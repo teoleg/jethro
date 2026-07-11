@@ -7,9 +7,13 @@ description: Rigor rules for implementing or reviewing any PnL, risk, pricing, p
 
 ## Non-negotiables (mirror CLAUDE.md invariants)
 
-- `BigDecimal` (Java) / decimal logical type (Avro) / `NUMERIC` (Postgres). Never
-  `double`/`float` for prices, quantities, PnL, rates. Specify scale and
-  `RoundingMode` explicitly at every division — an unspecified rounding is a bug.
+- `BigDecimal` (Java) / decimal logical type (Avro) / `NUMERIC` (Postgres) at
+  boundaries; scaled-long decimal fixed-point (declared scale per field, conversions
+  only via `common-domain` helpers) in the hot path. Never `double`/`float` for prices,
+  quantities, PnL, rates — in either representation. Specify scale and `RoundingMode`
+  explicitly at every division — an unspecified rounding is a bug. Scaled-long
+  multiplication/division must state its overflow and rescaling strategy (`Math.multiplyHigh`
+  / widening to `BigDecimal` when ranges can overflow a `long`).
 - Every monetary value has an explicit currency. Every conversion names its FX mark and
   timestamp. No "number that is probably USD".
 - Signed conventions stated once and reused: quantity > 0 = long; sells reduce; PnL
