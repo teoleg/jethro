@@ -59,11 +59,12 @@ flowchart LR
 | Service | Role | Key ADRs |
 |---|---|---|
 | `market-data-gateway` | Provider adapters (SPI), normalization, conflation | 0009 |
-| `algo-engine` | Pluggable strategies over normalized ticks → orders | 0003 |
+| `algo-engine` | AI-driven strategies: model-inference SPI at decision cadence, deterministic tick path and guardrails, all decisions logged to `ai.decisions` | 0003, 0010 |
 | `order-service` | Order lifecycle; simulated execution until a broker is wired | 0003, 0008 |
 | `risk-pnl-service` | Positions (projection of fills), PnL, exposures per book | 0005, 0008 |
 | `reference-data-service` | Instruments, symbology, book tree | 0008 |
 | `ui-gateway` | BFF: REST snapshots + WebSocket streaming, per-view subscriptions | 0006 |
+| `finops-service` | Cost telemetry: Cost Explorer polling (tagged infra spend), real-time LLM token pricing from `ai.decisions`, budget alerts | 0011 |
 
 ## UI views
 
@@ -75,6 +76,7 @@ Landing page of tiles (`/`), each tile opening a view:
 | Order View `/orders` | order blotter with lifecycle states, fills | `orders.events`, `fills` |
 | Book Structure `/books` | book tree → positions → instrument details | reference data + positions |
 | Risk & PnL `/risk/:bookId` | per-book PnL (realized/unrealized), exposures, shocks | `risk.snapshots` |
+| Costs `/costs` | month-to-date spend by service vs budget, burn rate, live LLM token spend, running-resources panel | `cost.snapshots` (infra ~24h lag; LLM spend live) |
 
 ## Data flow invariants
 
@@ -87,6 +89,9 @@ Landing page of tiles (`/`), each tile opening a view:
 5. No binary floating point for money — decimals end to end (ADR-0008).
 6. Everything runs locally via Docker Compose (Redpanda + Postgres + sim market data)
    with no AWS dependency (ADR-0007).
+7. AI never sits on the tick path; risk guardrails are deterministic Java code, and every
+   AI decision is recorded as an event on `ai.decisions` — replay/backtests consume the
+   recorded decisions, not live re-inference (ADR-0010).
 
 ## Repository layout (planned)
 
@@ -101,7 +106,8 @@ jethro/
 │   ├── order-service/
 │   ├── risk-pnl-service/
 │   ├── reference-data-service/
-│   └── ui-gateway/
+│   ├── ui-gateway/
+│   └── finops-service/
 ├── ui/                    # React + TypeScript SPA (ADR-0006)
 ├── infra/                 # AWS CDK in Java (ADR-0007)
 └── docker-compose.yml     # local topology
@@ -116,4 +122,5 @@ jethro/
 5. `order-service` (simulated fills) + Order View
 6. `risk-pnl-service` + Risk & PnL view
 7. `algo-engine` with one toy strategy
-8. `infra/` CDK + first AWS deploy
+8. `infra/` CDK + first AWS deploy (tagging + AWS Budgets backstop in the first stack)
+9. `finops-service` + Costs view (LLM token pricing can land earlier, with step 7)
