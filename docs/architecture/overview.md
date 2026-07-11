@@ -11,7 +11,10 @@ ADR-0012) carries only transactional flow and snapshots: orders, fills, AI decis
 conflated marks and risk snapshots — at-least-once, idempotent consumers. Ticks are
 archived write-behind to S3 Parquet; backtests replay the archive through the same
 pipeline via the feed SPI (ADR-0009). UI is a React/TypeScript SPA (ADR-0006) streaming
-from `ui-gateway` over WebSocket. Dev runs the whole stack on one EC2 node; ECS
+from `ui-gateway` over WebSocket. **All modules currently assemble into a single JVM
+(`app`, ADR-0015)** — the diagram below shows logical module boundaries; every arrow
+touching the log is a real Redpanda topic even in-process, so extraction later is
+mechanical. Dev runs the whole stack (app + Redpanda + Postgres) on one EC2 node; ECS
 Fargate/Aurora/ALB are the production shape (ADR-0007/0013).
 
 ```mermaid
@@ -64,15 +67,18 @@ flowchart LR
     UIG -- WebSocket + REST --> SPA[React SPA<br/>S3 + CloudFront]
 ```
 
-## Deployables
+## Modules (one deployable JVM — ADR-0015)
 
-| Deployable | Role | Key ADRs |
-|---|---|---|
-| `trading-core` | Fused market path: feed adapters (provider SPI), AI algo engine (model-inference SPI), risk/PnL, tick archiver, LMDB local state. One feed session; conflation with counted drops | 0009, 0010, 0014 |
-| `order-service` | Order lifecycle; simulated execution until a broker is wired | 0003, 0008, 0012 |
-| `reference-data-service` | Instruments, symbology, book tree | 0008 |
-| `ui-gateway` | BFF: REST snapshots + WebSocket streaming, per-view subscriptions | 0006 |
-| `finops-service` | Cost telemetry: Cost Explorer polling, real-time LLM token pricing from `ai.decisions`, budget alerts | 0011 |
+| Module | Role | Key ADRs | Extraction trigger |
+|---|---|---|---|
+| `trading-core` cluster (market-data, algo-engine, risk-pnl, runtime) | Fused market path: feed adapters (provider SPI), AI algo engine (model-inference SPI), risk/PnL over the ring buffer; tick archiver; LMDB local state | 0009, 0010, 0014 | measured GC interference |
+| `order` | Order lifecycle; simulated execution until a broker is wired | 0003, 0008, 0012 | **hard: before any real-money broker connection** |
+| `reference-data` | Instruments, symbology, book tree | 0008 | on need |
+| `ui-gateway` | BFF: REST snapshots + WebSocket streaming, per-view subscriptions | 0006 | WebSocket fan-out load |
+| `finops` | Cost telemetry: Cost Explorer polling, real-time LLM token pricing from `ai.decisions`, budget alerts | 0011 | on need |
+
+Module isolation is build-enforced (Gradle constraints + ArchUnit): modules depend only
+on `common-domain`, `common-messaging`, and published interfaces — never internals.
 
 ## UI views
 
@@ -115,16 +121,17 @@ jethro/
 ├── docs/                    # ADRs, architecture
 ├── common-domain/           # shared types: Instrument, Book, Position... (ADR-0008)
 ├── common-messaging/        # Avro schemas + serde for all topics (ADR-0012)
-├── trading-core/            # fused market path (ADR-0014)
+├── trading-core/            # fused market path module cluster (ADR-0014)
 │   ├── market-data/         #   provider SPI + adapters (sim first)
 │   ├── algo-engine/         #   strategies + model-inference SPI (ADR-0010)
 │   ├── risk-pnl/            #   positions, PnL, exposures
 │   └── runtime/             #   ring buffer, LMDB state, tick archiver, wiring
-├── services/
-│   ├── order-service/
-│   ├── reference-data-service/
+├── modules/
+│   ├── order/
+│   ├── reference-data/
 │   ├── ui-gateway/
-│   └── finops-service/
+│   └── finops/
+├── app/                     # single-JVM assembly of all modules (ADR-0015)
 ├── ui/                      # React + TypeScript SPA (ADR-0006)
 ├── infra/                   # AWS CDK in Java (ADR-0007/0013)
 └── docker-compose.yml       # local topology
@@ -133,15 +140,16 @@ jethro/
 ## Build order (proposed)
 
 1. `common-domain` + `common-messaging` (types and schemas first, incl. `eventId` base
-   and the `ai.decisions` context-snapshot field)
-2. `trading-core` skeleton: ring buffer + sim adapter behind the feed SPI → ticks
-   flowing in-process; LMDB dedupe/warm-cache wiring
-3. `ui-gateway` + UI skeleton (landing tiles + Market Monitor) fed by `md.marks`
-4. `reference-data-service` (instruments, books) + Book Structure view
-5. `order-service` (simulated fills) + Order View
-6. risk-pnl module in `trading-core` + `risk.snapshots` + Risk & PnL view
-7. algo module with one toy strategy behind the model-inference SPI; tick archiver +
-   replay adapter (backtest loop closes here)
+   and the `ai.decisions` context-snapshot field) + `app` shell with ArchUnit boundary
+   rules (ADR-0015)
+2. `trading-core` skeleton in the app: ring buffer + sim adapter behind the feed SPI →
+   ticks flowing in-process; LMDB dedupe/warm-cache wiring
+3. `ui-gateway` module + UI skeleton (landing tiles + Market Monitor) fed by `md.marks`
+4. `reference-data` module (instruments, books) + Book Structure view
+5. `order` module (simulated fills) + Order View
+6. `risk-pnl` module + `risk.snapshots` + Risk & PnL view
+7. `algo-engine` module with one toy strategy behind the model-inference SPI; tick
+   archiver + replay adapter (backtest loop closes here)
 8. `infra/` CDK + first AWS deploy: single dev node running the compose stack, tagging,
    AWS Budgets backstop, stop-when-idle schedule (ADR-0013)
 9. `finops-service` + Costs view (LLM token pricing can land earlier, with step 7)

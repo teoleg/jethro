@@ -31,6 +31,10 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
 - AI: model-inference SPI in the algo engine; external frontier API via AWS first,
   embedded self-hosted behind measured cost/latency triggers (ADR-0010).
 - UI: TypeScript + React + Vite under `ui/`, AG Grid for blotters, WebSocket streaming.
+- Deployment: single-JVM modular monolith (`app/`) for now — modules isolated by Gradle
+  constraints + ArchUnit, cross-domain flow via Redpanda topics even in-process; the
+  `order` module MUST be extracted to its own JVM before any real-money broker
+  connection (ADR-0015).
 - Infra: AWS CDK in Java under `infra/`. Dev = the compose stack on one EC2 node
   (stop-when-idle); Fargate/ALB/Aurora are the production shape (ADR-0013). Everything
   tagged `project`/`service` for FinOps (ADR-0011).
