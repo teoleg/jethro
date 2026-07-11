@@ -64,6 +64,7 @@ flowchart LR
 | `risk-pnl-service` | Positions (projection of fills), PnL, exposures per book | 0005, 0008 |
 | `reference-data-service` | Instruments, symbology, book tree | 0008 |
 | `ui-gateway` | BFF: REST snapshots + WebSocket streaming, per-view subscriptions | 0006 |
+| `finops-service` | Cost telemetry: Cost Explorer polling (tagged infra spend), real-time LLM token pricing from `ai.decisions`, budget alerts | 0011 |
 
 ## UI views
 
@@ -75,6 +76,7 @@ Landing page of tiles (`/`), each tile opening a view:
 | Order View `/orders` | order blotter with lifecycle states, fills | `orders.events`, `fills` |
 | Book Structure `/books` | book tree → positions → instrument details | reference data + positions |
 | Risk & PnL `/risk/:bookId` | per-book PnL (realized/unrealized), exposures, shocks | `risk.snapshots` |
+| Costs `/costs` | month-to-date spend by service vs budget, burn rate, live LLM token spend, running-resources panel | `cost.snapshots` (infra ~24h lag; LLM spend live) |
 
 ## Data flow invariants
 
@@ -104,7 +106,8 @@ jethro/
 │   ├── order-service/
 │   ├── risk-pnl-service/
 │   ├── reference-data-service/
-│   └── ui-gateway/
+│   ├── ui-gateway/
+│   └── finops-service/
 ├── ui/                    # React + TypeScript SPA (ADR-0006)
 ├── infra/                 # AWS CDK in Java (ADR-0007)
 └── docker-compose.yml     # local topology
@@ -119,4 +122,5 @@ jethro/
 5. `order-service` (simulated fills) + Order View
 6. `risk-pnl-service` + Risk & PnL view
 7. `algo-engine` with one toy strategy
-8. `infra/` CDK + first AWS deploy
+8. `infra/` CDK + first AWS deploy (tagging + AWS Budgets backstop in the first stack)
+9. `finops-service` + Costs view (LLM token pricing can land earlier, with step 7)

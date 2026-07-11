@@ -14,6 +14,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0008](0008-domain-model-books-instruments-positions.md) | Domain model: books, instruments, positions, marks | Proposed |
 | [0009](0009-market-data-provider-abstraction.md) | Market data provider abstraction | Proposed |
 | [0010](0010-ai-algo-engine-embedded-vs-external-model.md) | AI-driven algo engine — model inference SPI, external API first, embedded behind triggers | Proposed |
+| [0011](0011-finops-cost-monitoring-in-platform.md) | FinOps in the platform — finops-service, tagged AWS costs, Costs tile in the UI | Proposed |
 
 ## Lifecycle
 

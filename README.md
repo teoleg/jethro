@@ -15,6 +15,7 @@ each holding positions in various instruments.
   - Order View (order blotter & lifecycle)
   - Book Structure (book → positions → instruments)
   - Risk & PnL per book
+  - Costs (FinOps: AWS spend vs budget, live AI token spend)
 
 ## Documentation
 
