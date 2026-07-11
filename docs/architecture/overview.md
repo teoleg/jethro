@@ -4,9 +4,11 @@ Status: design phase. Decisions referenced as ADR-XXXX live in [`docs/adr/`](../
 
 ## System at a glance
 
-Event-driven services (ADR-0003) in Java 21 (ADR-0002) around a Kafka backbone
-(ADR-0004), running on ECS Fargate in AWS (ADR-0007), with a React/TypeScript SPA
-(ADR-0006) streaming from a UI gateway over WebSocket.
+Event-driven services (ADR-0003) in Java 21 (ADR-0002) around a Kafka-API backbone —
+Redpanda everywhere, at-least-once delivery with idempotent consumers (ADR-0012) — with
+a React/TypeScript SPA (ADR-0006) streaming from a UI gateway over WebSocket. Dev runs
+the whole stack on one EC2 node; ECS Fargate/Aurora/ALB are the production shape
+(ADR-0007 as amended by ADR-0013).
 
 ```mermaid
 flowchart LR
@@ -15,7 +17,7 @@ flowchart LR
         P2[real provider]
     end
 
-    subgraph backbone[Kafka - MSK]
+    subgraph backbone[Kafka API - Redpanda]
         T1([md.quotes / md.trades])
         T2([orders.new / orders.events / fills])
         T3([risk.snapshots])
@@ -92,6 +94,8 @@ Landing page of tiles (`/`), each tile opening a view:
 7. AI never sits on the tick path; risk guardrails are deterministic Java code, and every
    AI decision is recorded as an event on `ai.decisions` — replay/backtests consume the
    recorded decisions, not live re-inference (ADR-0010).
+8. Delivery is at-least-once; consumers are idempotent (stable `eventId`, dedupe/upsert,
+   duplicate-delivery test per service). Never rely on broker exactly-once (ADR-0012).
 
 ## Repository layout (planned)
 
@@ -122,5 +126,6 @@ jethro/
 5. `order-service` (simulated fills) + Order View
 6. `risk-pnl-service` + Risk & PnL view
 7. `algo-engine` with one toy strategy
-8. `infra/` CDK + first AWS deploy (tagging + AWS Budgets backstop in the first stack)
+8. `infra/` CDK + first AWS deploy: single dev node running the compose stack, tagging,
+   AWS Budgets backstop, stop-when-idle schedule (ADR-0013)
 9. `finops-service` + Costs view (LLM token pricing can land earlier, with step 7)

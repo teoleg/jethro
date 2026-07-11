@@ -1,6 +1,6 @@
 # ADR-0007: Runtime on ECS Fargate, infrastructure as code with AWS CDK (Java)
 
-- **Status:** Proposed
+- **Status:** Proposed — amended for the dev environment by ADR-0013 (dev runs the compose stack on one EC2 node; Fargate/ALB are the production shape)
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** aws, infra

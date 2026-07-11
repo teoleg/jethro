@@ -1,6 +1,6 @@
 # ADR-0004: Kafka (Amazon MSK) as the messaging backbone
 
-- **Status:** Proposed
+- **Status:** Superseded by ADR-0012
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** messaging, aws

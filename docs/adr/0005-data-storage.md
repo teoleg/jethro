@@ -1,6 +1,6 @@
 # ADR-0005: Aurora PostgreSQL for state, Kafka + S3 for tick history
 
-- **Status:** Proposed
+- **Status:** Proposed — amended for the dev environment by ADR-0013 (dev runs compose Postgres; Aurora is the production shape)
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** data, aws
