@@ -20,11 +20,17 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
 
 - Backend: Java 21, Gradle monorepo, Spring Boot 3 for scaffolding, plain Java in data
   paths. C++ only behind a measured latency requirement, as a separate process.
-- Messaging: Kafka (MSK Serverless in AWS, Redpanda locally), Avro schemas in
-  `common-messaging`.
-- Storage: Aurora PostgreSQL (Flyway migrations), S3 Parquet for tick archive.
+- Messaging: Kafka API via Redpanda everywhere (Docker locally, self-hosted node in AWS
+  dev); managed Kafka only behind production triggers. Avro schemas in `common-messaging`
+  (Redpanda's built-in schema registry). Delivery is at-least-once — see invariant 6.
+- Storage: PostgreSQL (Flyway migrations) — compose Postgres in dev, Aurora as the
+  production shape; S3 Parquet for tick archive.
+- AI: model-inference SPI in the algo engine; external frontier API via AWS first,
+  embedded self-hosted behind measured cost/latency triggers (ADR-0010).
 - UI: TypeScript + React + Vite under `ui/`, AG Grid for blotters, WebSocket streaming.
-- Infra: AWS CDK in Java under `infra/`, ECS Fargate runtime.
+- Infra: AWS CDK in Java under `infra/`. Dev = the compose stack on one EC2 node
+  (stop-when-idle); Fargate/ALB/Aurora are the production shape (ADR-0013). Everything
+  tagged `project`/`service` for FinOps (ADR-0011).
 - Local dev: everything must run via Docker Compose with the sim market-data adapter —
   never make a feature depend on AWS or a paid data feed.
 
@@ -39,6 +45,11 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
 4. Event schemas are contracts: evolve backward-compatibly, never edit published schemas
    in place.
 5. Every event carries provider and ingest timestamps.
+6. Delivery is at-least-once; never rely on broker exactly-once. Every event carries a
+   stable `eventId`; applying the same event twice must leave state unchanged, and every
+   consumer ships a duplicate-delivery test.
+7. AI never sits on the tick path; risk guardrails are deterministic code; every AI
+   decision is an event on `ai.decisions`.
 
 ## Code conventions
 
