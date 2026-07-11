@@ -18,6 +18,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0012](0012-redpanda-backbone-idempotent-consumers.md) | Redpanda as the Kafka-API backbone; at-least-once + idempotent consumers | Proposed |
 | [0013](0013-dev-cost-posture-single-node-aws.md) | Dev cost posture — one EC2 node runs the compose stack; managed services behind triggers | Proposed |
 | [0014](0014-trading-core-in-process-market-path.md) | Fuse the market path into trading-core — in-process ticks, durable log for transactions only | Proposed |
+| [0015](0015-single-jvm-modular-monolith.md) | Single-JVM modular monolith — one app now, extraction seams preserved | Proposed |
 
 ## Lifecycle
 
