@@ -43,8 +43,11 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
 
 ## Hard invariants (violations are bugs)
 
-1. No binary floating point for prices, quantities, or PnL — `BigDecimal` / Avro decimal
-   / Postgres `NUMERIC`.
+1. No binary floating point for prices, quantities, or PnL — ever. Exact decimal
+   semantics end to end: `BigDecimal` / Avro decimal / Postgres `NUMERIC` at boundaries
+   (persistence, messaging, reports); **scaled-long decimal fixed-point** (e.g. price as
+   `long` in 1e-6 units, scale declared per field) in the allocation-free hot path.
+   `double`/`float` on money is a bug in either place.
 2. External provider symbology never leaks past `market-data-gateway`; internal code keys
    on `instrumentId`.
 3. `fills` is the source of truth for positions; only `risk-pnl-service` writes the
@@ -60,8 +63,12 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
 
 ## Code conventions
 
-- Java: standard formatting, package root `io.jethro.<service>`. Constructor injection.
+- Java: standard formatting, package root `io.jethro.<module>`. Constructor injection.
   No framework types in domain code (`common-domain` is dependency-free).
+- Hot path (trading-core ring buffer consumers): allocation-conscious — scaled-long
+  money types from `common-domain`, no `BigDecimal`, no boxing, no streams; convert to
+  `BigDecimal` only at the module boundary. Conversions live in `common-domain`
+  (`Decimals.toBigDecimal(long, scale)` etc.), never hand-rolled.
 - Tests: JUnit 5; every PnL/risk calculation gets exact-value tests (decimals make this
   possible — use it). Sim adapter is seedable — use fixed seeds in tests.
 - Errors in data paths: never silently drop a tick/fill — count, log, and expose a metric.

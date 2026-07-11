@@ -102,7 +102,9 @@ Landing page of tiles (`/`), each tile opening a view:
    rules (ADR-0014). Anything crossing a process boundary is an event on the log.
 4. Every event carries provider + ingest timestamps; staleness is always measurable.
    Marks restored from LMDB are flagged stale until the feed refreshes them.
-5. No binary floating point for money — decimals end to end (ADR-0008).
+5. No binary floating point for money — exact decimal semantics end to end (ADR-0008):
+   `BigDecimal`/Avro decimal/`NUMERIC` at boundaries, scaled-long decimal fixed-point in
+   the allocation-free hot path (declared scale per field).
 6. Everything runs locally via Docker Compose (Redpanda + Postgres + sim market data)
    with no AWS dependency (ADR-0007/0013).
 7. AI never sits on the tick path; risk guardrails are deterministic Java code; every AI
