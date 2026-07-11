@@ -20,6 +20,9 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
 
 - Backend: Java 21, Gradle monorepo, Spring Boot 3 for scaffolding, plain Java in data
   paths. C++ only behind a measured latency requirement, as a separate process.
+- Market path: fused `trading-core` process — feed adapters, algo engine, risk/PnL over
+  an in-process ring buffer; ticks archived write-behind to S3 Parquet, never brokered;
+  LMDB (local EBS) for dedupe + warm-restart state, derived data only (ADR-0014).
 - Messaging: Kafka API via Redpanda everywhere (Docker locally, self-hosted node in AWS
   dev); managed Kafka only behind production triggers. Avro schemas in `common-messaging`
   (Redpanda's built-in schema registry). Delivery is at-least-once — see invariant 6.
