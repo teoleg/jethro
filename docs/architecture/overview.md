@@ -59,7 +59,7 @@ flowchart LR
 | Service | Role | Key ADRs |
 |---|---|---|
 | `market-data-gateway` | Provider adapters (SPI), normalization, conflation | 0009 |
-| `algo-engine` | Pluggable strategies over normalized ticks → orders | 0003 |
+| `algo-engine` | AI-driven strategies: model-inference SPI at decision cadence, deterministic tick path and guardrails, all decisions logged to `ai.decisions` | 0003, 0010 |
 | `order-service` | Order lifecycle; simulated execution until a broker is wired | 0003, 0008 |
 | `risk-pnl-service` | Positions (projection of fills), PnL, exposures per book | 0005, 0008 |
 | `reference-data-service` | Instruments, symbology, book tree | 0008 |
@@ -87,6 +87,9 @@ Landing page of tiles (`/`), each tile opening a view:
 5. No binary floating point for money — decimals end to end (ADR-0008).
 6. Everything runs locally via Docker Compose (Redpanda + Postgres + sim market data)
    with no AWS dependency (ADR-0007).
+7. AI never sits on the tick path; risk guardrails are deterministic Java code, and every
+   AI decision is recorded as an event on `ai.decisions` — replay/backtests consume the
+   recorded decisions, not live re-inference (ADR-0010).
 
 ## Repository layout (planned)
 
