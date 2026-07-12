@@ -8,7 +8,7 @@ import org.springframework.test.context.DynamicPropertySource;
 
 import java.nio.file.Path;
 
-@SpringBootTest
+@SpringBootTest(properties = "jethro.ai.enabled=false")
 class JethroApplicationTest {
 
     @TempDir

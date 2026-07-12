@@ -38,8 +38,17 @@ docker compose --profile app up --build
 
 ## Status
 
-Build-out step 2 complete: ticks flow end to end inside `trading-core` — seedable sim
-feed adapter (provider SPI) → SPSC ring buffer (allocation-free slots, counted drops)
-→ last-value mark cache → LMDB warm-restart/dedupe store — wired into the app with
-lifecycle management and a smoke test. Next: step 3 — `ui-gateway` + Market Monitor
-fed by `md.marks`.
+Build-out step 3 complete: AI is in the loop — model-inference SPI (ADR-0010) with an
+Ollama adapter (local SLM, ADR-0016) and the first agentic element, a risk commentator
+that narrates computed market state on a cadence and records every run as an
+`AiDecision` audit event (model, latency, tokens, context snapshot + hash). Ollama runs
+in compose; the model narrates, deterministic code computes every number. Next: step 4
+— `ui-gateway` + the attention feed (ADR-0017), AiDecision events onto the broker.
+
+To see AI commentary locally:
+
+```bash
+docker compose up -d ollama
+docker exec jethro-ollama-1 ollama pull qwen2.5:3b   # once, ~2GB
+./gradlew :app:bootRun                                # commentary logged every 60s
+```

@@ -19,6 +19,8 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0013](0013-dev-cost-posture-single-node-aws.md) | Dev cost posture — one EC2 node runs the compose stack; managed services behind triggers | Proposed |
 | [0014](0014-trading-core-in-process-market-path.md) | Fuse the market path into trading-core — in-process ticks, durable log for transactions only | Proposed |
 | [0015](0015-single-jvm-modular-monolith.md) | Single-JVM modular monolith — one app now, extraction seams preserved | Proposed |
+| [0016](0016-local-slm-tier-agentic-elements.md) | Local SLM inference tier — Ollama adapter first, agentic elements pulled forward | Proposed |
+| [0017](0017-attention-first-ui.md) | Attention-first UI — agents curate with a deterministic floor; grids become drill-down | Proposed |
 
 ## Lifecycle
 
