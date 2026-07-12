@@ -10,15 +10,19 @@ import io.jethro.messaging.MarkEvent;
 import io.jethro.messaging.Topics;
 import io.jethro.trading.riskpnl.RiskProjection;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.Collection;
 import java.util.List;
 import java.util.Properties;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -56,11 +60,31 @@ public final class RiskDataConsumer implements AutoCloseable {
     private void consumeLoop() {
         Properties props = new Properties();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "risk-pnl");
-        // fills from the beginning (positions must be complete); marks only need latest.
+        // The projection is in-memory and derived, so it must be rebuilt from scratch on
+        // every boot: use an ephemeral group (no committed offsets to resume from) and
+        // seek explicitly on assignment — fills from the beginning to replay the full
+        // position history (invariant 3), marks from the end since only the latest matters.
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "risk-pnl-" + UUID.randomUUID());
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         try (var consumer = new KafkaConsumer<>(props, new StringDeserializer(), new ByteArrayDeserializer())) {
-            consumer.subscribe(List.of(Topics.FILLS, Topics.MD_MARKS));
+            consumer.subscribe(List.of(Topics.FILLS, Topics.MD_MARKS), new ConsumerRebalanceListener() {
+                @Override
+                public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                }
+
+                @Override
+                public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                    var fills = partitions.stream().filter(p -> Topics.FILLS.equals(p.topic())).toList();
+                    var marks = partitions.stream().filter(p -> Topics.MD_MARKS.equals(p.topic())).toList();
+                    if (!fills.isEmpty()) {
+                        consumer.seekToBeginning(fills);
+                    }
+                    if (!marks.isEmpty()) {
+                        consumer.seekToEnd(marks);
+                    }
+                }
+            });
             while (running.get()) {
                 var records = consumer.poll(Duration.ofMillis(500));
                 for (var record : records) {
