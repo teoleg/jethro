@@ -138,6 +138,7 @@ public final class ChatResponder {
             case GROSS_EXPOSURE -> "gross exposure";
             case NET_EXPOSURE -> "net exposure";
             case LOSS -> "loss";
+            case INSTRUMENT_EXPOSURE -> "concentration";
         };
     }
 

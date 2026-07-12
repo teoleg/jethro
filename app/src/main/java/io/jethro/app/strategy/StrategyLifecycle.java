@@ -115,12 +115,18 @@ public final class StrategyLifecycle implements SmartLifecycle {
             Set<String> current = new HashSet<>();
             int signals = 0;
             int suppressed = 0;
+            int oversized = 0;
             int executed = 0;
             String sampleReason = null;
             for (TradeSignal signal : strategy.evaluate(observations)) {
                 signals++;
                 String book = bookFor(signal.instrumentId()); // route by asset class, not all to one book
-                BigDecimal quantity = size(signal);
+                Optional<BigDecimal> sized = size(signal);
+                if (sized.isEmpty()) {
+                    oversized++; // one unit exceeds the order-notional cap — unsizeable, skip
+                    continue;
+                }
+                BigDecimal quantity = sized.get();
                 BigDecimal signed = signal.side().signed(quantity);
                 Optional<String> rejection =
                         guardrail.rejectionReason(book, signal.instrumentId(), signed);
@@ -174,8 +180,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
 
             // Heartbeat: the log always shows the strategy is alive and why it is/ isn't trading.
             if (++cycles % HEARTBEAT_CYCLES == 0 || signals > 0 || suppressed > 0) {
-                log.info("strategy: {} fresh marks ({} stale), {} signals, {} suppressed by limits, {} auto-executed{}",
-                        fresh, stale, signals, suppressed, executed,
+                log.info("strategy: {} fresh marks ({} stale), {} signals, {} unsizeable, {} suppressed by limits, {} auto-executed{}",
+                        fresh, stale, signals, oversized, suppressed, executed,
                         fresh == 0 ? "  — NO FRESH MARKS (feed may be stale)" : "");
             }
         } catch (Throwable t) {
@@ -190,13 +196,23 @@ public final class StrategyLifecycle implements SmartLifecycle {
         return props.bookFor(refs.find(instrumentId).map(InstrumentRef::assetClass).orElse(null));
     }
 
-    /** Sizes a suggestion to the target notional: qty = targetNotional / (price × multiplier), min 1. */
-    private BigDecimal size(TradeSignal signal) {
+    /**
+     * Sizes a suggestion to the target notional: qty = targetNotional / (price × multiplier),
+     * rounded down. Never rounds up: if even one unit exceeds the max-order-notional cap
+     * (one ES contract ≈ $272k vs a $25k target), the signal is skipped — empty result.
+     */
+    private Optional<BigDecimal> size(TradeSignal signal) {
         BigDecimal multiplier = refs.find(signal.instrumentId())
                 .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
         BigDecimal notionalPerUnit = signal.price().multiply(multiplier);
         BigDecimal qty = props.targetNotional().divide(notionalPerUnit, 0, RoundingMode.DOWN);
-        return qty.signum() > 0 ? qty : BigDecimal.ONE;
+        if (qty.signum() <= 0) {
+            if (notionalPerUnit.compareTo(props.maxOrderNotionalOrDefault()) > 0) {
+                return Optional.empty(); // one unit already blows the order cap — unsizeable
+            }
+            qty = BigDecimal.ONE;
+        }
+        return Optional.of(qty);
     }
 
     /**

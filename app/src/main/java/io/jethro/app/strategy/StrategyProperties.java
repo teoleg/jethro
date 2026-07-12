@@ -25,7 +25,16 @@ public record StrategyProperties(
         /** Auto-submit admissible signals (SIMULATED only, ADR-0019). Default false. */
         boolean autoExecute,
         /** Min seconds between auto-orders for the same instrument. */
-        long autoCooldownSeconds) {
+        long autoCooldownSeconds,
+        /** Hard cap on a single order's notional; signals that can't be sized under it
+         *  (e.g. one ES contract > cap) are skipped, never rounded up. Default 2× target. */
+        BigDecimal maxOrderNotional) {
+
+    /** The single-order notional cap, defaulting to 2× the target notional. */
+    public BigDecimal maxOrderNotionalOrDefault() {
+        return maxOrderNotional != null ? maxOrderNotional
+                : targetNotional.multiply(new BigDecimal("2"));
+    }
 
     /** Resolves the target book for an instrument's asset class, or the default. */
     public String bookFor(String assetClass) {

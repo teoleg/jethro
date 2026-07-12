@@ -138,6 +138,46 @@ public final class RiskProjection {
         return new Exposure(p8(gross), p8(net));
     }
 
+    /**
+     * Projects the |notional| the book would hold in one instrument if {@code signedQtyDelta}
+     * were applied — the concentration input of the pre-trade guardrail. Zero without a mark.
+     */
+    public synchronized BigDecimal projectedInstrumentExposure(String bookId, String instrumentId,
+                                                               BigDecimal signedQtyDelta) {
+        Position pos = positions.get(key(bookId, instrumentId));
+        BigDecimal qty = (pos == null ? BigDecimal.ZERO : pos.quantity()).add(signedQtyDelta);
+        return p8(exposureOf(instrumentId, qty).abs());
+    }
+
+    /**
+     * Projects the firm-wide gross/net exposure (across every book) if {@code signedQtyDelta}
+     * were applied to one (book, instrument) — the firm-cap input of the guardrail.
+     */
+    public synchronized Exposure projectedFirmExposure(String bookId, String instrumentId,
+                                                       BigDecimal signedQtyDelta) {
+        BigDecimal gross = BigDecimal.ZERO;
+        BigDecimal net = BigDecimal.ZERO;
+        String targetKey = key(bookId, instrumentId);
+        boolean targetSeen = false;
+        for (Map.Entry<String, Position> entry : positions.entrySet()) {
+            Position pos = entry.getValue();
+            BigDecimal qty = pos.quantity();
+            if (entry.getKey().equals(targetKey)) {
+                qty = qty.add(signedQtyDelta);
+                targetSeen = true;
+            }
+            BigDecimal contrib = exposureOf(pos.instrumentId().value(), qty);
+            net = net.add(contrib);
+            gross = gross.add(contrib.abs());
+        }
+        if (!targetSeen) {
+            BigDecimal contrib = exposureOf(instrumentId, signedQtyDelta);
+            net = net.add(contrib);
+            gross = gross.add(contrib.abs());
+        }
+        return new Exposure(p8(gross), p8(net));
+    }
+
     private BigDecimal exposureOf(String instrumentId, BigDecimal qty) {
         MarkPoint m = marks.get(instrumentId);
         if (m == null) {

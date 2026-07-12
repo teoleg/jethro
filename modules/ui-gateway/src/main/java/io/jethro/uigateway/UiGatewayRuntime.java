@@ -63,15 +63,31 @@ public final class UiGatewayRuntime implements AutoCloseable {
     private void consumeLoop() {
         Properties props = new Properties();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "ui-gateway");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
-        // UI state is last-value + bounded feed: duplicate delivery is naturally
-        // idempotent here (upsert by key) — invariant 8 satisfied by shape.
+        // UI state is derived and in-memory, so rebuild it from the log on every boot:
+        // ephemeral group (no committed offsets), md.marks replayed from now−retention so
+        // the price-history chart survives restarts (the marks are durable in the broker),
+        // ai.decisions from the end (old commentary isn't re-surfaced). Duplicate delivery
+        // is naturally idempotent here (last-value upsert by key) — invariant 8 by shape.
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "ui-gateway-" + java.util.UUID.randomUUID());
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         long lastRulesRun = 0;
         try (var consumer = new KafkaConsumer<>(props, new StringDeserializer(), new ByteArrayDeserializer())) {
-            consumer.subscribe(List.of(Topics.MD_MARKS, Topics.AI_DECISIONS));
-            log.info("ui-gateway consuming {} and {} from {}", Topics.MD_MARKS, Topics.AI_DECISIONS, bootstrapServers);
+            consumer.subscribe(List.of(Topics.MD_MARKS, Topics.AI_DECISIONS),
+                    new org.apache.kafka.clients.consumer.ConsumerRebalanceListener() {
+                        @Override
+                        public void onPartitionsRevoked(
+                                java.util.Collection<org.apache.kafka.common.TopicPartition> partitions) {
+                        }
+
+                        @Override
+                        public void onPartitionsAssigned(
+                                java.util.Collection<org.apache.kafka.common.TopicPartition> partitions) {
+                            seekForReplay(consumer, partitions);
+                        }
+                    });
+            log.info("ui-gateway consuming {} (replaying last {}min) and {} from {}",
+                    Topics.MD_MARKS, markHistory.retentionMillis() / 60_000, Topics.AI_DECISIONS, bootstrapServers);
             while (running.get()) {
                 var records = consumer.poll(POLL);
                 boolean marksChanged = false;
@@ -101,6 +117,31 @@ public final class UiGatewayRuntime implements AutoCloseable {
             if (running.get()) {
                 log.error("ui-gateway consumer died: {} — UI will not update (restart the app once the broker is up)",
                         e.getMessage());
+            }
+        }
+    }
+
+    /** md.marks → back to now−retention (rebuild the chart history); ai.decisions → end. */
+    private void seekForReplay(KafkaConsumer<String, byte[]> consumer,
+                               java.util.Collection<org.apache.kafka.common.TopicPartition> partitions) {
+        var marks = partitions.stream().filter(p -> Topics.MD_MARKS.equals(p.topic())).toList();
+        var decisions = partitions.stream().filter(p -> Topics.AI_DECISIONS.equals(p.topic())).toList();
+        if (!decisions.isEmpty()) {
+            consumer.seekToEnd(decisions);
+        }
+        if (marks.isEmpty()) {
+            return;
+        }
+        long since = System.currentTimeMillis() - markHistory.retentionMillis();
+        var query = new java.util.HashMap<org.apache.kafka.common.TopicPartition, Long>();
+        marks.forEach(p -> query.put(p, since));
+        var offsets = consumer.offsetsForTimes(query);
+        for (var p : marks) {
+            var offset = offsets.get(p);
+            if (offset != null) {
+                consumer.seek(p, offset.offset());
+            } else {
+                consumer.seekToBeginning(List.of(p)); // topic shorter than the window
             }
         }
     }

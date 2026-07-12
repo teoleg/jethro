@@ -10,12 +10,20 @@ import java.math.BigDecimal;
  *   <li>{@code maxGrossExposure} — cap on gross (sum of |notional|) exposure.</li>
  *   <li>{@code maxNetExposure} — cap on |net| directional exposure.</li>
  *   <li>{@code maxLossPnl} — max tolerable loss: breached when total PnL falls below
- *       {@code -maxLossPnl}.</li>
+ *       {@code -maxLossPnl}. Enforced pre-trade: a loss-breached book may only reduce risk.</li>
+ *   <li>{@code maxInstrumentExposure} — concentration cap: max |notional| in any single
+ *       instrument within the book.</li>
  * </ul>
  */
-public record RiskLimits(BigDecimal maxGrossExposure, BigDecimal maxNetExposure, BigDecimal maxLossPnl) {
+public record RiskLimits(BigDecimal maxGrossExposure, BigDecimal maxNetExposure,
+                         BigDecimal maxLossPnl, BigDecimal maxInstrumentExposure) {
 
-    private static final RiskLimits NONE = new RiskLimits(null, null, null);
+    private static final RiskLimits NONE = new RiskLimits(null, null, null, null);
+
+    /** Convenience: gross/net/loss caps, no instrument concentration cap. */
+    public RiskLimits(BigDecimal maxGrossExposure, BigDecimal maxNetExposure, BigDecimal maxLossPnl) {
+        this(maxGrossExposure, maxNetExposure, maxLossPnl, null);
+    }
 
     /** No limits — every check is skipped. */
     public static RiskLimits none() {

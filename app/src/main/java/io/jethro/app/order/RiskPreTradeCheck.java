@@ -18,7 +18,9 @@ public final class RiskPreTradeCheck implements PreTradeCheck {
 
     @Override
     public Decision check(BookId bookId, InstrumentId instrumentId, BigDecimal signedQuantity) {
-        return guardrail.rejectionReason(bookId.value(), instrumentId.value(), signedQuantity)
+        // reserve=true: this is the order path — an approval reserves the exposure delta so
+        // in-flight orders count against subsequent checks until their fills project.
+        return guardrail.rejectionReason(bookId.value(), instrumentId.value(), signedQuantity, true)
                 .map(Decision::reject)
                 .orElseGet(Decision::approve);
     }

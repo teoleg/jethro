@@ -28,6 +28,10 @@ public final class MarkHistory {
         this.retentionMillis = retentionMillis;
     }
 
+    public long retentionMillis() {
+        return retentionMillis;
+    }
+
     /** Appends a mark and evicts anything older than the retention window. */
     public void record(String instrumentId, String price, long timestampMillis) {
         Deque<Point> points = series.computeIfAbsent(instrumentId, k -> new ArrayDeque<>());
