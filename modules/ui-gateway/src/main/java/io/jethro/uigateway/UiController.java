@@ -36,8 +36,8 @@ public class UiController {
 
     /** Recent price history for the interactive chart: last {@code minutes} (default 120). */
     @GetMapping("/api/history/{instrumentId}")
-    public List<MarkHistory.Point> history(@PathVariable String instrumentId,
-                                           @RequestParam(defaultValue = "120") long minutes) {
+    public List<MarkHistory.Point> history(@PathVariable("instrumentId") String instrumentId,
+                                           @RequestParam(name = "minutes", defaultValue = "120") long minutes) {
         long since = System.currentTimeMillis() - Math.max(1, minutes) * 60_000L;
         return markHistory.since(instrumentId, since);
     }
