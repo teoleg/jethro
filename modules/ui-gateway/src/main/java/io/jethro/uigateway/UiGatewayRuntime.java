@@ -32,16 +32,18 @@ public final class UiGatewayRuntime implements AutoCloseable {
 
     private final String bootstrapServers;
     private final MarkState markState;
+    private final MarkHistory markHistory;
     private final AttentionFeed feed;
     private final AttentionRules rules;
     private final SseBroadcaster sse;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread consumerThread;
 
-    public UiGatewayRuntime(String bootstrapServers, MarkState markState,
+    public UiGatewayRuntime(String bootstrapServers, MarkState markState, MarkHistory markHistory,
                             AttentionFeed feed, AttentionRules rules, SseBroadcaster sse) {
         this.bootstrapServers = bootstrapServers;
         this.markState = markState;
+        this.markHistory = markHistory;
         this.feed = feed;
         this.rules = rules;
         this.sse = sse;
@@ -103,8 +105,11 @@ public final class UiGatewayRuntime implements AutoCloseable {
     }
 
     private void onMark(MarkEvent event) {
-        markState.update(event.getInstrumentId(), event.getPrice().toPlainString(),
-                event.getSource(), event.getMeta().getProviderTimestamp().toEpochMilli());
+        String instrumentId = event.getInstrumentId().toString();
+        String price = event.getPrice().toPlainString();
+        long providerMillis = event.getMeta().getProviderTimestamp().toEpochMilli();
+        markState.update(event.getInstrumentId(), price, event.getSource(), providerMillis);
+        markHistory.record(instrumentId, price, providerMillis);
     }
 
     private void onDecision(AiDecision decision) {
