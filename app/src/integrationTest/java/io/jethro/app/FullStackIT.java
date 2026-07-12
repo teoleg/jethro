@@ -113,10 +113,11 @@ class FullStackIT {
             return body != null && body.size() == 1 ? body : null;
         });
         assertEquals("FIRM", books.get(0).get("bookId").asText());
-        assertEquals(2, books.get(0).get("children").size(), "ALPHA and BETA under FIRM");
+        assertEquals(3, books.get(0).get("children").size(), "ALPHA, BETA and MACRO under FIRM");
 
         JsonNode instruments = getJson("/api/instruments");
-        assertEquals(4, instruments.size(), "seeded sim instruments");
+        assertEquals(9, instruments.size(), "seeded multi-asset sim instruments");
+        assertEquals("AAPL", instruments.get(0).get("instrumentId").asText(), "sorted by id");
         assertEquals("1.00000000", instruments.get(0).get("contractMultiplier").asText(),
                 "multiplier arrives as exact decimal string");
     }
