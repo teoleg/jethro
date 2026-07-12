@@ -25,7 +25,8 @@ public class StrategyConfig {
 
     @Bean
     MomentumStrategy momentumStrategy(StrategyProperties props) {
-        return new MomentumStrategy(props.lookback(), props.thresholdBps());
+        return new MomentumStrategy(props.lookback(), props.thresholdSigmasOrDefault(),
+                props.minSignalBpsOrDefault());
     }
 
     @Bean

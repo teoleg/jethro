@@ -16,7 +16,11 @@ public record StrategyProperties(
         boolean enabled,
         long intervalSeconds,
         int lookback,
-        BigDecimal thresholdBps,
+        /** Z-score at which a signal fires — the window move in units of the instrument's
+         *  own realized vol, so each instrument self-calibrates (equities vs Treasuries). */
+        Double thresholdSigmas,
+        /** Floor: minimum absolute move in bps for any signal (dust-trade guard). */
+        BigDecimal minSignalBps,
         BigDecimal targetNotional,
         /** Default book when an instrument's asset class has no bookByClass entry. */
         String book,
@@ -29,6 +33,14 @@ public record StrategyProperties(
         /** Hard cap on a single order's notional; signals that can't be sized under it
          *  (e.g. one ES contract > cap) are skipped, never rounded up. Default 2× target. */
         BigDecimal maxOrderNotional) {
+
+    public double thresholdSigmasOrDefault() {
+        return thresholdSigmas != null ? thresholdSigmas : 2.5;
+    }
+
+    public BigDecimal minSignalBpsOrDefault() {
+        return minSignalBps != null ? minSignalBps : new BigDecimal("2");
+    }
 
     /** The single-order notional cap, defaulting to 2× the target notional. */
     public BigDecimal maxOrderNotionalOrDefault() {

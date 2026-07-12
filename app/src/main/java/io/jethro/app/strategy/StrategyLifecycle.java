@@ -84,8 +84,9 @@ public final class StrategyLifecycle implements SmartLifecycle {
         });
         scheduler.scheduleWithFixedDelay(this::runOnce,
                 props.intervalSeconds(), props.intervalSeconds(), TimeUnit.SECONDS);
-        log.info("momentum strategy started: every {}s, lookback {}, threshold {}bps, book {}",
-                props.intervalSeconds(), props.lookback(), props.thresholdBps(), props.book());
+        log.info("momentum strategy started: every {}s, lookback {}, threshold {}σ (floor {}bps), default book {}",
+                props.intervalSeconds(), props.lookback(), props.thresholdSigmasOrDefault(),
+                props.minSignalBpsOrDefault(), props.book());
         if (autoExecuting()) {
             log.warn("AUTO-EXECUTE ON (ADR-0019): strategy signals auto-submit SIMULATED orders "
                     + "(routed by asset class {}, default {}; cooldown {}s). Never enable against a real broker.",
