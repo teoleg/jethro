@@ -38,17 +38,21 @@ docker compose --profile app up --build
 
 ## Status
 
-Build-out step 3 complete: AI is in the loop — model-inference SPI (ADR-0010) with an
-Ollama adapter (local SLM, ADR-0016) and the first agentic element, a risk commentator
-that narrates computed market state on a cadence and records every run as an
-`AiDecision` audit event (model, latency, tokens, context snapshot + hash). Ollama runs
-in compose; the model narrates, deterministic code computes every number. Next: step 4
-— `ui-gateway` + the attention feed (ADR-0017), AiDecision events onto the broker.
+Build-out step 4 complete: first screen — the **attention feed** (ADR-0017) at
+`http://localhost:8080`. Broker wiring is live: conflated marks publish to `md.marks`
+at 1Hz and every AI decision goes to `ai.decisions` (invariant 7's audit trail on the
+log); `ui-gateway` consumes both topics and pushes to the browser over SSE.
+Deterministic triggers (stale-mark rule v0) always surface; agent commentary cards
+annotate. Next: step 5 — reference data + Book Structure.
 
-To see AI commentary locally:
+Full local run:
 
 ```bash
-docker compose up -d ollama
-docker exec jethro-ollama-1 ollama pull qwen2.5:3b   # once, ~2GB
-./gradlew :app:bootRun                                # commentary logged every 60s
+docker compose up -d                                  # Redpanda + Postgres + Ollama
+docker exec jethro-ollama-1 ollama pull qwen2.5:3b    # once, ~2GB
+./gradlew :app:bootRun
+# open http://localhost:8080 — live marks strip + attention feed
 ```
+
+Without the broker/model running, the app degrades gracefully (rate-limited warnings,
+empty feed) — the market path never depends on either.
