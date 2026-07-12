@@ -1,65 +1,63 @@
-# ADR-0020: Enriched risk model on real quant libraries — Commons Math now, Strata for derivatives; exact money ledger preserved
+# ADR-0020: Multi-asset quant foundation — OpenGamma Strata as the analytics substrate, exact money ledger on top
 
 - **Status:** Proposed
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
-- **Tags:** risk, data, backend
+- **Tags:** risk, data, backend, architecture
 
 ## Context
 
-Risk today is notional exposure + PnL + static caps (ADR-0017). It treats every dollar as
-equally risky and is portfolio-blind — no volatility, VaR, or concentration — and the
-strategy's signals never see book state. The owner's concern: hand-rolled risk math "looks
-like a toy," and rightly so — reinventing volatility estimators, covariance, and (later)
-curve/day-count/Greeks conventions is where amateur systems get subtly wrong numbers.
+Jethro is a **multi-asset** platform (CLAUDE.md): equities and index futures today, FX,
+rates, options and credit ahead. Risk today is notional exposure + average-cost PnL +
+static caps — no volatility, VaR, curves, Greeks, or scenario, and portfolio-blind.
 
-Forces: invariant 1 (money is exact decimal, never `double`); a JVM/ARM/Pi target;
-finance math must be auditable; ADR-0002 (native code only behind a measured need). The
-decision: which quant library, and where does it stop touching the money ledger?
+The decision is the **analytics foundation** for a multi-asset risk/pricing engine, not a
+one-off statistic. Building that layer out of general-purpose math (std-dev, matrices)
+means re-implementing finance conventions — day counts, calendars, curve interpolation,
+Greeks, discounting — which is exactly where hand-rolled systems get subtly wrong numbers
+and "look like a toy." Constraints: JVM on ARM/Pi, no JNI embedded (ADR-0002), exact money
+(invariant 1), auditable finance math.
 
 ## Decision
 
-We will build risk analytics on **established libraries, not hand-rolled math**, matched
-to the instruments:
+We will adopt **OpenGamma Strata** as the multi-asset quant/analytics substrate — a
+pure-Java institutional library whose domain model already spans the layers we need:
+reference data (calendars, day counts), market data (curves, vol surfaces), products
+across asset classes, pricers (PV + Greeks), and a **measures + scenario/stress**
+framework. We model Jethro instruments onto Strata products and build curves/surfaces from
+market data; PV, Greeks, VaR and scenario come from Strata measures.
 
-- **Apache Commons Math** (pure Java) now, for the statistics we need — volatility (σ of
-  log returns), covariance/correlation, and parametric VaR (`z · σ · |exposure|`). Real,
-  respected, trivial to integrate.
-- **OpenGamma Strata** (pure Java, institutional — no JNI) reserved for when we add
-  **derivatives pricing / Greeks / curves / day counts** (rates, options). Trigger:
-  trading those instruments. Adopting it early would force its swap/curve domain model
-  onto an equities book for no payoff.
-
-Hard boundary: the money ledger (positions, PnL, exposure) stays exact `BigDecimal`
-(invariant 1); library analytics run in `double` and cross back to `BigDecimal` only at
-the money boundary (VaR in currency). Portfolio VaR starts as the conservative
-undiversified sum.
-
-Worked example (95%, z=1.645): AAPL exposure 19,000, daily σ=1.5% → VaR ≈ 1.645 · 0.015 ·
-19,000 = **468.83**, encoded as an exact-value boundary test.
+Hard boundary: the **exact money ledger** — positions, average-cost PnL, cash, exposure —
+stays in `common-domain` `BigDecimal` (invariant 1) as the record of truth; Strata's
+`double` analytics run at the pricing layer and convert back at the money boundary. A
+general-purpose math library is at most a low-level transitive detail, never "the risk
+library." QuantLib stays reserved as an **out-of-process** pricing service (ADR-0002/0010)
+for exotics Strata can't cover — never JNI-embedded on the Pi.
 
 ## Alternatives considered
 
-**Hand-rolled primitives (no library).** Rejected: reinvents error-prone conventions and,
-as the owner put it, looks like a toy. Acceptable only for the most trivial glue.
+**General-purpose math library as the risk layer (Commons Math et al.).** Rejected as the
+foundation: it's statistics, not a finance engine — assembling curves, day counts, Greeks
+and scenario from primitives is the toy path. (Supersedes this ADR's earlier draft framing.)
 
-**QuantLib (JNI/C++).** Rejected: best-known, but native — JNI + ARM/Pi build pain,
-against the JVM/lean posture (ADR-0002). Revisit only for a model that exists only there.
+**QuantLib embedded via JNI.** Rejected: native C++/JNI, ARM/Pi build pain, against the
+JVM/lean posture (ADR-0002). Reachable only as a separate service, for exotics.
 
-**Strata now, for everything.** Deferred, not rejected: it's the right JVM library for
-rates/FX/derivatives, but its trade/curve/market-data model is heavy and a poor fit for
-today's equity + index-future + FX-spot book. Adopt when derivatives pricing lands.
+**Hand-rolled finance framework.** Rejected: reinvents years of error-prone market
+conventions; unauditable at the pace we need.
+
+**Defer a foundation, keep bolting on ad-hoc measures.** Rejected: that is the tunnel-
+vision path — a pile of inconsistent numbers instead of one coherent multi-asset engine.
 
 ## Consequences
 
-- Positive: risk numbers are library-backed and defensible, not toy; VaR gives a dollar
-  risk budget; concentration exposes pile-ups; the enriched snapshot is the input signals,
-  commentary, and any trained model need. A clear upgrade path to Strata for derivatives.
-- Negative: parametric VaR assumes normal returns and an undiversified sum — it
-  **understates tail risk and ignores diversification** (documented; scenario/stress is the
-  real hedge, deferred). Two representations (`double` analytics beside exact money) — the
-  boundary must be enforced in review. A returns window needs warm-up before it means
-  anything. New third-party dependency to vet and keep current.
-- Follow-ups: feed the enriched snapshot into the strategy (vol-scaled sizing,
-  concentration damping) and into limits (VaR/concentration caps); correlation-based VaR +
-  scenario/stress; Strata when Greeks/curves arrive.
+- Positive: one coherent multi-asset substrate — curves, pricing, Greeks, VaR, scenario
+  across asset classes; credible, not toy; exact money preserved; a defined home for every
+  future measure. QuantLib still reachable as a service when exotics demand it.
+- Negative: Strata is a substantial dependency with its own domain model — real
+  integration cost (mapping instruments, sourcing market data); `double` analytics beside
+  exact money means the boundary must be policed in review; strongest for rates/FX/credit,
+  so equities/futures use a thinner slice at first; more build weight (pure-Java, Pi-fine).
+- Follow-ups: verify the Strata artifact/version resolves; map instruments→products and
+  marks→curves per asset class; wire VaR/sensitivities/scenario into the risk snapshot;
+  feed the enriched snapshot to the strategy and limits; QuantLib service for exotics.
