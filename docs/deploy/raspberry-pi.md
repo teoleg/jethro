@@ -77,10 +77,35 @@ If you run headless, disable the desktop GUI to reclaim ~300–400 MB:
 
 ## 5. Get the code
 
+**The repo is private, so plain HTTPS with your GitHub password will fail** — GitHub
+stopped accepting account passwords for git in 2021 (`Authentication failed ... password
+is correct` is exactly this). Use one of:
+
+**A — Personal Access Token (quickest for one machine).** On github.com →
+_Settings → Developer settings → Personal access tokens → Fine-grained tokens_ →
+Generate, scoped to the `jethro` repo with **Contents: Read**. Then paste the **token as
+the password** (username is `teoleg`):
+
 ```bash
 git clone https://github.com/teoleg/jethro.git && cd jethro
+# Username: teoleg
+# Password: <paste the token — NOT your account password>
+git checkout claude/new-session-smb8v6
+git config credential.helper store   # optional: remember it so future pulls don't re-prompt
+```
+
+**B — SSH key (better if you'll pull often).** Generate a key on the Pi and add the
+public half to github.com → _Settings → SSH and GPG keys_:
+
+```bash
+ssh-keygen -t ed25519 -C "pi" -f ~/.ssh/id_ed25519 -N ""
+cat ~/.ssh/id_ed25519.pub          # paste this into GitHub → SSH keys
+git clone git@github.com:teoleg/jethro.git && cd jethro
 git checkout claude/new-session-smb8v6
 ```
+
+**C — GitHub CLI.** `sudo apt install gh && gh auth login` (choose HTTPS, authenticate in
+a browser), then `gh repo clone teoleg/jethro && cd jethro && git checkout claude/new-session-smb8v6`.
 
 ## 6. Build
 
