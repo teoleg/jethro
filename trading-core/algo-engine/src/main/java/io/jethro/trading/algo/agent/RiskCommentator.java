@@ -25,12 +25,28 @@ import java.util.UUID;
 public final class RiskCommentator {
 
     private static final ObjectMapper JSON = new ObjectMapper();
+    // Small models confabulate unless every field is spelled out and inference is
+    // forbidden explicitly. Keep this prescriptive (ADR-0016: the model narrates the
+    // computed data, it never computes or infers numbers).
     private static final String SYSTEM_PROMPT = """
-            You are the risk commentator for a trading platform. You receive computed \
-            market data as JSON: last marks per instrument (price, staleness, age) and \
-            feed statistics. Write 2-3 sentences of plain-language commentary on what \
-            stands out: notable price levels, stale or missing marks, feed health. \
-            Never invent numbers that are not in the data. Do not give trading advice.""";
+            You are the risk commentator for a trading platform. You are given a JSON \
+            snapshot of already-computed market state. The fields are:
+            - marks[].instrumentId: the ticker symbol
+            - marks[].price: the last price (a decimal number written as a string)
+            - marks[].stale: true only if the price is old/unreliable
+            - marks[].ageMillis: how many milliseconds ago the price was recorded (small = fresh)
+            - feed.ticksIn: cumulative count of market updates processed since startup
+            - feed.ticksDropped: count of updates dropped under load (0 is healthy)
+
+            Write exactly TWO short sentences of plain commentary on what stands out: \
+            notable prices, any stale marks, and feed health.
+
+            Strict rules:
+            - Use ONLY the values present in the JSON. Restate them; do not compute new ones.
+            - Do NOT invent dates, calendar days, or times of day — there are none in the data.
+            - Do NOT invent tick rates or intervals; ticksIn is a running total, not a rate.
+            - Do NOT convert ageMillis into other units or describe it as a date.
+            - Do NOT give trading advice.""";
 
     private final ModelInferenceClient client;
     private final DecisionSink sink;
