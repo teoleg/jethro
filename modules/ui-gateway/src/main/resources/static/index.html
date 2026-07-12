@@ -5,8 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jethro — overview</title>
 <style>
-  /* v0 placeholder page (ADR-0017); replaced by the React app under ui/ as views grow.
-     Shared shell (bar + tabs + tokens) is duplicated across the static pages by design. */
+  /* v0 placeholder page (ADR-0017/0021); replaced by the React app under ui/ as views grow. */
   :root {
     --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
     --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
@@ -15,19 +14,14 @@
   * { box-sizing:border-box; margin:0; }
   html, body { height:100%; }
   body {
-    background:
-      radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%),
-      radial-gradient(900px 500px at 0% 0%, rgba(53,192,122,.06), transparent 55%),
-      var(--bg);
-    color:var(--txt);
-    font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    -webkit-font-smoothing:antialiased;
+    background: radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 0%, rgba(53,192,122,.06), transparent 55%), var(--bg);
+    color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased;
   }
   .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
 
-  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);
-            background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
-  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1240px; margin:0 auto; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
   .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
   .tabs { display:flex; gap:4px; margin-left:8px; }
@@ -37,50 +31,50 @@
   .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
   .spacer { flex:1; }
   .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
-  .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); }
-  .pill.on .led { background:var(--up); box-shadow:0 0 8px var(--up); }
-  .pill.off .led { background:var(--warn); }
+  .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); } .pill.on .led { background:var(--up); box-shadow:0 0 8px var(--up); } .pill.off .led { background:var(--warn); }
 
-  main { max-width:1200px; margin:0 auto; padding:20px 24px 48px; }
-  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:22px 2px 12px; display:flex; align-items:center; gap:8px; }
-  .section-h:first-child { margin-top:6px; }
+  main { max-width:1240px; margin:0 auto; padding:18px 24px 40px; display:grid; gap:18px; grid-template-columns:1.05fr 0.95fr; align-items:start; }
+  @media (max-width:920px) { main { grid-template-columns:1fr; } }
+  .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 0; display:flex; align-items:center; gap:8px; }
 
-  /* headline stat cards */
-  .stats { display:grid; grid-template-columns:repeat(5, 1fr); gap:12px; }
-  @media (max-width:820px) { .stats { grid-template-columns:repeat(2, 1fr); } }
-  .stat { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
-  .stat .k { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
-  .stat .v { font-size:22px; font-weight:650; margin-top:6px; letter-spacing:-.01em; }
-  .stat .v.big { font-size:26px; }
+  .stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
+  .stat .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
+  .stat .v { font-size:19px; font-weight:650; margin-top:5px; letter-spacing:-.01em; }
+  .stat .v.big { font-size:22px; }
   .up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--txt); }
 
-  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:2px 4px; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:right; padding:2px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; }
+  .panel.pad { padding:4px 4px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:3px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
   th:first-child, td:first-child { text-align:left; }
-  tbody tr:last-child td { border-bottom:0; }
-  tbody tr { transition:.1s; } tbody tr:hover { background:var(--surface-2); }
+  tbody tr:last-child td, tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
   th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
-  .cls { font-weight:600; }
-  .muted { color:var(--dim); }
+  .cls { font-weight:600; } .muted { color:var(--dim); }
 
-  .empty { color:var(--dim); text-align:center; padding:40px 0; border:1px dashed var(--line); border-radius:14px; background:var(--surface); }
-  .empty .big { font-size:20px; margin-bottom:6px; }
-  .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:12px; padding:13px 16px; margin-bottom:10px; }
+  .feed { display:flex; flex-direction:column; gap:8px; max-height:300px; overflow-y:auto; padding-right:2px; }
+  .empty { color:var(--dim); text-align:center; padding:24px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
+  .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:12px; padding:11px 14px; }
   .card.WARN { border-left-color:var(--warn); } .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
-  .card .row1 { display:flex; align-items:center; gap:10px; }
-  .card h3 { font-size:14px; font-weight:600; }
+  .card .row1 { display:flex; align-items:center; gap:10px; } .card h3 { font-size:13px; font-weight:600; }
   .badge { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); margin-left:auto; }
   .card.WARN .badge { color:var(--warn); border-color:var(--warn); } .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
-  .card p { color:var(--txt); font-size:13px; white-space:pre-wrap; margin-top:7px; }
-  .card .meta { color:var(--dim); font-size:11px; margin-top:9px; }
+  .card p { font-size:12.5px; white-space:pre-wrap; margin-top:6px; } .card .meta { color:var(--dim); font-size:11px; margin-top:8px; }
 
-  /* demoted marks strip */
-  .marks { display:flex; gap:8px; flex-wrap:wrap; }
-  .m { display:flex; align-items:baseline; gap:7px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:5px 10px; font-size:12px; }
-  .m .sym { color:var(--dim); font-size:10px; letter-spacing:.05em; } .m.stale { border-color:var(--warn); }
-  .m { cursor:pointer; transition:.12s; } .m:hover { border-color:var(--brand); }
-  .m .ico { color:var(--dim); display:inline-flex; margin-left:2px; } .m:hover .ico { color:var(--brand); }
+  /* chat */
+  .chat { display:flex; flex-direction:column; height:340px; }
+  .chatlog { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
+  .msg { max-width:88%; padding:7px 11px; border-radius:12px; font-size:13px; white-space:pre-wrap; }
+  .msg.user { align-self:flex-end; background:var(--brand); color:#fff; border-bottom-right-radius:4px; }
+  .msg.bot { align-self:flex-start; background:var(--surface-2); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .msg.pending { color:var(--dim); }
+  .msg .mmeta { display:block; color:var(--dim); font-size:10px; margin-top:4px; letter-spacing:.04em; }
+  .chatform { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line); }
+  .chatform input { flex:1; background:#0c1019; color:var(--txt); border:1px solid var(--line-2); border-radius:9px; padding:9px 11px; font:inherit; }
+  .chatform input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(91,140,255,.18); }
+  .chatform button { background:var(--brand); color:#fff; border:0; border-radius:9px; padding:9px 15px; font:inherit; font-weight:600; cursor:pointer; }
 </style>
 </head>
 <body>
@@ -98,23 +92,30 @@
   </div>
 </div>
 <main>
-  <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
-  <div class="stats" id="stats"></div>
+  <!-- LEFT: book & risk -->
+  <div class="col">
+    <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
+    <div class="stats" id="stats"></div>
+    <div class="section-h">By market</div>
+    <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
+  </div>
 
-  <div class="section-h">By market</div>
-  <div class="panel"><div id="byclass" class="muted" style="padding:16px">loading…</div></div>
-
-  <div class="section-h">Needs your attention</div>
-  <div id="feed"><div class="empty"><div class="big">all quiet</div>nothing needs you right now</div></div>
-
-  <div class="section-h">Live marks <span style="margin-left:8px;text-transform:none;letter-spacing:0;font-size:12px">— click a price for its history chart</span></div>
-  <div class="marks" id="marks"></div>
+  <!-- RIGHT: AI (notes + chat) -->
+  <div class="col">
+    <div class="section-h">Needs your attention</div>
+    <div id="feed" class="feed"><div class="empty">all quiet</div></div>
+    <div class="section-h">Ask</div>
+    <div class="panel chat">
+      <div class="chatlog" id="chatlog"></div>
+      <form class="chatform" id="chatform" autocomplete="off">
+        <input id="chatinput" placeholder="pnl alpha · exposure AAPL · any limits breached?">
+        <button type="submit">Ask</button>
+      </form>
+    </div>
+  </div>
 </main>
-<script src="/chart.js"></script>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
-  const fmtAge = ms => ms < 2000 ? "live" : Math.round(ms / 1000) + "s";
-  // Display-only money formatting (2dp, grouped). Exact decimals stay strings on the wire.
   const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); };
   const cls = s => { const n = Number(s); return n>0?"up":(n<0?"down":"flat"); };
 
@@ -129,47 +130,61 @@
       `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>`;
     const g = r.byAssetClass || [];
     document.getElementById("byclass").outerHTML = '<div id="byclass">' + (g.length ?
-      "<table><tr><th>market</th><th>positions</th><th>realized</th><th>unrealized</th><th>total P&L</th><th>net exp</th><th>gross exp</th></tr>" +
+      "<table><tr><th>market</th><th>pos</th><th>realized</th><th>unrealized</th><th>total P&L</th><th>gross exp</th></tr>" +
       g.map(x => `<tr><td class="cls">${esc(x.key)}</td><td class="muted mono">${x.positionCount}</td>
         <td class="mono ${cls(x.realizedPnl)}">${money(x.realizedPnl)}</td>
         <td class="mono ${cls(x.unrealizedPnl)}">${money(x.unrealizedPnl)}</td>
         <td class="mono ${cls(x.totalPnl)}">${money(x.totalPnl)}</td>
-        <td class="mono">${money(x.netExposure)}</td><td class="mono">${money(x.grossExposure)}</td></tr>`).join("") + "</table>"
-      : '<div class="muted" style="padding:16px">no positions yet — submit an order to build a book</div>') + '</div>';
+        <td class="mono">${money(x.grossExposure)}</td></tr>`).join("") + "</table>"
+      : '<div class="muted" style="padding:14px">no positions yet — the strategy or an order will build a book</div>') + '</div>';
   }
 
   function renderFeed(items) {
     const feed = document.getElementById("feed");
-    if (!items.length) { feed.innerHTML = '<div class="empty"><div class="big">all quiet</div>nothing needs you right now</div>'; return; }
+    if (!items.length) { feed.innerHTML = '<div class="empty">all quiet</div>'; return; }
     feed.innerHTML = items.map(i =>
       `<div class="card ${esc(i.severity)}"><div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
-         <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()} · evidence: ${esc(i.evidenceRef)}</div></div>`).join("");
-  }
-
-  function renderMarks(marks) {
-    document.getElementById("marks").innerHTML = marks.map(m =>
-      `<div class="m ${m.ageMillis > 10000 ? "stale" : ""}" data-i="${esc(m.instrumentId)}" title="click for price history"><span class="sym">${esc(m.instrumentId)}</span>
-         <b class="mono">${esc(m.price)}</b><span class="muted">${fmtAge(m.ageMillis)}</span>
-         <span class="ico"><svg width="15" height="10" viewBox="0 0 15 10"><polyline points="0,9 4,4 8,6 15,0" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span></div>`).join("");
-    document.querySelectorAll("#marks .m").forEach(el => el.onclick = () => openChart(el.dataset.i));
+         <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()}</div></div>`).join("");
   }
 
   function setStatus(on, text) { document.getElementById("status").className = "pill " + (on?"on":"off"); document.getElementById("statusText").textContent = text; }
 
+  // ---- chat ----
+  const chatlog = document.getElementById("chatlog");
+  function addMsg(text, who, meta) {
+    const d = document.createElement("div");
+    d.className = "msg " + who;
+    d.innerHTML = esc(text) + (meta ? `<span class="mmeta">${esc(meta)}</span>` : "");
+    chatlog.appendChild(d); chatlog.scrollTop = chatlog.scrollHeight;
+    return d;
+  }
+  addMsg("Ask me about PnL, exposure, positions, limits, or signals — e.g. \"pnl alpha\".", "bot");
+  document.getElementById("chatform").addEventListener("submit", async e => {
+    e.preventDefault();
+    const input = document.getElementById("chatinput");
+    const q = input.value.trim(); if (!q) return;
+    addMsg(q, "user"); input.value = "";
+    const pending = addMsg("…", "bot pending");
+    try {
+      const r = await (await fetch("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({question:q})})).json();
+      pending.remove();
+      const slots = [r.book, r.instrument].filter(Boolean).join(" · ");
+      addMsg(r.answer, "bot", "intent: " + r.intent + (slots ? " · " + slots : "") + " · " + (r.model||""));
+    } catch (err) { pending.remove(); addMsg("chat unavailable right now", "bot"); }
+  });
+
   async function loadRisk() { try { renderRisk(await (await fetch("/api/risk")).json()); } catch (e) {} }
   async function bootstrap() {
-    renderMarks(await (await fetch("/api/marks")).json());
-    renderFeed(await (await fetch("/api/attention")).json());
+    try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) {}
     loadRisk();
   }
 
   const es = new EventSource("/api/stream");
   es.onopen = () => setStatus(true, "live");
   es.onerror = () => setStatus(false, "reconnecting…");
-  es.addEventListener("marks", e => renderMarks(JSON.parse(e.data)));
   es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
   bootstrap();
-  setInterval(loadRisk, 2000); // risk/PnL isn't on the SSE stream yet — poll
+  setInterval(loadRisk, 2000);
 </script>
 </body>
 </html>

@@ -163,6 +163,17 @@ class FullStackIT {
                 "reason states the limit breach: " + rejected.get("reason").asText());
     }
 
+    @Test
+    void operationalChatAnswersAndAudits() {
+        // Exercises /api/chat end to end (intent parse → deterministic answer → chat_audit
+        // write via the V6 migration). Content is deterministic; don't assert the model's
+        // parse (0.5b may vary) — just that a real, non-empty answer comes back.
+        JsonNode resp = postJson("/api/chat", "{\"question\":\"what is the firm pnl?\"}");
+        assertTrue(resp != null, "chat endpoint responded");
+        assertTrue(resp.path("answer").asText("").length() > 0, "answer is non-empty");
+        assertTrue(resp.path("intent").asText("").length() > 0, "intent was classified");
+    }
+
     private JsonNode postJson(String path, String body) {
         try {
             HttpHeaders headers = new HttpHeaders();
