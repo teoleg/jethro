@@ -3,26 +3,27 @@
 # Build (no tests), bring up Docker infra, and start the app in the background — one
 # command. Designed for constrained hardware (e.g. Raspberry Pi): builds the boot jar
 # without the test suite, runs the app as a plain detached JVM (nohup, no resident
-# Gradle daemon), and by default leaves the local SLM (Ollama) OFF so the market path +
-# UI come up light. The app keeps running after you close the terminal; logs go to
-# logs/jethro-app.log. Stop it with scripts/stop-local.sh.
+# Gradle daemon). By default the local SLM (Ollama) commentary AND simulated
+# auto-execution are ON so the whole system runs itself. The app keeps running after you
+# close the terminal; logs go to logs/jethro-app.log. Stop it with scripts/stop-local.sh.
 #
 # Usage:
-#   ./scripts/run-local.sh                 # app + Redpanda + Postgres, AI off
-#   AI=on ./scripts/run-local.sh           # also start Ollama and enable commentary
+#   ./scripts/run-local.sh                       # everything on (AI + auto-execute)
+#   AI=off AUTOEXEC=off ./scripts/run-local.sh   # market path + UI only, no AI, no trading
+#   MODEL=qwen2.5:3b ./scripts/run-local.sh      # better commentary (heavier)
 #   PROFILE=default HEAP=1g ./scripts/run-local.sh
 #
-# Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: off),
-#            MODEL (default: qwen2.5:0.5b)
+# Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
+#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:0.5b)
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PROFILE="${PROFILE:-pi}"
 HEAP="${HEAP:-512m}"
-AI="${AI:-off}"
+AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:0.5b}"
-AUTOEXEC="${AUTOEXEC:-off}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
+AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 
 wait_for() {  # name, timeout_seconds, command...
   local name="$1" timeout="$2"; shift 2
