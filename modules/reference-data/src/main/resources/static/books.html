@@ -70,6 +70,9 @@
   ul.tree b { font-weight:600; }
   .ccy { color:var(--brand); font-size:10px; margin-left:8px; letter-spacing:.06em;
          border:1px solid var(--line-2); border-radius:999px; padding:1px 7px; }
+  .ids { display:flex; flex-wrap:wrap; gap:4px; }
+  .id { font-size:10px; color:var(--dim); border:1px solid var(--line-2); border-radius:4px; padding:0 5px; }
+  .id b { color:var(--txt); font-weight:600; margin-right:3px; font-size:9px; letter-spacing:.04em; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th, td { text-align:left; padding:2px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
   tr:last-child td { border-bottom:0; }
@@ -139,10 +142,15 @@
       const books = await (await fetch("/api/books")).json();
       document.getElementById("books").innerHTML = books.length ? renderTree(books) : "no books";
       const instruments = await (await fetch("/api/instruments")).json();
+      // External identifiers (CUSIP/ISIN/exchange/ISO) from the symbology map; the
+      // internal 'sim' feed symbol is not an identifier, so it's hidden here.
+      const ids = sym => Object.entries(sym || {}).filter(([s]) => s !== "sim")
+        .map(([s, v]) => `<span class="id"><b>${esc(s)}</b>${esc(v)}</span>`).join("") || '<span class="dim">—</span>';
       document.getElementById("instruments").innerHTML =
-        "<table><tr><th>id</th><th>class</th><th>ccy</th><th class='num'>mult</th></tr>" +
+        "<table><tr><th>id</th><th>class</th><th>ccy</th><th class='num'>mult</th><th>identifiers</th></tr>" +
         instruments.map(i => `<tr><td><b>${esc(i.instrumentId)}</b></td><td class="dim">${esc(i.assetClass)}</td>
-          <td class="dim">${esc(i.currency)}</td><td class="num mono">${esc(i.contractMultiplier)}</td></tr>`).join("") + "</table>";
+          <td class="dim">${esc(i.currency)}</td><td class="num mono">${esc(i.contractMultiplier)}</td>
+          <td><div class="ids">${ids(i.symbology)}</div></td></tr>`).join("") + "</table>";
     } catch (e) {
       document.getElementById("books").textContent = "reference data unavailable: " + e;
     }
