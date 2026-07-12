@@ -43,7 +43,14 @@ public class UiController {
     }
 
     @GetMapping("/api/stream")
-    public SseEmitter stream() {
+    public SseEmitter stream(jakarta.servlet.http.HttpServletRequest request) {
+        // When a browser drops mid-stream (tab refresh/navigation), Tomcat re-dispatches
+        // the errored request back through the servlet. Handing out a fresh emitter then
+        // makes Spring try startAsync on an ERROR-state response ("Cannot start async").
+        // Only register on the original REQUEST dispatch; re-dispatches get nothing.
+        if (request.getDispatcherType() != jakarta.servlet.DispatcherType.REQUEST) {
+            return null;
+        }
         return sse.register();
     }
 }
