@@ -21,6 +21,8 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0015](0015-single-jvm-modular-monolith.md) | Single-JVM modular monolith — one app now, extraction seams preserved | Proposed |
 | [0016](0016-local-slm-tier-agentic-elements.md) | Local SLM inference tier — Ollama adapter first, agentic elements pulled forward | Proposed |
 | [0017](0017-attention-first-ui.md) | Attention-first UI — agents curate with a deterministic floor; grids become drill-down | Proposed |
+| [0018](0018-ai-trade-suggestions-human-in-loop.md) | AI trade suggestions — frontier tier proposes, deterministic guardrails gate, human executes | Proposed |
+| [0019](0019-simulated-auto-execution.md) | Simulated auto-execution — deterministic strategy may auto-trade in sim, hard-gated off real brokers | Proposed |
 
 ## Lifecycle
 

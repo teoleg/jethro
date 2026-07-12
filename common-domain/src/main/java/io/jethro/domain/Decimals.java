@@ -39,4 +39,15 @@ public final class Decimals {
     public static BigDecimal fromScaledLong(long scaled, int scale) {
         return BigDecimal.valueOf(scaled, scale);
     }
+
+    /**
+     * Restates a boundary value at exactly {@code scale} for an Avro/JDBC decimal field
+     * whose scale is fixed by contract. Padding-only ("100" → "100.000000"); throws
+     * {@link ArithmeticException} if the value carries more precision than {@code scale}
+     * allows — Avro's decimal encoder rejects a scale mismatch, and silently rounding
+     * money to fit would be a bug (invariant 1).
+     */
+    public static BigDecimal atScale(BigDecimal value, int scale) {
+        return value.setScale(scale, RoundingMode.UNNECESSARY);
+    }
 }

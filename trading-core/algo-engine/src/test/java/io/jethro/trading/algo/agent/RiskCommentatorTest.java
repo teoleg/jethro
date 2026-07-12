@@ -78,6 +78,6 @@ class RiskCommentatorTest {
         new RiskCommentator(client, d -> { }, 128).commentOn(view());
         assertTrue(client.lastRequest.userPrompt().contains("101.230000"));
         assertTrue(client.lastRequest.userPrompt().contains("ticksIn"));
-        assertTrue(client.lastRequest.systemPrompt().contains("Never invent numbers"));
+        assertTrue(client.lastRequest.systemPrompt().contains("Use ONLY the values present"));
     }
 }

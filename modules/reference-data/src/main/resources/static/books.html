@@ -5,62 +5,175 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jethro — books</title>
 <style>
-  :root { --bg:#0e1116; --card:#161b23; --line:#232a35; --txt:#d7dde6; --dim:#8a94a3; }
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
+    --up:#35c07a; --down:#f0553f;
+  }
   * { box-sizing:border-box; margin:0; }
-  body { background:var(--bg); color:var(--txt); font:14px/1.5 system-ui, sans-serif; }
-  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; }
-  header h1 { font-size:16px; letter-spacing:.08em; }
-  header a { color:var(--dim); font-size:12px; text-decoration:none; }
-  main { max-width:860px; margin:0 auto; padding:20px; display:grid; gap:20px; grid-template-columns: 1fr 1fr; }
-  h2 { font-size:13px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; margin-bottom:10px; }
-  .panel { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:14px 16px; }
-  ul.tree, ul.tree ul { list-style:none; padding-left:18px; }
-  ul.tree > li { padding-left:0; }
-  ul.tree li { padding:3px 0; }
-  .ccy { color:var(--dim); font-size:11px; margin-left:6px; }
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); }
-  th { color:var(--dim); font-weight:normal; font-size:11px; text-transform:uppercase; }
+  html, body { height:100%; }
+  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
+
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
+  .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); } .pill.on .led { background:var(--up); box-shadow:0 0 8px var(--up); }
+
+  main { max-width:1200px; margin:0 auto; padding:16px 24px 48px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:22px 2px 12px; display:flex; align-items:center; gap:8px; }
+  .section-h:first-child { margin-top:4px; }
+
+  /* per-book situation cards */
+  .book { background:var(--surface); border:1px solid var(--line); border-radius:14px; margin-bottom:14px; overflow:hidden; }
+  .book-h { display:flex; align-items:center; gap:18px; padding:12px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .book-h .name { font-weight:650; font-size:14px; } .book-h .name .dim { color:var(--dim); font-weight:400; }
+  .book-h .ccy { font-size:10px; color:var(--brand); border:1px solid var(--line-2); border-radius:999px; padding:1px 7px; letter-spacing:.06em; }
+  .metric { display:flex; flex-direction:column; font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  .metric b { font-size:14px; font-weight:650; margin-top:2px; letter-spacing:-.01em; }
+  .up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--txt); }
+  .empty-b { padding:12px 16px; color:var(--dim); font-size:13px; }
+
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:2px 14px; border-bottom:1px solid var(--line); line-height:1.7; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align:left; }
+  tbody tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; padding-top:6px; padding-bottom:4px; }
+  .cid { color:var(--dim); font-size:11px; }
+
+  /* reference: structure + instrument master */
+  .grid2 { display:grid; gap:14px; grid-template-columns:1fr 1fr; }
+  @media (max-width:760px) { .grid2 { grid-template-columns:1fr; } }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:6px 4px; }
+  .panel .ph { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; padding:8px 12px 4px; }
+  ul.tree, ul.tree ul { list-style:none; padding-left:16px; } ul.tree > li { padding-left:0; } ul.tree li { padding:1px 0; }
+  ul.tree b { font-weight:600; }
+  .ids { display:flex; flex-wrap:wrap; gap:4px; }
+  .id { font-size:10px; color:var(--dim); border:1px solid var(--line-2); border-radius:4px; padding:0 5px; }
+  .id b { color:var(--txt); font-weight:600; margin-right:3px; font-size:9px; letter-spacing:.04em; }
   .dim { color:var(--dim); }
+
+  /* commentary + alarms */
+  .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:10px; padding:10px 14px; margin-bottom:8px; }
+  .card:last-child { margin-bottom:0; } .card.WARN { border-left-color:var(--warn); } .card.ALERT { border-left-color:var(--alert); }
+  .card .row1 { display:flex; align-items:center; gap:10px; } .card h3 { font-size:13px; font-weight:600; }
+  .badge { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); margin-left:auto; }
+  .card p { font-size:12.5px; white-space:pre-wrap; margin-top:6px; } .card .meta { color:var(--dim); font-size:11px; margin-top:8px; }
+  .quiet { color:var(--dim); }
 </style>
 </head>
 <body>
-<header>
-  <h1>JETHRO</h1>
-  <a href="/">← attention feed</a>
-  <span style="color:var(--dim);font-size:12px">book structure — drill-down evidence view (ADR-0017)</span>
-</header>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab active" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
+  </div>
+</div>
 <main>
-  <section class="panel">
-    <h2>Books</h2>
-    <div id="books" class="dim">loading…</div>
-  </section>
-  <section class="panel">
-    <h2>Instruments</h2>
-    <div id="instruments" class="dim">loading…</div>
-  </section>
+  <div class="section-h">Situation by book</div>
+  <div id="books" class="quiet">loading…</div>
+
+  <div class="section-h">Commentary &amp; alarms</div>
+  <div id="feed"><div class="quiet">all quiet — no alarms or commentary</div></div>
+
+  <div class="section-h">Reference</div>
+  <div class="grid2">
+    <div class="panel"><div class="ph">Book structure</div><div id="tree" class="dim" style="padding:8px 12px">loading…</div></div>
+    <div class="panel"><div class="ph">Instrument master</div><div id="instruments" class="dim" style="padding:8px 12px">loading…</div></div>
+  </div>
 </main>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+  const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  const cls = s => { const n = Number(s); return n>0?"up":(n<0?"down":"flat"); };
+  // Primary standard identifier for a security (CUSIP preferred, then ISIN/exchange/ISO).
+  const cusipOf = {};
+  const primaryId = sym => (sym && (sym.CUSIP || sym.ISIN || sym.GLOBEX || sym.ISO)) || null;
 
-  const renderTree = nodes => "<ul class='tree'>" + nodes.map(n =>
-    `<li>▸ <b>${esc(n.name)}</b> <span class='dim'>(${esc(n.bookId)})</span><span class='ccy'>${esc(n.baseCurrency)}</span>` +
-    (n.children.length ? renderTree(n.children) : "") + "</li>").join("") + "</ul>";
+  let books = [];          // flattened {bookId, name, baseCurrency, isLeaf}
+  let instruments = [];
 
-  async function load() {
-    try {
-      const books = await (await fetch("/api/books")).json();
-      document.getElementById("books").innerHTML = books.length ? renderTree(books) : "no books";
-      const instruments = await (await fetch("/api/instruments")).json();
-      document.getElementById("instruments").innerHTML =
-        "<table><tr><th>id</th><th>class</th><th>ccy</th><th>mult</th></tr>" +
-        instruments.map(i => `<tr><td><b>${esc(i.instrumentId)}</b></td><td>${esc(i.assetClass)}</td>
-          <td>${esc(i.currency)}</td><td>${esc(i.contractMultiplier)}</td></tr>`).join("") + "</table>";
-    } catch (e) {
-      document.getElementById("books").textContent = "reference data unavailable: " + e;
-    }
+  function flatten(nodes, out) { nodes.forEach(n => { out.push({bookId:n.bookId, name:n.name, baseCurrency:n.baseCurrency, isLeaf:!(n.children&&n.children.length)}); if (n.children) flatten(n.children, out); }); return out; }
+
+  function renderBooks(risk) {
+    const byBook = {}; (risk.byBook||[]).forEach(g => byBook[g.key] = g);
+    const posByBook = {}; (risk.positions||[]).forEach(p => (posByBook[p.bookId] = posByBook[p.bookId] || []).push(p));
+    // show every book that has activity, plus leaf (trading) books even when flat
+    const show = books.filter(b => byBook[b.bookId] || b.isLeaf);
+    document.getElementById("books").innerHTML = show.length ? show.map(b => {
+      const g = byBook[b.bookId], ps = posByBook[b.bookId] || [];
+      const metric = (k, v, colour) => `<span class="metric">${k}<b class="${colour?cls(v):''} mono">${money(v)}</b></span>`;
+      const head = `<div class="book-h"><span class="name">${esc(b.name)} <span class="dim">(${esc(b.bookId)})</span></span>
+        <span class="ccy">${esc(b.baseCurrency)}</span><span class="spacer"></span>` +
+        (g ? metric("Total P&L", g.totalPnl, true) + metric("Realized", g.realizedPnl, true) + metric("Unrealized", g.unrealizedPnl, true)
+           + metric("Net exp", g.netExposure) + metric("Gross exp", g.grossExposure)
+           : '<span class="metric">Total P&L<b class="flat mono">0.00</b></span>') + `</div>`;
+      const body = ps.length ?
+        "<table><tr><th>instr</th><th>CUSIP / ID</th><th>market</th><th>qty</th><th>avg cost</th><th>mark</th><th>unrealized</th><th>realized</th><th>net exp</th></tr>" +
+        ps.map(p => `<tr><td><b>${esc(p.instrumentId)}</b></td><td class="cid mono">${esc(cusipOf[p.instrumentId]||'—')}</td>
+          <td class="dim">${esc(p.assetClass)}</td><td class="mono">${money(p.quantity)}</td><td class="mono">${money(p.avgCost)}</td>
+          <td class="mono">${p.hasMark?money(p.mark):'—'}</td><td class="mono ${cls(p.unrealizedPnl)}">${money(p.unrealizedPnl)}</td>
+          <td class="mono ${cls(p.realizedPnl)}">${money(p.realizedPnl)}</td><td class="mono">${money(p.netExposure)}</td></tr>`).join("") + "</table>"
+        : '<div class="empty-b">flat — no positions in this book</div>';
+      return `<div class="book">${head}${body}</div>`;
+    }).join("") : '<div class="quiet">no books</div>';
   }
-  load();
+
+  function renderReference() {
+    const renderTree = nodes => "<ul class='tree'>" + nodes.map(n =>
+      `<li>▸ <b>${esc(n.name)}</b> <span class='dim'>(${esc(n.bookId)})</span>` +
+      (n.children && n.children.length ? renderTree(n.children) : "") + "</li>").join("") + "</ul>";
+    fetch("/api/books").then(r => r.json()).then(tree => { document.getElementById("tree").innerHTML = tree.length ? renderTree(tree) : "no books"; });
+    const ids = sym => Object.entries(sym||{}).filter(([s]) => s!=="sim").map(([s,v]) => `<span class="id"><b>${esc(s)}</b>${esc(v)}</span>`).join("") || '<span class="dim">—</span>';
+    document.getElementById("instruments").innerHTML =
+      "<table><tr><th>id</th><th>class</th><th>ccy</th><th>identifiers</th></tr>" +
+      instruments.map(i => `<tr><td><b>${esc(i.instrumentId)}</b></td><td class="dim">${esc(i.assetClass)}</td>
+        <td class="dim">${esc(i.currency)}</td><td><div class="ids">${ids(i.symbology)}</div></td></tr>`).join("") + "</table>";
+  }
+
+  function renderFeed(items) {
+    const feed = document.getElementById("feed");
+    if (!items.length) { feed.innerHTML = '<div class="quiet">all quiet — no alarms or commentary</div>'; return; }
+    feed.innerHTML = items.map(i => `<div class="card ${esc(i.severity)}"><div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
+      <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()} · evidence: ${esc(i.evidenceRef)}</div></div>`).join("");
+  }
+
+  function setStatus(on, text) { document.getElementById("status").className = "pill " + (on?"on":""); document.getElementById("statusText").textContent = text; }
+
+  async function refreshRisk() { try { renderBooks(await (await fetch("/api/risk")).json()); } catch (e) {} }
+  async function init() {
+    try {
+      instruments = await (await fetch("/api/instruments")).json();
+      instruments.forEach(i => cusipOf[i.instrumentId] = primaryId(i.symbology));
+      books = flatten(await (await fetch("/api/books")).json(), []);
+      renderReference();
+    } catch (e) { document.getElementById("books").textContent = "reference data unavailable: " + e; }
+    try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) {}
+    await refreshRisk();
+    setInterval(refreshRisk, 2000);
+  }
+
+  const es = new EventSource("/api/stream");
+  es.onopen = () => setStatus(true, "live");
+  es.onerror = () => setStatus(false, "reconnecting…");
+  es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
+  init();
 </script>
 </body>
 </html>

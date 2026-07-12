@@ -15,8 +15,16 @@ bleeds. Curation must never be able to *hide* a real problem.
 
 ## Decision
 
-We will make the landing page an **attention feed**, not a tile menu, built on a
-two-layer curation rule:
+We will make the landing page a **consolidated risk/PnL header above an attention
+feed**, not a tile menu, built on a two-layer curation rule:
+
+0. **The landing leads with a deterministic consolidated risk/PnL summary.**
+   Firm-wide realized/unrealized PnL, net/gross exposure, and a per-asset-class
+   rollup sit at the top of the page, computed by risk-pnl from fills+marks — plain
+   numbers, never model-sourced (invariant 7). This is the standing "how are we
+   doing" answer; the attention feed below it is the "what needs me now" answer.
+   The two are complementary: neither replaces the other, and the SLM annotates the
+   feed but never the headline numbers.
 
 1. **Deterministic triggers decide WHAT surfaces (the floor).** Threshold rules in
    plain code — PnL swing, exposure breach, mark staleness, feed drops/gaps, order
@@ -54,7 +62,8 @@ the same events; deferred until the feed and evidence views exist to ground it.
 
 - Positive: the human watches a short ranked feed instead of four grids; agents built
   in ADR-0016 get a product surface immediately; "all quiet" becomes an explicit,
-  auditable statement rather than an empty screen.
+  auditable statement rather than an empty screen. The consolidated PnL header gives a
+  standing risk answer without demoting the attention model — the two coexist.
 - Negative: curation bugs can still mis-rank or over-group (mitigated: floor rules +
   show-everything mode + evidence links); threshold tuning is now product work —
   bad thresholds mean noise or silence; slightly more to build before the first

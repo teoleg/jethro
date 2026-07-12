@@ -111,7 +111,8 @@ a browser), then `gh repo clone teoleg/jethro && cd jethro && git checkout claud
 
 There's a script that does everything: builds the jar **without the test suite** (CI is
 the test gate — see below), brings up Docker infra, waits for it to be healthy, and
-starts the app as a plain JVM. AI is off by default so it comes up light:
+starts the app **in the background** (`nohup`) so it keeps running after you close the
+terminal. AI is off by default so it comes up light:
 
 ```bash
 ./scripts/run-local.sh                 # app + Redpanda + Postgres, AI off, profile=pi
@@ -119,8 +120,13 @@ AI=on ./scripts/run-local.sh           # also start Ollama + enable commentary
 HEAP=1g PROFILE=default ./scripts/run-local.sh   # override knobs
 ```
 
-Stop the app with **Ctrl+C**; stop the Docker services with `./scripts/stop-local.sh`
-(add `--volumes` to also wipe Postgres/Redpanda data).
+The app logs to `logs/jethro-app.log` — follow it with `tail -f logs/jethro-app.log`.
+
+Stop the app **and** Docker services with `./scripts/stop-local.sh` (add `--volumes` to
+also wipe Postgres/Redpanda data). To wipe **everything** for a clean slate — app,
+Docker volumes, LMDB state (`data/`), and logs — use `./scripts/clean-local.sh`
+(add `--all` to also drop Gradle build outputs). Flyway re-runs all migrations on the
+next start.
 
 **Tests no longer run in a local `build`.** `./gradlew build` (and the script's
 `:app:bootJar`) compile and package **without** running the unit/module test suite — that
@@ -244,7 +250,7 @@ sudo systemctl enable --now jethro.service
 | `java.lang.reflect.InaccessibleObjectException` on LMDB | The `--add-opens` flags are missing — use `./gradlew :app:bootRun` (they're wired in) or the provided Dockerfile, not a hand-rolled `java -jar`. |
 | A container is `Killed` / restarts | Out of memory. Drop to the 0.5B model, lower `sim-instruments`, add swap (step 4), or disable Ollama on a 2 GB Pi. |
 | No commentary cards appear | Model still warming up (first Pi inference is slow) or Ollama not reachable. Check `docker logs jethro-ollama-1`; the feed's marks and stale-mark alerts work regardless. |
-| Redpanda won't go healthy | Give it a minute on a Pi; if it OOMs, lower `--memory` to `700M` in `docker-compose.yml`. |
+| Redpanda exits with `insufficient physical memory` / never healthy | seastar can't read the cgroup memory limit on Pi OS (memory controller off by default) and under-detects RAM. The compose file already requests `--memory=512M` to avoid this; lower it further if it still fails. Optionally enable proper accounting by adding `cgroup_enable=memory cgroup_memory=1` to `/boot/firmware/cmdline.txt` and rebooting. |
 | SD card wearing out / very slow | Move to a USB SSD; point Docker's data-root and swap there. |
 
 ## Memory budget (rough, 0.5B model)

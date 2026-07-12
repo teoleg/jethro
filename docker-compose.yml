@@ -10,7 +10,11 @@ services:
       - start
       - --mode=dev-container
       - --smp=1
-      - --memory=1G
+      # 512M is ample for our low-rate topics and starts reliably on boards where
+      # seastar can't read the cgroup memory limit and under-detects available RAM
+      # (e.g. Raspberry Pi OS with the memory cgroup controller off) — a 1G request
+      # failed there with "insufficient physical memory". Fine on CI/EC2 too.
+      - --memory=512M
       - --kafka-addr=PLAINTEXT://0.0.0.0:9092
       - --advertise-kafka-addr=PLAINTEXT://localhost:9092
       - --schema-registry-addr=0.0.0.0:8081
