@@ -1,0 +1,6 @@
+{
+  "type": "enum",
+  "name": "Side",
+  "namespace": "io.jethro.messaging",
+  "symbols": ["BUY", "SELL"]
+}

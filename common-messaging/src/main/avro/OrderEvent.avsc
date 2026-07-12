@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "OrderEvent",
+  "namespace": "io.jethro.messaging",
+  "doc": "Order lifecycle transition on orders.events (ADR-0008 state machine).",
+  "fields": [
+    {"name": "meta", "type": "io.jethro.messaging.EventMeta"},
+    {"name": "orderId", "type": "string"},
+    {"name": "status", "type": {"type": "enum", "name": "OrderStatus", "namespace": "io.jethro.messaging", "symbols": ["NEW", "ROUTED", "PARTIALLY_FILLED", "FILLED", "CANCELLED", "REJECTED"]}},
+    {"name": "reason", "type": ["null", "string"], "default": null}
+  ]
+}

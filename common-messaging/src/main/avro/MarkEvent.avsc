@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "MarkEvent",
+  "namespace": "io.jethro.messaging",
+  "doc": "Conflated last-value mark (~1Hz per instrument) on md.marks (ADR-0014). Not a tick feed: raw ticks stay in-process and are archived to S3.",
+  "fields": [
+    {"name": "meta", "type": "io.jethro.messaging.EventMeta"},
+    {"name": "instrumentId", "type": "string"},
+    {"name": "price", "type": {"type": "bytes", "logicalType": "decimal", "precision": 20, "scale": 6}},
+    {"name": "source", "type": "string", "doc": "Provider adapter that produced the mark"}
+  ]
+}
