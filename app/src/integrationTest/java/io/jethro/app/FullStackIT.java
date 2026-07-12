@@ -144,6 +144,25 @@ class FullStackIT {
                 "fill price is an exact decimal");
     }
 
+    @Test
+    void anOrderBreachingTheBookExposureLimitIsRejectedByTheGuardrail() {
+        // 5000 AAPL at ~190 ≈ 950k gross, over ALPHA's 500k cap → the deterministic
+        // pre-trade guardrail rejects before any fill. Retry until the risk projection
+        // has the mark it needs to value the exposure (transient "no market data"
+        // rejections are skipped by the reason check).
+        String body = """
+                {"bookId":"ALPHA","instrumentId":"AAPL","side":"BUY","type":"MARKET","quantity":"5000"}""";
+
+        JsonNode rejected = await("guardrail rejection", Duration.ofSeconds(120), () -> {
+            JsonNode resp = postJson("/api/orders", body);
+            return resp != null
+                    && "REJECTED".equals(resp.path("status").asText())
+                    && resp.path("reason").asText("").toLowerCase().contains("exposure") ? resp : null;
+        });
+        assertTrue(rejected.get("reason").asText().toLowerCase().contains("exceed"),
+                "reason states the limit breach: " + rejected.get("reason").asText());
+    }
+
     private JsonNode postJson(String path, String body) {
         try {
             HttpHeaders headers = new HttpHeaders();

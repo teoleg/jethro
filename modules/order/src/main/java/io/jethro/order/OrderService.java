@@ -24,13 +24,15 @@ public final class OrderService {
     private final SimulatedExecutor executor;
     private final LastPriceCache prices;
     private final OrderEventPublisher publisher;
+    private final PreTradeCheck preTradeCheck;
 
-    public OrderService(OrderStore store, SimulatedExecutor executor,
-                        LastPriceCache prices, OrderEventPublisher publisher) {
+    public OrderService(OrderStore store, SimulatedExecutor executor, LastPriceCache prices,
+                        OrderEventPublisher publisher, PreTradeCheck preTradeCheck) {
         this.store = store;
         this.executor = executor;
         this.prices = prices;
         this.publisher = publisher;
+        this.preTradeCheck = preTradeCheck;
     }
 
     /** Submits an order. Idempotent on {@link NewOrder#idempotencyKey()}. */
@@ -58,6 +60,14 @@ public final class OrderService {
             return store.findByIdempotencyKey(command.idempotencyKey()).orElseThrow();
         }
         publisher.publishOrderEvent(order, null);
+
+        // Deterministic pre-trade risk gate (ADR-0018): reject before routing if the
+        // order would push the book over an exposure limit.
+        PreTradeCheck.Decision gate = preTradeCheck.check(
+                order.bookId(), order.instrumentId(), order.side().signed(order.quantity()));
+        if (!gate.approved()) {
+            return transition(order, OrderStatus.REJECTED, gate.reason());
+        }
 
         order = transition(order, OrderStatus.ROUTED, null);
 

@@ -101,6 +101,51 @@ public final class RiskProjection {
                 rollup(rows, PositionRisk::assetClass), rollup(rows, PositionRisk::bookId), rows);
     }
 
+    /** A book's gross/net exposure — for pre-trade limit checks. */
+    public record Exposure(BigDecimal gross, BigDecimal net) {
+    }
+
+    /**
+     * Projects a book's gross/net exposure if {@code signedQtyDelta} were applied to one
+     * instrument — the basis of the pre-trade guardrail (ADR-0018). Exposure only needs the
+     * resulting quantity valued at its mark, so no avgCost/fill is simulated. An instrument
+     * with no mark contributes zero (can't value it).
+     */
+    public synchronized Exposure projectedExposure(String bookId, String instrumentId, BigDecimal signedQtyDelta) {
+        BigDecimal gross = BigDecimal.ZERO;
+        BigDecimal net = BigDecimal.ZERO;
+        boolean targetSeen = false;
+        for (Map.Entry<String, Position> entry : positions.entrySet()) {
+            Position pos = entry.getValue();
+            if (!pos.bookId().value().equals(bookId)) {
+                continue;
+            }
+            String iid = pos.instrumentId().value();
+            BigDecimal qty = pos.quantity();
+            if (iid.equals(instrumentId)) {
+                qty = qty.add(signedQtyDelta);
+                targetSeen = true;
+            }
+            BigDecimal contrib = exposureOf(iid, qty);
+            net = net.add(contrib);
+            gross = gross.add(contrib.abs());
+        }
+        if (!targetSeen) {
+            BigDecimal contrib = exposureOf(instrumentId, signedQtyDelta);
+            net = net.add(contrib);
+            gross = gross.add(contrib.abs());
+        }
+        return new Exposure(p8(gross), p8(net));
+    }
+
+    private BigDecimal exposureOf(String instrumentId, BigDecimal qty) {
+        MarkPoint m = marks.get(instrumentId);
+        if (m == null) {
+            return BigDecimal.ZERO;
+        }
+        return qty.multiply(m.price()).multiply(ref(instrumentId).multiplier());
+    }
+
     private static ConsolidatedRisk.Totals totals(List<PositionRisk> rows) {
         BigDecimal realized = BigDecimal.ZERO, unrealized = BigDecimal.ZERO;
         BigDecimal gross = BigDecimal.ZERO, net = BigDecimal.ZERO;

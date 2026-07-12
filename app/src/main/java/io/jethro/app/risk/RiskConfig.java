@@ -4,6 +4,7 @@ import io.jethro.app.kafka.KafkaConfig;
 import io.jethro.app.kafka.KafkaEventPublisher;
 import io.jethro.refdata.RefDataRepository;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
+import io.jethro.trading.riskpnl.PreTradeGuardrail;
 import io.jethro.trading.riskpnl.RiskLimitEvaluator;
 import io.jethro.trading.riskpnl.RiskLimitSource;
 import io.jethro.trading.riskpnl.RiskProjection;
@@ -69,6 +70,12 @@ public class RiskConfig {
     @Bean
     RiskLimitEvaluator riskLimitEvaluator(RiskLimitProperties properties) {
         return new RiskLimitEvaluator(properties.warnRatioOrDefault());
+    }
+
+    /** Pre-trade exposure guardrail (ADR-0018), consumed by the order module via its port. */
+    @Bean
+    PreTradeGuardrail preTradeGuardrail(RiskProjection projection, RiskLimitSource limits) {
+        return new PreTradeGuardrail(projection, limits);
     }
 
     /** Risk-limit breaches feed the attention floor; needs live fills, so gated on the broker. */

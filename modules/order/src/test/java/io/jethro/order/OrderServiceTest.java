@@ -81,7 +81,7 @@ class OrderServiceTest {
     private final LastPriceCache prices = new LastPriceCache();
     private final RecordingPublisher publisher = new RecordingPublisher();
     private final OrderService service =
-            new OrderService(store, new SimulatedExecutor(), prices, publisher);
+            new OrderService(store, new SimulatedExecutor(), prices, publisher, PreTradeCheck.APPROVE_ALL);
 
     private NewOrder market(String key, Side side, String qty) {
         return new NewOrder(key, "ALPHA", "AAPL", side, OrderType.MARKET, new BigDecimal(qty), null);
@@ -121,6 +121,21 @@ class OrderServiceTest {
         assertEquals(first.orderId(), second.orderId(), "same command → same order (invariant 6)");
         assertEquals(1, store.fills.size(), "duplicate submit must not fill twice");
         assertEquals(1, store.byId.size(), "only one order persisted");
+    }
+
+    @Test
+    void orderRejectedByThePreTradeGateNeverFillsAndCarriesTheReason() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        PreTradeCheck rejectAll = (book, instrument, qty) -> PreTradeCheck.Decision.reject("gross limit");
+        var gated = new OrderService(store, new SimulatedExecutor(), prices, publisher, rejectAll);
+
+        Order result = gated.submit(market("idem-1", Side.BUY, "100"));
+
+        assertEquals(OrderStatus.REJECTED, result.status());
+        assertTrue(store.fills.isEmpty(), "a risk-rejected order must not fill");
+        assertTrue(publisher.fillEvents.isEmpty());
+        // Lifecycle stops at NEW → REJECTED (no ROUTED).
+        assertEquals(List.of(OrderStatus.NEW, OrderStatus.REJECTED), publisher.orderEvents);
     }
 
     @Test

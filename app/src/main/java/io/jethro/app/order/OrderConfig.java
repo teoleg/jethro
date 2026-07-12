@@ -10,7 +10,9 @@ import io.jethro.order.OrderEventPublisher;
 import io.jethro.order.OrderMarketDataConsumer;
 import io.jethro.order.OrderRepository;
 import io.jethro.order.OrderService;
+import io.jethro.order.PreTradeCheck;
 import io.jethro.order.SimulatedExecutor;
+import io.jethro.trading.riskpnl.PreTradeGuardrail;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -59,10 +61,17 @@ public class OrderConfig {
         };
     }
 
+    /** Binds the pre-trade gate to the risk guardrail; approves all if risk isn't wired. */
+    @Bean
+    PreTradeCheck preTradeCheck(ObjectProvider<PreTradeGuardrail> guardrail) {
+        PreTradeGuardrail g = guardrail.getIfAvailable();
+        return g != null ? new RiskPreTradeCheck(g) : PreTradeCheck.APPROVE_ALL;
+    }
+
     @Bean
     OrderService orderService(OrderRepository repository, SimulatedExecutor executor,
-                              LastPriceCache prices, OrderEventPublisher publisher) {
-        return new OrderService(repository, executor, prices, publisher);
+                              LastPriceCache prices, OrderEventPublisher publisher, PreTradeCheck preTradeCheck) {
+        return new OrderService(repository, executor, prices, publisher, preTradeCheck);
     }
 
     @Bean
