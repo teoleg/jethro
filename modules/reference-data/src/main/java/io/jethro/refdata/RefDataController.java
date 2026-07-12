@@ -13,7 +13,8 @@ public class RefDataController {
 
     /** Multiplier as string: exact decimal at the boundary (invariant 1), never a JS float. */
     public record InstrumentDto(String instrumentId, String assetClass, String currency,
-                                String contractMultiplier, Map<String, String> symbology) {
+                                String contractMultiplier, Map<String, String> symbology,
+                                Map<String, String> attributes) {
     }
 
     private final RefDataRepository repository;
@@ -24,7 +25,10 @@ public class RefDataController {
 
     @GetMapping("/api/instruments")
     public List<InstrumentDto> instruments() {
-        return repository.findAllInstruments().stream().map(RefDataController::toDto).toList();
+        Map<String, Map<String, String>> attributes = repository.findAllAttributes();
+        return repository.findAllInstruments().stream()
+                .map(i -> toDto(i, attributes.getOrDefault(i.id().value(), Map.of())))
+                .toList();
     }
 
     @GetMapping("/api/books")
@@ -32,12 +36,13 @@ public class RefDataController {
         return BookTree.assemble(repository.findAllBooks());
     }
 
-    private static InstrumentDto toDto(Instrument instrument) {
+    private static InstrumentDto toDto(Instrument instrument, Map<String, String> attributes) {
         return new InstrumentDto(
                 instrument.id().value(),
                 instrument.assetClass().name(),
                 instrument.currency(),
                 instrument.contractMultiplier().toPlainString(),
-                instrument.symbology());
+                instrument.symbology(),
+                attributes);
     }
 }

@@ -26,15 +26,23 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
         this(seed, instrumentIds, uniform(instrumentIds.size(), startPriceScaled), tickIntervalNanos);
     }
 
-    /** Per-instrument start prices, aligned to {@code instrumentIds} order. */
+    /** Per-instrument start prices, aligned to {@code instrumentIds} order; default vol. */
     public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled, long tickIntervalNanos) {
+        this(seed, instrumentIds, startPricesScaled, null, tickIntervalNanos);
+    }
+
+    /** Per-instrument start prices and per-tick max step (millionths of price); null steps = default. */
+    public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled,
+                                long[] maxStepMicros, long tickIntervalNanos) {
         if (instrumentIds.isEmpty()) {
             throw new IllegalArgumentException("at least one instrument required");
         }
         if (startPricesScaled.length != instrumentIds.size()) {
             throw new IllegalArgumentException("start prices must align with instruments");
         }
-        this.generator = new SimTickGenerator(seed, startPricesScaled);
+        this.generator = maxStepMicros == null
+                ? new SimTickGenerator(seed, startPricesScaled)
+                : new SimTickGenerator(seed, startPricesScaled, maxStepMicros);
         this.instrumentIds = instrumentIds.toArray(String[]::new);
         this.tickIntervalNanos = tickIntervalNanos;
     }

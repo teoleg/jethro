@@ -15,6 +15,10 @@ public record TradingCoreProperties(
         BigDecimal simStartPrice,
         /** Optional per-instrument start prices; instruments not listed use simStartPrice. */
         Map<String, BigDecimal> simStartPrices,
+        /** Default annualized volatility for the walk (e.g. 0.20 = 20%). */
+        Double simAnnualVol,
+        /** Optional per-instrument annualized vol overrides (statistical params, not money). */
+        Map<String, Double> simAnnualVols,
         long simTickIntervalMillis,
         String lmdbPath,
         long lmdbMaxSizeMb,
@@ -24,5 +28,14 @@ public record TradingCoreProperties(
     public BigDecimal startPriceFor(String instrumentId) {
         BigDecimal override = simStartPrices == null ? null : simStartPrices.get(instrumentId);
         return override != null ? override : simStartPrice;
+    }
+
+    /** Annualized vol for one instrument: override, else default, else 20%. */
+    public double annualVolFor(String instrumentId) {
+        Double override = simAnnualVols == null ? null : simAnnualVols.get(instrumentId);
+        if (override != null) {
+            return override;
+        }
+        return simAnnualVol != null ? simAnnualVol : 0.20;
     }
 }

@@ -31,10 +31,21 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         long[] startPricesScaled = properties.simInstruments().stream()
                 .mapToLong(id -> Decimals.toScaledLong(properties.startPriceFor(id), Decimals.PRICE_SCALE))
                 .toArray();
+        // Per-tick step calibrated from annualized vol: maxStep(1e-6 of price) =
+        // σ_annual · √(Δt / trading-year) · √3 (uniform→σ match). Worked example: 25% vol,
+        // 100ms tick, year = 252d·6.5h ≈ 5.9e6s → 0.25·√(0.1/5.9e6)·1.732·1e6 ≈ 56 →
+        // a typical 5-minute move of ~0.18%, instead of the old multi-percent jumps.
+        double tickSeconds = properties.simTickIntervalMillis() / 1_000.0;
+        double tradingYearSeconds = 252 * 6.5 * 3_600;
+        long[] maxStepMicros = properties.simInstruments().stream()
+                .mapToLong(id -> Math.max(1, Math.round(properties.annualVolFor(id)
+                        * Math.sqrt(tickSeconds / tradingYearSeconds) * Math.sqrt(3.0) * 1_000_000)))
+                .toArray();
         var adapter = new SimMarketDataAdapter(
                 properties.simSeed(),
                 properties.simInstruments(),
                 startPricesScaled,
+                maxStepMicros,
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
         var store = LmdbStateStore.open(
                 Path.of(properties.lmdbPath()),

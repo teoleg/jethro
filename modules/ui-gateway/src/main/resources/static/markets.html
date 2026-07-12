@@ -82,7 +82,7 @@
   const fmtAge = ms => ms < 2000 ? "live" : Math.round(ms / 1000) + "s";
   const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
   const cls = s => { const n = Number(s); return n>0?"up":(n<0?"down":"flat"); };
-  const LABEL = { EQUITY:"Equities", FUTURE:"Futures", FX:"FX", BOND:"Rates", OPTION:"Options", UNKNOWN:"Other" };
+  const LABEL = { EQUITY:"Equities", FUTURE:"Futures", FX:"FX", BOND:"Rates", SWAP:"Swaps", OPTION:"Options", UNKNOWN:"Other" };
   const label = c => LABEL[c] || c;
 
   let filter = "ALL";

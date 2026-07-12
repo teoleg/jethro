@@ -117,7 +117,7 @@
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const t = ms => new Date(ms).toLocaleTimeString();
-  const QTY_LABEL = { EQUITY:"Shares", FUTURE:"Contracts", FX:"Notional", BOND:"Contracts", OPTION:"Contracts" };
+  const QTY_LABEL = { EQUITY:"Shares", FUTURE:"Contracts", FX:"Notional", BOND:"Contracts", SWAP:"Notional", OPTION:"Contracts" };
   let instrClass = {}, cusipOf = {};
   const primaryId = sym => (sym && (sym.CUSIP || sym.ISIN || sym.GLOBEX || sym.ISO)) || null;
 
@@ -155,7 +155,8 @@
     try {
       const instruments = await (await fetch("/api/instruments")).json();
       instruments.forEach(i => { instrClass[i.instrumentId] = i.assetClass; cusipOf[i.instrumentId] = primaryId(i.symbology); });
-      document.getElementById("instrument").innerHTML = instruments.map(i =>
+      // Swaps are definitions only (no marks, no pricing yet) — not orderable.
+      document.getElementById("instrument").innerHTML = instruments.filter(i => i.assetClass !== "SWAP").map(i =>
         `<option value="${esc(i.instrumentId)}">${esc(i.instrumentId)} — ${esc(i.assetClass)}</option>`).join("");
       const books = flatten(await (await fetch("/api/books")).json(), []);
       document.getElementById("book").innerHTML = books.map(b =>

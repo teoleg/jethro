@@ -116,7 +116,7 @@ class FullStackIT {
         assertEquals(3, books.get(0).get("children").size(), "ALPHA, BETA and MACRO under FIRM");
 
         JsonNode instruments = getJson("/api/instruments");
-        assertEquals(9, instruments.size(), "seeded multi-asset sim instruments");
+        assertEquals(14, instruments.size(), "seeded multi-asset instruments incl. rates + swap definitions");
         assertEquals("AAPL", instruments.get(0).get("instrumentId").asText(), "sorted by id");
         assertEquals("1.00000000", instruments.get(0).get("contractMultiplier").asText(),
                 "multiplier arrives as exact decimal string");

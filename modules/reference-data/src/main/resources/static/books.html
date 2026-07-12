@@ -141,10 +141,14 @@
       (n.children && n.children.length ? renderTree(n.children) : "") + "</li>").join("") + "</ul>";
     fetch("/api/books").then(r => r.json()).then(tree => { document.getElementById("tree").innerHTML = tree.length ? renderTree(tree) : "no books"; });
     const ids = sym => Object.entries(sym||{}).filter(([s]) => s!=="sim").map(([s,v]) => `<span class="id"><b>${esc(s)}</b>${esc(v)}</span>`).join("") || '<span class="dim">—</span>';
+    // OTC product terms (tenor, index, day counts) from instrument_attributes.
+    const terms = at => Object.entries(at||{}).filter(([k]) => k!=="product")
+      .map(([k,v]) => `<span class="id"><b>${esc(k.replace(/_/g," "))}</b>${esc(v)}</span>`).join("");
     document.getElementById("instruments").innerHTML =
-      "<table><tr><th>id</th><th>class</th><th>ccy</th><th>identifiers</th></tr>" +
+      "<table><tr><th>id</th><th>class</th><th>ccy</th><th>identifiers</th><th>terms</th></tr>" +
       instruments.map(i => `<tr><td><b>${esc(i.instrumentId)}</b></td><td class="dim">${esc(i.assetClass)}</td>
-        <td class="dim">${esc(i.currency)}</td><td><div class="ids">${ids(i.symbology)}</div></td></tr>`).join("") + "</table>";
+        <td class="dim">${esc(i.currency)}</td><td><div class="ids">${ids(i.symbology)}</div></td>
+        <td><div class="ids">${terms(i.attributes) || '<span class="dim">—</span>'}</div></td></tr>`).join("") + "</table>";
   }
 
   function renderFeed(items) {
