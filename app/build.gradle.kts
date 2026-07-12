@@ -23,6 +23,23 @@ dependencies {
     testImplementation(libs.archunit.junit5)
 }
 
+// Full-stack integration tests (real broker + real model) — separate source set,
+// excluded from `gradle build`; CI runs `:app:integrationTest` against live services.
+val integrationTest: SourceSet = sourceSets.create("integrationTest") {
+    compileClasspath += sourceSets.main.get().output
+    runtimeClasspath += sourceSets.main.get().output
+}
+configurations["integrationTestImplementation"].extendsFrom(configurations["testImplementation"])
+configurations["integrationTestRuntimeOnly"].extendsFrom(configurations["testRuntimeOnly"])
+
+tasks.register<Test>("integrationTest") {
+    description = "Full-stack tests against live Redpanda/Postgres/Ollama (docker compose up first)"
+    group = "verification"
+    testClassesDirs = integrationTest.output.classesDirs
+    classpath = integrationTest.runtimeClasspath
+    shouldRunAfter(tasks.test)
+}
+
 // lmdbjava (JNR) needs reflective access to NIO internals on JDK 17+
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
     jvmArgs(

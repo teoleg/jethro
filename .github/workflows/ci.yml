@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build:
+    name: Build + unit/module tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build and test
+        run: ./gradlew build
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: "**/build/reports/tests/**"
+
+  integration:
+    name: Full-stack integration (real broker + real model)
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 30
+    env:
+      JETHRO_IT_MODEL: qwen2.5:0.5b # small = fast CI; same code path as any model
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Start infra (Redpanda, Postgres, Ollama)
+        run: docker compose up -d redpanda postgres ollama
+
+      - name: Wait for Redpanda
+        run: |
+          timeout 120 bash -c \
+            'until docker compose exec -T redpanda rpk cluster health --exit-when-healthy >/dev/null 2>&1; do sleep 3; done'
+
+      - name: Pull the real model (no stubs)
+        run: docker compose exec -T ollama ollama pull "$JETHRO_IT_MODEL"
+
+      - name: Warm up the model
+        run: |
+          docker compose exec -T ollama ollama run "$JETHRO_IT_MODEL" "Reply with the single word ready" || true
+
+      - name: Full-stack integration tests
+        run: ./gradlew :app:integrationTest
+
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose logs --tail 300
+
+      - name: Upload IT reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-reports
+          path: app/build/reports/tests/integrationTest/**

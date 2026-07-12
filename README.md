@@ -23,6 +23,17 @@ each holding positions in various instruments.
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records (start at the [index](docs/adr/README.md))
 - [`CLAUDE.md`](CLAUDE.md) — working conventions for AI-assisted development
 
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs two jobs on every push:
+
+1. **build** — compile + all unit/module tests (`./gradlew build`).
+2. **integration** — the no-stubs job: starts Redpanda + Postgres + Ollama via the
+   repo's own compose file, pulls a real model, then runs `./gradlew :app:integrationTest`
+   (`FullStackIT`): marks must arrive through the real broker, and an `AiDecision` with
+   real generation latency and token counts must land on `ai.decisions` and surface as
+   an attention card. Locally: `docker compose up -d && ./gradlew :app:integrationTest`.
+
 ## Building & running
 
 Requires Java 21 (Gradle toolchain) and Docker.
