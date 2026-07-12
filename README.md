@@ -38,7 +38,8 @@ docker compose --profile app up --build
 
 ## Status
 
-Build-out step 1 complete: Gradle monorepo, `common-domain` (decimal money types,
-average-cost position math with exact-value tests), `common-messaging` (Avro event
-contracts), `app` shell with ArchUnit-enforced module boundaries, local compose
-topology. Next: step 2 — trading-core ring buffer + sim feed adapter.
+Build-out step 2 complete: ticks flow end to end inside `trading-core` — seedable sim
+feed adapter (provider SPI) → SPSC ring buffer (allocation-free slots, counted drops)
+→ last-value mark cache → LMDB warm-restart/dedupe store — wired into the app with
+lifecycle management and a smoke test. Next: step 3 — `ui-gateway` + Market Monitor
+fed by `md.marks`.

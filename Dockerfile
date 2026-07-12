@@ -7,4 +7,4 @@ RUN gradle :app:bootJar --no-daemon
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /src/app/build/libs/*.jar app.jar
-ENTRYPOINT ["java", "-XX:+UseZGC", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-XX:+UseZGC", "--add-opens", "java.base/java.nio=ALL-UNNAMED", "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED", "-jar", "app.jar"]
