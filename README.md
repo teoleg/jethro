@@ -49,7 +49,10 @@ docker compose --profile app up --build
 
 ## Status
 
-Build-out step 4 complete: first screen — the **attention feed** (ADR-0017) at
+Build-out step 5 complete: reference data — Postgres schema via Flyway (books tree,
+instruments, symbology), seeded to match the sim feed; `/api/books` + `/api/instruments`
+(exact decimals as strings); Book Structure drill-down at `/books.html`. CI's FullStackIT
+now also proves migration + seeded queries against real Postgres. Previously (step 4): first screen — the **attention feed** (ADR-0017) at
 `http://localhost:8080`. Broker wiring is live: conflated marks publish to `md.marks`
 at 1Hz and every AI decision goes to `ai.decisions` (invariant 7's audit trail on the
 log); `ui-gateway` consumes both topics and pushes to the browser over SSE.

@@ -103,6 +103,21 @@ class FullStackIT {
         assertEquals(64, decision.getContextHash().length());
     }
 
+    @Test
+    void referenceDataMigratesAndServesSeededBooksAndInstruments() {
+        JsonNode books = await("book tree", Duration.ofSeconds(30), () -> {
+            JsonNode body = getJson("/api/books");
+            return body != null && body.size() == 1 ? body : null;
+        });
+        assertEquals("FIRM", books.get(0).get("bookId").asText());
+        assertEquals(2, books.get(0).get("children").size(), "ALPHA and BETA under FIRM");
+
+        JsonNode instruments = getJson("/api/instruments");
+        assertEquals(4, instruments.size(), "seeded sim instruments");
+        assertEquals("1.00000000", instruments.get(0).get("contractMultiplier").asText(),
+                "multiplier arrives as exact decimal string");
+    }
+
     private AiDecision pollLatestDecision() {
         Properties props = new Properties();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,

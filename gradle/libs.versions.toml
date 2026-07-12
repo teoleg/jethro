@@ -8,6 +8,8 @@ archunit = "1.3.0"
 lmdbjava = "0.9.0"
 jackson = "2.17.2"
 kafka = "3.8.0"
+postgresql = "42.7.4"
+flyway = "10.20.1"
 
 [libraries]
 avro = { module = "org.apache.avro:avro", version.ref = "avro" }
@@ -20,6 +22,10 @@ archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref
 spring-boot-starter = { module = "org.springframework.boot:spring-boot-starter", version.ref = "springBoot" }
 spring-boot-starter-web = { module = "org.springframework.boot:spring-boot-starter-web", version.ref = "springBoot" }
 kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
+postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
+flyway-core = { module = "org.flywaydb:flyway-core", version.ref = "flyway" }
+flyway-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flyway" }
+spring-boot-starter-jdbc = { module = "org.springframework.boot:spring-boot-starter-jdbc", version.ref = "springBoot" }
 spring-boot-starter-test = { module = "org.springframework.boot:spring-boot-starter-test", version.ref = "springBoot" }
 
 [plugins]

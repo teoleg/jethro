@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * market state goes to the model, commentary comes back, and an AiDecision audit
  * event is recorded. Ollama is stubbed; the real model is a compose container.
  */
-@SpringBootTest(properties = {"jethro.ai.interval-seconds=1", "jethro.kafka.enabled=false"})
+@SpringBootTest(properties = {"jethro.ai.interval-seconds=1", "jethro.kafka.enabled=false", "jethro.refdata.enabled=false"})
 class AiCommentarySmokeTest {
 
     @TempDir

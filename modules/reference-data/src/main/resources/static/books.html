@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — books</title>
+<style>
+  :root { --bg:#0e1116; --card:#161b23; --line:#232a35; --txt:#d7dde6; --dim:#8a94a3; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.5 system-ui, sans-serif; }
+  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; }
+  header h1 { font-size:16px; letter-spacing:.08em; }
+  header a { color:var(--dim); font-size:12px; text-decoration:none; }
+  main { max-width:860px; margin:0 auto; padding:20px; display:grid; gap:20px; grid-template-columns: 1fr 1fr; }
+  h2 { font-size:13px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; margin-bottom:10px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:14px 16px; }
+  ul.tree, ul.tree ul { list-style:none; padding-left:18px; }
+  ul.tree > li { padding-left:0; }
+  ul.tree li { padding:3px 0; }
+  .ccy { color:var(--dim); font-size:11px; margin-left:6px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:normal; font-size:11px; text-transform:uppercase; }
+  .dim { color:var(--dim); }
+</style>
+</head>
+<body>
+<header>
+  <h1>JETHRO</h1>
+  <a href="/">← attention feed</a>
+  <span style="color:var(--dim);font-size:12px">book structure — drill-down evidence view (ADR-0017)</span>
+</header>
+<main>
+  <section class="panel">
+    <h2>Books</h2>
+    <div id="books" class="dim">loading…</div>
+  </section>
+  <section class="panel">
+    <h2>Instruments</h2>
+    <div id="instruments" class="dim">loading…</div>
+  </section>
+</main>
+<script>
+  const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+
+  const renderTree = nodes => "<ul class='tree'>" + nodes.map(n =>
+    `<li>▸ <b>${esc(n.name)}</b> <span class='dim'>(${esc(n.bookId)})</span><span class='ccy'>${esc(n.baseCurrency)}</span>` +
+    (n.children.length ? renderTree(n.children) : "") + "</li>").join("") + "</ul>";
+
+  async function load() {
+    try {
+      const books = await (await fetch("/api/books")).json();
+      document.getElementById("books").innerHTML = books.length ? renderTree(books) : "no books";
+      const instruments = await (await fetch("/api/instruments")).json();
+      document.getElementById("instruments").innerHTML =
+        "<table><tr><th>id</th><th>class</th><th>ccy</th><th>mult</th></tr>" +
+        instruments.map(i => `<tr><td><b>${esc(i.instrumentId)}</b></td><td>${esc(i.assetClass)}</td>
+          <td>${esc(i.currency)}</td><td>${esc(i.contractMultiplier)}</td></tr>`).join("") + "</table>";
+    } catch (e) {
+      document.getElementById("books").textContent = "reference data unavailable: " + e;
+    }
+  }
+  load();
+</script>
+</body>
+</html>
