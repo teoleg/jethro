@@ -28,10 +28,13 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     @Override
     public void start() {
+        long[] startPricesScaled = properties.simInstruments().stream()
+                .mapToLong(id -> Decimals.toScaledLong(properties.startPriceFor(id), Decimals.PRICE_SCALE))
+                .toArray();
         var adapter = new SimMarketDataAdapter(
                 properties.simSeed(),
                 properties.simInstruments(),
-                Decimals.toScaledLong(properties.simStartPrice(), Decimals.PRICE_SCALE),
+                startPricesScaled,
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
         var store = LmdbStateStore.open(
                 Path.of(properties.lmdbPath()),

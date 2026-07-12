@@ -21,13 +21,28 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
 
+    /** Convenience: every instrument starts at the same price. */
     public SimMarketDataAdapter(long seed, List<String> instrumentIds, long startPriceScaled, long tickIntervalNanos) {
+        this(seed, instrumentIds, uniform(instrumentIds.size(), startPriceScaled), tickIntervalNanos);
+    }
+
+    /** Per-instrument start prices, aligned to {@code instrumentIds} order. */
+    public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled, long tickIntervalNanos) {
         if (instrumentIds.isEmpty()) {
             throw new IllegalArgumentException("at least one instrument required");
         }
-        this.generator = new SimTickGenerator(seed, instrumentIds.size(), startPriceScaled);
+        if (startPricesScaled.length != instrumentIds.size()) {
+            throw new IllegalArgumentException("start prices must align with instruments");
+        }
+        this.generator = new SimTickGenerator(seed, startPricesScaled);
         this.instrumentIds = instrumentIds.toArray(String[]::new);
         this.tickIntervalNanos = tickIntervalNanos;
+    }
+
+    private static long[] uniform(int count, long startPriceScaled) {
+        long[] prices = new long[count];
+        java.util.Arrays.fill(prices, startPriceScaled);
+        return prices;
     }
 
     @Override
