@@ -109,14 +109,28 @@ a browser), then `gh repo clone teoleg/jethro && cd jethro && git checkout claud
 
 ## 6. Build
 
+**You don't strictly need this step to run the app** — `:app:bootRun` (step 9) compiles
+without running the test suite, and CI already validates every test on each push. On a
+RAM-tight Pi, the full test run (several `@SpringBootTest` contexts) can exhaust memory
+and start swapping, which looks like a hang. Options, easiest first:
+
 ```bash
-./gradlew build               # first run downloads Gradle 8.14.3 + deps; slower on a Pi
+# A) Skip the tests, just produce the runnable app (fastest, no memory pressure):
+./gradlew build -x test
+#    ...or go straight to running it (step 8/9) without building at all.
+
+# B) Run the build WITH tests, but capped so it can't thrash. Create gradle.properties:
+cat >> gradle.properties <<'EOF'
+org.gradle.jvmargs=-Xmx768m
+org.gradle.workers.max=1
+org.gradle.parallel=false
+EOF
+./gradlew build --console=plain      # --console=plain shows which test is running
 ```
 
-Expect a few minutes on first build (JIT + downloads). `BUILD SUCCESSFUL` with the unit
-and module tests green means the ARM64 toolchain, LMDB native, and Avro codegen all work.
-If the Pi is RAM-tight during the build, cap the Gradle daemon:
-`echo "org.gradle.jvmargs=-Xmx1g" >> gradle.properties`.
+Expect several minutes on a Pi (first run also downloads Gradle + deps). If a build
+"hangs", it's almost always swap-thrashing, not a deadlock — check `free -h` in another
+shell (Swap full = thrashing). Use option A and let CI be your test gate.
 
 ## 7. Pi-tuned configuration
 
