@@ -173,7 +173,7 @@
     try {
       const res = await fetch("/api/orders", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
       const o = await res.json();
-      if (res.ok) { msg.className="ok"; msg.textContent = `${o.side} ${o.quantity} ${o.instrumentId} → ${o.status}`; setTimeout(closeModal, 900); }
+      if (res.ok) { msg.className="ok"; msg.textContent = `${o.side} ${o.quantity} ${o.instrumentId} · ${o.bookId} → ${o.status}`; setTimeout(closeModal, 900); }
       else { msg.className="err"; msg.textContent = "rejected: " + (o.error || JSON.stringify(o)); }
     } catch (err) { msg.className="err"; msg.textContent = "error: " + err; }
     refresh();

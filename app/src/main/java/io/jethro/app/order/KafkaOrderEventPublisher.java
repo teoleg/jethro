@@ -31,6 +31,8 @@ public final class KafkaOrderEventPublisher implements OrderEventPublisher {
         var event = OrderEvent.newBuilder()
                 .setMeta(meta(UUID.randomUUID().toString()))
                 .setOrderId(order.orderId())
+                .setBookId(order.bookId().value())
+                .setInstrumentId(order.instrumentId().value())
                 .setStatus(io.jethro.messaging.OrderStatus.valueOf(order.status().name()))
                 .setReason(reason)
                 .build();

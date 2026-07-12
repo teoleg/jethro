@@ -6,6 +6,8 @@
   "fields": [
     {"name": "meta", "type": "io.jethro.messaging.EventMeta"},
     {"name": "orderId", "type": "string"},
+    {"name": "bookId", "type": "string", "default": "", "doc": "Owning book/desk (added: order lifecycle must be attributable to a book)"},
+    {"name": "instrumentId", "type": "string", "default": "", "doc": "Instrument the order is for"},
     {"name": "status", "type": {"type": "enum", "name": "OrderStatus", "namespace": "io.jethro.messaging", "symbols": ["NEW", "ROUTED", "PARTIALLY_FILLED", "FILLED", "CANCELLED", "REJECTED"]}},
     {"name": "reason", "type": ["null", "string"], "default": null}
   ]
