@@ -53,7 +53,8 @@ jobs:
         run: docker compose exec -T ollama ollama pull "$JETHRO_IT_MODEL"
 
       - name: Warm up the model
-        run: docker compose exec -T ollama ollama run "$JETHRO_IT_MODEL" "Reply with exactly: ready" || true
+        run: |
+          docker compose exec -T ollama ollama run "$JETHRO_IT_MODEL" "Reply with the single word ready" || true
 
       - name: Full-stack integration tests
         run: ./gradlew :app:integrationTest
