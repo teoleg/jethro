@@ -28,9 +28,14 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
   (Redpanda's built-in schema registry). Delivery is at-least-once — see invariant 6.
 - Storage: PostgreSQL (Flyway migrations) — compose Postgres in dev, Aurora as the
   production shape; S3 Parquet for tick archive.
-- AI: model-inference SPI in the algo engine; external frontier API via AWS first,
-  embedded self-hosted behind measured cost/latency triggers (ADR-0010).
-- UI: TypeScript + React + Vite under `ui/`, AG Grid for blotters, WebSocket streaming.
+- AI: model-inference SPI in the algo engine. Two tiers: local SLM via Ollama for
+  narration/triage/scenario-proposal (ADR-0016 — a model output is NEVER parsed for a
+  number feeding positions/PnL/risk); external frontier API via AWS for trading
+  decisions, embedded self-hosted behind measured cost/latency triggers (ADR-0010).
+- UI: TypeScript + React + Vite under `ui/`, WebSocket streaming. Attention-first
+  (ADR-0017): landing page is an agent-curated attention feed with a deterministic
+  floor (models may never suppress a triggered alert); grids (AG Grid) are drill-down
+  evidence views with a "show everything" mode.
 - Deployment: single-JVM modular monolith (`app/`) for now — modules isolated by Gradle
   constraints + ArchUnit, cross-domain flow via Redpanda topics even in-process; the
   `order` module MUST be extracted to its own JVM before any real-money broker

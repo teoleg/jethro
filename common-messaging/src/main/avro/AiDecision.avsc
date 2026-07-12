@@ -1,0 +1,18 @@
+{
+  "type": "record",
+  "name": "AiDecision",
+  "namespace": "io.jethro.messaging",
+  "doc": "Every AI decision is an event (invariant 7, ADR-0010/0014). Embeds the market context it decided on so replay/backtests consume recorded decisions; token counts feed finops (ADR-0011). Snapshot/actions are JSON payloads in v0 — evolve to typed records once the shapes settle.",
+  "fields": [
+    {"name": "meta", "type": "io.jethro.messaging.EventMeta"},
+    {"name": "decisionId", "type": "string"},
+    {"name": "modelId", "type": "string"},
+    {"name": "modelVersion", "type": "string", "default": ""},
+    {"name": "contextHash", "type": "string", "doc": "Hash of contextSnapshotJson for cheap comparison"},
+    {"name": "contextSnapshotJson", "type": "string", "doc": "Market context the model saw"},
+    {"name": "proposedActionsJson", "type": "string", "doc": "Actions proposed; deterministic guardrails dispose"},
+    {"name": "latencyMillis", "type": "long"},
+    {"name": "inputTokens", "type": "long"},
+    {"name": "outputTokens", "type": "long"}
+  ]
+}

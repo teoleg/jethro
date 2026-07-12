@@ -23,6 +23,32 @@ each holding positions in various instruments.
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records (start at the [index](docs/adr/README.md))
 - [`CLAUDE.md`](CLAUDE.md) — working conventions for AI-assisted development
 
+## Building & running
+
+Requires Java 21 (Gradle toolchain) and Docker.
+
+```bash
+./gradlew build            # compile everything + domain/serde/ArchUnit tests
+docker compose up -d       # local infra: Redpanda (Kafka API + schema registry) + Postgres
+./gradlew :app:bootRun     # the single-JVM app (ADR-0015)
+
+# or run the app as a container too:
+docker compose --profile app up --build
+```
+
 ## Status
 
-Design phase. Decisions are being captured as ADRs before implementation starts.
+Build-out step 3 complete: AI is in the loop — model-inference SPI (ADR-0010) with an
+Ollama adapter (local SLM, ADR-0016) and the first agentic element, a risk commentator
+that narrates computed market state on a cadence and records every run as an
+`AiDecision` audit event (model, latency, tokens, context snapshot + hash). Ollama runs
+in compose; the model narrates, deterministic code computes every number. Next: step 4
+— `ui-gateway` + the attention feed (ADR-0017), AiDecision events onto the broker.
+
+To see AI commentary locally:
+
+```bash
+docker compose up -d ollama
+docker exec jethro-ollama-1 ollama pull qwen2.5:3b   # once, ~2GB
+./gradlew :app:bootRun                                # commentary logged every 60s
+```

@@ -1,0 +1,11 @@
+{
+  "type": "record",
+  "name": "EventMeta",
+  "namespace": "io.jethro.messaging",
+  "doc": "Common event envelope. eventId is the dedupe key under at-least-once delivery (invariant 6/8); dual timestamps make staleness measurable (invariant 4).",
+  "fields": [
+    {"name": "eventId", "type": "string", "doc": "Stable unique id; consumers dedupe on it"},
+    {"name": "providerTimestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "When the source produced the underlying data"},
+    {"name": "ingestTimestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "When jethro ingested/created the event"}
+  ]
+}

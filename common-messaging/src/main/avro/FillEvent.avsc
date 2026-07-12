@@ -1,0 +1,16 @@
+{
+  "type": "record",
+  "name": "FillEvent",
+  "namespace": "io.jethro.messaging",
+  "doc": "Execution on fills — the source of truth for positions (invariant 3). fillId (in meta.eventId as well) is the dedupe key.",
+  "fields": [
+    {"name": "meta", "type": "io.jethro.messaging.EventMeta"},
+    {"name": "fillId", "type": "string"},
+    {"name": "orderId", "type": "string"},
+    {"name": "bookId", "type": "string"},
+    {"name": "instrumentId", "type": "string"},
+    {"name": "side", "type": "io.jethro.messaging.Side"},
+    {"name": "quantity", "type": {"type": "bytes", "logicalType": "decimal", "precision": 20, "scale": 6}},
+    {"name": "price", "type": {"type": "bytes", "logicalType": "decimal", "precision": 20, "scale": 6}}
+  ]
+}

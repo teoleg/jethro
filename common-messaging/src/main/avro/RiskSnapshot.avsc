@@ -1,0 +1,16 @@
+{
+  "type": "record",
+  "name": "RiskSnapshot",
+  "namespace": "io.jethro.messaging",
+  "doc": "Per-book risk/PnL snapshot on risk.snapshots (~1Hz conflated, ADR-0014). Figures are in the book's base currency; maxMarkAgeMillis exposes staleness (invariant 4).",
+  "fields": [
+    {"name": "meta", "type": "io.jethro.messaging.EventMeta"},
+    {"name": "bookId", "type": "string"},
+    {"name": "currency", "type": "string"},
+    {"name": "realizedPnl", "type": {"type": "bytes", "logicalType": "decimal", "precision": 24, "scale": 8}},
+    {"name": "unrealizedPnl", "type": {"type": "bytes", "logicalType": "decimal", "precision": 24, "scale": 8}},
+    {"name": "grossExposure", "type": {"type": "bytes", "logicalType": "decimal", "precision": 24, "scale": 8}},
+    {"name": "netExposure", "type": {"type": "bytes", "logicalType": "decimal", "precision": 24, "scale": 8}},
+    {"name": "maxMarkAgeMillis", "type": "long", "doc": "Age of the stalest mark used in this snapshot"}
+  ]
+}

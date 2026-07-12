@@ -80,17 +80,21 @@ flowchart LR
 Module isolation is build-enforced (Gradle constraints + ArchUnit): modules depend only
 on `common-domain`, `common-messaging`, and published interfaces — never internals.
 
-## UI views
+## UI views (attention-first — ADR-0017)
 
-Landing page of tiles (`/`), each tile opening a view:
+Landing page (`/`) is the **attention feed**: ranked cards from deterministic triggers
+(always surface) annotated/grouped by agents (never suppress). Every card links to its
+evidence. Detail views are drill-down behind the feed, each with a "show everything"
+mode:
 
-| Tile / route | View | Primary data |
+| Route | Drill-down view | Primary data |
 |---|---|---|
-| Market Monitor `/market` | live quotes/trades, movers, mini-charts | `md.marks` (1Hz conflated) |
-| Order View `/orders` | order blotter with lifecycle states, fills | `orders.events`, `fills` |
-| Book Structure `/books` | book tree → positions → instrument details | reference data + positions |
-| Risk & PnL `/risk/:bookId` | per-book PnL (realized/unrealized), exposures, shocks | `risk.snapshots` |
-| Costs `/costs` | month-to-date spend by service vs budget, burn rate, live LLM token spend, running-resources panel | `cost.snapshots` (infra ~24h lag; LLM spend live) |
+| `/` | attention feed: alerts, anomalies, AI commentary, "all quiet" digests | `ui.attention`, `ai.decisions` |
+| `/market` | live marks, movers, mini-charts | `md.marks` (1Hz conflated) |
+| `/orders` | order blotter with lifecycle states, fills | `orders.events`, `fills` |
+| `/books` | book tree → positions → instrument details | reference data + positions |
+| `/risk/:bookId` | per-book PnL (realized/unrealized), exposures, shocks | `risk.snapshots` |
+| `/costs` | spend by service vs budget, burn rate, live LLM token spend, running resources | `cost.snapshots` (infra ~24h lag; LLM spend live) |
 
 ## Data flow invariants
 
@@ -146,12 +150,15 @@ jethro/
    rules (ADR-0015)
 2. `trading-core` skeleton in the app: ring buffer + sim adapter behind the feed SPI →
    ticks flowing in-process; LMDB dedupe/warm-cache wiring
-3. `ui-gateway` module + UI skeleton (landing tiles + Market Monitor) fed by `md.marks`
-4. `reference-data` module (instruments, books) + Book Structure view
-5. `order` module (simulated fills) + Order View
-6. `risk-pnl` module + `risk.snapshots` + Risk & PnL view
-7. `algo-engine` module with one toy strategy behind the model-inference SPI; tick
-   archiver + replay adapter (backtest loop closes here)
-8. `infra/` CDK + first AWS deploy: single dev node running the compose stack, tagging,
+3. model-inference SPI (`algo-engine`) + Ollama adapter (local SLM) + risk commentator
+   agent emitting `AiDecision` events (ADR-0016) — AI in the loop before pixels
+4. `ui-gateway` module + UI skeleton (landing tiles + Market Monitor with AI
+   commentary panel) fed by `md.marks`; AiDecision events move onto the broker here
+5. `reference-data` module (instruments, books) + Book Structure view
+6. `order` module (simulated fills) + Order View
+7. `risk-pnl` module + `risk.snapshots` + Risk & PnL view; scenario-proposer agent
+8. `algo-engine` toy strategy + frontier-API adapter (ADR-0010); tick archiver +
+   replay adapter (backtest loop closes here)
+9. `infra/` CDK + first AWS deploy: single dev node running the compose stack, tagging,
    AWS Budgets backstop, stop-when-idle schedule (ADR-0013)
-9. `finops-service` + Costs view (LLM token pricing can land earlier, with step 7)
+10. `finops` module + Costs view (LLM token pricing can land earlier, with step 8)
