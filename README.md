@@ -27,7 +27,8 @@ each holding positions in various instruments.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs two jobs on every push:
 
-1. **build** — compile + all unit/module tests (`./gradlew build`).
+1. **build** — compile + all unit/module tests (`./gradlew build -Pci`; a plain
+   `./gradlew build` skips tests so constrained hardware can still produce a jar).
 2. **integration** — the no-stubs job: starts Redpanda + Postgres + Ollama via the
    repo's own compose file, pulls a real model, then runs `./gradlew :app:integrationTest`
    (`FullStackIT`): marks must arrive through the real broker, and an `AiDecision` with
@@ -39,7 +40,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs two jobs on every push:
 Requires Java 21 (Gradle toolchain) and Docker.
 
 ```bash
-./gradlew build            # compile everything + domain/serde/ArchUnit tests
+./gradlew build            # compile + package (tests skipped; add -Pci to run them, as CI does)
+#   ./scripts/run-local.sh   # build + start Docker infra + run the app in one command
 docker compose up -d       # local infra: Redpanda (Kafka API + schema registry) + Postgres
 ./gradlew :app:bootRun     # the single-JVM app (ADR-0015)
 
@@ -49,12 +51,13 @@ docker compose --profile app up --build
 
 ## Status
 
-Build-out step 4 complete: first screen — the **attention feed** (ADR-0017) at
-`http://localhost:8080`. Broker wiring is live: conflated marks publish to `md.marks`
-at 1Hz and every AI decision goes to `ai.decisions` (invariant 7's audit trail on the
-log); `ui-gateway` consumes both topics and pushes to the browser over SSE.
-Deterministic triggers (stale-mark rule v0) always surface; agent commentary cards
-annotate. Next: step 5 — reference data + Book Structure.
+Build-out step 5 complete: reference data — Postgres schema via Flyway (books tree,
+instruments, symbology), seeded to match the sim feed; `/api/books` + `/api/instruments`
+(exact decimals as strings); Book Structure drill-down at `/books.html`. CI's FullStackIT
+now also proves migration + seeded queries against real Postgres. The attention feed
+(step 4, ADR-0017) is the landing page at `http://localhost:8080`: conflated marks on
+`md.marks`, AI decisions on `ai.decisions`, SSE to the browser, deterministic triggers
+always surfacing. Next: step 6 — order module (simulated fills) + Order View.
 
 Full local run:
 

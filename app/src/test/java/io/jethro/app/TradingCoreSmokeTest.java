@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Step-2 definition of done: ticks flow through the assembled app. */
-@SpringBootTest(properties = {"jethro.trading.sim-tick-interval-millis=1", "jethro.ai.enabled=false", "jethro.kafka.enabled=false"})
+@SpringBootTest(properties = {"jethro.trading.sim-tick-interval-millis=1", "jethro.ai.enabled=false", "jethro.kafka.enabled=false", "jethro.refdata.enabled=false"})
 class TradingCoreSmokeTest {
 
     @TempDir
