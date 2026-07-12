@@ -49,8 +49,12 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final StrategyProperties props;
     private final OrderService orderService; // nullable: null → suggestions only
 
+    private static final long HEARTBEAT_CYCLES = 24; // ~2 min at a 5s cadence
+
     private final Set<String> active = new HashSet<>();
     private final Map<String, Long> lastAutoExec = new ConcurrentHashMap<>();
+    private long cycles;
+    private boolean throttledActive;
     private volatile ScheduledExecutorService scheduler;
 
     public StrategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
@@ -98,23 +102,39 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 return;
             }
             List<MomentumStrategy.Observation> observations = new ArrayList<>();
+            int stale = 0;
             for (var mark : runtime.markCache().snapshot()) {
                 observations.add(new MomentumStrategy.Observation(mark.instrumentId(), mark.price(), mark.stale()));
+                if (mark.stale()) {
+                    stale++;
+                }
             }
+            int fresh = observations.size() - stale;
+
             long now = System.currentTimeMillis();
             Set<String> current = new HashSet<>();
+            int signals = 0;
+            int suppressed = 0;
+            int executed = 0;
+            String sampleReason = null;
             for (TradeSignal signal : strategy.evaluate(observations)) {
+                signals++;
                 BigDecimal quantity = size(signal);
                 BigDecimal signed = signal.side().signed(quantity);
                 Optional<String> rejection =
                         guardrail.rejectionReason(props.book(), signal.instrumentId(), signed);
                 if (rejection.isPresent()) {
+                    suppressed++;
+                    sampleReason = rejection.get();
                     continue; // not admissible under the book's limits — don't suggest it
                 }
-                boolean executed = autoExecuting() && maybeAutoExecute(signal, quantity, now);
+                boolean traded = autoExecuting() && maybeAutoExecute(signal, quantity, now);
+                if (traded) {
+                    executed++;
+                }
                 String id = "signal:" + signal.instrumentId();
                 current.add(id);
-                feed.upsert(toItem(signal, quantity, now, executed));
+                feed.upsert(toItem(signal, quantity, now, traded));
             }
             boolean changed = false;
             for (String id : Set.copyOf(active)) {
@@ -129,11 +149,38 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     changed = true;
                 }
             }
+
+            // Surface "why did it go quiet" on the feed the user already watches: every
+            // signal blocked by the guardrail (e.g. the book hit an exposure limit).
+            if (suppressed > 0 && current.isEmpty()) {
+                if (!throttledActive) {
+                    feed.upsert(new AttentionFeed.AttentionItem("strategy-throttled", now,
+                            AttentionFeed.Severity.WARN, "strategy-throttled",
+                            "Strategy idling — " + props.book() + " at a risk limit",
+                            suppressed + " signal(s) blocked by the pre-trade guardrail: " + sampleReason
+                                    + ". Auto-trading resumes when the book's exposure frees up.", "/books.html"));
+                    throttledActive = true;
+                    changed = true;
+                }
+            } else if (throttledActive) {
+                feed.resolve("strategy-throttled");
+                throttledActive = false;
+                changed = true;
+            }
             if (changed) {
                 sse.broadcast("attention", feed.snapshot());
             }
-        } catch (Exception e) {
-            log.warn("strategy run failed: {}", e.getMessage());
+
+            // Heartbeat: the log always shows the strategy is alive and why it is/ isn't trading.
+            if (++cycles % HEARTBEAT_CYCLES == 0 || signals > 0 || suppressed > 0) {
+                log.info("strategy: {} fresh marks ({} stale), {} signals, {} suppressed by limits, {} auto-executed{}",
+                        fresh, stale, signals, suppressed, executed,
+                        fresh == 0 ? "  — NO FRESH MARKS (feed may be stale)" : "");
+            }
+        } catch (Throwable t) {
+            // Never let a Throwable silently cancel the scheduled task — that would stop the
+            // strategy for good with no further logging. Catch, log, keep the cadence alive.
+            log.warn("strategy run failed: {}", t.toString());
         }
     }
 
