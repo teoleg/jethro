@@ -46,9 +46,9 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
             return t;
         });
         statsLogger.scheduleAtFixedRate(this::logStats, 10, 10, TimeUnit.SECONDS);
-        log.info("trading-core started: {} instruments, sim seed {}, tick interval {}ms, lmdb at {}",
+        log.info("trading-core started: {} instruments, sim seed {}, tick interval {}ms, lmdb at {}, warm-loaded marks {}",
                 properties.simInstruments().size(), properties.simSeed(),
-                properties.simTickIntervalMillis(), properties.lmdbPath());
+                properties.simTickIntervalMillis(), properties.lmdbPath(), rt.stats().warmLoadedMarks());
     }
 
     private void logStats() {

@@ -39,11 +39,15 @@ public final class TradingCoreRuntime implements AutoCloseable {
             throw new IllegalStateException("trading-core runtime already started");
         }
         if (stateStore != null) {
-            stateStore.forEachMark((instrumentId, priceScaled, providerTs, source) ->
-                    markCache.loadStale(instrumentId, priceScaled, providerTs, source));
+            stateStore.forEachMark((instrumentId, priceScaled, providerTs, source) -> {
+                markCache.loadStale(instrumentId, priceScaled, providerTs, source);
+                stats.markWarmLoaded();
+            });
         }
+        // Non-daemon by design: the market path IS the application — it keeps the
+        // JVM alive until the context shuts it down.
         Thread thread = new Thread(this::consumeLoop, "trading-core");
-        thread.setDaemon(true);
+        thread.setDaemon(false);
         consumerThread = thread;
         thread.start();
         adapter.start(feedListener());

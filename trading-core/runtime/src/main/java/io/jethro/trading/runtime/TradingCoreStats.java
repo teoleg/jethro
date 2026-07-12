@@ -10,6 +10,7 @@ public final class TradingCoreStats {
 
     private final AtomicLong ticksIn = new AtomicLong();
     private final AtomicLong marksFlushed = new AtomicLong();
+    private final AtomicLong warmLoadedMarks = new AtomicLong();
 
     private final TickRingBuffer buffer;
 
@@ -23,6 +24,14 @@ public final class TradingCoreStats {
 
     void marksFlushed(long count) {
         marksFlushed.addAndGet(count);
+    }
+
+    void markWarmLoaded() {
+        warmLoadedMarks.incrementAndGet();
+    }
+
+    public long warmLoadedMarks() {
+        return warmLoadedMarks.get();
     }
 
     public long ticksIn() {

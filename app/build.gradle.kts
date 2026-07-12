@@ -20,3 +20,11 @@ dependencies {
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.archunit.junit5)
 }
+
+// lmdbjava (JNR) needs reflective access to NIO internals on JDK 17+
+tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {
+    jvmArgs(
+        "--add-opens", "java.base/java.nio=ALL-UNNAMED",
+        "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
+    )
+}
