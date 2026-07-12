@@ -30,23 +30,32 @@ public class OrderController {
     }
 
     @PostMapping("/api/orders")
-    public ResponseEntity<OrderRepository.OrderRow> submit(@RequestBody OrderRequest request) {
-        var command = new NewOrder(
-                request.idempotencyKey() == null || request.idempotencyKey().isBlank()
-                        ? "idem-" + UUID.randomUUID() : request.idempotencyKey(),
-                request.bookId(),
-                request.instrumentId(),
-                Side.valueOf(request.side().toUpperCase()),
-                request.type() == null ? OrderType.MARKET : OrderType.valueOf(request.type().toUpperCase()),
-                new BigDecimal(request.quantity()),
-                request.limitPrice() == null || request.limitPrice().isBlank()
-                        ? null : new BigDecimal(request.limitPrice()));
-        var order = orderService.submit(command);
-        // Return the persisted row view (single-element lookup by re-reading recent).
-        var row = repository.recentOrders(50).stream()
-                .filter(o -> o.orderId().equals(order.orderId()))
-                .findFirst().orElseThrow();
-        return ResponseEntity.ok(row);
+    public ResponseEntity<?> submit(@RequestBody OrderRequest request) {
+        try {
+            var command = new NewOrder(
+                    request.idempotencyKey() == null || request.idempotencyKey().isBlank()
+                            ? "idem-" + UUID.randomUUID() : request.idempotencyKey(),
+                    request.bookId(),
+                    request.instrumentId(),
+                    Side.valueOf(request.side().toUpperCase()),
+                    request.type() == null ? OrderType.MARKET : OrderType.valueOf(request.type().toUpperCase()),
+                    new BigDecimal(request.quantity()),
+                    request.limitPrice() == null || request.limitPrice().isBlank()
+                            ? null : new BigDecimal(request.limitPrice()));
+            var order = orderService.submit(command);
+            // Return the persisted row view (single-element lookup by re-reading recent).
+            var row = repository.recentOrders(50).stream()
+                    .filter(o -> o.orderId().equals(order.orderId()))
+                    .findFirst().orElseThrow();
+            return ResponseEntity.ok(row);
+        } catch (IllegalArgumentException | ArithmeticException e) {
+            // Bad enum, unparseable/negative/over-precise decimal — client error, not a 500.
+            return ResponseEntity.badRequest().body(new ApiError(e.getMessage()));
+        }
+    }
+
+    /** Error payload so a rejected submit shows a reason in the UI, not a bare 500. */
+    public record ApiError(String error) {
     }
 
     @GetMapping("/api/orders")

@@ -1,6 +1,7 @@
 package io.jethro.app.order;
 
 import io.jethro.app.kafka.KafkaEventPublisher;
+import io.jethro.domain.Decimals;
 import io.jethro.domain.Fill;
 import io.jethro.domain.Order;
 import io.jethro.messaging.EventMeta;
@@ -45,8 +46,10 @@ public final class KafkaOrderEventPublisher implements OrderEventPublisher {
                 .setBookId(fill.bookId().value())
                 .setInstrumentId(fill.instrumentId().value())
                 .setSide(io.jethro.messaging.Side.valueOf(fill.side().name()))
-                .setQuantity(fill.quantity())
-                .setPrice(fill.price())
+                // Avro decimal fields have a fixed scale — restate before encoding
+                // (user-entered "100" is scale 0; the schema declares scale 6).
+                .setQuantity(Decimals.atScale(fill.quantity(), Decimals.QTY_SCALE))
+                .setPrice(Decimals.atScale(fill.price(), Decimals.PRICE_SCALE))
                 .build();
         publisher.publish(Topics.FILLS, fill.instrumentId().value(), event);
     }

@@ -5,41 +5,102 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jethro — attention</title>
 <style>
-  /* v0 placeholder page (ADR-0017); replaced by the React app under ui/ as views grow */
-  :root { --bg:#0e1116; --card:#161b23; --line:#232a35; --txt:#d7dde6; --dim:#8a94a3;
-          --info:#3d7bd9; --warn:#d9a13d; --alert:#d94f3d; }
+  /* v0 placeholder page (ADR-0017); replaced by the React app under ui/ as views grow.
+     Shared shell (bar + tabs + tokens) is duplicated across the static pages by design —
+     it disappears when the React app lands. */
+  :root {
+    --bg:#0a0d13; --bg-2:#0e121b; --surface:#141926; --surface-2:#1a2030;
+    --line:#252d3d; --line-2:#323c50; --txt:#e6eaf2; --dim:#8b95a8;
+    --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
+    --buy:#35c07a; --sell:#f0553f;
+  }
   * { box-sizing:border-box; margin:0; }
-  body { background:var(--bg); color:var(--txt); font:14px/1.5 system-ui, sans-serif; }
-  header { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; }
-  header h1 { font-size:16px; letter-spacing:.08em; }
-  header .sub { color:var(--dim); font-size:12px; }
-  #marks { display:flex; gap:10px; padding:10px 20px; flex-wrap:wrap; border-bottom:1px solid var(--line); }
-  .mark { background:var(--card); border:1px solid var(--line); border-radius:6px; padding:6px 12px; }
-  .mark b { font-variant-numeric:tabular-nums; }
-  .mark .age { color:var(--dim); font-size:11px; margin-left:6px; }
+  html, body { height:100%; }
+  body {
+    background:
+      radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 0%, rgba(53,192,122,.06), transparent 55%),
+      var(--bg);
+    color:var(--txt);
+    font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
+
+  /* ---- app bar + tabs (shared shell) ---- */
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);
+            background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand);
+                box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim);
+         text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px;
+                       height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim);
+          padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
+  .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); }
+  .pill.on .led { background:var(--buy); box-shadow:0 0 8px var(--buy); }
+  .pill.off .led { background:var(--warn); }
+
+  /* ---- marks strip ---- */
+  .strip { display:flex; gap:10px; padding:14px 24px; flex-wrap:wrap; max-width:1200px; margin:0 auto; }
+  .mark { display:flex; align-items:baseline; gap:8px; background:var(--surface); border:1px solid var(--line);
+          border-radius:10px; padding:9px 14px; min-width:118px; transition:.15s; }
+  .mark:hover { border-color:var(--line-2); }
+  .mark .sym { font-size:11px; letter-spacing:.06em; color:var(--dim); }
+  .mark .px { font-size:15px; font-weight:600; }
+  .mark .age { color:var(--dim); font-size:11px; margin-left:auto; }
   .mark.stale { border-color:var(--warn); }
-  main { max-width:860px; margin:0 auto; padding:20px; }
-  .empty { color:var(--dim); text-align:center; padding:40px 0; }
-  .card { background:var(--card); border:1px solid var(--line); border-left:3px solid var(--info);
-          border-radius:6px; padding:12px 16px; margin-bottom:10px; }
+  .mark.stale .age { color:var(--warn); }
+
+  /* ---- feed ---- */
+  main { max-width:900px; margin:0 auto; padding:12px 24px 48px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim);
+               margin:16px 2px 12px; }
+  .empty { color:var(--dim); text-align:center; padding:56px 0; border:1px dashed var(--line);
+           border-radius:14px; background:var(--surface); }
+  .empty .big { font-size:22px; margin-bottom:6px; }
+  .card { background:linear-gradient(var(--surface), var(--surface)); border:1px solid var(--line);
+          border-left:3px solid var(--info); border-radius:12px; padding:14px 18px; margin-bottom:12px;
+          transition:.15s; }
+  .card:hover { border-color:var(--line-2); border-left-color:var(--info); transform:translateY(-1px); }
   .card.WARN { border-left-color:var(--warn); }
-  .card.ALERT { border-left-color:var(--alert); }
-  .card h3 { font-size:13px; margin-bottom:4px; }
-  .card .meta { color:var(--dim); font-size:11px; margin-top:6px; }
-  .card p { color:var(--txt); font-size:13px; white-space:pre-wrap; }
+  .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
+  .card .row1 { display:flex; align-items:center; gap:10px; }
+  .card h3 { font-size:14px; font-weight:600; }
+  .badge { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px;
+           border-radius:999px; border:1px solid var(--line-2); color:var(--dim); margin-left:auto; }
+  .card.WARN .badge { color:var(--warn); border-color:var(--warn); }
+  .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
+  .card p { color:var(--txt); font-size:13px; white-space:pre-wrap; margin-top:7px; }
+  .card .meta { color:var(--dim); font-size:11px; margin-top:9px; display:flex; gap:8px; flex-wrap:wrap; }
+  .card .meta span::after { content:"·"; margin-left:8px; color:var(--line-2); }
+  .card .meta span:last-child::after { content:""; }
 </style>
 </head>
 <body>
-<header>
-  <h1>JETHRO</h1>
-  <span class="sub">attention feed — deterministic triggers always surface; agents annotate (ADR-0017)</span>
-  <a class="sub" href="/books.html" style="color:inherit">books</a>
-  <a class="sub" href="/orders.html" style="color:inherit">orders</a>
-  <span class="sub" id="status">connecting…</span>
-</header>
-<div id="marks"></div>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab active" href="/">Attention</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
+  </div>
+</div>
+<div class="strip" id="marks"></div>
 <main>
-  <div id="feed"><div class="empty">all quiet — nothing needs you</div></div>
+  <div class="section-h">Needs your attention</div>
+  <div id="feed"><div class="empty"><div class="big">all quiet</div>nothing needs you right now</div></div>
 </main>
 <script>
   const fmtAge = ms => ms < 2000 ? "live" : Math.round(ms / 1000) + "s";
@@ -47,19 +108,31 @@
 
   function renderMarks(marks) {
     document.getElementById("marks").innerHTML = marks.map(m =>
-      `<span class="mark ${m.ageMillis > 10000 ? "stale" : ""}">${esc(m.instrumentId)}
-         <b>${esc(m.price)}</b><span class="age">${fmtAge(m.ageMillis)}</span></span>`).join("");
+      `<div class="mark ${m.ageMillis > 10000 ? "stale" : ""}">
+         <span class="sym">${esc(m.instrumentId)}</span>
+         <span class="px mono">${esc(m.price)}</span>
+         <span class="age">${fmtAge(m.ageMillis)}</span>
+       </div>`).join("");
   }
 
   function renderFeed(items) {
     const feed = document.getElementById("feed");
-    if (!items.length) { feed.innerHTML = '<div class="empty">all quiet — nothing needs you</div>'; return; }
+    if (!items.length) {
+      feed.innerHTML = '<div class="empty"><div class="big">all quiet</div>nothing needs you right now</div>';
+      return;
+    }
     feed.innerHTML = items.map(i =>
       `<div class="card ${esc(i.severity)}">
-         <h3>${esc(i.title)}</h3>
+         <div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
          <p>${esc(i.body)}</p>
-         <div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()} · evidence: ${esc(i.evidenceRef)}</div>
+         <div class="meta"><span>${esc(i.kind)}</span><span>${new Date(i.timestampMillis).toLocaleTimeString()}</span><span>evidence: ${esc(i.evidenceRef)}</span></div>
        </div>`).join("");
+  }
+
+  function setStatus(on, text) {
+    const el = document.getElementById("status");
+    el.className = "pill " + (on ? "on" : "off");
+    document.getElementById("statusText").textContent = text;
   }
 
   async function bootstrap() {
@@ -68,8 +141,8 @@
   }
 
   const es = new EventSource("/api/stream");
-  es.onopen = () => document.getElementById("status").textContent = "live";
-  es.onerror = () => document.getElementById("status").textContent = "reconnecting…";
+  es.onopen = () => setStatus(true, "live");
+  es.onerror = () => setStatus(false, "reconnecting…");
   es.addEventListener("marks", e => renderMarks(JSON.parse(e.data)));
   es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
   bootstrap();
