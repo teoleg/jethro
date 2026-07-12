@@ -7,7 +7,7 @@
 <style>
   :root {
     --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
-    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
   }
   * { box-sizing:border-box; margin:0; }
   html, body { height:100%; }
@@ -37,10 +37,32 @@
   .spacer { flex:1; }
   .hint { color:var(--dim); font-size:12px; }
 
-  main { max-width:960px; margin:0 auto; padding:20px 24px 48px; display:grid; gap:18px; grid-template-columns:1fr 1fr; }
-  @media (max-width:720px) { main { grid-template-columns:1fr; } }
+  main { max-width:1080px; margin:0 auto; padding:20px 24px 48px; display:grid; gap:18px; }
+  .grid2 { display:grid; gap:18px; grid-template-columns:1fr 1fr; }
+  @media (max-width:720px) { .grid2 { grid-template-columns:1fr; } }
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px 20px; }
-  .panel h2 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.14em; margin-bottom:14px; }
+  .panel h2 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.14em; margin-bottom:14px;
+              display:flex; align-items:center; gap:8px; }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:11px; color:var(--dim);
+          padding:3px 9px; border:1px solid var(--line); border-radius:999px; margin-left:auto; }
+  .pill .led { width:6px; height:6px; border-radius:50%; background:var(--dim); }
+  .pill.on .led { background:#35c07a; box-shadow:0 0 8px #35c07a; }
+
+  /* commentary + alarm cards (shared look with the attention feed) */
+  .empty { color:var(--dim); padding:20px 2px; }
+  .card { background:var(--surface-2); border:1px solid var(--line); border-left:3px solid var(--info);
+          border-radius:10px; padding:11px 14px; margin-bottom:10px; }
+  .card:last-child { margin-bottom:0; }
+  .card.WARN { border-left-color:var(--warn); }
+  .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
+  .card .row1 { display:flex; align-items:center; gap:10px; }
+  .card h3 { font-size:13px; font-weight:600; }
+  .badge { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px;
+           border-radius:999px; border:1px solid var(--line-2); color:var(--dim); margin-left:auto; }
+  .card.WARN .badge { color:var(--warn); border-color:var(--warn); }
+  .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
+  .card p { color:var(--txt); font-size:12.5px; white-space:pre-wrap; margin-top:6px; }
+  .card .meta { color:var(--dim); font-size:11px; margin-top:8px; }
 
   ul.tree, ul.tree ul { list-style:none; padding-left:16px; }
   ul.tree > li { padding-left:0; }
@@ -72,13 +94,21 @@
 </div>
 <main>
   <section class="panel">
-    <h2>Books</h2>
-    <div id="books" class="dim">loading…</div>
+    <h2>Commentary &amp; alarms
+      <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
+    </h2>
+    <div id="feed"><div class="empty">all quiet — no alarms or commentary</div></div>
   </section>
-  <section class="panel">
-    <h2>Instruments</h2>
-    <div id="instruments" class="dim">loading…</div>
-  </section>
+  <div class="grid2">
+    <section class="panel">
+      <h2>Books</h2>
+      <div id="books" class="dim">loading…</div>
+    </section>
+    <section class="panel">
+      <h2>Instruments</h2>
+      <div id="instruments" class="dim">loading…</div>
+    </section>
+  </div>
 </main>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
@@ -86,6 +116,22 @@
   const renderTree = nodes => "<ul class='tree'>" + nodes.map(n =>
     `<li>▸ <b>${esc(n.name)}</b> <span class='dim'>(${esc(n.bookId)})</span><span class='ccy'>${esc(n.baseCurrency)}</span>` +
     (n.children.length ? renderTree(n.children) : "") + "</li>").join("") + "</ul>";
+
+  function renderFeed(items) {
+    const feed = document.getElementById("feed");
+    if (!items.length) { feed.innerHTML = '<div class="empty">all quiet — no alarms or commentary</div>'; return; }
+    feed.innerHTML = items.map(i =>
+      `<div class="card ${esc(i.severity)}">
+         <div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
+         <p>${esc(i.body)}</p>
+         <div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()} · evidence: ${esc(i.evidenceRef)}</div>
+       </div>`).join("");
+  }
+
+  function setStatus(on, text) {
+    document.getElementById("status").className = "pill " + (on ? "on" : "");
+    document.getElementById("statusText").textContent = text;
+  }
 
   async function load() {
     try {
@@ -99,7 +145,14 @@
     } catch (e) {
       document.getElementById("books").textContent = "reference data unavailable: " + e;
     }
+    try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) { /* feed optional here */ }
   }
+
+  // Live commentary + alarms — same stream the attention feed uses (single JVM, same origin).
+  const es = new EventSource("/api/stream");
+  es.onopen = () => setStatus(true, "live");
+  es.onerror = () => setStatus(false, "reconnecting…");
+  es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
   load();
 </script>
 </body>
