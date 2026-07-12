@@ -7,64 +7,64 @@
 <style>
   :root {
     --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
-    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --buy:#35c07a; --sell:#f0553f; --fill:#5b8cff;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --buy:#35c07a; --sell:#f0553f;
   }
   * { box-sizing:border-box; margin:0; }
   html, body { height:100%; }
-  body {
-    background:
-      radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%),
-      var(--bg);
-    color:var(--txt);
-    font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-    -webkit-font-smoothing:antialiased;
-  }
+  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
   .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
 
-  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);
-            background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
   .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
-  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand);
-                box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
   .tabs { display:flex; gap:4px; margin-left:8px; }
-  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim);
-         text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
   .tab:hover { color:var(--txt); background:var(--surface); }
   .tab.active { color:var(--txt); background:var(--surface-2); }
-  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px;
-                       height:2px; border-radius:2px; background:var(--brand); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
   .spacer { flex:1; }
-  .hint { color:var(--dim); font-size:12px; }
+  .btn { background:var(--brand); color:#fff; border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; transition:.15s; }
+  .btn:hover { filter:brightness(1.08); } .btn:active { transform:translateY(1px); }
 
-  main { max-width:1080px; margin:0 auto; padding:20px 24px 48px; display:grid; gap:18px; }
-  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px 20px; }
-  .panel h2 { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.14em; margin-bottom:14px; }
+  main { max-width:1200px; margin:0 auto; padding:18px 24px 48px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:0 2px 12px; display:flex; align-items:center; }
+  .section-h .muted { margin-left:auto; text-transform:none; letter-spacing:0; font-size:12px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:2px 4px; }
 
-  form { display:flex; gap:12px; flex-wrap:wrap; align-items:end; }
-  label { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:5px; letter-spacing:.04em; }
-  input, select { background:#0c1019; color:var(--txt); border:1px solid var(--line-2); border-radius:8px;
-                  padding:9px 11px; font:inherit; transition:.15s; }
-  input:focus, select:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(91,140,255,.18); }
-  button { background:var(--brand); color:#fff; border:0; border-radius:8px; padding:10px 20px; font:inherit;
-           font-weight:600; cursor:pointer; transition:.15s; }
-  button:hover { filter:brightness(1.08); }
-  button:active { transform:translateY(1px); }
-  #msg { color:var(--dim); font-size:12px; margin-top:12px; min-height:16px; }
-  #msg.ok { color:var(--buy); } #msg.err { color:var(--sell); }
-
-  table { width:100%; border-collapse:collapse; font-size:13px; }
-  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
-  tr:last-child td { border-bottom:0; }
-  tbody tr { transition:.1s; } tbody tr:hover { background:var(--surface-2); }
+  /* compact blotter */
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:6px 12px; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2), th:nth-child(3), td:nth-child(3) { text-align:left; }
+  tbody tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
   th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
-  td.num { text-align:right; }
   .BUY { color:var(--buy); font-weight:600; } .SELL { color:var(--sell); font-weight:600; }
-  .status { font-size:10px; letter-spacing:.06em; padding:3px 9px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
-  .FILLED { color:var(--buy); border-color:var(--buy); }
-  .REJECTED { color:var(--sell); border-color:var(--sell); }
-  .ROUTED, .NEW { color:var(--dim); }
   .muted { color:var(--dim); }
+  .st { font-size:10px; letter-spacing:.05em; padding:2px 8px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
+  .st.FILLED { color:var(--buy); border-color:var(--buy); }
+  .st.PARTIALLY_FILLED { color:#e0a83d; border-color:#e0a83d; }
+  .st.REJECTED, .st.CANCELLED { color:var(--sell); border-color:var(--sell); }
+
+  /* modal */
+  .overlay { position:fixed; inset:0; background:rgba(6,8,13,.66); backdrop-filter:blur(3px); display:none; align-items:flex-start; justify-content:center; z-index:50; }
+  .overlay.open { display:flex; }
+  .dialog { background:var(--surface); border:1px solid var(--line-2); border-radius:16px; padding:20px 22px; margin-top:9vh; width:min(520px, 92vw); box-shadow:0 24px 60px rgba(0,0,0,.5); }
+  .dialog h2 { font-size:15px; margin-bottom:16px; display:flex; align-items:center; }
+  .dialog h2 .x { margin-left:auto; cursor:pointer; color:var(--dim); font-size:20px; line-height:1; background:none; border:0; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  label { display:flex; flex-direction:column; font-size:11px; color:var(--dim); gap:5px; letter-spacing:.04em; }
+  label.full { grid-column:1 / -1; }
+  input, select { background:#0c1019; color:var(--txt); border:1px solid var(--line-2); border-radius:8px; padding:9px 11px; font:inherit; transition:.15s; }
+  input:focus, select:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(91,140,255,.18); }
+  .side-toggle { display:flex; gap:8px; }
+  .side-toggle button { flex:1; padding:9px; border-radius:8px; border:1px solid var(--line-2); background:#0c1019; color:var(--dim); font:inherit; font-weight:600; cursor:pointer; }
+  .side-toggle button.on[data-side="BUY"] { background:rgba(53,192,122,.15); color:var(--buy); border-color:var(--buy); }
+  .side-toggle button.on[data-side="SELL"] { background:rgba(240,85,63,.15); color:var(--sell); border-color:var(--sell); }
+  .actions { display:flex; align-items:center; gap:12px; margin-top:18px; }
+  .actions .btn { padding:11px 22px; } .actions #msg { font-size:12px; color:var(--dim); }
+  #msg.ok { color:var(--buy); } #msg.err { color:var(--sell); }
+  .hint { font-size:11px; color:var(--dim); margin-top:2px; }
 </style>
 </head>
 <body>
@@ -72,72 +72,133 @@
   <div class="bar">
     <span class="brand"><span class="dot"></span>JETHRO</span>
     <nav class="tabs">
-      <a class="tab" href="/">Attention</a>
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
       <a class="tab" href="/books.html">Books</a>
       <a class="tab active" href="/orders.html">Orders</a>
     </nav>
     <span class="spacer"></span>
-    <span class="hint">simulated execution</span>
+    <button class="btn" id="open">+ New order</button>
   </div>
 </div>
 <main>
-  <section class="panel">
-    <h2>New order</h2>
-    <form id="f">
-      <label>Book<select name="bookId"><option>ALPHA</option><option>BETA</option><option>FIRM</option></select></label>
-      <label>Instrument<select name="instrumentId"><option>AAPL</option><option>MSFT</option><option>AMZN</option><option>GOOG</option></select></label>
-      <label>Side<select name="side"><option>BUY</option><option>SELL</option></select></label>
-      <label>Type<select name="type"><option>MARKET</option><option>LIMIT</option></select></label>
-      <label>Qty<input name="quantity" value="100" size="6"></label>
-      <label>Limit<input name="limitPrice" placeholder="(market)" size="8"></label>
-      <button type="submit">Submit</button>
-    </form>
-    <div id="msg"></div>
-  </section>
-  <section class="panel">
-    <h2>Orders</h2>
-    <div id="orders" class="muted">loading…</div>
-  </section>
-  <section class="panel">
-    <h2>Fills</h2>
-    <div id="fills" class="muted">loading…</div>
-  </section>
+  <div class="section-h">Blotter <span class="muted" id="count"></span></div>
+  <div class="panel"><div id="blotter" class="muted" style="padding:16px">loading…</div></div>
 </main>
+
+<div class="overlay" id="overlay">
+  <div class="dialog">
+    <h2>New order <button class="x" id="close">&times;</button></h2>
+    <form id="f">
+      <div class="grid">
+        <label class="full">Instrument
+          <select name="instrumentId" id="instrument"></select>
+          <span class="hint" id="instrHint"></span>
+        </label>
+        <label class="full">Side
+          <div class="side-toggle" id="side">
+            <button type="button" data-side="BUY" class="on">Buy</button>
+            <button type="button" data-side="SELL">Sell</button>
+          </div>
+        </label>
+        <label>Book<select name="bookId" id="book"></select></label>
+        <label>Type<select name="type" id="type"><option>MARKET</option><option>LIMIT</option></select></label>
+        <label id="qtyLabel">Quantity<input name="quantity" id="quantity" value="100" inputmode="decimal"></label>
+        <label id="limitLabel" style="display:none">Limit price<input name="limitPrice" id="limitPrice" inputmode="decimal" placeholder="(market)"></label>
+      </div>
+      <div class="actions">
+        <button type="submit" class="btn" id="submit">Submit order</button>
+        <span id="msg"></span>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const t = ms => new Date(ms).toLocaleTimeString();
+  const QTY_LABEL = { EQUITY:"Shares", FUTURE:"Contracts", FX:"Notional", BOND:"Contracts", OPTION:"Contracts" };
+  let instrClass = {};
 
-  async function refresh() {
-    const orders = await (await fetch("/api/orders")).json();
-    document.getElementById("orders").innerHTML = orders.length ?
-      "<table><tr><th>time</th><th>book</th><th>instr</th><th>side</th><th>type</th><th class='num'>qty</th><th class='num'>limit</th><th>status</th></tr>" +
-      orders.map(o => `<tr><td class="muted mono">${t(o.createdAtMillis)}</td><td>${esc(o.bookId)}</td><td>${esc(o.instrumentId)}</td>
-        <td class="${esc(o.side)}">${esc(o.side)}</td><td class="muted">${esc(o.orderType)}</td><td class="num mono">${esc(o.quantity)}</td>
-        <td class="num mono">${esc(o.limitPrice||"—")}</td><td><span class="status ${esc(o.status)}">${esc(o.status)}</span></td></tr>`).join("") + "</table>"
-      : "<span class='muted'>no orders yet — submit one above</span>";
-    const fills = await (await fetch("/api/fills")).json();
-    document.getElementById("fills").innerHTML = fills.length ?
-      "<table><tr><th>time</th><th>instr</th><th>side</th><th class='num'>qty</th><th class='num'>price</th></tr>" +
-      fills.map(f => `<tr><td class="muted mono">${t(f.executedAtMillis)}</td><td>${esc(f.instrumentId)}</td>
-        <td class="${esc(f.side)}">${esc(f.side)}</td><td class="num mono">${esc(f.quantity)}</td><td class="num mono">${esc(f.price)}</td></tr>`).join("") + "</table>"
-      : "<span class='muted'>no fills yet</span>";
+  // ---- modal ----
+  const overlay = document.getElementById("overlay");
+  const openModal = () => { overlay.classList.add("open"); document.getElementById("quantity").focus(); };
+  const closeModal = () => { overlay.classList.remove("open"); document.getElementById("msg").textContent=""; };
+  document.getElementById("open").onclick = openModal;
+  document.getElementById("close").onclick = closeModal;
+  overlay.onclick = e => { if (e.target === overlay) closeModal(); };
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+
+  // side toggle
+  let side = "BUY";
+  document.querySelectorAll("#side button").forEach(b => b.onclick = () => {
+    side = b.dataset.side;
+    document.querySelectorAll("#side button").forEach(x => x.classList.toggle("on", x.dataset.side===side));
+  });
+
+  // instrument-type-aware inputs
+  function syncInputs() {
+    const instr = document.getElementById("instrument").value;
+    const ac = instrClass[instr] || "EQUITY";
+    document.querySelector("#qtyLabel").childNodes[0].nodeValue = QTY_LABEL[ac] || "Quantity";
+    document.getElementById("instrHint").textContent = ac ? (ac + " · priced from live marks") : "";
+    const isLimit = document.getElementById("type").value === "LIMIT";
+    document.getElementById("limitLabel").style.display = isLimit ? "" : "none";
+  }
+  document.getElementById("type").onchange = syncInputs;
+  document.getElementById("instrument").onchange = syncInputs;
+
+  // ---- populate dropdowns ----
+  function flatten(nodes, out) { nodes.forEach(n => { out.push(n); if (n.children) flatten(n.children, out); }); return out; }
+  async function populate() {
+    try {
+      const instruments = await (await fetch("/api/instruments")).json();
+      instruments.forEach(i => instrClass[i.instrumentId] = i.assetClass);
+      document.getElementById("instrument").innerHTML = instruments.map(i =>
+        `<option value="${esc(i.instrumentId)}">${esc(i.instrumentId)} — ${esc(i.assetClass)}</option>`).join("");
+      const books = flatten(await (await fetch("/api/books")).json(), []);
+      document.getElementById("book").innerHTML = books.map(b =>
+        `<option value="${esc(b.bookId)}"${b.bookId==='ALPHA'?' selected':''}>${esc(b.name)} (${esc(b.bookId)})</option>`).join("");
+      syncInputs();
+    } catch (e) {}
   }
 
+  // ---- submit ----
   document.getElementById("f").addEventListener("submit", async e => {
     e.preventDefault();
     const data = Object.fromEntries(new FormData(e.target).entries());
+    data.side = side;
     const msg = document.getElementById("msg");
     try {
       const res = await fetch("/api/orders", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)});
       const o = await res.json();
-      if (res.ok) { msg.className = "ok"; msg.textContent = `submitted ${o.orderId} → ${o.status}`; }
-      else { msg.className = "err"; msg.textContent = "rejected: " + (o.error || JSON.stringify(o)); }
-    } catch (err) { msg.className = "err"; msg.textContent = "error: " + err; }
+      if (res.ok) { msg.className="ok"; msg.textContent = `${o.side} ${o.quantity} ${o.instrumentId} → ${o.status}`; setTimeout(closeModal, 900); }
+      else { msg.className="err"; msg.textContent = "rejected: " + (o.error || JSON.stringify(o)); }
+    } catch (err) { msg.className="err"; msg.textContent = "error: " + err; }
     refresh();
   });
 
+  // ---- blotter (single table; fill is the order's outcome, not a second table) ----
+  async function refresh() {
+    let orders = [], fills = [];
+    try { orders = await (await fetch("/api/orders")).json(); fills = await (await fetch("/api/fills")).json(); } catch (e) { return; }
+    const fillByOrder = {};
+    fills.forEach(f => fillByOrder[f.orderId] = f); // one fill per order today
+    document.getElementById("count").textContent = orders.length ? orders.length + " orders" : "";
+    document.getElementById("blotter").outerHTML = '<div id="blotter">' + (orders.length ?
+      "<table><tr><th>time</th><th>instr</th><th>book</th><th>side</th><th>type</th><th>qty</th><th>limit</th><th>status</th><th>fill</th></tr>" +
+      orders.map(o => { const f = fillByOrder[o.orderId]; return `<tr>
+        <td class="muted mono">${t(o.createdAtMillis)}</td><td>${esc(o.instrumentId)}</td><td class="muted">${esc(o.bookId)}</td>
+        <td class="${esc(o.side)}">${esc(o.side)}</td><td class="muted">${esc(o.orderType)}</td>
+        <td class="mono">${esc(o.quantity)}</td><td class="mono muted">${esc(o.limitPrice||"—")}</td>
+        <td><span class="st ${esc(o.status)}">${esc(o.status)}</span></td>
+        <td class="mono">${f ? esc(f.price) : '<span class="muted">—</span>'}</td></tr>`; }).join("") + "</table>"
+      : '<div class="muted" style="padding:16px">no orders yet — hit <b>+ New order</b> to submit one</div>') + '</div>';
+  }
+
+  populate();
   refresh();
-  setInterval(refresh, 3000);
+  setInterval(refresh, 2500);
 </script>
 </body>
 </html>

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — markets</title>
+<style>
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f; --warn:#e0a83d;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
+
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
+  .pill .led { width:7px; height:7px; border-radius:50%; background:var(--up); box-shadow:0 0 8px var(--up); }
+
+  main { max-width:1200px; margin:0 auto; padding:18px 24px 48px; }
+  /* the per-market sub-tab layer */
+  .subtabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:18px; }
+  .subtab { padding:7px 14px; border-radius:999px; border:1px solid var(--line-2); background:var(--surface); color:var(--dim);
+            font-size:13px; font-weight:500; cursor:pointer; transition:.15s; }
+  .subtab:hover { color:var(--txt); border-color:var(--brand); }
+  .subtab.active { color:#fff; background:var(--brand); border-color:var(--brand); }
+
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:20px 2px 12px; }
+  .marks { display:flex; gap:8px; flex-wrap:wrap; }
+  .m { display:flex; align-items:baseline; gap:8px; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:8px 13px; }
+  .m .sym { color:var(--dim); font-size:10px; letter-spacing:.05em; } .m .px { font-weight:600; } .m.stale { border-color:var(--warn); }
+  .m .age { color:var(--dim); font-size:11px; }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:6px 4px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:right; padding:9px 14px; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align:left; }
+  tbody tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--txt); }
+  .muted { color:var(--dim); } .cls { font-weight:600; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab active" href="/markets.html">Markets</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="pill"><span class="led"></span>live</span>
+  </div>
+</div>
+<main>
+  <div class="subtabs" id="subtabs"></div>
+  <div class="section-h">Prices</div>
+  <div class="marks" id="marks"><span class="muted">loading…</span></div>
+  <div class="section-h">Positions</div>
+  <div class="panel"><div id="positions" class="muted" style="padding:16px">loading…</div></div>
+</main>
+<script>
+  const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+  const fmtAge = ms => ms < 2000 ? "live" : Math.round(ms / 1000) + "s";
+  const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  const cls = s => { const n = Number(s); return n>0?"up":(n<0?"down":"flat"); };
+  const LABEL = { EQUITY:"Equities", FUTURE:"Futures", FX:"FX", BOND:"Rates", OPTION:"Options", UNKNOWN:"Other" };
+  const label = c => LABEL[c] || c;
+
+  let filter = "ALL";
+  let instrClass = {};     // instrumentId -> assetClass
+  let marks = [], positions = [];
+
+  function classes() {
+    const set = new Set(Object.values(instrClass));
+    return ["ALL", ...[...set].sort()];
+  }
+
+  function renderSubtabs() {
+    document.getElementById("subtabs").innerHTML = classes().map(c =>
+      `<button class="subtab ${c===filter?'active':''}" data-c="${c}">${c==="ALL"?"All markets":label(c)}</button>`).join("");
+    document.querySelectorAll(".subtab").forEach(b => b.onclick = () => { filter = b.dataset.c; render(); });
+  }
+
+  function match(instrumentId) { return filter === "ALL" || instrClass[instrumentId] === filter; }
+
+  function render() {
+    renderSubtabs();
+    const ms = marks.filter(m => match(m.instrumentId));
+    document.getElementById("marks").innerHTML = ms.length ? ms.map(m =>
+      `<div class="m ${m.ageMillis>10000?'stale':''}"><span class="sym">${esc(m.instrumentId)}</span>
+        <span class="px mono">${esc(m.price)}</span><span class="age">${fmtAge(m.ageMillis)}</span></div>`).join("")
+      : '<span class="muted">no live prices</span>';
+
+    const ps = positions.filter(p => match(p.instrumentId));
+    document.getElementById("positions").outerHTML = '<div id="positions">' + (ps.length ?
+      "<table><tr><th>instr</th><th>book</th><th>market</th><th>qty</th><th>avg cost</th><th>mark</th><th>unrealized</th><th>realized</th><th>net exp</th></tr>" +
+      ps.map(p => `<tr><td class="cls">${esc(p.instrumentId)}</td><td class="muted">${esc(p.bookId)}</td>
+        <td class="muted">${esc(label(p.assetClass))}</td><td class="mono">${money(p.quantity)}</td>
+        <td class="mono">${money(p.avgCost)}</td><td class="mono">${p.hasMark?money(p.mark):'—'}</td>
+        <td class="mono ${cls(p.unrealizedPnl)}">${money(p.unrealizedPnl)}</td>
+        <td class="mono ${cls(p.realizedPnl)}">${money(p.realizedPnl)}</td>
+        <td class="mono">${money(p.netExposure)}</td></tr>`).join("") + "</table>"
+      : '<div class="muted" style="padding:16px">no positions in this market — submit an order on the Orders tab</div>') + '</div>';
+  }
+
+  async function refresh() {
+    try {
+      marks = await (await fetch("/api/marks")).json();
+      positions = (await (await fetch("/api/risk")).json()).positions || [];
+      render();
+    } catch (e) {}
+  }
+
+  async function init() {
+    try {
+      const instruments = await (await fetch("/api/instruments")).json();
+      instruments.forEach(i => instrClass[i.instrumentId] = i.assetClass);
+    } catch (e) {}
+    await refresh();
+    setInterval(refresh, 2000);
+  }
+  init();
+</script>
+</body>
+</html>

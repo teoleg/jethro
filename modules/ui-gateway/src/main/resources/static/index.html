@@ -3,16 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>jethro — attention</title>
+<title>jethro — overview</title>
 <style>
   /* v0 placeholder page (ADR-0017); replaced by the React app under ui/ as views grow.
-     Shared shell (bar + tabs + tokens) is duplicated across the static pages by design —
-     it disappears when the React app lands. */
+     Shared shell (bar + tabs + tokens) is duplicated across the static pages by design. */
   :root {
-    --bg:#0a0d13; --bg-2:#0e121b; --surface:#141926; --surface-2:#1a2030;
-    --line:#252d3d; --line-2:#323c50; --txt:#e6eaf2; --dim:#8b95a8;
-    --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
-    --buy:#35c07a; --sell:#f0553f;
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
+    --up:#35c07a; --down:#f0553f;
   }
   * { box-sizing:border-box; margin:0; }
   html, body { height:100%; }
@@ -27,61 +25,60 @@
   }
   .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
 
-  /* ---- app bar + tabs (shared shell) ---- */
   .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px);
             background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
   .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
-  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand);
-                box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
   .tabs { display:flex; gap:4px; margin-left:8px; }
-  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim);
-         text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
   .tab:hover { color:var(--txt); background:var(--surface); }
   .tab.active { color:var(--txt); background:var(--surface-2); }
-  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px;
-                       height:2px; border-radius:2px; background:var(--brand); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
   .spacer { flex:1; }
-  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim);
-          padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
   .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); }
-  .pill.on .led { background:var(--buy); box-shadow:0 0 8px var(--buy); }
+  .pill.on .led { background:var(--up); box-shadow:0 0 8px var(--up); }
   .pill.off .led { background:var(--warn); }
 
-  /* ---- marks strip ---- */
-  .strip { display:flex; gap:10px; padding:14px 24px; flex-wrap:wrap; max-width:1200px; margin:0 auto; }
-  .mark { display:flex; align-items:baseline; gap:8px; background:var(--surface); border:1px solid var(--line);
-          border-radius:10px; padding:9px 14px; min-width:118px; transition:.15s; }
-  .mark:hover { border-color:var(--line-2); }
-  .mark .sym { font-size:11px; letter-spacing:.06em; color:var(--dim); }
-  .mark .px { font-size:15px; font-weight:600; }
-  .mark .age { color:var(--dim); font-size:11px; margin-left:auto; }
-  .mark.stale { border-color:var(--warn); }
-  .mark.stale .age { color:var(--warn); }
+  main { max-width:1200px; margin:0 auto; padding:20px 24px 48px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:22px 2px 12px; display:flex; align-items:center; gap:8px; }
+  .section-h:first-child { margin-top:6px; }
 
-  /* ---- feed ---- */
-  main { max-width:900px; margin:0 auto; padding:12px 24px 48px; }
-  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim);
-               margin:16px 2px 12px; }
-  .empty { color:var(--dim); text-align:center; padding:56px 0; border:1px dashed var(--line);
-           border-radius:14px; background:var(--surface); }
-  .empty .big { font-size:22px; margin-bottom:6px; }
-  .card { background:linear-gradient(var(--surface), var(--surface)); border:1px solid var(--line);
-          border-left:3px solid var(--info); border-radius:12px; padding:14px 18px; margin-bottom:12px;
-          transition:.15s; }
-  .card:hover { border-color:var(--line-2); border-left-color:var(--info); transform:translateY(-1px); }
-  .card.WARN { border-left-color:var(--warn); }
-  .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
+  /* headline stat cards */
+  .stats { display:grid; grid-template-columns:repeat(5, 1fr); gap:12px; }
+  @media (max-width:820px) { .stats { grid-template-columns:repeat(2, 1fr); } }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  .stat .k { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
+  .stat .v { font-size:22px; font-weight:650; margin-top:6px; letter-spacing:-.01em; }
+  .stat .v.big { font-size:26px; }
+  .up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--txt); }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:6px 4px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:right; padding:10px 14px; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  tbody tr:last-child td { border-bottom:0; }
+  tbody tr { transition:.1s; } tbody tr:hover { background:var(--surface-2); }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .cls { font-weight:600; }
+  .muted { color:var(--dim); }
+
+  .empty { color:var(--dim); text-align:center; padding:40px 0; border:1px dashed var(--line); border-radius:14px; background:var(--surface); }
+  .empty .big { font-size:20px; margin-bottom:6px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:12px; padding:13px 16px; margin-bottom:10px; }
+  .card.WARN { border-left-color:var(--warn); } .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
   .card .row1 { display:flex; align-items:center; gap:10px; }
   .card h3 { font-size:14px; font-weight:600; }
-  .badge { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px;
-           border-radius:999px; border:1px solid var(--line-2); color:var(--dim); margin-left:auto; }
-  .card.WARN .badge { color:var(--warn); border-color:var(--warn); }
-  .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
+  .badge { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); margin-left:auto; }
+  .card.WARN .badge { color:var(--warn); border-color:var(--warn); } .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
   .card p { color:var(--txt); font-size:13px; white-space:pre-wrap; margin-top:7px; }
-  .card .meta { color:var(--dim); font-size:11px; margin-top:9px; display:flex; gap:8px; flex-wrap:wrap; }
-  .card .meta span::after { content:"·"; margin-left:8px; color:var(--line-2); }
-  .card .meta span:last-child::after { content:""; }
+  .card .meta { color:var(--dim); font-size:11px; margin-top:9px; }
+
+  /* demoted marks strip */
+  .marks { display:flex; gap:8px; flex-wrap:wrap; }
+  .m { display:flex; align-items:baseline; gap:7px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:5px 10px; font-size:12px; }
+  .m .sym { color:var(--dim); font-size:10px; letter-spacing:.05em; } .m.stale { border-color:var(--warn); }
 </style>
 </head>
 <body>
@@ -89,7 +86,8 @@
   <div class="bar">
     <span class="brand"><span class="dot"></span>JETHRO</span>
     <nav class="tabs">
-      <a class="tab active" href="/">Attention</a>
+      <a class="tab active" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
       <a class="tab" href="/books.html">Books</a>
       <a class="tab" href="/orders.html">Orders</a>
     </nav>
@@ -97,47 +95,67 @@
     <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
   </div>
 </div>
-<div class="strip" id="marks"></div>
 <main>
+  <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
+  <div class="stats" id="stats"></div>
+
+  <div class="section-h">By market</div>
+  <div class="panel"><div id="byclass" class="muted" style="padding:16px">loading…</div></div>
+
   <div class="section-h">Needs your attention</div>
   <div id="feed"><div class="empty"><div class="big">all quiet</div>nothing needs you right now</div></div>
+
+  <div class="section-h">Live marks</div>
+  <div class="marks" id="marks"></div>
 </main>
 <script>
-  const fmtAge = ms => ms < 2000 ? "live" : Math.round(ms / 1000) + "s";
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+  const fmtAge = ms => ms < 2000 ? "live" : Math.round(ms / 1000) + "s";
+  // Display-only money formatting (2dp, grouped). Exact decimals stay strings on the wire.
+  const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); };
+  const cls = s => { const n = Number(s); return n>0?"up":(n<0?"down":"flat"); };
 
-  function renderMarks(marks) {
-    document.getElementById("marks").innerHTML = marks.map(m =>
-      `<div class="mark ${m.ageMillis > 10000 ? "stale" : ""}">
-         <span class="sym">${esc(m.instrumentId)}</span>
-         <span class="px mono">${esc(m.price)}</span>
-         <span class="age">${fmtAge(m.ageMillis)}</span>
-       </div>`).join("");
+  function stat(k, v, big) { return `<div class="stat"><div class="k">${k}</div><div class="v ${big?'big ':''}${cls(v)}">${money(v)}</div></div>`; }
+
+  function renderRisk(r) {
+    document.getElementById("asof").textContent = "· " + new Date(r.asOfMillis).toLocaleTimeString();
+    const t = r.total;
+    document.getElementById("stats").innerHTML =
+      stat("Total P&L", t.totalPnl, true) + stat("Realized", t.realizedPnl) + stat("Unrealized", t.unrealizedPnl) +
+      `<div class="stat"><div class="k">Net exposure</div><div class="v mono">${money(t.netExposure)}</div></div>` +
+      `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>`;
+    const g = r.byAssetClass || [];
+    document.getElementById("byclass").outerHTML = '<div id="byclass">' + (g.length ?
+      "<table><tr><th>market</th><th>positions</th><th>realized</th><th>unrealized</th><th>total P&L</th><th>net exp</th><th>gross exp</th></tr>" +
+      g.map(x => `<tr><td class="cls">${esc(x.key)}</td><td class="muted mono">${x.positionCount}</td>
+        <td class="mono ${cls(x.realizedPnl)}">${money(x.realizedPnl)}</td>
+        <td class="mono ${cls(x.unrealizedPnl)}">${money(x.unrealizedPnl)}</td>
+        <td class="mono ${cls(x.totalPnl)}">${money(x.totalPnl)}</td>
+        <td class="mono">${money(x.netExposure)}</td><td class="mono">${money(x.grossExposure)}</td></tr>`).join("") + "</table>"
+      : '<div class="muted" style="padding:16px">no positions yet — submit an order to build a book</div>') + '</div>';
   }
 
   function renderFeed(items) {
     const feed = document.getElementById("feed");
-    if (!items.length) {
-      feed.innerHTML = '<div class="empty"><div class="big">all quiet</div>nothing needs you right now</div>';
-      return;
-    }
+    if (!items.length) { feed.innerHTML = '<div class="empty"><div class="big">all quiet</div>nothing needs you right now</div>'; return; }
     feed.innerHTML = items.map(i =>
-      `<div class="card ${esc(i.severity)}">
-         <div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
-         <p>${esc(i.body)}</p>
-         <div class="meta"><span>${esc(i.kind)}</span><span>${new Date(i.timestampMillis).toLocaleTimeString()}</span><span>evidence: ${esc(i.evidenceRef)}</span></div>
-       </div>`).join("");
+      `<div class="card ${esc(i.severity)}"><div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
+         <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()} · evidence: ${esc(i.evidenceRef)}</div></div>`).join("");
   }
 
-  function setStatus(on, text) {
-    const el = document.getElementById("status");
-    el.className = "pill " + (on ? "on" : "off");
-    document.getElementById("statusText").textContent = text;
+  function renderMarks(marks) {
+    document.getElementById("marks").innerHTML = marks.map(m =>
+      `<div class="m ${m.ageMillis > 10000 ? "stale" : ""}"><span class="sym">${esc(m.instrumentId)}</span>
+         <b class="mono">${esc(m.price)}</b><span class="muted">${fmtAge(m.ageMillis)}</span></div>`).join("");
   }
 
+  function setStatus(on, text) { document.getElementById("status").className = "pill " + (on?"on":"off"); document.getElementById("statusText").textContent = text; }
+
+  async function loadRisk() { try { renderRisk(await (await fetch("/api/risk")).json()); } catch (e) {} }
   async function bootstrap() {
     renderMarks(await (await fetch("/api/marks")).json());
     renderFeed(await (await fetch("/api/attention")).json());
+    loadRisk();
   }
 
   const es = new EventSource("/api/stream");
@@ -146,6 +164,7 @@
   es.addEventListener("marks", e => renderMarks(JSON.parse(e.data)));
   es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
   bootstrap();
+  setInterval(loadRisk, 2000); // risk/PnL isn't on the SSE stream yet — poll
 </script>
 </body>
 </html>
