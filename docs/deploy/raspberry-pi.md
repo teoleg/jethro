@@ -107,30 +107,44 @@ git checkout claude/new-session-smb8v6
 **C — GitHub CLI.** `sudo apt install gh && gh auth login` (choose HTTPS, authenticate in
 a browser), then `gh repo clone teoleg/jethro && cd jethro && git checkout claude/new-session-smb8v6`.
 
-## 6. Build
+## 6. One-command build + run (recommended)
 
-**You don't strictly need this step to run the app** — `:app:bootRun` (step 9) compiles
-without running the test suite, and CI already validates every test on each push. On a
-RAM-tight Pi, the full test run (several `@SpringBootTest` contexts) can exhaust memory
-and start swapping, which looks like a hang. Options, easiest first:
+There's a script that does everything: builds the jar **without the test suite** (CI is
+the test gate — see below), brings up Docker infra, waits for it to be healthy, and
+starts the app as a plain JVM. AI is off by default so it comes up light:
 
 ```bash
-# A) Skip the tests, just produce the runnable app (fastest, no memory pressure):
-./gradlew build -x test
-#    ...or go straight to running it (step 8/9) without building at all.
-
-# B) Run the build WITH tests, but capped so it can't thrash. Create gradle.properties:
-cat >> gradle.properties <<'EOF'
-org.gradle.jvmargs=-Xmx768m
-org.gradle.workers.max=1
-org.gradle.parallel=false
-EOF
-./gradlew build --console=plain      # --console=plain shows which test is running
+./scripts/run-local.sh                 # app + Redpanda + Postgres, AI off, profile=pi
+AI=on ./scripts/run-local.sh           # also start Ollama + enable commentary
+HEAP=1g PROFILE=default ./scripts/run-local.sh   # override knobs
 ```
 
-Expect several minutes on a Pi (first run also downloads Gradle + deps). If a build
-"hangs", it's almost always swap-thrashing, not a deadlock — check `free -h` in another
-shell (Swap full = thrashing). Use option A and let CI be your test gate.
+Stop the app with **Ctrl+C**; stop the Docker services with `./scripts/stop-local.sh`
+(add `--volumes` to also wipe Postgres/Redpanda data).
+
+**Tests no longer run in a local `build`.** `./gradlew build` (and the script's
+`:app:bootJar`) compile and package **without** running the unit/module test suite — that
+was what forked memory-hungry JVMs and could freeze a Pi. CI runs the full suite on every
+push (`./gradlew build -Pci`), so the tests are still your safety net; they just don't run
+on the Pi. To run them locally anyway (on a capable box): `./gradlew build -Pci`.
+
+### Manual equivalent (if you prefer step-by-step)
+
+```bash
+./gradlew :app:bootJar                 # build the jar (no tests)
+./gradlew --stop                       # release the build daemon before running
+docker compose up -d redpanda postgres # (add `ollama` for AI)
+java -Xmx512m -XX:+UseZGC \
+  --add-opens java.base/java.nio=ALL-UNNAMED \
+  --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
+  -jar app/build/libs/app-*-SNAPSHOT.jar \
+  --spring.profiles.active=pi --jethro.ai.enabled=false
+```
+
+First build on a Pi still takes a few minutes (Gradle + dependency downloads). If it looks
+stuck, run with `--console=plain` to see live task progress, and check `free -h` /
+`vcgencmd measure_temp` in another shell — a "hang" is almost always swap-thrash or thermal
+throttling, not a deadlock.
 
 ## 7. Pi-tuned configuration
 

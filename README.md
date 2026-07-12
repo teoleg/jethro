@@ -27,7 +27,8 @@ each holding positions in various instruments.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs two jobs on every push:
 
-1. **build** — compile + all unit/module tests (`./gradlew build`).
+1. **build** — compile + all unit/module tests (`./gradlew build -Pci`; a plain
+   `./gradlew build` skips tests so constrained hardware can still produce a jar).
 2. **integration** — the no-stubs job: starts Redpanda + Postgres + Ollama via the
    repo's own compose file, pulls a real model, then runs `./gradlew :app:integrationTest`
    (`FullStackIT`): marks must arrive through the real broker, and an `AiDecision` with
@@ -39,7 +40,8 @@ GitHub Actions (`.github/workflows/ci.yml`) runs two jobs on every push:
 Requires Java 21 (Gradle toolchain) and Docker.
 
 ```bash
-./gradlew build            # compile everything + domain/serde/ArchUnit tests
+./gradlew build            # compile + package (tests skipped; add -Pci to run them, as CI does)
+#   ./scripts/run-local.sh   # build + start Docker infra + run the app in one command
 docker compose up -d       # local infra: Redpanda (Kafka API + schema registry) + Postgres
 ./gradlew :app:bootRun     # the single-JVM app (ADR-0015)
 

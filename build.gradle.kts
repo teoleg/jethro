@@ -37,6 +37,13 @@ subprojects {
             "--add-opens", "java.base/java.nio=ALL-UNNAMED",
             "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
         )
+        // Local `build` skips the unit/module test suite so constrained hardware
+        // (e.g. a Raspberry Pi) can produce a runnable jar without forking heavy test
+        // JVMs. CI runs the full suite with `-Pci` (see .github/workflows/ci.yml).
+        // The full-stack `integrationTest` task is separate and never gated here.
+        if (name == "test") {
+            onlyIf { project.hasProperty("ci") }
+        }
     }
 
     tasks.withType<JavaCompile> {
