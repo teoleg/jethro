@@ -48,8 +48,20 @@ else
   docker compose up -d redpanda postgres
 fi
 
-wait_for "Postgres"  120 docker compose exec -T postgres pg_isready -U jethro -d jethro
-wait_for "Redpanda"  120 docker compose exec -T redpanda rpk cluster health --exit-when-healthy
+# Postgres is a hard dependency: the app runs Flyway on startup and blocks without it.
+if ! wait_for "Postgres" 120 docker compose exec -T postgres pg_isready -U jethro -d jethro; then
+  echo "!! Postgres never became ready — the app needs it. Check: docker compose logs postgres"
+  exit 1
+fi
+
+# Redpanda is NOT a hard dependency: the app degrades gracefully and the Kafka client
+# reconnects on its own once the broker is up. So warn on timeout, don't abort.
+if ! wait_for "Redpanda" 90 docker compose exec -T redpanda rpk cluster health --exit-when-healthy; then
+  echo "!! Redpanda not reporting healthy yet — starting the app anyway; it will connect"
+  echo "   when the broker is ready. If live marks never appear in the UI, inspect it with:"
+  echo "     docker compose logs --tail 50 redpanda"
+  echo "     docker compose exec redpanda rpk cluster health"
+fi
 
 AI_ARGS=(--jethro.ai.enabled=false)
 if [ "$AI" = "on" ]; then
