@@ -4,7 +4,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /** Pushes named JSON events to connected browsers (SSE v0; WebSocket if bidirectional needs arrive). */
@@ -25,12 +24,21 @@ public final class SseBroadcaster {
     }
 
     public void broadcast(String eventName, Object payload) {
+        SseEmitter.SseEventBuilder event = SseEmitter.event().name(eventName).data(payload);
         for (SseEmitter emitter : emitters) {
             try {
-                emitter.send(SseEmitter.event().name(eventName).data(payload));
-            } catch (IOException | IllegalStateException e) {
+                emitter.send(event);
+            } catch (Exception e) {
+                // A disconnected browser (tab closed/refreshed) causes a broken-pipe
+                // write — expected, not an error. Drop the client and complete the
+                // emitter quietly so the async request is torn down cleanly.
                 emitters.remove(emitter);
-                log.debug("dropped SSE client: {}", e.getMessage());
+                try {
+                    emitter.complete();
+                } catch (Exception ignored) {
+                    // already closed
+                }
+                log.debug("dropped disconnected SSE client: {}", e.getMessage());
             }
         }
     }
