@@ -83,7 +83,9 @@
 
   let filter = "ALL";
   let instrClass = {};     // instrumentId -> assetClass
+  let cusipOf = {};        // instrumentId -> primary standard identifier
   let marks = [], positions = [];
+  const primaryId = sym => (sym && (sym.CUSIP || sym.ISIN || sym.GLOBEX || sym.ISO)) || null;
 
   function classes() {
     const set = new Set(Object.values(instrClass));
@@ -108,8 +110,8 @@
 
     const ps = positions.filter(p => match(p.instrumentId));
     document.getElementById("positions").outerHTML = '<div id="positions">' + (ps.length ?
-      "<table><tr><th>instr</th><th>book</th><th>market</th><th>qty</th><th>avg cost</th><th>mark</th><th>unrealized</th><th>realized</th><th>net exp</th></tr>" +
-      ps.map(p => `<tr><td class="cls">${esc(p.instrumentId)}</td><td class="muted">${esc(p.bookId)}</td>
+      "<table><tr><th>instr</th><th>CUSIP / ID</th><th>book</th><th>market</th><th>qty</th><th>avg cost</th><th>mark</th><th>unrealized</th><th>realized</th><th>net exp</th></tr>" +
+      ps.map(p => `<tr><td class="cls">${esc(p.instrumentId)}</td><td class="muted mono">${esc(cusipOf[p.instrumentId]||'—')}</td><td class="muted">${esc(p.bookId)}</td>
         <td class="muted">${esc(label(p.assetClass))}</td><td class="mono">${money(p.quantity)}</td>
         <td class="mono">${money(p.avgCost)}</td><td class="mono">${p.hasMark?money(p.mark):'—'}</td>
         <td class="mono ${cls(p.unrealizedPnl)}">${money(p.unrealizedPnl)}</td>
@@ -129,7 +131,7 @@
   async function init() {
     try {
       const instruments = await (await fetch("/api/instruments")).json();
-      instruments.forEach(i => instrClass[i.instrumentId] = i.assetClass);
+      instruments.forEach(i => { instrClass[i.instrumentId] = i.assetClass; cusipOf[i.instrumentId] = primaryId(i.symbology); });
     } catch (e) {}
     await refresh();
     setInterval(refresh, 2000);

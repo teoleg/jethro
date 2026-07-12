@@ -118,7 +118,8 @@
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const t = ms => new Date(ms).toLocaleTimeString();
   const QTY_LABEL = { EQUITY:"Shares", FUTURE:"Contracts", FX:"Notional", BOND:"Contracts", OPTION:"Contracts" };
-  let instrClass = {};
+  let instrClass = {}, cusipOf = {};
+  const primaryId = sym => (sym && (sym.CUSIP || sym.ISIN || sym.GLOBEX || sym.ISO)) || null;
 
   // ---- modal ----
   const overlay = document.getElementById("overlay");
@@ -153,7 +154,7 @@
   async function populate() {
     try {
       const instruments = await (await fetch("/api/instruments")).json();
-      instruments.forEach(i => instrClass[i.instrumentId] = i.assetClass);
+      instruments.forEach(i => { instrClass[i.instrumentId] = i.assetClass; cusipOf[i.instrumentId] = primaryId(i.symbology); });
       document.getElementById("instrument").innerHTML = instruments.map(i =>
         `<option value="${esc(i.instrumentId)}">${esc(i.instrumentId)} — ${esc(i.assetClass)}</option>`).join("");
       const books = flatten(await (await fetch("/api/books")).json(), []);
@@ -186,9 +187,9 @@
     fills.forEach(f => fillByOrder[f.orderId] = f); // one fill per order today
     document.getElementById("count").textContent = orders.length ? orders.length + " orders" : "";
     document.getElementById("blotter").outerHTML = '<div id="blotter">' + (orders.length ?
-      "<table><tr><th>time</th><th>instr</th><th>book</th><th>side</th><th>type</th><th>qty</th><th>limit</th><th>status</th><th>fill</th></tr>" +
+      "<table><tr><th>time</th><th>instr</th><th>CUSIP / ID</th><th>book</th><th>side</th><th>type</th><th>qty</th><th>limit</th><th>status</th><th>fill</th></tr>" +
       orders.map(o => { const f = fillByOrder[o.orderId]; return `<tr>
-        <td class="muted mono">${t(o.createdAtMillis)}</td><td>${esc(o.instrumentId)}</td><td class="muted">${esc(o.bookId)}</td>
+        <td class="muted mono">${t(o.createdAtMillis)}</td><td>${esc(o.instrumentId)}</td><td class="muted mono">${esc(cusipOf[o.instrumentId]||'—')}</td><td class="muted">${esc(o.bookId)}</td>
         <td class="${esc(o.side)}">${esc(o.side)}</td><td class="muted">${esc(o.orderType)}</td>
         <td class="mono">${esc(o.quantity)}</td><td class="mono muted">${esc(o.limitPrice||"—")}</td>
         <td><span class="st ${esc(o.status)}">${esc(o.status)}</span></td>
