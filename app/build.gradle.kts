@@ -16,6 +16,8 @@ dependencies {
     implementation(project(":modules:finops"))
 
     implementation(libs.spring.boot.starter)
+    implementation(libs.spring.boot.starter.web)
+    implementation(libs.kafka.clients)
 
     testImplementation(libs.spring.boot.starter.test)
     testImplementation(libs.archunit.junit5)
