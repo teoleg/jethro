@@ -1,11 +1,13 @@
 package io.jethro.app.strategy;
 
 import io.jethro.app.trading.TradingCoreLifecycle;
+import io.jethro.order.OrderService;
 import io.jethro.trading.algo.strategy.MomentumStrategy;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.trading.riskpnl.PreTradeGuardrail;
 import io.jethro.uigateway.AttentionFeed;
 import io.jethro.uigateway.SseBroadcaster;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -29,7 +31,11 @@ public class StrategyConfig {
     @Bean
     StrategyLifecycle strategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
                                         InstrumentRefSource refs, PreTradeGuardrail guardrail,
-                                        AttentionFeed feed, SseBroadcaster sse, StrategyProperties props) {
-        return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, feed, sse, props);
+                                        AttentionFeed feed, SseBroadcaster sse, StrategyProperties props,
+                                        ObjectProvider<OrderService> orderService) {
+        // OrderService present only when persistence is on; without it the strategy is
+        // suggestion-only even if auto-execute is set.
+        return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, feed, sse, props,
+                orderService.getIfAvailable());
     }
 }

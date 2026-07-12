@@ -22,6 +22,7 @@ PROFILE="${PROFILE:-pi}"
 HEAP="${HEAP:-512m}"
 AI="${AI:-off}"
 MODEL="${MODEL:-qwen2.5:0.5b}"
+AUTOEXEC="${AUTOEXEC:-off}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 
 wait_for() {  # name, timeout_seconds, command...
   local name="$1" timeout="$2"; shift 2
@@ -72,6 +73,12 @@ if [ "$AI" = "on" ]; then
   AI_ARGS=(--jethro.ai.model="$MODEL")
 fi
 
+EXTRA_ARGS=()
+if [ "$AUTOEXEC" = "on" ]; then
+  echo "==> AUTO-EXECUTE ON: the strategy will auto-submit SIMULATED orders (ADR-0019)"
+  EXTRA_ARGS+=(--jethro.strategy.auto-execute=true)
+fi
+
 mkdir -p logs
 LOG="logs/jethro-app.log"
 PIDFILE="logs/jethro-app.pid"
@@ -87,7 +94,7 @@ nohup java -Xmx"$HEAP" -XX:+UseZGC \
   --add-opens java.base/java.nio=ALL-UNNAMED \
   --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
   -jar "$JAR" \
-  --spring.profiles.active="$PROFILE" "${AI_ARGS[@]}" \
+  --spring.profiles.active="$PROFILE" "${AI_ARGS[@]}" "${EXTRA_ARGS[@]}" \
   >"$LOG" 2>&1 &
 APP_PID=$!
 echo "$APP_PID" >"$PIDFILE"

@@ -16,5 +16,9 @@ public record StrategyProperties(
         int lookback,
         BigDecimal thresholdBps,
         BigDecimal targetNotional,
-        String book) {
+        String book,
+        /** Auto-submit admissible signals (SIMULATED only, ADR-0019). Default false. */
+        boolean autoExecute,
+        /** Min seconds between auto-orders for the same instrument. */
+        long autoCooldownSeconds) {
 }
