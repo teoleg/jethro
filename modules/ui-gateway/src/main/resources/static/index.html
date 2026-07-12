@@ -79,6 +79,8 @@
   .marks { display:flex; gap:8px; flex-wrap:wrap; }
   .m { display:flex; align-items:baseline; gap:7px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:5px 10px; font-size:12px; }
   .m .sym { color:var(--dim); font-size:10px; letter-spacing:.05em; } .m.stale { border-color:var(--warn); }
+  .m { cursor:pointer; transition:.12s; } .m:hover { border-color:var(--brand); }
+  .m .ico { color:var(--dim); display:inline-flex; margin-left:2px; } .m:hover .ico { color:var(--brand); }
 </style>
 </head>
 <body>
@@ -105,9 +107,10 @@
   <div class="section-h">Needs your attention</div>
   <div id="feed"><div class="empty"><div class="big">all quiet</div>nothing needs you right now</div></div>
 
-  <div class="section-h">Live marks</div>
+  <div class="section-h">Live marks <span style="margin-left:8px;text-transform:none;letter-spacing:0;font-size:12px">— click a price for its history chart</span></div>
   <div class="marks" id="marks"></div>
 </main>
+<script src="/chart.js"></script>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
   const fmtAge = ms => ms < 2000 ? "live" : Math.round(ms / 1000) + "s";
@@ -145,8 +148,10 @@
 
   function renderMarks(marks) {
     document.getElementById("marks").innerHTML = marks.map(m =>
-      `<div class="m ${m.ageMillis > 10000 ? "stale" : ""}"><span class="sym">${esc(m.instrumentId)}</span>
-         <b class="mono">${esc(m.price)}</b><span class="muted">${fmtAge(m.ageMillis)}</span></div>`).join("");
+      `<div class="m ${m.ageMillis > 10000 ? "stale" : ""}" data-i="${esc(m.instrumentId)}" title="click for price history"><span class="sym">${esc(m.instrumentId)}</span>
+         <b class="mono">${esc(m.price)}</b><span class="muted">${fmtAge(m.ageMillis)}</span>
+         <span class="ico"><svg width="15" height="10" viewBox="0 0 15 10"><polyline points="0,9 4,4 8,6 15,0" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span></div>`).join("");
+    document.querySelectorAll("#marks .m").forEach(el => el.onclick = () => openChart(el.dataset.i));
   }
 
   function setStatus(on, text) { document.getElementById("status").className = "pill " + (on?"on":"off"); document.getElementById("statusText").textContent = text; }

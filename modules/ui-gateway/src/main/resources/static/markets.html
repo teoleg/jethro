@@ -42,21 +42,7 @@
   .m .sym { color:var(--dim); font-size:10px; letter-spacing:.05em; } .m .px { font-weight:600; } .m.stale { border-color:var(--warn); }
   .m .age { color:var(--dim); font-size:11px; }
   .m { cursor:pointer; transition:.12s; } .m:hover { border-color:var(--brand); }
-
-  /* price chart modal */
-  .overlay { position:fixed; inset:0; background:rgba(6,8,13,.66); backdrop-filter:blur(3px); display:none; align-items:flex-start; justify-content:center; z-index:50; }
-  .overlay.open { display:flex; }
-  .chartbox { background:var(--surface); border:1px solid var(--line-2); border-radius:16px; padding:18px 20px; margin-top:7vh; width:min(840px,94vw); box-shadow:0 24px 60px rgba(0,0,0,.5); }
-  .chartbox h3 { font-size:15px; display:flex; align-items:center; gap:12px; margin-bottom:12px; }
-  .chartbox h3 .x { cursor:pointer; color:var(--dim); background:none; border:0; font-size:22px; line-height:1; }
-  .ranges { display:flex; gap:6px; }
-  .ranges button { padding:4px 11px; border-radius:999px; border:1px solid var(--line-2); background:var(--surface-2); color:var(--dim); font:inherit; font-size:12px; cursor:pointer; }
-  .ranges button.on { color:#fff; background:var(--brand); border-color:var(--brand); }
-  #chart svg { width:100%; height:auto; display:block; }
-  #chart svg text { fill:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; }
-  #chart svg .grid { stroke:var(--line); stroke-width:1; }
-  #chart svg .line { fill:none; stroke:var(--brand); stroke-width:1.6; }
-  #chart svg .area { fill:var(--brand); opacity:.08; }
+  .m .ico { color:var(--dim); display:inline-flex; margin-left:2px; } .m:hover .ico { color:var(--brand); }
 
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:2px 4px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
@@ -84,21 +70,13 @@
 </div>
 <main>
   <div class="subtabs" id="subtabs"></div>
-  <div class="section-h">Prices</div>
+  <div class="section-h">Prices <span class="muted" style="margin-left:8px;text-transform:none;letter-spacing:0;font-size:12px">— click a price for its history chart</span></div>
   <div class="marks" id="marks"><span class="muted">loading…</span></div>
   <div class="section-h">Positions</div>
   <div class="panel"><div id="positions" class="muted" style="padding:16px">loading…</div></div>
 </main>
 
-<div class="overlay" id="chartOverlay">
-  <div class="chartbox">
-    <h3><span id="chartTitle">—</span><span style="flex:1"></span>
-      <span class="ranges" id="ranges"></span>
-      <button class="x" id="chartClose">&times;</button></h3>
-    <div id="chart"><span class="muted">loading…</span></div>
-    <div class="muted" id="chartMeta" style="font-size:11px;margin-top:8px"></div>
-  </div>
-</div>
+<script src="/chart.js"></script>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
   const fmtAge = ms => ms < 2000 ? "live" : Math.round(ms / 1000) + "s";
@@ -130,8 +108,9 @@
     renderSubtabs();
     const ms = marks.filter(m => match(m.instrumentId));
     document.getElementById("marks").innerHTML = ms.length ? ms.map(m =>
-      `<div class="m ${m.ageMillis>10000?'stale':''}" data-i="${esc(m.instrumentId)}" title="click for chart"><span class="sym">${esc(m.instrumentId)}</span>
-        <span class="px mono">${esc(m.price)}</span><span class="age">${fmtAge(m.ageMillis)}</span></div>`).join("")
+      `<div class="m ${m.ageMillis>10000?'stale':''}" data-i="${esc(m.instrumentId)}" title="click for price history"><span class="sym">${esc(m.instrumentId)}</span>
+        <span class="px mono">${esc(m.price)}</span><span class="age">${fmtAge(m.ageMillis)}</span>
+        <span class="ico"><svg width="15" height="10" viewBox="0 0 15 10"><polyline points="0,9 4,4 8,6 15,0" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span></div>`).join("")
       : '<span class="muted">no live prices</span>';
     document.querySelectorAll("#marks .m").forEach(el => el.onclick = () => openChart(el.dataset.i));
 
@@ -155,55 +134,7 @@
     } catch (e) {}
   }
 
-  // ---- price history chart (click a price tile) ----
-  const RANGES = [{label:"30m",min:30},{label:"1h",min:60},{label:"2h",min:120}];
-  let chartInstrument = null, chartMinutes = 120;
-  const chartOverlay = document.getElementById("chartOverlay");
-  const closeChart = () => chartOverlay.classList.remove("open");
-  document.getElementById("chartClose").onclick = closeChart;
-  chartOverlay.onclick = e => { if (e.target === chartOverlay) closeChart(); };
-  document.addEventListener("keydown", e => { if (e.key === "Escape") closeChart(); });
-
-  function renderRanges() {
-    document.getElementById("ranges").innerHTML = RANGES.map(r =>
-      `<button data-m="${r.min}" class="${r.min===chartMinutes?'on':''}">${r.label}</button>`).join("");
-    document.querySelectorAll("#ranges button").forEach(b => b.onclick = () => { chartMinutes = +b.dataset.m; renderRanges(); loadChart(); });
-  }
-
-  function openChart(instrumentId) {
-    chartInstrument = instrumentId; chartMinutes = 120;
-    document.getElementById("chartTitle").textContent = instrumentId + "  ·  price";
-    chartOverlay.classList.add("open");
-    renderRanges(); loadChart();
-  }
-
-  async function loadChart() {
-    const el = document.getElementById("chart"), meta = document.getElementById("chartMeta");
-    try {
-      const pts = await (await fetch(`/api/history/${encodeURIComponent(chartInstrument)}?minutes=${chartMinutes}`)).json();
-      el.innerHTML = svgChart(pts);
-      if (pts.length > 1) {
-        const f = Number(pts[0].price), l = Number(pts[pts.length-1].price), ch = (l-f)/f*100;
-        meta.textContent = `${pts.length} points · ${new Date(pts[0].t).toLocaleTimeString()} → ${new Date(pts[pts.length-1].t).toLocaleTimeString()} · change ${ch>=0?'+':''}${ch.toFixed(2)}%`;
-      } else meta.textContent = "";
-    } catch (e) { el.innerHTML = '<span class="muted">history unavailable</span>'; meta.textContent = ""; }
-  }
-
-  function svgChart(points) {
-    if (points.length < 2) return '<span class="muted">not enough history yet — give it a minute</span>';
-    const W=800, H=300, pl=64, pr=14, pt=14, pb=26;
-    const t0=points[0].t, t1=points[points.length-1].t || (t0+1);
-    const ys=points.map(p=>Number(p.price)), mn=Math.min(...ys), mx=Math.max(...ys), span=(mx-mn)||1;
-    const X=t => pl + (t1===t0?0:(t-t0)/(t1-t0))*(W-pl-pr);
-    const Y=v => H-pb - ((v-mn)/span)*(H-pt-pb);
-    const line=points.map((p,i)=>`${i?'L':'M'}${X(p.t).toFixed(1)},${Y(Number(p.price)).toFixed(1)}`).join(" ");
-    const area=`M${X(t0).toFixed(1)},${H-pb} `+points.map(p=>`L${X(p.t).toFixed(1)},${Y(Number(p.price)).toFixed(1)}`).join(" ")+` L${X(t1).toFixed(1)},${H-pb} Z`;
-    const fmt=v=>v.toLocaleString(undefined,{maximumFractionDigits:4});
-    const rows=[mx,(mx+mn)/2,mn].map(v=>`<line class="grid" x1="${pl}" y1="${Y(v).toFixed(1)}" x2="${W-pr}" y2="${Y(v).toFixed(1)}"/><text x="${pl-8}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end">${fmt(v)}</text>`).join("");
-    return `<svg viewBox="0 0 ${W} ${H}">${rows}<path class="area" d="${area}"/><path class="line" d="${line}"/>`+
-      `<text x="${pl}" y="${H-8}">${new Date(t0).toLocaleTimeString()}</text>`+
-      `<text x="${W-pr}" y="${H-8}" text-anchor="end">${new Date(t1).toLocaleTimeString()}</text></svg>`;
-  }
+  // price history chart is provided by /chart.js — window.openChart(instrumentId)
 
   async function init() {
     try {
