@@ -15,6 +15,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
@@ -116,6 +119,40 @@ class FullStackIT {
         assertEquals(4, instruments.size(), "seeded sim instruments");
         assertEquals("1.00000000", instruments.get(0).get("contractMultiplier").asText(),
                 "multiplier arrives as exact decimal string");
+    }
+
+    @Test
+    void submittingAMarketOrderPersistsAndFillsAgainstTheLiveMark() {
+        // Exercises the full order write path against real Postgres + Redpanda: NEW →
+        // ROUTED → simulated FILL at the live mark, persisted to orders/fills and
+        // published. A market order rejects when no mark is cached yet, so retry with a
+        // fresh order until marks have propagated to the order module's price cache.
+        String body = """
+                {"bookId":"ALPHA","instrumentId":"AAPL","side":"BUY","type":"MARKET","quantity":"100"}""";
+
+        JsonNode filled = await("market order fills", Duration.ofSeconds(120), () -> {
+            JsonNode resp = postJson("/api/orders", body);
+            return resp != null && "FILLED".equals(resp.path("status").asText()) ? resp : null;
+        });
+        assertEquals("AAPL", filled.get("instrumentId").asText());
+        assertEquals("100.000000", filled.get("quantity").asText(), "quantity persisted as exact decimal");
+
+        JsonNode fills = getJson("/api/fills");
+        assertTrue(fills != null && fills.size() >= 1, "the fill persisted and is queryable");
+        assertTrue(fills.get(0).get("price").asText().matches("\\d+\\.\\d{6}"),
+                "fill price is an exact decimal");
+    }
+
+    private JsonNode postJson(String path, String body) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            String resp = http.postForObject(
+                    "http://localhost:" + port + path, new HttpEntity<>(body, headers), String.class);
+            return resp == null ? null : JSON.readTree(resp);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private AiDecision pollLatestDecision() {

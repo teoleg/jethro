@@ -10,6 +10,8 @@ import io.jethro.domain.Side;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,14 +39,14 @@ public class OrderRepository implements OrderStore {
                 order.orderId(), order.idempotencyKey(), order.bookId().value(),
                 order.instrumentId().value(), order.side().name(), order.type().name(),
                 order.quantity(), order.limitPrice().orElse(null), order.status().name(),
-                Instant.now(), Instant.now());
+                ts(order.createdAt()), ts(now));
         return rows == 1;
     }
 
     @Override
     public void updateStatus(String orderId, OrderStatus status, String reason, Instant now) {
         jdbc.update("update orders set status = ?, reason = ?, updated_at = ? where order_id = ?",
-                status.name(), reason, now, orderId);
+                status.name(), reason, ts(now), orderId);
     }
 
     @Override
@@ -55,7 +57,15 @@ public class OrderRepository implements OrderStore {
                 on conflict (fill_id) do nothing
                 """,
                 fill.fillId(), fill.orderId(), fill.bookId().value(), fill.instrumentId().value(),
-                fill.side().name(), fill.quantity(), fill.price(), fill.executedAt());
+                fill.side().name(), fill.quantity(), fill.price(), ts(fill.executedAt()));
+    }
+
+    /**
+     * PgJDBC cannot infer a SQL type for a bare {@link Instant}; {@link OffsetDateTime}
+     * is the unambiguous binding for a {@code timestamptz} column.
+     */
+    private static OffsetDateTime ts(Instant instant) {
+        return instant.atOffset(ZoneOffset.UTC);
     }
 
     @Override
