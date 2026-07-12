@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 #
-# Build (no tests), bring up Docker infra, and start the app — one command.
-# Designed for constrained hardware (e.g. Raspberry Pi): builds the boot jar without
-# the test suite, runs the app as a plain JVM (no resident Gradle daemon), and by
-# default leaves the local SLM (Ollama) OFF so the market path + UI come up light.
+# Build (no tests), bring up Docker infra, and start the app in the background — one
+# command. Designed for constrained hardware (e.g. Raspberry Pi): builds the boot jar
+# without the test suite, runs the app as a plain detached JVM (nohup, no resident
+# Gradle daemon), and by default leaves the local SLM (Ollama) OFF so the market path +
+# UI come up light. The app keeps running after you close the terminal; logs go to
+# logs/jethro-app.log. Stop it with scripts/stop-local.sh.
 #
 # Usage:
 #   ./scripts/run-local.sh                 # app + Redpanda + Postgres, AI off
@@ -70,10 +72,38 @@ if [ "$AI" = "on" ]; then
   AI_ARGS=(--jethro.ai.model="$MODEL")
 fi
 
-echo "==> Starting app: profile=$PROFILE heap=$HEAP ai=$AI"
-echo "==> UI at http://localhost:8080  (Ctrl+C to stop the app; 'scripts/stop-local.sh' stops Docker)"
-exec java -Xmx"$HEAP" -XX:+UseZGC \
+mkdir -p logs
+LOG="logs/jethro-app.log"
+PIDFILE="logs/jethro-app.pid"
+
+# Refuse to double-start: one background app at a time.
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
+  echo "!! app already running (pid $(cat "$PIDFILE")). Stop it first: scripts/stop-local.sh"
+  exit 1
+fi
+
+echo "==> Starting app in background: profile=$PROFILE heap=$HEAP ai=$AI"
+nohup java -Xmx"$HEAP" -XX:+UseZGC \
   --add-opens java.base/java.nio=ALL-UNNAMED \
   --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
   -jar "$JAR" \
-  --spring.profiles.active="$PROFILE" "${AI_ARGS[@]}"
+  --spring.profiles.active="$PROFILE" "${AI_ARGS[@]}" \
+  >"$LOG" 2>&1 &
+APP_PID=$!
+echo "$APP_PID" >"$PIDFILE"
+echo "==> App launched (pid $APP_PID), logs → $LOG"
+
+# Give it a moment; if it died immediately (bad jar, port in use), say so.
+sleep 2
+if ! kill -0 "$APP_PID" 2>/dev/null; then
+  echo "!! app exited during startup — last log lines:"; tail -n 20 "$LOG"; rm -f "$PIDFILE"; exit 1
+fi
+
+if command -v curl >/dev/null 2>&1; then
+  wait_for "app UI on :8080" 90 curl -fs http://localhost:8080/api/marks || \
+    echo "   (still starting — follow it with: tail -f $LOG)"
+fi
+
+echo "==> UI at http://localhost:8080"
+echo "==> Follow logs:  tail -f $LOG"
+echo "==> Stop app+infra: scripts/stop-local.sh   |   Wipe all data: scripts/clean-local.sh"
