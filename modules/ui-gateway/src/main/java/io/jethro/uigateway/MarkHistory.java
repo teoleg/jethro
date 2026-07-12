@@ -40,6 +40,22 @@ public final class MarkHistory {
         }
     }
 
+    /** Number of instruments with recorded history (for diagnostics). */
+    public int instrumentCount() {
+        return series.size();
+    }
+
+    /** Current point count for one instrument (for diagnostics). */
+    public int pointCount(String instrumentId) {
+        Deque<Point> points = series.get(instrumentId);
+        if (points == null) {
+            return 0;
+        }
+        synchronized (points) {
+            return points.size();
+        }
+    }
+
     /** Points at or after {@code sinceMillis}, oldest first. Empty if the instrument is unknown. */
     public List<Point> since(String instrumentId, long sinceMillis) {
         Deque<Point> points = series.get(instrumentId);

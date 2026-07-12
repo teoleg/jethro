@@ -37,6 +37,7 @@ public final class UiGatewayRuntime implements AutoCloseable {
     private final AttentionRules rules;
     private final SseBroadcaster sse;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final java.util.concurrent.atomic.AtomicLong marksConsumed = new java.util.concurrent.atomic.AtomicLong();
     private volatile Thread consumerThread;
 
     public UiGatewayRuntime(String bootstrapServers, MarkState markState, MarkHistory markHistory,
@@ -110,6 +111,12 @@ public final class UiGatewayRuntime implements AutoCloseable {
         long providerMillis = event.getMeta().getProviderTimestamp().toEpochMilli();
         markState.update(event.getInstrumentId(), price, event.getSource(), providerMillis);
         markHistory.record(instrumentId, price, providerMillis);
+        // Diagnostic: prove history is filling. Logs about every ~20s of marks.
+        long n = marksConsumed.incrementAndGet();
+        if (n % 180 == 0) {
+            log.info("ui-gateway: consumed {} md.marks; history {} instruments, {} pts for {}",
+                    n, markHistory.instrumentCount(), markHistory.pointCount(instrumentId), instrumentId);
+        }
     }
 
     private void onDecision(AiDecision decision) {
