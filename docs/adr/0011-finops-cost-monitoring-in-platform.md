@@ -1,6 +1,6 @@
 # ADR-0011: FinOps in the platform — finops-service, tagged AWS costs, Costs tile in the UI
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** finops, aws, ui, cost

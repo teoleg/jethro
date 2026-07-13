@@ -1,6 +1,6 @@
 # ADR-0012: Redpanda as the Kafka-API backbone; at-least-once + idempotent consumers
 
-- **Status:** Proposed (supersedes ADR-0004)
+- **Status:** Accepted (supersedes ADR-0004)
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** messaging, aws, cost

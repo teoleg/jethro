@@ -1,6 +1,6 @@
 # ADR-0019: Simulated auto-execution — the deterministic strategy may auto-trade in sim, hard-gated off real brokers
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** order, risk, ai, strategy
@@ -62,3 +62,25 @@ the existing order path reuses the guardrail and audit for free. Revisit at extr
 - Follow-ups: when the order module is extracted for a real broker (ADR-0015), remove or
   re-gate this flag behind a real-trading-policy ADR; a kill-switch / max-orders-per-interval
   cap when auto-execution runs unattended for long periods.
+
+## Addendum (2026-07-13): closing the loop — exits and de-risking
+
+The initial implementation only auto-*opened* positions; there was no automated way to
+*reduce* risk, so a losing position rode forever and a book at its loss cap just re-alarmed
+(the guardrail froze new risk but nothing unwound the old). Within this ADR's scope (the
+deterministic strategy submitting simulated, guardrailed orders), the strategy now also:
+
+- **Per-position stop-loss / take-profit** (`jethro.strategy.stop-loss-pct` /
+  `take-profit-pct`): closes a managed position whose unrealized return crosses the
+  threshold. Price-quoted classes only — swaps are par-rate-quoted (bp scale), managed by
+  de-risk + opposite signals until a bp-denominated rates stop exists.
+- **Book de-risk backstop** (`jethro.strategy.derisk-on-loss-cap`, default on): when a
+  managed book with live exposure reaches its configured max-loss cap, the strategy flattens
+  it with risk-reducing orders (always guardrail-admissible) and shows a de-risk attention
+  card until it is flat. The separate loss ALERT persists — the day's realized loss happened.
+- **Long-only by default** (`jethro.strategy.allow-short`, default false): a SELL signal may
+  only reduce an existing long, clamped so it never crosses through flat into a short.
+
+These are refinements of this decision, not a new one: still deterministic, still simulated,
+still guardrailed, off/safe by default. They also make unattended auto-execution safer
+(positions can close), partially addressing the kill-switch follow-up above.

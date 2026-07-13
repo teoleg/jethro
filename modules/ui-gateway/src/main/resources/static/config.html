@@ -120,7 +120,9 @@
         targetNotional:"target order notional", maxOrderNotional:"max order notional (default)",
         maxOrderNotionalByClass:"max order notional by class", maxPositionNotional:"max position notional",
         volReferenceBps:"vol reference (bps)", book:"default book", bookByClass:"book routing",
-        autoExecute:"auto-execute (sim only)", autoCooldownSeconds:"auto cooldown (s)"}) + '</div>';
+        autoExecute:"auto-execute (sim only)", autoCooldownSeconds:"auto cooldown (s)",
+        allowShort:"allow shorts", stopLossPct:"stop-loss (fraction)", takeProfitPct:"take-profit (fraction)",
+        deriskOnLossCap:"de-risk on loss cap"}) + '</div>';
 
       document.getElementById("sim").outerHTML = '<div id="sim">' + kvTable(cfg.sim, {
         enabled:"trading-core enabled", simSeed:"seed", simInstruments:"instruments",

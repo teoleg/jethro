@@ -1,6 +1,6 @@
 # ADR-0013: Dev cost posture — one EC2 node runs the compose stack; managed services deferred behind triggers
 
-- **Status:** Proposed (amends ADR-0005 and ADR-0007 for the dev environment)
+- **Status:** Accepted (amends ADR-0005 and ADR-0007 for the dev environment)
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** aws, cost, infra, finops

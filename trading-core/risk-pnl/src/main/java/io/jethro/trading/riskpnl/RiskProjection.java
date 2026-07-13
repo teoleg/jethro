@@ -161,6 +161,14 @@ public final class RiskProjection {
         return new Exposure(p8(gross), p8(net));
     }
 
+    /** The SIGNED quantity a book holds in one instrument (positive = long); zero if
+     *  flat/absent. Quantity, not notional — lets the strategy clamp a reducing order so
+     *  it never crosses through flat into a short (long-only guard). */
+    public synchronized BigDecimal positionQuantity(String bookId, String instrumentId) {
+        Position pos = positions.get(key(bookId, instrumentId));
+        return pos == null ? BigDecimal.ZERO : pos.quantity();
+    }
+
     /**
      * The SIGNED notional a book currently holds in one instrument (positive = long) —
      * lets the strategy distinguish adding to a position from reducing it. Zero without

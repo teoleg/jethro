@@ -1,6 +1,6 @@
 # ADR-0014: Fuse the market path into trading-core — in-process ticks, durable log for transactions only
 
-- **Status:** Proposed (amends ADR-0003: market-path services fused; order/reference/UI services unchanged)
+- **Status:** Accepted (amends ADR-0003: market-path services fused; order/reference/UI services unchanged)
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** architecture, latency, storage, cost

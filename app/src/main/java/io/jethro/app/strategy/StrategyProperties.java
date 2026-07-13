@@ -41,7 +41,39 @@ public record StrategyProperties(
         Double volReferenceBps,
         /** Per-asset-class order-notional caps (e.g. BOND=150000 so one Treasury contract
          *  is sizeable); classes not listed use maxOrderNotional. */
-        Map<String, BigDecimal> maxOrderNotionalByClass) {
+        Map<String, BigDecimal> maxOrderNotionalByClass,
+        /** Long-only guard: when false (default), a SELL signal may only REDUCE an existing
+         *  long — never open or extend a short. Set true to let the strategy take shorts. */
+        Boolean allowShort,
+        /** Per-position stop-loss: close a position whose unrealized return is at/below
+         *  −stopLossPct (e.g. 0.008 = 0.8%). Null/≤0 disables. The risk-reducing half of
+         *  the loop (ADR-0019) — without it a losing position rides forever. */
+        BigDecimal stopLossPct,
+        /** Per-position take-profit: close a position whose unrealized return is at/above
+         *  +takeProfitPct. Null/≤0 disables. */
+        BigDecimal takeProfitPct,
+        /** Book de-risk backstop: when a strategy-managed book's total loss is at/over its
+         *  configured max-loss cap, flatten its positions (risk-reducing orders, always
+         *  admissible). Default true — this is what makes a floored book actually unwind. */
+        Boolean deriskOnLossCap) {
+
+    public boolean allowShortOrDefault() {
+        return allowShort != null && allowShort;
+    }
+
+    public boolean deriskOnLossCapOrDefault() {
+        return deriskOnLossCap == null || deriskOnLossCap;
+    }
+
+    /** Stop-loss as a positive fraction, or null when disabled. */
+    public BigDecimal stopLossPctOrNull() {
+        return stopLossPct != null && stopLossPct.signum() > 0 ? stopLossPct : null;
+    }
+
+    /** Take-profit as a positive fraction, or null when disabled. */
+    public BigDecimal takeProfitPctOrNull() {
+        return takeProfitPct != null && takeProfitPct.signum() > 0 ? takeProfitPct : null;
+    }
 
     public double thresholdSigmasOrDefault() {
         return thresholdSigmas != null ? thresholdSigmas : 2.5;

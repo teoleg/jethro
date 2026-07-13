@@ -1,6 +1,6 @@
 # ADR-0018: AI trade suggestions — frontier tier proposes, deterministic guardrails gate, human executes
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** ai, ui, order, risk

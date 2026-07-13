@@ -1,6 +1,6 @@
 # ADR-0017: Attention-first UI — agents curate, humans see what needs them
 
-- **Status:** Proposed (reshapes the information architecture of ADR-0006; stack unchanged)
+- **Status:** Accepted (reshapes the information architecture of ADR-0006; stack unchanged)
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** ui, ai, architecture

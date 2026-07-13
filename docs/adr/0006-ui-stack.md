@@ -1,6 +1,6 @@
 # ADR-0006: UI in TypeScript + React (Vite), streaming over WebSocket
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** ui
