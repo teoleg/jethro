@@ -50,13 +50,18 @@ public final class HypothesisGenerator {
                "thesis": <one short sentence, your reasoning>,
                "sources": <array of narrative item ids that informed this, or []>}
 
-            Strict rules:
+            Example output:
+              [{"instrument":"AAPL","direction":"BUY","horizon":"SWING","conviction":"MEDIUM",
+                "thesis":"Upbeat earnings headline and a firm price support a long.","sources":["sim-news-3"]}]
+
+            Rules:
             - Choose "instrument" ONLY from tradableInstruments. Never invent a ticker.
             - Do NOT output any price, size, quantity, percentage, or numeric target. \
             Direction and conviction only — the risk system computes all numbers.
-            - Base each thesis on the narrative and marks provided; if nothing stands out, \
-            return an empty array [].
-            - No text outside the JSON array.""";
+            - Base each thesis on the narrative and marks. Prefer names with the strongest recent \
+            move or a matching headline; aim to return at least one hypothesis when a headline is \
+            clearly directional. Use [] only if truly nothing is actionable.
+            - Output the JSON array only — no prose, no markdown fences.""";
 
     private final ModelInferenceClient client;
     private final DecisionSink sink;
@@ -83,19 +88,9 @@ public final class HypothesisGenerator {
 
     private List<Hypothesis> parse(String text, HypothesisContext context) {
         List<Hypothesis> out = new ArrayList<>();
-        int start = text.indexOf('[');
-        int end = text.lastIndexOf(']');
-        if (start < 0 || end <= start) {
-            return out; // no array — the model produced nothing usable
-        }
-        JsonNode array;
-        try {
-            array = JSON.readTree(text.substring(start, end + 1));
-        } catch (Exception e) {
-            return out;
-        }
-        if (!array.isArray()) {
-            return out;
+        JsonNode array = extractArray(text);
+        if (array == null) {
+            return out; // nothing parseable — the model produced no usable JSON
         }
         for (JsonNode node : array) {
             Hypothesis h = validate(node, context);
@@ -107,6 +102,41 @@ public final class HypothesisGenerator {
             }
         }
         return out;
+    }
+
+    /**
+     * Pulls a JSON array out of the model's reply. Tolerant of a small model: accepts a bare
+     * array, and if it emitted a single object (no array) wraps it — so one valid hypothesis
+     * isn't lost to a missing pair of brackets. Ignores prose/markdown around the JSON.
+     */
+    private static JsonNode extractArray(String text) {
+        int start = text.indexOf('[');
+        int end = text.lastIndexOf(']');
+        if (start >= 0 && end > start) {
+            try {
+                JsonNode node = JSON.readTree(text.substring(start, end + 1));
+                if (node.isArray()) {
+                    return node;
+                }
+            } catch (Exception ignored) {
+                // fall through to the single-object attempt
+            }
+        }
+        int objStart = text.indexOf('{');
+        int objEnd = text.lastIndexOf('}');
+        if (objStart >= 0 && objEnd > objStart) {
+            try {
+                JsonNode obj = JSON.readTree(text.substring(objStart, objEnd + 1));
+                if (obj.isObject()) {
+                    ArrayNode wrapped = JSON.createArrayNode();
+                    wrapped.add(obj);
+                    return wrapped;
+                }
+            } catch (Exception ignored) {
+                // no usable JSON
+            }
+        }
+        return null;
     }
 
     /** Field-by-field validation: a hallucinated instrument, bad enum, or empty thesis is dropped. */

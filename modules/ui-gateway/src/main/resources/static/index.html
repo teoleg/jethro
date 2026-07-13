@@ -30,8 +30,15 @@
   .tab.active { color:var(--txt); background:var(--surface-2); }
   .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
   .spacer { flex:1; }
+  .feeds { display:flex; gap:6px; }
   .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
   .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); } .pill.on .led { background:var(--up); box-shadow:0 0 8px var(--up); } .pill.off .led { background:var(--warn); }
+  .led.ok { background:var(--up); box-shadow:0 0 8px var(--up); } .led.warn { background:var(--warn); } .led.bad { background:var(--down); }
+
+  /* price ticker strip across the top of the landing page */
+  .ticker { grid-column:1 / -1; display:flex; gap:8px; overflow-x:auto; padding:2px 2px 12px; margin-bottom:2px; border-bottom:1px solid var(--line); scrollbar-width:thin; }
+  .tk { display:flex; align-items:baseline; gap:7px; background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:5px 11px; white-space:nowrap; }
+  .tk .s { color:var(--dim); font-size:10px; letter-spacing:.04em; } .tk .p { font-weight:600; font-size:13px; }
 
   main { max-width:1780px; margin:0 auto; padding:18px 24px 40px; display:grid; gap:18px; grid-template-columns:1.05fr 0.95fr; align-items:start; }
   @media (max-width:920px) { main { grid-template-columns:1fr; } }
@@ -98,10 +105,14 @@
       <a class="tab" href="/backtest.html">Backtest</a>
     </nav>
     <span class="spacer"></span>
+    <span class="feeds" id="feeds"></span>
     <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
   </div>
 </div>
 <main>
+  <!-- price ticker across the top -->
+  <div class="ticker" id="ticker"><span class="muted" style="padding:4px 8px">loading prices…</span></div>
+
   <!-- LEFT: book & risk -->
   <div class="col">
     <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
@@ -198,6 +209,28 @@
 
   async function loadRisk() { try { renderRisk(await (await fetch("/api/risk")).json()); } catch (e) {} }
 
+  // ---- price ticker + feed connection indicators ----
+  let tickPrev = {};
+  function setFeeds(freshAge) {
+    // Per-feed connection LEDs on the same line as the stream pill. Market data now; per-source
+    // (sim / yahoo) LEDs arrive with the market-data adapter (ADR-0023).
+    const md = freshAge == null ? "bad" : (freshAge < 10000 ? "ok" : "warn");
+    const label = freshAge == null ? "market data: down" : (freshAge < 10000 ? "market data" : "market data: stale");
+    document.getElementById("feeds").innerHTML = `<span class="pill"><span class="led ${md}"></span>${label}</span>`;
+  }
+  async function loadTicker() {
+    try {
+      const marks = (await (await fetch("/api/marks")).json()).filter(m => !m.instrumentId.startsWith("USD.SOFR."));
+      document.getElementById("ticker").innerHTML = marks.length ? marks.map(m => {
+        const prev = tickPrev[m.instrumentId], now = Number(m.price);
+        const c = prev == null ? "flat" : (now > prev ? "up" : (now < prev ? "down" : "flat"));
+        tickPrev[m.instrumentId] = now;
+        return `<div class="tk"><span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(m.price)}</span></div>`;
+      }).join("") : '<span class="muted" style="padding:4px 8px">no live prices</span>';
+      setFeeds(marks.length ? Math.min(...marks.map(m => m.ageMillis)) : null);
+    } catch (e) { setFeeds(null); }
+  }
+
   // ---- scenario / stress panel ----
   function renderStress(rows) {
     const covered = rows.some(s => s.positionsCovered > 0);
@@ -225,13 +258,16 @@
         const bt = r.backtestSupports == null ? '<span class="muted">—</span>'
           : (r.backtestSupports ? `<span class="up" title="strategy net-positive on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">supported</span>`
                                 : `<span class="down" title="strategy not profitable on this name">unsupported</span>`);
+        const verdictCell = r.autonomous
+          ? '<span class="up" title="auto-executed within the risk envelope (simulated)">AUTO ✓</span>'
+          : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</span>`;
         return `<tr><td title="${esc(r.note||'')}">${esc(r.instrumentId)} — ${esc(r.thesis)}</td>
           <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conviction)}</td>
-          <td class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</td>
+          <td>${verdictCell}</td>
           <td class="mono">${sz}</td><td>${bt}</td></tr>`;
       }).join("") + "</table>" +
-      '<div class="muted" style="font-size:11px;padding:6px 12px">Model proposes direction only; every number is the quant layer\'s. Admissible ones also appear on the attention feed for one-click execution.</div>'
-      : '<div class="muted" style="padding:14px">no hypotheses yet — the model runs on a cadence (needs Ollama up)</div>') + '</div>';
+      '<div class="muted" style="font-size:11px;padding:6px 12px">Model proposes direction only; every number is the quant layer\'s. Admissible ones appear on the attention feed; inside the risk envelope (if autonomy is on) they auto-execute as simulated orders.</div>'
+      : '<div class="muted" style="padding:14px">no hypotheses right now — the model runs every ~90s; if Ollama is up, a 3B model often returns none until a directional headline appears (see the strategy log line "hypotheses: model proposed N")</div>') + '</div>';
   }
   async function loadHypotheses() { try { renderHypotheses(await (await fetch("/api/hypotheses")).json()); } catch (e) {} }
 
@@ -267,7 +303,9 @@
   loadOrders();
   loadStress();
   loadHypotheses();
+  loadTicker();
   setInterval(loadRisk, 2000);
+  setInterval(loadTicker, 2000);
   setInterval(loadStress, 10000);
   setInterval(loadHypotheses, 15000);
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only

@@ -2,10 +2,14 @@ package io.jethro.app.hypothesis;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.math.BigDecimal;
+import java.util.List;
+
 /**
  * Config for the LLM hypothesis layer (ADR-0022, jethro.hypothesis). The model proposes
  * structured theses on a cadence; the deterministic quant layer sizes/gates them (sizing
- * params come from {@code jethro.strategy}). Human-in-loop in this slice — no auto-execute.
+ * params come from {@code jethro.strategy}). Human-in-loop by default; {@link Autonomy}
+ * opens a tight, deterministic envelope for hands-off simulated execution.
  */
 @ConfigurationProperties(prefix = "jethro.hypothesis")
 public record HypothesisProperties(
@@ -14,7 +18,44 @@ public record HypothesisProperties(
         Integer maxPerCycle,
         Integer maxOutputTokens,
         Long narrativeSeed,
-        Integer backtestTicks) {
+        Integer backtestTicks,
+        Autonomy autonomy) {
+
+    /**
+     * The deterministic risk envelope for bounded autonomy (ADR-0022): a thesis auto-executes
+     * (simulated, ADR-0019) only if ALL hold — autonomy on, the backtest supports it, conviction
+     * ≥ min, order notional ≤ the (tight) autonomy cap, and the instrument is whitelisted (empty
+     * = all). Outside the envelope it stays a human-review card. The model never widens this —
+     * it's operator config, evaluated in code. Default OFF; must never front a real broker.
+     */
+    public record Autonomy(Boolean enabled, String minConviction, BigDecimal maxOrderNotional,
+                           Long cooldownSeconds, List<String> whitelist) {
+
+        public boolean enabledOrDefault() {
+            return enabled != null && enabled;
+        }
+
+        public String minConvictionOrDefault() {
+            return minConviction != null ? minConviction : "HIGH";
+        }
+
+        public BigDecimal maxOrderNotionalOrDefault() {
+            return maxOrderNotional != null ? maxOrderNotional : new BigDecimal("10000");
+        }
+
+        public long cooldownSecondsOrDefault() {
+            return cooldownSeconds != null ? cooldownSeconds : 300;
+        }
+
+        public List<String> whitelistOrEmpty() {
+            return whitelist != null ? whitelist : List.of();
+        }
+    }
+
+    /** Never-null autonomy view (all-default when the block is absent). */
+    public Autonomy autonomyOrDefault() {
+        return autonomy != null ? autonomy : new Autonomy(null, null, null, null, null);
+    }
 
     public int backtestTicksOrDefault() {
         return backtestTicks != null && backtestTicks > 0 ? backtestTicks : 15_000;

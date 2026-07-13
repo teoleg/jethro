@@ -3,7 +3,11 @@ package io.jethro.app.hypothesis;
 import io.jethro.app.backtest.BacktestResult;
 import io.jethro.app.backtest.BacktestService;
 import io.jethro.app.trading.TradingCoreLifecycle;
+import io.jethro.domain.OrderType;
 import io.jethro.domain.Side;
+import io.jethro.order.NewOrder;
+import io.jethro.order.OrderService;
+import io.jethro.trading.riskpnl.InstrumentRef;
 import io.jethro.trading.algo.hypothesis.Hypothesis;
 import io.jethro.trading.algo.hypothesis.HypothesisContext;
 import io.jethro.trading.algo.hypothesis.NarrativeItem;
@@ -25,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -51,21 +56,27 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private final AttentionFeed feed;
     private final SseBroadcaster sse;
     private final HypothesisProperties props;
+    private final AutonomyEnvelope envelope;
+    private final OrderService orderService; // nullable: null → human-in-loop only
 
     private final Set<String> active = new HashSet<>();
+    private final Map<String, Long> lastAutoExec = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicLong consecutiveFailures = new AtomicLong();
     private volatile List<HypothesisEvaluator.Evaluated> latest = List.of();
+    private volatile Set<String> autoTradedIds = Set.of();
     private volatile ScheduledExecutorService scheduler;
 
     public HypothesisLifecycle(io.jethro.trading.algo.hypothesis.HypothesisGenerator generator,
                                HypothesisEvaluator evaluator, SimNarrativeFeed narrativeFeed,
                                BacktestService backtest, TradingCoreLifecycle tradingCore, RiskProjection risk,
                                InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
-                               HypothesisProperties props) {
+                               HypothesisProperties props, OrderService orderService) {
         this.generator = generator;
         this.evaluator = evaluator;
         this.narrativeFeed = narrativeFeed;
         this.backtest = backtest;
+        this.envelope = new AutonomyEnvelope(props.autonomyOrDefault());
+        this.orderService = orderService;
         this.tradingCore = tradingCore;
         this.risk = risk;
         this.refs = refs;
@@ -88,8 +99,18 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         });
         long interval = props.intervalSecondsOrDefault();
         scheduler.scheduleWithFixedDelay(this::runOnce, interval, interval, TimeUnit.SECONDS);
-        log.info("hypothesis layer started: every {}s, up to {} per cycle (local SLM, human-in-loop)",
-                interval, props.maxPerCycleOrDefault());
+        var auto = props.autonomyOrDefault();
+        if (auto.enabledOrDefault() && orderService != null) {
+            log.warn("BOUNDED AUTONOMY ON (ADR-0022): admissible, backtest-supported theses with conviction ≥ {} "
+                            + "and notional ≤ {} auto-submit SIMULATED orders (cooldown {}s, whitelist {}). "
+                            + "Never against a real broker.",
+                    auto.minConvictionOrDefault(), auto.maxOrderNotionalOrDefault().toPlainString(),
+                    auto.cooldownSecondsOrDefault(),
+                    auto.whitelistOrEmpty().isEmpty() ? "(all)" : auto.whitelistOrEmpty());
+        }
+        log.info("hypothesis layer started: every {}s, up to {} per cycle (local SLM, {})",
+                interval, props.maxPerCycleOrDefault(),
+                auto.enabledOrDefault() && orderService != null ? "bounded autonomy" : "human-in-loop");
     }
 
     private void runOnce() {
@@ -164,21 +185,75 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 evaluated.add(evaluator.evaluate(h, priceMap, backtestByInstrument));
             }
             latest = List.copyOf(evaluated);
-            surface(evaluated, now);
+            Set<String> autoTraded = runAutonomy(evaluated, now);
+            autoTradedIds = autoTraded;
+            surface(evaluated, now, autoTraded);
 
             int admissible = (int) evaluated.stream()
                     .filter(e -> e.verdict() == HypothesisEvaluator.Verdict.ADMISSIBLE).count();
-            if (!evaluated.isEmpty()) {
-                log.info("hypotheses: {} proposed, {} admissible (regime {})",
-                        evaluated.size(), admissible, tradingCore.regime());
-            }
+            // Log every cycle so "no hypotheses" is explained: the model ran (Ollama up) but
+            // returned 0 usable structured theses, vs the layer being disabled or the model down.
+            log.info("hypotheses: model proposed {}, {} admissible, {} auto-traded (regime {})",
+                    evaluated.size(), admissible, autoTraded.size(), tradingCore.regime());
         } catch (Throwable t) {
             log.warn("hypothesis cycle failed: {}", t.toString());
         }
     }
 
+    /**
+     * Bounded-autonomy pass (ADR-0022): auto-executes admissible, backtest-supported theses
+     * that fit the deterministic risk envelope, as SIMULATED orders (ADR-0019). Off unless
+     * autonomy is enabled and an order path exists. @return instruments auto-traded this cycle.
+     */
+    private Set<String> runAutonomy(List<HypothesisEvaluator.Evaluated> evaluated, long now) {
+        Set<String> traded = new HashSet<>();
+        var auto = props.autonomyOrDefault();
+        if (!auto.enabledOrDefault() || orderService == null) {
+            return traded;
+        }
+        long cooldownMillis = auto.cooldownSecondsOrDefault() * 1_000;
+        for (HypothesisEvaluator.Evaluated e : evaluated) {
+            BigDecimal multiplier = refs.find(e.hypothesis().instrumentId())
+                    .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
+            if (envelope.rejectionReason(e, multiplier).isPresent()) {
+                continue; // outside the envelope — stays a human-review card
+            }
+            String instrument = e.hypothesis().instrumentId();
+            Long last = lastAutoExec.get(instrument);
+            if (last != null && now - last < cooldownMillis) {
+                continue;
+            }
+            if (submitAuto(e, now)) {
+                traded.add(instrument);
+            }
+        }
+        return traded;
+    }
+
+    private boolean submitAuto(HypothesisEvaluator.Evaluated e, long now) {
+        Hypothesis h = e.hypothesis();
+        try {
+            var command = new NewOrder("hypo:" + h.instrumentId() + ":" + UUID.randomUUID(),
+                    e.book(), h.instrumentId(), h.direction(), OrderType.MARKET, e.quantity(), null);
+            var order = orderService.submit(command);
+            lastAutoExec.put(h.instrumentId(), now);
+            log.warn("AUTONOMY auto-executed {} {} {} → {} on {} ({}) — thesis: {}",
+                    h.direction(), e.quantity().toPlainString(), h.instrumentId(), order.status(),
+                    e.book(), order.orderId(), h.thesis());
+            return true;
+        } catch (Exception ex) {
+            log.warn("autonomy auto-execute of {} failed: {}", h.instrumentId(), ex.getMessage());
+            return false;
+        }
+    }
+
+    /** Instruments auto-traded by autonomy in the last cycle (for the UI). */
+    public Set<String> autoTradedIds() {
+        return autoTradedIds;
+    }
+
     /** Admissible candidates become INFO cards on the attention feed; stale ones resolve. */
-    private void surface(List<HypothesisEvaluator.Evaluated> evaluated, long now) {
+    private void surface(List<HypothesisEvaluator.Evaluated> evaluated, long now, Set<String> autoTraded) {
         Set<String> current = new HashSet<>();
         for (HypothesisEvaluator.Evaluated e : evaluated) {
             if (e.verdict() != HypothesisEvaluator.Verdict.ADMISSIBLE) {
@@ -186,7 +261,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             }
             String id = "hypothesis:" + e.hypothesis().instrumentId();
             current.add(id);
-            feed.upsert(card(id, e, now));
+            feed.upsert(card(id, e, now, autoTraded.contains(e.hypothesis().instrumentId())));
         }
         boolean changed = false;
         for (String id : Set.copyOf(active)) {
@@ -206,10 +281,12 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         }
     }
 
-    private static AttentionFeed.AttentionItem card(String id, HypothesisEvaluator.Evaluated e, long now) {
+    private static AttentionFeed.AttentionItem card(String id, HypothesisEvaluator.Evaluated e, long now,
+                                                    boolean autoTraded) {
         Hypothesis h = e.hypothesis();
         String dir = h.direction() == Side.BUY ? "LONG" : "SHORT";
-        String title = "Hypothesis: " + dir + " " + h.instrumentId() + " (" + h.conviction() + ")";
+        String title = (autoTraded ? "Auto-traded (hypothesis): " : "Hypothesis: ")
+                + dir + " " + h.instrumentId() + " (" + h.conviction() + ")";
         String backtestNote = "";
         if (e.backtest() != null) {
             backtestNote = e.backtest().supports()
@@ -217,9 +294,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                         + " on " + e.backtest().trades() + " trades)."
                     : " Backtest does NOT support it (strategy not profitable on this name).";
         }
+        String tail = autoTraded
+                ? " Auto-submitted a SIMULATED order within the risk envelope (ADR-0019/0022)."
+                : " Review and execute on the Orders ticket.";
         String body = h.thesis() + " — Quant sized " + e.quantity().toPlainString() + " " + h.instrumentId()
-                + " on " + e.book() + " (" + h.horizon() + " horizon); pre-trade check passed." + backtestNote
-                + " Review and execute on the Orders ticket.";
+                + " on " + e.book() + " (" + h.horizon() + " horizon); pre-trade check passed." + backtestNote + tail;
         return new AttentionFeed.AttentionItem(id, now, AttentionFeed.Severity.INFO,
                 "hypothesis", title, body, "/orders.html");
     }

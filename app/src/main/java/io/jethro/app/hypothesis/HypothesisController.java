@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Read-only view of the latest LLM hypotheses and the quant layer's verdict on each
@@ -18,7 +19,8 @@ public final class HypothesisController {
     public record HypothesisDto(String instrumentId, String direction, String horizon, String conviction,
                                 String thesis, List<String> sources, String verdict, String book,
                                 String quantity, String price, String note,
-                                String backtestPnl, Integer backtestTrades, Boolean backtestSupports) {
+                                String backtestPnl, Integer backtestTrades, Boolean backtestSupports,
+                                boolean autonomous) {
     }
 
     private final ObjectProvider<HypothesisLifecycle> lifecycle;
@@ -33,6 +35,7 @@ public final class HypothesisController {
         if (live == null) {
             return List.of();
         }
+        Set<String> autoTraded = live.autoTradedIds();
         return live.latest().stream().map(e -> new HypothesisDto(
                 e.hypothesis().instrumentId(),
                 e.hypothesis().direction().name(),
@@ -47,6 +50,7 @@ public final class HypothesisController {
                 e.note(),
                 e.backtest() != null ? e.backtest().pnl().toPlainString() : null,
                 e.backtest() != null ? e.backtest().trades() : null,
-                e.backtest() != null ? e.backtest().supports() : null)).toList();
+                e.backtest() != null ? e.backtest().supports() : null,
+                autoTraded.contains(e.hypothesis().instrumentId()))).toList();
     }
 }
