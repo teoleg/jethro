@@ -90,4 +90,14 @@ auto-submits (ADR-0019 order path) only if admissible, **backtest-supported**, c
 order notional ≤ a tight cap, and whitelisted (empty = all) — else it stays a human-review card.
 The model never widens the envelope; a per-instrument cooldown throttles; a loud startup banner and
 `AUTONOMY auto-executed …` logs when on; auto-traded theses show "AUTO ✓" in the UI. Deferred:
-frontier-tier generation, a real narrative feed, and a real-broker autonomy ADR before any live venue.
+frontier-tier generation, and a real-broker autonomy ADR before any live venue.
+
+**Persisted executed decisions + UI (2026-07-14).** Every hypothesis the envelope acts on (i.e.
+that leads to an order) is now durable: `hypothesis_record` (Flyway V13) via `HypothesisRecordStore`
+(JDBC when persistence is on, in-memory otherwise), keyed on the order id. On startup the recent
+records reload, so an executed decision **stays on the page across cycles and restarts** rather than
+scrolling off with the next generation — a compliance-grade record alongside the `ai.decisions`
+event. `/api/hypotheses/executed` serves the sticky list; the Overview page's right column is now
+three fixed panels — attention, AI hypotheses (executed-sticky + live proposals), and a smaller
+chat — and the first-order **stress table moved off the landing to the Books page** (drill-down
+evidence, per ADR-0017's attention-first landing). The real narrative feed also landed (ADR-0024).

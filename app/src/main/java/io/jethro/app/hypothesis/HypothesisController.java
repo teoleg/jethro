@@ -23,10 +23,29 @@ public final class HypothesisController {
                                 boolean autonomous) {
     }
 
+    /** A persisted, executed hypothesis (led to an order) — sticky across cycles and restarts. */
+    public record ExecutedDto(long timestampMillis, String instrumentId, String direction,
+                              String horizon, String conviction, String thesis, String book,
+                              String quantity, Boolean backtestSupported, String orderId, String orderStatus) {
+    }
+
     private final ObjectProvider<HypothesisLifecycle> lifecycle;
 
     public HypothesisController(ObjectProvider<HypothesisLifecycle> lifecycle) {
         this.lifecycle = lifecycle;
+    }
+
+    /** Executed hypotheses (persisted): the ones the autonomy envelope acted on, newest first. */
+    @GetMapping("/api/hypotheses/executed")
+    public List<ExecutedDto> executed() {
+        HypothesisLifecycle live = lifecycle.getIfAvailable();
+        if (live == null) {
+            return List.of();
+        }
+        return live.executed().stream().map(r -> new ExecutedDto(
+                r.timestampMillis(), r.instrumentId(), r.direction(), r.horizon(), r.conviction(),
+                r.thesis(), r.book(), r.quantity() != null ? r.quantity().toPlainString() : null,
+                r.backtestSupported(), r.orderId(), r.orderStatus())).toList();
     }
 
     @GetMapping("/api/hypotheses")

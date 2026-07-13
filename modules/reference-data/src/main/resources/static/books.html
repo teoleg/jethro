@@ -95,6 +95,9 @@
   <div class="section-h">Situation by book</div>
   <div id="books" class="quiet">loading…</div>
 
+  <div class="section-h">Stress <span class="dim" style="text-transform:none;letter-spacing:0">— what the standard shocks would do to the books (first-order)</span></div>
+  <div class="panel"><div id="stress" class="quiet" style="padding:12px">loading…</div></div>
+
   <div class="section-h">Commentary &amp; alarms</div>
   <div id="feed"><div class="quiet">all quiet — no alarms or commentary</div></div>
 
@@ -168,6 +171,21 @@
   function setStatus(on, text) { document.getElementById("status").className = "pill " + (on?"on":""); document.getElementById("statusText").textContent = text; }
 
   async function refreshRisk() { try { renderBooks(await (await fetch("/api/risk")).json()); } catch (e) {} }
+
+  function renderStress(rows) {
+    const covered = rows.some(s => s.positionsCovered > 0);
+    document.getElementById("stress").outerHTML = '<div id="stress" class="quiet">' + (covered ?
+      "<table><tr><th>scenario</th><th>firm P&L</th><th>worst book</th><th>coverage</th></tr>" +
+      rows.map(s => {
+        const worst = s.byBook.length ? s.byBook[0] : null;
+        return `<tr><td>${esc(s.name)}</td>
+          <td class="mono ${cls(s.firmPnlUsd)}">${money(s.firmPnlUsd)}</td>
+          <td>${worst ? `<span class="dim">${esc(worst.bookId)}</span> <span class="mono ${cls(worst.pnlUsd)}">${money(worst.pnlUsd)}</span>` : '—'}</td>
+          <td class="dim mono">${s.positionsCovered}${s.positionsSkipped ? ` <span title="positions skipped (no mark, duration or FX)">+${s.positionsSkipped} skipped</span>` : ''}</td></tr>`;
+      }).join("") + "</table>"
+      : '<div class="quiet" style="padding:12px">no positions to stress yet</div>') + '</div>';
+  }
+  async function refreshStress() { try { renderStress(await (await fetch("/api/scenarios")).json()); } catch (e) {} }
   async function init() {
     try {
       instruments = await (await fetch("/api/instruments")).json();
@@ -177,7 +195,9 @@
     } catch (e) { document.getElementById("books").textContent = "reference data unavailable: " + e; }
     try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) {}
     await refreshRisk();
+    refreshStress();
     setInterval(refreshRisk, 2000);
+    setInterval(refreshStress, 10000);
   }
 
   const es = new EventSource("/api/stream");

@@ -78,8 +78,9 @@
   .st { font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
   .st.FILLED { color:var(--up); border-color:var(--up); } .st.REJECTED { color:var(--down); border-color:var(--down); }
 
-  /* FIXED heights (not max-) so the chat pane never moves as notes come and go */
-  .feed { display:flex; flex-direction:column; gap:8px; height:clamp(260px, 44vh, 560px); overflow-y:auto; padding-right:2px; }
+  /* FIXED heights (not max-) so the right column's three panels never jump as content changes */
+  .feed { display:flex; flex-direction:column; gap:8px; height:clamp(180px, 24vh, 320px); overflow-y:auto; padding-right:2px; }
+  .hypo-panel { height:clamp(200px, 28vh, 360px); overflow-y:auto; }
   .empty { color:var(--dim); text-align:center; padding:24px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
   .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:12px; padding:11px 14px; }
   .card.WARN { border-left-color:var(--warn); } .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
@@ -88,8 +89,10 @@
   .card.WARN .badge { color:var(--warn); border-color:var(--warn); } .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
   .card p { font-size:12.5px; white-space:pre-wrap; margin-top:6px; } .card .meta { color:var(--dim); font-size:11px; margin-top:8px; }
 
-  /* chat */
-  .chat { display:flex; flex-direction:column; height:clamp(300px, 34vh, 480px); }
+  /* chat — smaller for now (gets the least of the three right-side panels) */
+  .chat { display:flex; flex-direction:column; height:clamp(200px, 22vh, 300px); }
+  .hypo-exec { border-left:3px solid var(--up); }
+  .hypo-sub { font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--dim); padding:8px 12px 2px; }
   .chatlog { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
   .msg { max-width:88%; padding:7px 11px; border-radius:12px; font-size:13px; white-space:pre-wrap; }
   .msg.user { align-self:flex-end; background:var(--brand); color:#fff; border-bottom-right-radius:4px; }
@@ -130,10 +133,6 @@
     <div class="stats" id="stats"></div>
     <div class="section-h">By market</div>
     <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
-    <div class="section-h">Stress <span class="muted" style="text-transform:none;letter-spacing:0">— what the standard shocks would do to today's book (first-order)</span></div>
-    <div class="panel pad"><div id="stress" class="muted" style="padding:14px">loading…</div></div>
-    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM proposes a thesis, the quant layer sizes &amp; gates it (ADR-0022)</span></div>
-    <div class="panel pad"><div id="hypotheses" class="muted" style="padding:14px">loading…</div></div>
     <div class="section-h">Today's orders <span class="muted" id="obcount"></span></div>
     <div class="panel pad">
       <div id="oblotter" class="muted" style="padding:12px">loading…</div>
@@ -145,15 +144,17 @@
     </div>
   </div>
 
-  <!-- RIGHT: AI (notes + chat) -->
+  <!-- RIGHT: attention · hypotheses · chat (three fixed-height panels) -->
   <div class="col">
     <div class="section-h">Needs your attention</div>
     <div id="feed" class="feed"><div class="empty">all quiet</div></div>
+    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— executed decisions persist; live proposals refresh (ADR-0022)</span></div>
+    <div class="panel pad hypo-panel"><div id="hypotheses" class="muted" style="padding:14px">loading…</div></div>
     <div class="section-h">Ask</div>
     <div class="panel chat">
       <div class="chatlog" id="chatlog"></div>
       <form class="chatform" id="chatform" autocomplete="off">
-        <input id="chatinput" placeholder="pnl alpha · exposure AAPL · any limits breached?">
+        <input id="chatinput" placeholder="pnl alpha · exposure AAPL · limits?">
         <button type="submit">Ask</button>
       </form>
     </div>
@@ -282,29 +283,31 @@
     } catch (e) {}
   }
 
-  // ---- scenario / stress panel ----
-  function renderStress(rows) {
-    const covered = rows.some(s => s.positionsCovered > 0);
-    document.getElementById("stress").outerHTML = '<div id="stress">' + (covered ?
-      "<table><tr><th>scenario</th><th>firm P&L</th><th>worst book</th><th>coverage</th></tr>" +
-      rows.map(s => {
-        const worst = s.byBook.length ? s.byBook[0] : null;
-        return `<tr><td class="cls">${esc(s.name)}</td>
-          <td class="mono ${cls(s.firmPnlUsd)}">${money(s.firmPnlUsd)}</td>
-          <td>${worst ? `<span class="muted">${esc(worst.bookId)}</span> <span class="mono ${cls(worst.pnlUsd)}">${money(worst.pnlUsd)}</span>` : '—'}</td>
-          <td class="muted mono">${s.positionsCovered}${s.positionsSkipped ? ` <span title="positions skipped (no mark, duration or FX)">+${s.positionsSkipped} skipped</span>` : ''}</td></tr>`;
-      }).join("") + "</table>"
-      : '<div class="muted" style="padding:14px">no positions to stress yet</div>') + '</div>';
-  }
-  async function loadStress() { try { renderStress(await (await fetch("/api/scenarios")).json()); } catch (e) {} }
-
-  // ---- AI hypotheses (LLM thesis + deterministic quant verdict) ----
+  // ---- AI hypotheses: persisted EXECUTED decisions (sticky) + live proposals ----
   const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
-  function renderHypotheses(rows) {
-    document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
-      "<table><tr><th>thesis</th><th>view</th><th>conv</th><th>quant verdict</th><th>size</th><th>backtest</th></tr>" +
+  const dirLabel = d => d === "BUY" ? "LONG" : "SHORT";
+
+  function executedRows(execs) {
+    if (!execs.length) return "";
+    return '<div class="hypo-sub">Executed — persisted</div>' +
+      "<table><tr><th>when</th><th>thesis</th><th>view</th><th>size</th><th>order</th></tr>" +
+      execs.map(x => {
+        const dir = dirLabel(x.direction);
+        const sz = x.quantity ? `${esc(x.quantity)} → ${esc(x.book||'')}` : "—";
+        const st = x.orderStatus ? `<span class="st ${esc(x.orderStatus)}" title="order ${esc(x.orderId||'')}">${esc(x.orderStatus)}</span>` : '—';
+        return `<tr class="hypo-exec"><td class="muted mono">${new Date(x.timestampMillis).toLocaleTimeString()}</td>
+          <td title="${esc(x.thesis)}">${esc(x.instrumentId)} — ${esc(x.thesis)}</td>
+          <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="mono">${sz}</td><td>${st}</td></tr>`;
+      }).join("") + "</table>";
+  }
+
+  function proposalRows(rows) {
+    if (!rows.length)
+      return '<div class="muted" style="padding:12px">no live proposals — the model runs every ~90s; a small model often returns none until a directional headline appears (log line "hypotheses: model proposed N").</div>';
+    return '<div class="hypo-sub">Live proposals</div>' +
+      "<table><tr><th>thesis</th><th>view</th><th>conv</th><th>verdict</th><th>size</th><th>backtest</th></tr>" +
       rows.map(r => {
-        const dir = r.direction === "BUY" ? "LONG" : "SHORT";
+        const dir = dirLabel(r.direction);
         const sz = r.quantity ? `${esc(r.quantity)} → ${esc(r.book||'')}` : "—";
         const bt = r.backtestSupports == null ? '<span class="muted">—</span>'
           : (r.backtestSupports ? `<span class="up" title="strategy net-positive on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">supported</span>`
@@ -314,13 +317,22 @@
           : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</span>`;
         return `<tr><td title="${esc(r.note||'')}">${esc(r.instrumentId)} — ${esc(r.thesis)}</td>
           <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conviction)}</td>
-          <td>${verdictCell}</td>
-          <td class="mono">${sz}</td><td>${bt}</td></tr>`;
-      }).join("") + "</table>" +
-      '<div class="muted" style="font-size:11px;padding:6px 12px">Model proposes direction only; every number is the quant layer\'s. Admissible ones appear on the attention feed; inside the risk envelope (if autonomy is on) they auto-execute as simulated orders.</div>'
-      : '<div class="muted" style="padding:14px">no hypotheses right now — the model runs every ~90s; if Ollama is up, a 3B model often returns none until a directional headline appears (see the strategy log line "hypotheses: model proposed N")</div>') + '</div>';
+          <td>${verdictCell}</td><td class="mono">${sz}</td><td>${bt}</td></tr>`;
+      }).join("") + "</table>";
   }
-  async function loadHypotheses() { try { renderHypotheses(await (await fetch("/api/hypotheses")).json()); } catch (e) {} }
+
+  function renderHypotheses(execs, proposals) {
+    const body = executedRows(execs) + proposalRows(proposals);
+    document.getElementById("hypotheses").outerHTML = '<div id="hypotheses" class="muted">' + body + '</div>';
+  }
+  async function loadHypotheses() {
+    try {
+      const [execs, proposals] = await Promise.all([
+        fetch("/api/hypotheses/executed").then(r => r.json()),
+        fetch("/api/hypotheses").then(r => r.json())]);
+      renderHypotheses(execs, proposals);
+    } catch (e) {}
+  }
 
   // ---- today's orders (paginated 100/page) ----
   let obPage = 0, obTotalPages = 1;
@@ -352,7 +364,6 @@
   es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
   bootstrap();
   loadOrders();
-  loadStress();
   loadHypotheses();
   loadTicker();
   loadFeeds();
@@ -361,7 +372,6 @@
   setInterval(loadTicker, 2000);
   setInterval(loadFeeds, 5000);
   setInterval(loadIndicators, 30000);
-  setInterval(loadStress, 10000);
   setInterval(loadHypotheses, 15000);
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
 </script>
