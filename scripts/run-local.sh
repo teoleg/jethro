@@ -31,7 +31,7 @@ HEAP="${HEAP:-512m}"
 AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:3b}"   # 3b = usable commentary; MODEL=qwen2.5:0.5b for tight RAM
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
-AUTONOMY="${AUTONOMY:-off}"  # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
+AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
 PROVIDER="${PROVIDER:-yahoo}"  # yahoo = real delayed prices (ADR-0023, default); PROVIDER=sim for offline
 
 wait_for() {  # name, timeout_seconds, command...

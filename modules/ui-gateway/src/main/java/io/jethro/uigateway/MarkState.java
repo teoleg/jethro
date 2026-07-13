@@ -12,20 +12,23 @@ public final class MarkState {
                           long providerTimestampMillis, long ageMillis) {
     }
 
-    private record Entry(String price, String source, long providerTimestampMillis) {
+    private record Entry(String price, String source, long providerTimestampMillis, long receivedAtMillis) {
     }
 
     private final ConcurrentHashMap<String, Entry> marks = new ConcurrentHashMap<>();
 
     public void update(String instrumentId, String price, String source, long providerTimestampMillis) {
-        marks.put(instrumentId, new Entry(price, source, providerTimestampMillis));
+        // receivedAtMillis is local receive time: FRESHNESS (is the feed alive), which is distinct
+        // from the provider timestamp's DELAY. A ~15-min-delayed provider (Yahoo) is still fresh if
+        // we just received it, so ageMillis must not treat delayed-but-live data as stale (ADR-0023).
+        marks.put(instrumentId, new Entry(price, source, providerTimestampMillis, System.currentTimeMillis()));
     }
 
     public List<MarkDto> snapshot(long nowMillis) {
         List<MarkDto> result = new ArrayList<>(marks.size());
         marks.forEach((id, e) -> result.add(new MarkDto(
                 id, e.price(), e.source(), e.providerTimestampMillis(),
-                Math.max(0, nowMillis - e.providerTimestampMillis()))));
+                Math.max(0, nowMillis - e.receivedAtMillis())))); // age = since last received, not since source time
         result.sort((a, b) -> a.instrumentId().compareTo(b.instrumentId()));
         return result;
     }
