@@ -109,6 +109,8 @@
     <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
     <div class="section-h">Stress <span class="muted" style="text-transform:none;letter-spacing:0">— what the standard shocks would do to today's book (first-order)</span></div>
     <div class="panel pad"><div id="stress" class="muted" style="padding:14px">loading…</div></div>
+    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM proposes a thesis, the quant layer sizes &amp; gates it (ADR-0022)</span></div>
+    <div class="panel pad"><div id="hypotheses" class="muted" style="padding:14px">loading…</div></div>
     <div class="section-h">Today's orders <span class="muted" id="obcount"></span></div>
     <div class="panel pad">
       <div id="oblotter" class="muted" style="padding:12px">loading…</div>
@@ -211,6 +213,24 @@
   }
   async function loadStress() { try { renderStress(await (await fetch("/api/scenarios")).json()); } catch (e) {} }
 
+  // ---- AI hypotheses (LLM thesis + deterministic quant verdict) ----
+  const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
+  function renderHypotheses(rows) {
+    document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
+      "<table><tr><th>thesis</th><th>view</th><th>conv</th><th>quant verdict</th><th>size</th></tr>" +
+      rows.map(r => {
+        const dir = r.direction === "BUY" ? "LONG" : "SHORT";
+        const sz = r.quantity ? `${esc(r.quantity)} → ${esc(r.book||'')}` : "—";
+        return `<tr><td title="${esc(r.note||'')}">${esc(r.instrumentId)} — ${esc(r.thesis)}</td>
+          <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conviction)}</td>
+          <td class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</td>
+          <td class="mono">${sz}</td></tr>`;
+      }).join("") + "</table>" +
+      '<div class="muted" style="font-size:11px;padding:6px 12px">Model proposes direction only; every number is the quant layer\'s. Admissible ones also appear on the attention feed for one-click execution.</div>'
+      : '<div class="muted" style="padding:14px">no hypotheses yet — the model runs on a cadence (needs Ollama up)</div>') + '</div>';
+  }
+  async function loadHypotheses() { try { renderHypotheses(await (await fetch("/api/hypotheses")).json()); } catch (e) {} }
+
   // ---- today's orders (paginated 100/page) ----
   let obPage = 0, obTotalPages = 1;
   async function loadOrders() {
@@ -242,8 +262,10 @@
   bootstrap();
   loadOrders();
   loadStress();
+  loadHypotheses();
   setInterval(loadRisk, 2000);
   setInterval(loadStress, 10000);
+  setInterval(loadHypotheses, 15000);
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
 </script>
 </body>

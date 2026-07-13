@@ -73,3 +73,15 @@ until hypotheses and the backtest bridge exist; revive once step 8 replay and a 
   `HypothesisGenerator` agent (SLM local, frontier when keys/cost triggers allow, ADR-0010) and a
   deterministic `HypothesisEvaluator`; the risk-envelope config + evaluator; real news/earnings/econ
   providers and the factor/optimisation layer behind their own triggers; a real-broker autonomy ADR.
+
+## Implementation note — first slice (2026-07-13)
+
+Built end-to-end, human-in-loop, local SLM: `Hypothesis`/`NarrativeItem`/`HypothesisContext`
+types + `HypothesisGenerator` (algo-engine; strict-JSON, number-free, off-list/bad-enum dropped,
+every run an audited `AiDecision`); `SimNarrativeFeed` (seedable, regime-correlated — the "no news
+source yet" stand-in); deterministic `HypothesisEvaluator` (validate → target-notional sizing →
+book routing → read-only guardrail → verdict); `HypothesisLifecycle` cadence surfacing admissible
+candidates on the attention feed; `/api/hypotheses` + an Overview panel showing thesis vs quant
+verdict. Config under `jethro.hypothesis.*`; sizing reuses `jethro.strategy.*`. Deferred as planned:
+the thesis **backtest** (needs step-8 replay) and **bounded autonomy** (stays off until the backtest
+can validate an edge) — this slice never auto-submits.

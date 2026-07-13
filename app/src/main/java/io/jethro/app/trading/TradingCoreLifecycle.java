@@ -107,4 +107,10 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     public TradingCoreRuntime runtime() {
         return runtime;
     }
+
+    /** Current sim market regime name (CALM when unavailable) — for the narrative feed. */
+    public String regime() {
+        var sim = adapter;
+        return sim != null ? sim.regime().name() : "CALM";
+    }
 }

@@ -1,0 +1,91 @@
+package io.jethro.app.hypothesis;
+
+import io.jethro.app.strategy.StrategyProperties;
+import io.jethro.domain.Side;
+import io.jethro.trading.algo.hypothesis.Hypothesis;
+import io.jethro.trading.riskpnl.InstrumentRef;
+import io.jethro.trading.riskpnl.InstrumentRefSource;
+import io.jethro.trading.riskpnl.PreTradeGuardrail;
+import io.jethro.trading.riskpnl.RiskLimits;
+import io.jethro.trading.riskpnl.RiskLimitSource;
+import io.jethro.trading.riskpnl.RiskProjection;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+/**
+ * Exact-value tests for the deterministic quant layer: the model gives a direction, this
+ * code owns every number. Sizing = target / (price × multiplier), floored (finance-math).
+ */
+class HypothesisEvaluatorTest {
+
+    private final InstrumentRefSource refs = id -> Optional.ofNullable(Map.of(
+            "AAPL", new InstrumentRef("AAPL", "EQUITY", "USD", new BigDecimal("1")),
+            "ES", new InstrumentRef("ES", "FUTURE", "USD", new BigDecimal("50"))
+    ).get(id));
+
+    // target 25,000; per-class caps default 2×target = 50,000 (no FUTURE override here).
+    private final StrategyProperties sizing = new StrategyProperties(
+            true, 5, 24, 2.5, new BigDecimal("2"), new BigDecimal("25000"),
+            "ALPHA", Map.of("EQUITY", "ALPHA", "FUTURE", "MACRO"),
+            false, 60, null, null, null, Map.of(), false, null, null, true);
+
+    private static Hypothesis h(String instrument, Side dir) {
+        return new Hypothesis("h1", instrument, dir, Hypothesis.Horizon.SWING,
+                Hypothesis.Conviction.MEDIUM, "thesis", List.of());
+    }
+
+    private HypothesisEvaluator evaluator(RiskLimitSource limits, RiskProjection projection) {
+        return new HypothesisEvaluator(refs, new PreTradeGuardrail(projection, limits), sizing);
+    }
+
+    @Test
+    void admissibleSizesToTargetNotionalAndRoutesByAssetClass() {
+        var eval = evaluator(book -> RiskLimits.none(), new RiskProjection(refs));
+        // 25,000 / (190 × 1) = 131.57 → floor 131; EQUITY routes to ALPHA.
+        var e = eval.evaluate(h("AAPL", Side.BUY), Map.of("AAPL", new BigDecimal("190")));
+        assertEquals(HypothesisEvaluator.Verdict.ADMISSIBLE, e.verdict());
+        assertEquals("ALPHA", e.book());
+        assertEquals(0, new BigDecimal("131").compareTo(e.quantity()));
+    }
+
+    @Test
+    void oneContractOverTheClassCapIsUnsizeable() {
+        var eval = evaluator(book -> RiskLimits.none(), new RiskProjection(refs));
+        // 1 ES = 5450 × 50 = 272,500 > 50,000 cap → unsizeable, never rounded up.
+        var e = eval.evaluate(h("ES", Side.BUY), Map.of("ES", new BigDecimal("5450")));
+        assertEquals(HypothesisEvaluator.Verdict.UNSIZEABLE, e.verdict());
+        assertEquals("MACRO", e.book());
+        assertNull(e.quantity());
+    }
+
+    @Test
+    void unknownInstrumentIsRejected() {
+        var eval = evaluator(book -> RiskLimits.none(), new RiskProjection(refs));
+        var e = eval.evaluate(h("ZZZZ", Side.BUY), Map.of("ZZZZ", new BigDecimal("10")));
+        assertEquals(HypothesisEvaluator.Verdict.UNKNOWN_INSTRUMENT, e.verdict());
+    }
+
+    @Test
+    void noMarkCannotBeValued() {
+        var eval = evaluator(book -> RiskLimits.none(), new RiskProjection(refs));
+        var e = eval.evaluate(h("AAPL", Side.BUY), Map.of()); // no price for AAPL
+        assertEquals(HypothesisEvaluator.Verdict.NO_MARK, e.verdict());
+    }
+
+    @Test
+    void guardrailBreachIsBlockedNotSurfaced() {
+        var projection = new RiskProjection(refs);
+        projection.applyMark("AAPL", new BigDecimal("190"), 0); // guardrail values exposure off its own marks
+        // Concentration cap 1,000 « 131 × 190 = 24,890 → the pre-trade guardrail rejects.
+        RiskLimitSource limits = book -> new RiskLimits(null, null, null, new BigDecimal("1000"));
+        var e = evaluator(limits, projection).evaluate(h("AAPL", Side.BUY), Map.of("AAPL", new BigDecimal("190")));
+        assertEquals(HypothesisEvaluator.Verdict.BLOCKED, e.verdict());
+    }
+}
