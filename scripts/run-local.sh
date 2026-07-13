@@ -16,7 +16,12 @@
 #
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
 #            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b),
-#            PROVIDER (sim|yahoo, default: sim)
+#            PROVIDER (sim|yahoo, default: yahoo), AUTONOMY (off|on, default: off)
+#
+# AUTOEXEC  = the momentum STRATEGY auto-submits simulated orders (ADR-0019).
+# AUTONOMY  = the LLM's HYPOTHESES auto-execute, but only within the deterministic risk
+#             envelope (admissible + backtest-supported + conviction>=min + notional<=cap +
+#             whitelist), ADR-0022. Off by default; simulated only, never a real broker.
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -26,6 +31,7 @@ HEAP="${HEAP:-512m}"
 AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:3b}"   # 3b = usable commentary; MODEL=qwen2.5:0.5b for tight RAM
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
+AUTONOMY="${AUTONOMY:-off}"  # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
 PROVIDER="${PROVIDER:-yahoo}"  # yahoo = real delayed prices (ADR-0023, default); PROVIDER=sim for offline
 
 wait_for() {  # name, timeout_seconds, command...
@@ -81,6 +87,10 @@ EXTRA_ARGS=()
 if [ "$AUTOEXEC" = "on" ]; then
   echo "==> AUTO-EXECUTE ON: the strategy will auto-submit SIMULATED orders (ADR-0019)"
   EXTRA_ARGS+=(--jethro.strategy.auto-execute=true)
+fi
+if [ "$AUTONOMY" = "on" ]; then
+  echo "==> BOUNDED AUTONOMY ON: LLM hypotheses inside the risk envelope auto-execute as SIMULATED orders (ADR-0022)"
+  EXTRA_ARGS+=(--jethro.hypothesis.autonomy.enabled=true)
 fi
 EXTRA_ARGS+=(--jethro.trading.provider="$PROVIDER")
 if [ "$PROVIDER" = "yahoo" ]; then
