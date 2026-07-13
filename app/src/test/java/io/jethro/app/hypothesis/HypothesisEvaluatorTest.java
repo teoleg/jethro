@@ -36,7 +36,7 @@ class HypothesisEvaluatorTest {
     private final StrategyProperties sizing = new StrategyProperties(
             true, 5, 24, 2.5, new BigDecimal("2"), new BigDecimal("25000"),
             "ALPHA", Map.of("EQUITY", "ALPHA", "FUTURE", "MACRO"),
-            false, 60, null, null, null, Map.of(), false, null, null, true);
+            false, 60, null, null, null, Map.of(), false, null, null, true, null);
 
     private static Hypothesis h(String instrument, Side dir) {
         return new Hypothesis("h1", instrument, dir, Hypothesis.Horizon.SWING,

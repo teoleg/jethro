@@ -11,6 +11,8 @@ import java.util.List;
  * get their own backtest later.
  *
  * @param evalEveryTicks strategy cadence in ticks (live: 5s / 100ms tick = every 50).
+ * @param volatileScale  new-entry sizing multiplier in the VOLATILE regime (risk-off), so the
+ *                       backtest mirrors the live strategy's regime-awareness. 1 = no scaling.
  * @param costBps        round-trip-agnostic transaction cost charged per fill, in bps of
  *                       traded notional (fees + slippage proxy). 0 = frictionless.
  */
@@ -18,7 +20,7 @@ public record BacktestConfig(
         long seed, int ticks, boolean regimes, int evalEveryTicks,
         int lookback, double thresholdSigmas, BigDecimal minSignalBps,
         BigDecimal targetNotional, BigDecimal maxOrderNotional, BigDecimal maxPositionNotional,
-        boolean allowShort, BigDecimal costBps, List<Instrument> instruments) {
+        boolean allowShort, BigDecimal volatileScale, BigDecimal costBps, List<Instrument> instruments) {
 
     /** One tradable instrument in the backtest universe. */
     public record Instrument(String instrumentId, BigDecimal startPrice, double annualVol,

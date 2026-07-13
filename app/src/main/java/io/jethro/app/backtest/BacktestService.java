@@ -47,6 +47,7 @@ public final class BacktestService {
                 strategy.lookback(), strategy.thresholdSigmasOrDefault(), strategy.minSignalBpsOrDefault(),
                 strategy.targetNotional(), strategy.maxOrderNotionalOrDefault(),
                 strategy.maxPositionNotionalOrDefault(), strategy.allowShortOrDefault(),
+                strategy.regimeVolatileScaleOrDefault(),
                 costBps != null ? costBps : DEFAULT_COST_BPS,
                 universe());
         return engine.run(cfg);

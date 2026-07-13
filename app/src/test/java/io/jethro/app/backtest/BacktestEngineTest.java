@@ -20,7 +20,8 @@ class BacktestEngineTest {
     private static BacktestConfig config(long seed, BigDecimal costBps) {
         return new BacktestConfig(seed, 5_000, true, 50,
                 24, 2.5, new BigDecimal("2"),
-                new BigDecimal("25000"), new BigDecimal("50000"), new BigDecimal("75000"), false, costBps,
+                new BigDecimal("25000"), new BigDecimal("50000"), new BigDecimal("75000"), false,
+                BigDecimal.ONE, costBps,
                 List.of(new BacktestConfig.Instrument("AAPL", new BigDecimal("190"), 0.28, BigDecimal.ONE),
                         new BacktestConfig.Instrument("ES", new BigDecimal("5450"), 0.15, new BigDecimal("50"))));
     }
@@ -51,7 +52,8 @@ class BacktestEngineTest {
     private static BacktestConfig tradingConfig(BigDecimal costBps) {
         return new BacktestConfig(42, 30_000, true, 50,
                 12, 0.5, BigDecimal.ONE,
-                new BigDecimal("25000"), new BigDecimal("50000"), new BigDecimal("75000"), true, costBps,
+                new BigDecimal("25000"), new BigDecimal("50000"), new BigDecimal("75000"), true,
+                BigDecimal.ONE, costBps,
                 List.of(new BacktestConfig.Instrument("AAPL", new BigDecimal("190"), 0.28, BigDecimal.ONE)));
     }
 

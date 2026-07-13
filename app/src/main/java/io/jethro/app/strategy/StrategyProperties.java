@@ -55,7 +55,21 @@ public record StrategyProperties(
         /** Book de-risk backstop: when a strategy-managed book's total loss is at/over its
          *  configured max-loss cap, flatten its positions (risk-reducing orders, always
          *  admissible). Default true — this is what makes a floored book actually unwind. */
-        Boolean deriskOnLossCap) {
+        Boolean deriskOnLossCap,
+        /** Regime-aware sizing: in the sim's VOLATILE regime, scale new-entry notional by this
+         *  factor (risk-off in turbulence). Default 0.5 = half size; 0 = stand aside. Exits and
+         *  de-risking are unaffected — you can always reduce. */
+        BigDecimal regimeVolatileScale) {
+
+    public BigDecimal regimeVolatileScaleOrDefault() {
+        return regimeVolatileScale != null && regimeVolatileScale.signum() >= 0
+                ? regimeVolatileScale : new BigDecimal("0.5");
+    }
+
+    /** The new-entry sizing scale for a market regime — reduced in VOLATILE, 1 otherwise. */
+    public BigDecimal regimeScaleFor(String regime) {
+        return "VOLATILE".equals(regime) ? regimeVolatileScaleOrDefault() : BigDecimal.ONE;
+    }
 
     public boolean allowShortOrDefault() {
         return allowShort != null && allowShort;

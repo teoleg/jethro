@@ -90,13 +90,16 @@ public final class BacktestEngine {
                 for (int i = 0; i < n; i++) {
                     obs.add(new MomentumStrategy.Observation(ids[i], mark[i], false));
                 }
+                String regime = gen.regime().name();
+                BigDecimal regimeScale = "VOLATILE".equals(regime) ? cfg.volatileScale() : BigDecimal.ONE;
                 for (TradeSignal signal : strategy.evaluate(obs)) {
                     signalCount++;
                     int idx = indexOf(ids, signal.instrumentId());
                     if (idx < 0) {
                         continue;
                     }
-                    BigDecimal qty = decideQuantity(cfg, signal, mark[idx], mult[idx], books.get(ids[idx]).position);
+                    BigDecimal qty = decideQuantity(cfg, signal, mark[idx], mult[idx],
+                            books.get(ids[idx]).position, regimeScale);
                     if (qty == null) {
                         continue; // unsizeable, at position cap, or long-only-blocked short
                     }
@@ -153,9 +156,12 @@ public final class BacktestEngine {
     /** Live-mirroring sizing: target notional, per-order cap (never round up), long-only clamp,
      *  and the same-direction position cap. Returns null to skip. */
     private static BigDecimal decideQuantity(BacktestConfig cfg, TradeSignal signal, BigDecimal price,
-                                             BigDecimal multiplier, Position held) {
+                                             BigDecimal multiplier, Position held, BigDecimal regimeScale) {
+        if (regimeScale.signum() == 0) {
+            return null; // standing aside this regime
+        }
         BigDecimal notionalPerUnit = price.multiply(multiplier);
-        BigDecimal qty = cfg.targetNotional().divide(notionalPerUnit, 0, RoundingMode.DOWN);
+        BigDecimal qty = cfg.targetNotional().multiply(regimeScale).divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             if (notionalPerUnit.compareTo(cfg.maxOrderNotional()) > 0) {
                 return null; // one unit already exceeds the order cap — unsizeable

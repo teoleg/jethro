@@ -131,6 +131,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
             // Exit pass first (the risk-reducing half of the loop, ADR-0019): stop-loss,
             // take-profit and book de-risk close positions before we look for new entries.
             int exited = manageOpenPositions(now);
+            // Regime-aware sizing (quant-engine phase 5): shrink new entries in VOLATILE
+            // (risk-off in turbulence). Exits above are unaffected — you can always reduce.
+            String regime = tradingCore.regime();
+            BigDecimal regimeScale = props.regimeScaleFor(regime);
             Set<String> current = new HashSet<>();
             int signals = 0;
             int suppressed = 0;
@@ -142,9 +146,9 @@ public final class StrategyLifecycle implements SmartLifecycle {
             for (TradeSignal signal : strategy.evaluate(observations)) {
                 signals++;
                 String book = bookFor(signal.instrumentId()); // route by asset class, not all to one book
-                Optional<BigDecimal> sized = size(signal);
+                Optional<BigDecimal> sized = size(signal, regimeScale);
                 if (sized.isEmpty()) {
-                    oversized++; // one unit exceeds the order-notional cap — unsizeable, skip
+                    oversized++; // unsizeable under the cap, or standing aside in this regime
                     continue;
                 }
                 // Position-aware (quant-engine phase 5): once the book already holds the
@@ -223,8 +227,9 @@ public final class StrategyLifecycle implements SmartLifecycle {
 
             // Heartbeat: the log always shows the strategy is alive and why it is/ isn't trading.
             if (++cycles % HEARTBEAT_CYCLES == 0 || signals > 0 || suppressed > 0 || exited > 0) {
-                log.info("strategy: {} fresh marks ({} stale), {} signals, {} unsizeable, {} at-position, "
+                log.info("strategy [{}{}]: {} fresh marks ({} stale), {} signals, {} unsizeable, {} at-position, "
                                 + "{} short-blocked, {} suppressed by limits, {} auto-executed, {} exited{}",
+                        regime, regimeScale.compareTo(BigDecimal.ONE) < 0 ? " ×" + regimeScale.toPlainString() : "",
                         fresh, stale, signals, oversized, atPosition, shortsBlocked, suppressed, executed, exited,
                         fresh == 0 ? "  — NO FRESH MARKS (feed may be stale)" : "");
             }
@@ -245,7 +250,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
      * rounded down. Never rounds up: if even one unit exceeds the max-order-notional cap
      * (one ES contract ≈ $272k vs a $25k target), the signal is skipped — empty result.
      */
-    private Optional<BigDecimal> size(TradeSignal signal) {
+    private Optional<BigDecimal> size(TradeSignal signal, BigDecimal regimeScale) {
+        if (regimeScale.signum() == 0) {
+            return Optional.empty(); // standing aside this regime (e.g. VOLATILE scale 0)
+        }
         Optional<InstrumentRef> ref = refs.find(signal.instrumentId());
         if (ref.isEmpty()) {
             return Optional.empty(); // not in the instrument master (e.g. a curve quote) — never trade it
@@ -260,7 +268,9 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 ? Math.abs(signal.changeBps().doubleValue()) / z
                 : props.volReferenceBpsOrDefault();
         double scale = Math.max(0.5, Math.min(2.0, props.volReferenceBpsOrDefault() / Math.max(sigmaBps, 1e-9)));
-        BigDecimal notionalTarget = props.targetNotional().multiply(BigDecimal.valueOf(scale));
+        // Regime scale on top of vol-scale: risk-off in VOLATILE.
+        BigDecimal notionalTarget = props.targetNotional()
+                .multiply(BigDecimal.valueOf(scale)).multiply(regimeScale);
         BigDecimal qty = notionalTarget.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             // Cap is per asset class: one Treasury contract (~$110k) is a legitimate order

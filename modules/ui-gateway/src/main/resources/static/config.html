@@ -123,7 +123,7 @@
         volReferenceBps:"vol reference (bps)", book:"default book", bookByClass:"book routing",
         autoExecute:"auto-execute (sim only)", autoCooldownSeconds:"auto cooldown (s)",
         allowShort:"allow shorts", stopLossPct:"stop-loss (fraction)", takeProfitPct:"take-profit (fraction)",
-        deriskOnLossCap:"de-risk on loss cap"}) + '</div>';
+        deriskOnLossCap:"de-risk on loss cap", regimeVolatileScale:"volatile regime size scale"}) + '</div>';
 
       document.getElementById("sim").outerHTML = '<div id="sim">' + kvTable(cfg.sim, {
         enabled:"trading-core enabled", simSeed:"seed", simInstruments:"instruments",
