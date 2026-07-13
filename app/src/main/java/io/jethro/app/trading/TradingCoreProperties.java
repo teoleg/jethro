@@ -24,9 +24,51 @@ public record TradingCoreProperties(
         /** Factor-based SOFR curve sim publishing USD.SOFR.* tenor marks; default true. */
         Boolean simCurve,
         long simTickIntervalMillis,
+        /** Market-data provider: "sim" (default), "yahoo" (ADR-0023), or "finnhub" (ADR-0024,
+         *  real-time equities over WebSocket — needs finnhub-token). Dev/demo only. */
+        String provider,
+        /** Gap between individual Yahoo symbol requests, in ms (spread, not burst — avoids
+         *  429s). Default 700; each symbol then refreshes every ~spacing×instrumentCount. */
+        Long yahooRequestSpacingMillis,
+        /** Finnhub API token (free key) for the real-time WebSocket feed; blank falls back to sim. */
+        String finnhubToken,
+        /** Cap on Finnhub REST calls/minute shared across ALL endpoints (news + curve) — the free
+         *  tier's account-wide limit is 60; default 55 leaves headroom. WS trades don't count. */
+        Integer finnhubMaxCallsPerMinute,
+        /** Use a REAL Treasury yield curve (Finnhub) instead of the factor sim, when a token is
+         *  set. Default true; a failed startup probe falls back to the sim curve, logged. */
+        Boolean realCurve,
+        /** Seconds between real-curve refreshes (curves move slowly; keeps REST calls low). Default 120. */
+        Long treasuryCurveRefreshSeconds,
         String lmdbPath,
         long lmdbMaxSizeMb,
         int bufferCapacity) {
+
+    public String providerOrDefault() {
+        return provider != null && !provider.isBlank() ? provider : "sim";
+    }
+
+    public long yahooRequestSpacingMillisOrDefault() {
+        return yahooRequestSpacingMillis != null && yahooRequestSpacingMillis > 0
+                ? yahooRequestSpacingMillis : 700;
+    }
+
+    public String finnhubTokenOrEmpty() {
+        return finnhubToken != null ? finnhubToken.trim() : "";
+    }
+
+    public int finnhubMaxCallsPerMinuteOrDefault() {
+        return finnhubMaxCallsPerMinute != null && finnhubMaxCallsPerMinute > 0 ? finnhubMaxCallsPerMinute : 55;
+    }
+
+    public boolean realCurveOrDefault() {
+        return realCurve == null || realCurve;
+    }
+
+    public long treasuryCurveRefreshSecondsOrDefault() {
+        return treasuryCurveRefreshSeconds != null && treasuryCurveRefreshSeconds > 0
+                ? treasuryCurveRefreshSeconds : 120;
+    }
 
     /** Start price for one instrument: its override if present, else the default. */
     public BigDecimal startPriceFor(String instrumentId) {

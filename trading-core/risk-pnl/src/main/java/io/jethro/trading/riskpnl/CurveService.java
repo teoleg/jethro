@@ -51,14 +51,24 @@ public final class CurveService {
 
     /** The calibrated Strata curve, once every tenor has quoted; empty before that. */
     public Optional<Curve> curve() {
+        return curveWithShiftBps(0.0);
+    }
+
+    /**
+     * The curve with a parallel shift of every zero rate by {@code shiftBps} basis points —
+     * the input to full-revaluation scenarios (quant-engine step 2, second slice): re-pricing
+     * a swap on this shocked curve captures convexity a first-order DV01 shock cannot.
+     */
+    public Optional<Curve> curveWithShiftBps(double shiftBps) {
         if (latestRates.size() < TENORS.size()) {
             return Optional.empty();
         }
+        double shift = shiftBps / 10_000.0;
         double[] tenors = TENORS.values().stream().mapToDouble(Double::doubleValue).sorted().toArray();
         double[] rates = new double[tenors.length];
         int i = 0;
         for (double t : tenors) {
-            rates[i++] = rateForTenor(t);
+            rates[i++] = rateForTenor(t) + shift;
         }
         return Optional.of(InterpolatedNodalCurve.of(
                 Curves.zeroRates("USD-SOFR", DayCounts.ACT_365F),

@@ -49,6 +49,9 @@
   tbody tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
   th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; padding-top:6px; padding-bottom:4px; }
   .cid { color:var(--dim); font-size:11px; }
+  tr.closed td { color:var(--dim); } tr.closed td b { color:var(--dim); font-weight:600; }
+  .tag-closed { font-size:9px; text-transform:uppercase; letter-spacing:.06em; color:var(--dim);
+    border:1px solid var(--line-2); border-radius:4px; padding:0 4px; margin-left:6px; vertical-align:middle; }
 
   /* reference: structure + instrument master */
   .grid2 { display:grid; gap:14px; grid-template-columns:1fr 1fr; }
@@ -82,6 +85,7 @@
       <a class="tab active" href="/books.html">Books</a>
       <a class="tab" href="/orders.html">Orders</a>
       <a class="tab" href="/config.html">Config</a>
+      <a class="tab" href="/backtest.html">Backtest</a>
     </nav>
     <span class="spacer"></span>
     <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
@@ -128,10 +132,11 @@
            : '<span class="metric">Total P&L<b class="flat mono">0.00</b></span>') + `</div>`;
       const body = ps.length ?
         "<table><tr><th>instr</th><th>CUSIP / ID</th><th>market</th><th>qty</th><th>avg cost</th><th>mark</th><th>unrealized</th><th>realized</th><th>net exp</th></tr>" +
-        ps.map(p => `<tr><td><b>${esc(p.instrumentId)}</b></td><td class="cid mono">${esc(cusipOf[p.instrumentId]||'—')}</td>
-          <td class="dim">${esc(p.assetClass)}</td><td class="mono">${money(p.quantity)}</td><td class="mono">${money(p.avgCost)}</td>
-          <td class="mono">${p.hasMark?money(p.mark):'—'}</td><td class="mono ${cls(p.unrealizedPnl)}">${money(p.unrealizedPnl)}</td>
-          <td class="mono ${cls(p.realizedPnl)}">${money(p.realizedPnl)}</td><td class="mono">${money(p.netExposure)}</td></tr>`).join("") + "</table>"
+        ps.map(p => { const closed = Number(p.quantity) === 0; // flat: no position, kept only to carry realized P&L
+          return `<tr class="${closed?'closed':''}"><td><b>${esc(p.instrumentId)}</b>${closed?' <span class="tag-closed" title="position closed — no holding, realized P&L only">closed</span>':''}</td><td class="cid mono">${esc(cusipOf[p.instrumentId]||'—')}</td>
+          <td class="dim">${esc(p.assetClass)}</td><td class="mono">${closed?'flat':money(p.quantity)}</td><td class="mono">${closed?'—':money(p.avgCost)}</td>
+          <td class="mono">${closed||!p.hasMark?'—':money(p.mark)}</td><td class="mono ${cls(p.unrealizedPnl)}">${money(p.unrealizedPnl)}</td>
+          <td class="mono ${cls(p.realizedPnl)}">${money(p.realizedPnl)}</td><td class="mono">${closed?'—':money(p.netExposure)}</td></tr>`; }).join("") + "</table>"
         : '<div class="empty-b">flat — no positions in this book</div>';
       return `<div class="book">${head}${body}</div>`;
     }).join("") : '<div class="quiet">no books</div>';

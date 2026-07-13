@@ -73,3 +73,21 @@ until hypotheses and the backtest bridge exist; revive once step 8 replay and a 
   `HypothesisGenerator` agent (SLM local, frontier when keys/cost triggers allow, ADR-0010) and a
   deterministic `HypothesisEvaluator`; the risk-envelope config + evaluator; real news/earnings/econ
   providers and the factor/optimisation layer behind their own triggers; a real-broker autonomy ADR.
+
+## Implementation note — first slice (2026-07-13)
+
+Built end-to-end, human-in-loop, local SLM: `Hypothesis`/`NarrativeItem`/`HypothesisContext`
+types + `HypothesisGenerator` (algo-engine; strict-JSON, number-free, off-list/bad-enum dropped,
+every run an audited `AiDecision`); `SimNarrativeFeed` (seedable, regime-correlated — the "no news
+source yet" stand-in); deterministic `HypothesisEvaluator` (validate → target-notional sizing →
+book routing → read-only guardrail → verdict); `HypothesisLifecycle` cadence surfacing admissible
+candidates on the attention feed; `/api/hypotheses` + an Overview panel showing thesis vs quant
+verdict. Config under `jethro.hypothesis.*`; sizing reuses `jethro.strategy.*`.
+
+**Bounded autonomy (2026-07-13, second slice).** The deterministic `AutonomyEnvelope`
+(`jethro.hypothesis.autonomy.*`, **default OFF**) gates hands-off simulated execution: a thesis
+auto-submits (ADR-0019 order path) only if admissible, **backtest-supported**, conviction ≥ min,
+order notional ≤ a tight cap, and whitelisted (empty = all) — else it stays a human-review card.
+The model never widens the envelope; a per-instrument cooldown throttles; a loud startup banner and
+`AUTONOMY auto-executed …` logs when on; auto-traded theses show "AUTO ✓" in the UI. Deferred:
+frontier-tier generation, a real narrative feed, and a real-broker autonomy ADR before any live venue.

@@ -15,4 +15,15 @@ public interface MarketDataAdapter {
 
     /** Stops the feed and releases resources. Must be safe to call after start. */
     void stop();
+
+    /** Feed connection status for the UI (ADR-0023). Default: connected, live (no data delay). */
+    default FeedStatus status() {
+        return new FeedStatus(name(), true, System.currentTimeMillis(), 0);
+    }
+
+    /** All feeds this adapter drives — one per source (a composite feed reports several, e.g.
+     *  Finnhub + Yahoo, ADR-0024). Default: just {@link #status()}. */
+    default java.util.List<FeedStatus> statuses() {
+        return java.util.List.of(status());
+    }
 }

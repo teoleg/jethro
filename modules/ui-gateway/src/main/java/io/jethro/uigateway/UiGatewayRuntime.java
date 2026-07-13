@@ -161,12 +161,21 @@ public final class UiGatewayRuntime implements AutoCloseable {
     }
 
     private void onDecision(AiDecision decision) {
+        // ai.decisions carries every audited AI run (commentary, hypotheses, ...). Only the
+        // risk commentator's narration renders as a commentary card here; other decision types
+        // (e.g. hypotheses) are surfaced by their own producers — don't dump their raw JSON.
         String body;
         try {
             var actions = JSON.readTree(decision.getProposedActionsJson());
-            body = actions.path("text").asText(decision.getProposedActionsJson());
+            if (!"commentary".equals(actions.path("type").asText(""))) {
+                return;
+            }
+            body = actions.path("text").asText("");
         } catch (Exception e) {
-            body = decision.getProposedActionsJson();
+            return; // unparseable — it's still audited on the topic, just not surfaced
+        }
+        if (body.isBlank()) {
+            return;
         }
         feed.upsert(new AttentionFeed.AttentionItem(
                 "ai:" + decision.getDecisionId(),

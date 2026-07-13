@@ -18,7 +18,7 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
     private final SimTickGenerator generator;
     private final String[] instrumentIds; // constant references: no per-tick allocation
     private final long tickIntervalNanos;
-    private final CurveFactorSimulator curveSim; // nullable: no curve marks when absent
+    private final CurveMarkSource curveSim; // nullable: no curve marks when absent
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
 
@@ -47,7 +47,7 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
     /** As above plus a curve simulator whose SOFR tenor rates are published as marks (phase 4). */
     public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled,
                                 long[] maxStepMicros, boolean regimesEnabled,
-                                CurveFactorSimulator curveSim, long tickIntervalNanos) {
+                                CurveMarkSource curveSim, long tickIntervalNanos) {
         if (instrumentIds.isEmpty()) {
             throw new IllegalArgumentException("at least one instrument required");
         }
@@ -117,14 +117,14 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
                 curveSim.step(generator.regime(), shockSign);
                 // Curve tenor rates ride the same mark pipeline as pseudo-instruments;
                 // risk-pnl routes USD.SOFR.* to curve calibration, not to positions.
-                for (int t = 0; t < CurveFactorSimulator.TENOR_IDS.length; t++) {
-                    listener.onTrade(CurveFactorSimulator.TENOR_IDS[t],
+                for (int t = 0; t < CurveMarkSource.TENOR_IDS.length; t++) {
+                    listener.onTrade(CurveMarkSource.TENOR_IDS[t],
                             curveSim.rateScaledPercent(t), 1_000_000L, now, now);
                 }
                 // Swap par rates are REAL instrument marks (USD_IRS_*): they land in the
                 // mark cache, tick on the Markets → Swaps tab, and are tradeable (V9).
-                for (int s = 0; s < CurveFactorSimulator.SWAP_IDS.length; s++) {
-                    listener.onTrade(CurveFactorSimulator.SWAP_IDS[s],
+                for (int s = 0; s < CurveMarkSource.SWAP_IDS.length; s++) {
+                    listener.onTrade(CurveMarkSource.SWAP_IDS[s],
                             curveSim.swapParScaledPercent(s), 1_000_000L, now, now);
                 }
             }

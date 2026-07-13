@@ -46,6 +46,7 @@
       <a class="tab" href="/books.html">Books</a>
       <a class="tab" href="/orders.html">Orders</a>
       <a class="tab active" href="/config.html">Config</a>
+      <a class="tab" href="/backtest.html">Backtest</a>
     </nav>
     <span class="spacer"></span>
     <span class="hint">running configuration — read-only (edits via application.properties)</span>
@@ -122,7 +123,7 @@
         volReferenceBps:"vol reference (bps)", book:"default book", bookByClass:"book routing",
         autoExecute:"auto-execute (sim only)", autoCooldownSeconds:"auto cooldown (s)",
         allowShort:"allow shorts", stopLossPct:"stop-loss (fraction)", takeProfitPct:"take-profit (fraction)",
-        deriskOnLossCap:"de-risk on loss cap"}) + '</div>';
+        deriskOnLossCap:"de-risk on loss cap", regimeVolatileScale:"volatile regime size scale"}) + '</div>';
 
       document.getElementById("sim").outerHTML = '<div id="sim">' + kvTable(cfg.sim, {
         enabled:"trading-core enabled", simSeed:"seed", simInstruments:"instruments",

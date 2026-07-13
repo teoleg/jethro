@@ -11,10 +11,17 @@
 #   ./scripts/run-local.sh                       # everything on (AI + auto-execute)
 #   AI=off AUTOEXEC=off ./scripts/run-local.sh   # market path + UI only, no AI, no trading
 #   MODEL=qwen2.5:0.5b ./scripts/run-local.sh    # lighter model for tight RAM (weaker text)
+#   PROVIDER=yahoo ./scripts/run-local.sh        # real (delayed) prices from Yahoo (ADR-0023)
 #   PROFILE=default HEAP=1g ./scripts/run-local.sh
 #
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
-#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b)
+#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b),
+#            PROVIDER (sim|yahoo, default: yahoo), AUTONOMY (off|on, default: off)
+#
+# AUTOEXEC  = the momentum STRATEGY auto-submits simulated orders (ADR-0019).
+# AUTONOMY  = the LLM's HYPOTHESES auto-execute, but only within the deterministic risk
+#             envelope (admissible + backtest-supported + conviction>=min + notional<=cap +
+#             whitelist), ADR-0022. Off by default; simulated only, never a real broker.
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -24,6 +31,9 @@ HEAP="${HEAP:-512m}"
 AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:3b}"   # 3b = usable commentary; MODEL=qwen2.5:0.5b for tight RAM
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
+AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
+PROVIDER="${PROVIDER:-yahoo}"  # sim | yahoo (delayed, ADR-0023) | finnhub (real-time WS, ADR-0024)
+FINNHUB="${FINNHUB:-}"         # Finnhub API token (free at finnhub.io); needed for PROVIDER=finnhub
 
 wait_for() {  # name, timeout_seconds, command...
   local name="$1" timeout="$2"; shift 2
@@ -78,6 +88,26 @@ EXTRA_ARGS=()
 if [ "$AUTOEXEC" = "on" ]; then
   echo "==> AUTO-EXECUTE ON: the strategy will auto-submit SIMULATED orders (ADR-0019)"
   EXTRA_ARGS+=(--jethro.strategy.auto-execute=true)
+fi
+if [ "$AUTONOMY" = "on" ]; then
+  echo "==> BOUNDED AUTONOMY ON: LLM hypotheses inside the risk envelope auto-execute as SIMULATED orders (ADR-0022)"
+  EXTRA_ARGS+=(--jethro.hypothesis.autonomy.enabled=true)
+fi
+EXTRA_ARGS+=(--jethro.trading.provider="$PROVIDER")
+if [ "$PROVIDER" = "yahoo" ]; then
+  echo "==> MARKET DATA: Yahoo (real, ~15-min delayed, dev/demo only — ADR-0023). Needs internet."
+fi
+if [ "$PROVIDER" = "finnhub" ] && [ -z "$FINNHUB" ]; then
+  echo "!! PROVIDER=finnhub needs a token: FINNHUB=your_key PROVIDER=finnhub ./scripts/run-local.sh"
+  echo "   (free key at https://finnhub.io) — falling back to sim until set."
+fi
+# A token enables the real-time WS feed (PROVIDER=finnhub) AND — independent of the price
+# provider — real news + a LIVE US Treasury yield curve (ADR-0024). All share one 60/min budget.
+if [ -n "$FINNHUB" ]; then
+  EXTRA_ARGS+=(--jethro.trading.finnhub-token="$FINNHUB")
+  [ "$PROVIDER" = "finnhub" ] && echo "==> MARKET DATA: Finnhub (real-time WebSocket, dev/demo only — ADR-0024)."
+  echo "==> Finnhub key set: real news + live Treasury curve enabled (bond data may be premium —"
+  echo "    check the log line 'RATES CURVE:' to see if the live curve or the sim curve is active)."
 fi
 
 mkdir -p logs

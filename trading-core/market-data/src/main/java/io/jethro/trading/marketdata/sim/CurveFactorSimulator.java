@@ -20,17 +20,7 @@ import java.util.SplittableRandom;
  * sequence → same curve path (ADR-0009). Calibration from these quotes into a Strata
  * curve happens downstream in risk-pnl — this class only makes market data.
  */
-public final class CurveFactorSimulator {
-
-    /** Tenor grid in years and the pseudo-instrument ids the rates are published under. */
-    public static final double[] TENORS = {1, 2, 5, 10, 30};
-    public static final String[] TENOR_IDS = {
-            "USD.SOFR.1Y", "USD.SOFR.2Y", "USD.SOFR.5Y", "USD.SOFR.10Y", "USD.SOFR.30Y"};
-
-    /** Tradeable swaps quoted off this curve: par rate in percent (see V9 migration for
-     *  the quoting convention — 1 lot = $1M notional, BUY = pay fixed). */
-    public static final String[] SWAP_IDS = {"USD_IRS_5Y", "USD_IRS_10Y"};
-    public static final int[] SWAP_TENOR_YEARS = {5, 10};
+public final class CurveFactorSimulator implements CurveMarkSource {
 
     private static final double TAU_YEARS = 5.0;
     // Per-tick uniform bounds calibrated to ~4bp/day level vol, ~2bp/day slope vol at a
@@ -82,6 +72,7 @@ public final class CurveFactorSimulator {
     }
 
     /** True if this instrument's price derives from the curve (Treasury futures). */
+    @Override
     public boolean isLinked(String instrumentId) {
         return LINKED.containsKey(instrumentId);
     }
@@ -91,6 +82,7 @@ public final class CurveFactorSimulator {
      * 10bp yield rise moves ZN (D≈6.3) down ~0.63 points — bond futures trade WITH the
      * curve, plus a small mean-reverting basis of their own.
      */
+    @Override
     public long linkedPriceScaled(String instrumentId) {
         Linked l = LINKED.get(instrumentId);
         double deltaYield = zeroRate(l.tenorYears()) - initialZeros.get(instrumentId)
@@ -109,6 +101,7 @@ public final class CurveFactorSimulator {
      * multiple scales both factor steps, its drift moves the level (rates trend), and a
      * non-zero {@code shockSign} adds a one-tick 2–6bp level jump in that direction.
      */
+    @Override
     public void step(MarketRegime regime, int shockSign) {
         int volMultiple = regime.volMultiple();
         level += (random.nextDouble() * 2 - 1) * LEVEL_STEP * volMultiple
@@ -130,6 +123,7 @@ public final class CurveFactorSimulator {
     }
 
     /** Tenor rate quoted in percent as a scaled long (1e-6 units), for the mark pipeline. */
+    @Override
     public long rateScaledPercent(int tenorIndex) {
         return Math.round(zeroRate(TENORS[tenorIndex]) * 100 * 1_000_000);
     }
@@ -141,6 +135,7 @@ public final class CurveFactorSimulator {
      * pricing (risk-pnl) computes its own par from the calibrated curve with real day
      * counts; the two agree to within a few bp, which is exactly a quote/model basis.
      */
+    @Override
     public long swapParScaledPercent(int swapIndex) {
         int years = SWAP_TENOR_YEARS[swapIndex];
         double annuity = 0.0;
