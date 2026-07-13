@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — backtest</title>
+<style>
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; } .hint { color:var(--dim); font-size:12px; }
+
+  main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:20px 2px 12px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  form.controls { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
+  .field { display:flex; flex-direction:column; gap:5px; } .field label { font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  .field input { background:#0c1019; color:var(--txt); border:1px solid var(--line-2); border-radius:9px; padding:8px 11px; font:inherit; width:150px; }
+  .field.check { flex-direction:row; align-items:center; gap:8px; }
+  button.run { background:var(--brand); color:#fff; border:0; border-radius:9px; padding:9px 18px; font:inherit; font-weight:600; cursor:pointer; }
+  button.run:disabled { opacity:.5; cursor:default; }
+
+  .stats { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; margin-top:4px; }
+  @media (max-width:820px) { .stats { grid-template-columns:repeat(2,1fr); } }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
+  .stat .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
+  .stat .v { font-size:20px; font-weight:650; margin-top:5px; } .up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--txt); }
+  #curve svg { width:100%; height:auto; display:block; } #curve svg .line { fill:none; stroke:var(--brand); stroke-width:2; }
+  #curve svg .zero { stroke:var(--line-2); stroke-dasharray:3 3; } #curve svg text { fill:var(--dim); font-size:11px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; } th, td { text-align:right; padding:3px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
+  th:first-child, td:first-child { text-align:left; } tr:last-child td { border-bottom:0; } th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .muted { color:var(--dim); } .cls { font-weight:600; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+      <a class="tab" href="/config.html">Config</a>
+      <a class="tab active" href="/backtest.html">Backtest</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="hint">replay the sim tape through the live strategy (step 8)</span>
+  </div>
+</div>
+<main>
+  <div class="section-h">Run a backtest <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic: same seed reproduces the run; backtests the current strategy config on the price-quoted universe</span></div>
+  <div class="panel">
+    <form class="controls" id="f">
+      <div class="field"><label>seed (blank = sim seed)</label><input id="seed" placeholder="42" class="mono"></div>
+      <div class="field"><label>ticks (1k–200k)</label><input id="ticks" value="20000" class="mono"></div>
+      <div class="field check"><input type="checkbox" id="regimes" checked><label>market regimes</label></div>
+      <button class="run" id="run" type="submit">Run backtest</button>
+      <span class="hint" id="status"></span>
+    </form>
+  </div>
+
+  <div id="results" style="display:none">
+    <div class="section-h">Result <span class="muted" id="meta"></span></div>
+    <div class="stats" id="stats"></div>
+    <div class="section-h">Equity curve <span class="muted" style="text-transform:none;letter-spacing:0">— mark-to-market PnL over the run (no fees/slippage modelled yet)</span></div>
+    <div class="panel"><div id="curve" class="muted">—</div></div>
+    <div class="section-h">By instrument</div>
+    <div class="panel" style="padding:2px 4px"><div id="byinstr" class="muted" style="padding:12px">—</div></div>
+  </div>
+</main>
+<script>
+  const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
+  const money = s => { const n=Number(s); return (n<0?"−$":"$") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  const cls = s => Number(s) > 0 ? "up" : (Number(s) < 0 ? "down" : "flat");
+
+  function curveSvg(points) {
+    if (points.length < 2) return '<span class="muted">not enough points</span>';
+    const W=1600, H=320, pl=70, pr=20, pt=16, pb=24;
+    const ys = points.map(Number); const mn=Math.min(0,...ys), mx=Math.max(0,...ys), span=(mx-mn)||1;
+    const X = i => pl + i/(points.length-1)*(W-pl-pr);
+    const Y = v => H-pb - ((v-mn)/span)*(H-pt-pb);
+    const line = points.map((p,i)=>`${i?'L':'M'}${X(i).toFixed(1)},${Y(Number(p)).toFixed(1)}`).join(" ");
+    const zeroY = Y(0).toFixed(1);
+    return `<svg viewBox="0 0 ${W} ${H}"><line class="zero" x1="${pl}" y1="${zeroY}" x2="${W-pr}" y2="${zeroY}"/>
+      <text x="${pl-8}" y="${(Y(mx)+4).toFixed(1)}" text-anchor="end">${money(mx)}</text>
+      <text x="${pl-8}" y="${(Y(mn)+4).toFixed(1)}" text-anchor="end">${money(mn)}</text>
+      <path class="line" d="${line}"/></svg>`;
+  }
+
+  function stat(k, v, isMoney) { return `<div class="stat"><div class="k">${k}</div><div class="v ${isMoney?cls(v):''}">${isMoney?money(v):esc(v)}</div></div>`; }
+
+  async function run(e) {
+    e.preventDefault();
+    const btn = document.getElementById("run"); const st = document.getElementById("status");
+    btn.disabled = true; st.textContent = "running…";
+    const seed = document.getElementById("seed").value.trim();
+    const ticks = document.getElementById("ticks").value.trim() || "20000";
+    const regimes = document.getElementById("regimes").checked;
+    const qs = new URLSearchParams({ ticks, regimes }); if (seed) qs.set("seed", seed);
+    try {
+      const r = await (await fetch("/api/backtest?" + qs.toString())).json();
+      document.getElementById("results").style.display = "";
+      document.getElementById("meta").textContent = `· seed ${r.seed} · ${r.ticks.toLocaleString()} ticks · ${r.evaluations} evals`;
+      document.getElementById("stats").innerHTML =
+        stat("Total P&L", r.totalPnl, true) + stat("Realized", r.realizedPnl, true) +
+        stat("Unrealized", r.unrealizedPnl, true) + stat("Max drawdown", "-"+r.maxDrawdown, true) +
+        stat("Win rate", (r.winRate*100).toFixed(1)+"%") + stat("Trades", r.trades.toLocaleString()) +
+        stat("Signals", r.signals.toLocaleString()) + stat("Evaluations", r.evaluations.toLocaleString());
+      document.getElementById("curve").outerHTML = '<div id="curve">' + curveSvg(r.equityCurve) + '</div>';
+      document.getElementById("byinstr").outerHTML = '<div id="byinstr">' + (r.byInstrument.length ?
+        "<table><tr><th>instrument</th><th>trades</th><th>realized</th><th>unrealized</th><th>end position</th></tr>" +
+        r.byInstrument.map(x=>`<tr><td class="cls">${esc(x.instrumentId)}</td><td class="mono">${x.trades}</td>
+          <td class="mono ${cls(x.realizedPnl)}">${money(x.realizedPnl)}</td>
+          <td class="mono ${cls(x.unrealizedPnl)}">${money(x.unrealizedPnl)}</td>
+          <td class="mono">${esc(x.endPosition)}</td></tr>`).join("") + "</table>"
+        : '<span class="muted">no instruments</span>') + '</div>';
+      st.textContent = "done";
+    } catch (err) { st.textContent = "backtest failed: " + err; }
+    btn.disabled = false;
+  }
+  document.getElementById("f").addEventListener("submit", run);
+</script>
+</body>
+</html>
