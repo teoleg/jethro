@@ -156,6 +156,19 @@ public final class RiskProjection {
     }
 
     /**
+     * The SIGNED notional a book currently holds in one instrument (positive = long) —
+     * lets the strategy distinguish adding to a position from reducing it. Zero without
+     * a mark or position.
+     */
+    public synchronized BigDecimal instrumentNetExposure(String bookId, String instrumentId) {
+        Position pos = positions.get(key(bookId, instrumentId));
+        if (pos == null) {
+            return BigDecimal.ZERO;
+        }
+        return p8(exposureOf(instrumentId, pos.quantity()));
+    }
+
+    /**
      * Projects the |notional| the book would hold in one instrument if {@code signedQtyDelta}
      * were applied — the concentration input of the pre-trade guardrail. Zero without a mark.
      */

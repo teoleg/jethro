@@ -9,6 +9,7 @@ import io.jethro.trading.algo.strategy.TradeSignal;
 import io.jethro.trading.riskpnl.InstrumentRef;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.trading.riskpnl.PreTradeGuardrail;
+import io.jethro.trading.riskpnl.RiskProjection;
 import io.jethro.uigateway.AttentionFeed;
 import io.jethro.uigateway.SseBroadcaster;
 import org.slf4j.Logger;
@@ -44,6 +45,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final TradingCoreLifecycle tradingCore;
     private final InstrumentRefSource refs;
     private final PreTradeGuardrail guardrail;
+    private final RiskProjection risk;
     private final AttentionFeed feed;
     private final SseBroadcaster sse;
     private final StrategyProperties props;
@@ -58,13 +60,14 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private volatile ScheduledExecutorService scheduler;
 
     public StrategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
-                             InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                             InstrumentRefSource refs, PreTradeGuardrail guardrail, RiskProjection risk,
                              AttentionFeed feed, SseBroadcaster sse, StrategyProperties props,
                              OrderService orderService) {
         this.strategy = strategy;
         this.tradingCore = tradingCore;
         this.refs = refs;
         this.guardrail = guardrail;
+        this.risk = risk;
         this.feed = feed;
         this.sse = sse;
         this.props = props;
@@ -117,6 +120,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
             int signals = 0;
             int suppressed = 0;
             int oversized = 0;
+            int atPosition = 0;
             int executed = 0;
             String sampleReason = null;
             for (TradeSignal signal : strategy.evaluate(observations)) {
@@ -125,6 +129,16 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 Optional<BigDecimal> sized = size(signal);
                 if (sized.isEmpty()) {
                     oversized++; // one unit exceeds the order-notional cap — unsizeable, skip
+                    continue;
+                }
+                // Position-aware (quant-engine phase 5): once the book already holds the
+                // target position in this instrument, don't pile on in the same direction —
+                // opposite-direction signals still pass (they REDUCE risk).
+                BigDecimal held = risk.instrumentNetExposure(book, signal.instrumentId());
+                boolean sameDirection = (held.signum() > 0) == (signal.side() == io.jethro.domain.Side.BUY);
+                if (held.signum() != 0 && sameDirection
+                        && held.abs().compareTo(props.maxPositionNotionalOrDefault()) >= 0) {
+                    atPosition++;
                     continue;
                 }
                 BigDecimal quantity = sized.get();
@@ -181,8 +195,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
 
             // Heartbeat: the log always shows the strategy is alive and why it is/ isn't trading.
             if (++cycles % HEARTBEAT_CYCLES == 0 || signals > 0 || suppressed > 0) {
-                log.info("strategy: {} fresh marks ({} stale), {} signals, {} unsizeable, {} suppressed by limits, {} auto-executed{}",
-                        fresh, stale, signals, oversized, suppressed, executed,
+                log.info("strategy: {} fresh marks ({} stale), {} signals, {} unsizeable, {} at-position, {} suppressed by limits, {} auto-executed{}",
+                        fresh, stale, signals, oversized, atPosition, suppressed, executed,
                         fresh == 0 ? "  — NO FRESH MARKS (feed may be stale)" : "");
             }
         } catch (Throwable t) {

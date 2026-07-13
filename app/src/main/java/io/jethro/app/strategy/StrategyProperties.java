@@ -32,7 +32,10 @@ public record StrategyProperties(
         long autoCooldownSeconds,
         /** Hard cap on a single order's notional; signals that can't be sized under it
          *  (e.g. one ES contract > cap) are skipped, never rounded up. Default 2× target. */
-        BigDecimal maxOrderNotional) {
+        BigDecimal maxOrderNotional,
+        /** Target position cap: once a book holds this much |notional| in an instrument,
+         *  same-direction signals are skipped (risk-reducing ones still pass). Default 3× target. */
+        BigDecimal maxPositionNotional) {
 
     public double thresholdSigmasOrDefault() {
         return thresholdSigmas != null ? thresholdSigmas : 2.5;
@@ -40,6 +43,12 @@ public record StrategyProperties(
 
     public BigDecimal minSignalBpsOrDefault() {
         return minSignalBps != null ? minSignalBps : new BigDecimal("2");
+    }
+
+    /** The per-instrument position cap, defaulting to 3× the target notional. */
+    public BigDecimal maxPositionNotionalOrDefault() {
+        return maxPositionNotional != null ? maxPositionNotional
+                : targetNotional.multiply(new BigDecimal("3"));
     }
 
     /** The single-order notional cap, defaulting to 2× the target notional. */
