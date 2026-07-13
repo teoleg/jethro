@@ -9,9 +9,15 @@ import java.util.SplittableRandom;
  * from them (Nelson-Siegel-lite): {@code z(t) = level + slope · (1 − e^(−t/τ))}, τ = 5y.
  * The curve therefore stays coherent: parallel moves are level, steepenings are slope.
  *
+ * <p>The curve shares the sim's {@link MarketRegime}: trends drift the level (a rates
+ * selloff/rally the momentum strategy can genuinely catch), VOLATILE multiplies factor
+ * vol, and a correlated shock round jumps the level 2–6bp like a data surprise — so the
+ * rates market has episodes just as equities do, not a permanently flat drip.
+ *
  * <p>Rates are emitted as sim "marks" for pseudo-instruments {@code USD.SOFR.<tenor>},
- * quoted in percent (e.g. 4.215632), scaled 1e-6 like every price. Deterministic:
- * same seed → same curve path (ADR-0009). Calibration from these quotes into a Strata
+ * quoted in percent (e.g. 4.215632), scaled 1e-6 like every price; swap par rates for
+ * {@link #SWAP_IDS} are quoted the same way. Deterministic: same seed and same regime
+ * sequence → same curve path (ADR-0009). Calibration from these quotes into a Strata
  * curve happens downstream in risk-pnl — this class only makes market data.
  */
 public final class CurveFactorSimulator {
@@ -21,19 +27,37 @@ public final class CurveFactorSimulator {
     public static final String[] TENOR_IDS = {
             "USD.SOFR.1Y", "USD.SOFR.2Y", "USD.SOFR.5Y", "USD.SOFR.10Y", "USD.SOFR.30Y"};
 
+    /** Tradeable swaps quoted off this curve: par rate in percent (see V9 migration for
+     *  the quoting convention — 1 lot = $1M notional, BUY = pay fixed). */
+    public static final String[] SWAP_IDS = {"USD_IRS_5Y", "USD_IRS_10Y"};
+    public static final int[] SWAP_TENOR_YEARS = {5, 10};
+
     private static final double TAU_YEARS = 5.0;
-    // Per-tick uniform bounds calibrated to ~3bp/day level vol, ~1.5bp/day slope vol at
-    // a 100ms tick (≈234k ticks/trading day): daily σ / √234k, ×√3 for uniform.
-    private static final double LEVEL_STEP = 1.1e-6;
-    private static final double SLOPE_STEP = 0.55e-6;
+    // Per-tick uniform bounds calibrated to ~4bp/day level vol, ~2bp/day slope vol at a
+    // 100ms tick (≈234k ticks/trading day): daily σ / √234k, ×√3 for uniform. That puts
+    // ZN's implied price vol near its configured 5% annual (D≈6.3 × 4bp ≈ 25bp/day).
+    private static final double LEVEL_STEP = 1.5e-6;
+    private static final double SLOPE_STEP = 0.75e-6;
     private static final double MIN_RATE = 0.0001; // 1bp floor — no negative demo rates
+    // Shock round: a one-tick level jump of 2–6bp (CPI/FOMC surprise), sign from the
+    // equity shock so cross-asset moves stay correlated.
+    private static final double SHOCK_MIN = 0.0002;
+    private static final double SHOCK_RANGE = 0.0004;
+    // Idiosyncratic basis per linked future (mean-reverting yield offset): real futures
+    // don't sit exactly on the curve (CTD switches, carry). Keeps the four futures from
+    // being one deterministic function of two factors. Stationary σ ≈ 0.3bp of yield.
+    private static final double BASIS_STEP = 0.5e-6;
+    private static final double BASIS_KAPPA = 0.005;
 
     /** Curve-linked instruments: bond futures priced FROM the curve so rates signals on
      *  them are economically meaningful (not an independent walk). CONVENTION: price ≈
-     *  base × (1 − modDuration × Δyield(tenor)); durations ~ CTD conventions. */
+     *  base × (1 − modDuration × (Δyield(tenor) + basis)); durations ~ CTD conventions. */
     private record Linked(double tenorYears, double modDuration, double basePrice) {
     }
 
+    // Iteration over linked futures must be in a FIXED order (basis noise draws from the
+    // shared RNG) — a Map's iteration order would break seed determinism.
+    private static final String[] LINKED_IDS = {"ZT", "ZF", "ZN", "ZB"};
     private static final java.util.Map<String, Linked> LINKED = java.util.Map.of(
             "ZT", new Linked(2, 1.9, 102.90),
             "ZF", new Linked(5, 4.2, 107.30),
@@ -42,6 +66,7 @@ public final class CurveFactorSimulator {
 
     private final SplittableRandom random;
     private final java.util.Map<String, Double> initialZeros = new java.util.HashMap<>();
+    private final java.util.Map<String, Double> basis = new java.util.HashMap<>();
     private double level;
     private double slope;
 
@@ -50,7 +75,10 @@ public final class CurveFactorSimulator {
         this.random = new SplittableRandom(seed);
         this.level = startLevel;
         this.slope = startSlope;
-        LINKED.forEach((id, l) -> initialZeros.put(id, zeroRate(l.tenorYears())));
+        for (String id : LINKED_IDS) {
+            initialZeros.put(id, zeroRate(LINKED.get(id).tenorYears()));
+            basis.put(id, 0.0);
+        }
     }
 
     /** True if this instrument's price derives from the curve (Treasury futures). */
@@ -59,20 +87,40 @@ public final class CurveFactorSimulator {
     }
 
     /**
-     * Curve-implied futures price, scaled 1e-6: base × (1 − D·Δz(tenor)). A 10bp yield
-     * rise moves ZN (D≈6.3) down ~0.63 points — bond futures now trade WITH the curve.
+     * Curve-implied futures price, scaled 1e-6: base × (1 − D·(Δz(tenor) + basis)). A
+     * 10bp yield rise moves ZN (D≈6.3) down ~0.63 points — bond futures trade WITH the
+     * curve, plus a small mean-reverting basis of their own.
      */
     public long linkedPriceScaled(String instrumentId) {
         Linked l = LINKED.get(instrumentId);
-        double deltaYield = zeroRate(l.tenorYears()) - initialZeros.get(instrumentId);
+        double deltaYield = zeroRate(l.tenorYears()) - initialZeros.get(instrumentId)
+                + basis.get(instrumentId);
         double price = l.basePrice() * (1.0 - l.modDuration() * deltaYield);
         return Math.max(10_000L, Math.round(price * 1_000_000));
     }
 
-    /** Advances both factors one tick. */
+    /** Advances one tick with no regime effects (CALM, no shock) — tests/back-compat. */
     public void step() {
-        level += (random.nextDouble() * 2 - 1) * LEVEL_STEP;
-        slope += (random.nextDouble() * 2 - 1) * SLOPE_STEP;
+        step(MarketRegime.CALM, 0);
+    }
+
+    /**
+     * Advances both factors one tick under the given market regime: the regime's vol
+     * multiple scales both factor steps, its drift moves the level (rates trend), and a
+     * non-zero {@code shockSign} adds a one-tick 2–6bp level jump in that direction.
+     */
+    public void step(MarketRegime regime, int shockSign) {
+        int volMultiple = regime.volMultiple();
+        level += (random.nextDouble() * 2 - 1) * LEVEL_STEP * volMultiple
+                + LEVEL_STEP * regime.driftPerMille() / 1_000.0;
+        slope += (random.nextDouble() * 2 - 1) * SLOPE_STEP * volMultiple;
+        if (shockSign != 0) {
+            level += Math.signum(shockSign) * (SHOCK_MIN + random.nextDouble() * SHOCK_RANGE);
+        }
+        for (String id : LINKED_IDS) {
+            double b = basis.get(id);
+            basis.put(id, b * (1.0 - BASIS_KAPPA) + (random.nextDouble() * 2 - 1) * BASIS_STEP);
+        }
     }
 
     /** Zero rate for a tenor in years (fraction, e.g. 0.0421). */
@@ -84,5 +132,26 @@ public final class CurveFactorSimulator {
     /** Tenor rate quoted in percent as a scaled long (1e-6 units), for the mark pipeline. */
     public long rateScaledPercent(int tenorIndex) {
         return Math.round(zeroRate(TENORS[tenorIndex]) * 100 * 1_000_000);
+    }
+
+    /**
+     * Par swap rate for {@link #SWAP_IDS}[i], quoted in percent as a scaled long — the
+     * standard annual-fixed par formula on this curve's zeros:
+     * {@code par = (1 − DF(n)) / Σᵢ₌₁..ₙ DF(i)}, DF(t) = e^(−z(t)·t). Downstream Strata
+     * pricing (risk-pnl) computes its own par from the calibrated curve with real day
+     * counts; the two agree to within a few bp, which is exactly a quote/model basis.
+     */
+    public long swapParScaledPercent(int swapIndex) {
+        int years = SWAP_TENOR_YEARS[swapIndex];
+        double annuity = 0.0;
+        for (int i = 1; i <= years; i++) {
+            annuity += discountFactor(i);
+        }
+        double par = (1.0 - discountFactor(years)) / annuity;
+        return Math.round(par * 100 * 1_000_000);
+    }
+
+    private double discountFactor(double tenorYears) {
+        return Math.exp(-zeroRate(tenorYears) * tenorYears);
     }
 }
