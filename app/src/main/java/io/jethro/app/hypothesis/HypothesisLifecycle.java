@@ -127,6 +127,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     }
 
     private void runOnce() {
+        long startNanos = System.nanoTime();
         try {
             var runtime = tradingCore.runtime();
             if (runtime == null) {
@@ -206,8 +207,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                     .filter(e -> e.verdict() == HypothesisEvaluator.Verdict.ADMISSIBLE).count();
             // Log every cycle so "no hypotheses" is explained: the model ran (Ollama up) but
             // returned 0 usable structured theses, vs the layer being disabled or the model down.
-            log.info("hypotheses: model proposed {}, {} admissible, {} auto-traded (regime {})",
-                    evaluated.size(), admissible, autoTraded.size(), tradingCore.regime());
+            // The elapsed time is dominated by the local SLM inference — it's the real floor on how
+            // often the cycle can run (scheduleWithFixedDelay waits interval AFTER this completes).
+            long tookMs = (System.nanoTime() - startNanos) / 1_000_000;
+            log.info("hypotheses: model proposed {}, {} admissible, {} auto-traded (regime {}) — took {}ms",
+                    evaluated.size(), admissible, autoTraded.size(), tradingCore.regime(), tookMs);
         } catch (Throwable t) {
             log.warn("hypothesis cycle failed: {}", t.toString());
         }
