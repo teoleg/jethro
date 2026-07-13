@@ -84,14 +84,41 @@ public final class IndicatorsService implements SmartLifecycle {
 
     private void poll() {
         try {
+            int ok = 0;
             for (Map.Entry<String, String> e : props.symbolsOrDefault().entrySet()) {
-                fetch(e.getKey(), e.getValue()).ifPresent(i -> lastGood.put(e.getKey(), i));
+                var got = fetch(e.getKey(), e.getValue());
+                if (got.isPresent()) {
+                    lastGood.put(e.getKey(), got.get());
+                    ok++;
+                }
             }
             // Always publish every configured symbol (last-known or N/A) so the strip is complete.
             latest = allSymbols();
+            // Visibility (the request IS being made): log the hit rate; loud if none resolved.
+            log.info("market indicators: {}/{} symbols have data{}",
+                    ok, props.symbolsOrDefault().size(),
+                    ok == 0 ? " — NONE resolved (check /api/indicators/probe for the raw Yahoo response)" : "");
         } catch (Throwable t) {
             log.debug("indicators poll failed: {}", t.toString());
         }
+    }
+
+    /** One-shot raw fetch for diagnostics (/api/indicators/probe): the actual URL, HTTP status,
+     *  and the first bytes of the body — so a stuck strip can be diagnosed on the host. */
+    public ProbeResult probe(String symbol) {
+        String url = BASE + symbol.replace("^", "%5E") + "?interval=1d&range=5d";
+        try {
+            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url))
+                    .header("User-Agent", USER_AGENT).timeout(Duration.ofSeconds(8)).GET().build();
+            HttpResponse<String> r = http.send(request, HttpResponse.BodyHandlers.ofString());
+            String body = r.body() == null ? "" : r.body();
+            return new ProbeResult(url, r.statusCode(), body.substring(0, Math.min(400, body.length())), null);
+        } catch (Exception e) {
+            return new ProbeResult(url, -1, null, e.toString());
+        }
+    }
+
+    public record ProbeResult(String url, int status, String bodySnippet, String error) {
     }
 
     private Optional<Indicator> fetch(String symbol, String label) {

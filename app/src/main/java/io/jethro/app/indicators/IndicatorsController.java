@@ -32,4 +32,15 @@ public final class IndicatorsController {
                 .map(i -> new IndicatorDto(i.symbol(), i.label(), i.price(), i.changePercent()))
                 .toList();
     }
+
+    /** Diagnostics: raw Yahoo response for one symbol (default ^GSPC) — status + first bytes. */
+    @GetMapping("/api/indicators/probe")
+    public IndicatorsService.ProbeResult probe(
+            @org.springframework.web.bind.annotation.RequestParam(name = "symbol", defaultValue = "^GSPC") String symbol) {
+        IndicatorsService live = service.getIfAvailable();
+        if (live == null) {
+            return new IndicatorsService.ProbeResult("(indicators disabled)", -1, null, "service not available");
+        }
+        return live.probe(symbol);
+    }
 }

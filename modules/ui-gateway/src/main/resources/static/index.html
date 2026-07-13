@@ -31,10 +31,16 @@
   .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
   .spacer { flex:1; }
   .feeds { display:flex; gap:6px; }
-  /* market indicators strip in the top bar (indices/ETFs, US + international) */
-  .indices { flex:1; display:flex; gap:14px; overflow-x:auto; padding:0 6px; scrollbar-width:none; min-width:0; }
-  .indices::-webkit-scrollbar { display:none; }
-  .ix { display:flex; align-items:baseline; gap:6px; white-space:nowrap; font-size:12px; }
+  /* market indicators — continuously-scrolling ticker, bounded between the tabs and the
+     connection controls (flex:1 + min-width:0 + overflow hidden keeps it from overlapping) */
+  .indices { flex:1; min-width:0; overflow:hidden; padding:0 4px;
+             -webkit-mask-image:linear-gradient(90deg, transparent, #000 22px, #000 calc(100% - 22px), transparent);
+             mask-image:linear-gradient(90deg, transparent, #000 22px, #000 calc(100% - 22px), transparent); }
+  .marquee { display:inline-flex; white-space:nowrap; animation:ticker 60s linear infinite; will-change:transform; }
+  .indices:hover .marquee { animation-play-state:paused; }
+  /* trailing margin per tile (not container gap) so the two copies join seamlessly at -50% */
+  @keyframes ticker { to { transform:translateX(-50%); } }
+  .ix { display:inline-flex; align-items:baseline; gap:6px; margin-right:24px; white-space:nowrap; font-size:12px; }
   .ix .l { color:var(--dim); } .ix .v { font-weight:600; } .ix .c { font-size:11px; }
   .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
   .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); } .pill.on .led { background:var(--up); box-shadow:0 0 8px var(--up); } .pill.off .led { background:var(--warn); }
@@ -232,7 +238,8 @@
     try {
       const ix = await (await fetch("/api/indicators")).json();
       const el = document.getElementById("indices");
-      el.innerHTML = ix.map(i => {
+      if (!ix.length) { el.innerHTML = ""; return; }
+      const tiles = ix.map(i => {
         const hasData = i.price != null && i.changePercent != null;
         if (!hasData) {
           return `<span class="ix" title="${esc(i.symbol)}"><span class="l">${esc(i.label)}</span>
@@ -244,6 +251,8 @@
         return `<span class="ix" title="${esc(i.symbol)}"><span class="l">${esc(i.label)}</span>
           <span class="v mono">${v}</span><span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span></span>`;
       }).join("");
+      // Two copies so the -50% scroll loops seamlessly (running-text ticker).
+      el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
     } catch (e) {}
   }
   // Per-feed connection LEDs on the stream line, from real feed status (/api/feeds).
