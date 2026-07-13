@@ -56,10 +56,17 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.SwapPricingService(curveService);
     }
 
+    /** Deterministic scenario/stress over live positions (quant-engine step 2). */
+    @Bean
+    io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine(InstrumentRefSource refs) {
+        return new io.jethro.trading.riskpnl.ScenarioEngine(refs);
+    }
+
     @Bean
     RiskController riskController(RiskProjection projection, CurveService curveService,
-                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
-        return new RiskController(projection, curveService, swapPricing);
+                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine) {
+        return new RiskController(projection, curveService, swapPricing, scenarioEngine);
     }
 
     @Bean(destroyMethod = "close")
@@ -99,5 +106,14 @@ public class RiskConfig {
     RiskLimitMonitor riskLimitMonitor(RiskProjection projection, RiskLimitEvaluator evaluator,
                                       RiskLimitSource limits, AttentionFeed feed, SseBroadcaster sse) {
         return new RiskLimitMonitor(projection, evaluator, limits, feed, sse);
+    }
+
+    /** Worst-stress-vs-loss-cap attention trigger (deterministic floor, ADR-0017). */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
+    ScenarioMonitor scenarioMonitor(RiskProjection projection,
+                                    io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine,
+                                    RiskLimitProperties limits, AttentionFeed feed, SseBroadcaster sse) {
+        return new ScenarioMonitor(projection, scenarioEngine, limits, feed, sse);
     }
 }

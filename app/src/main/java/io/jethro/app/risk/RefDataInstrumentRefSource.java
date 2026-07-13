@@ -37,11 +37,27 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
     }
 
     private synchronized void reload() {
+        Map<String, Map<String, String>> attributes = repository.findAllAttributes();
         Map<String, InstrumentRef> next = new HashMap<>();
         for (Instrument i : repository.findAllInstruments()) {
-            next.put(i.id().value(), new InstrumentRef(
-                    i.id().value(), i.assetClass().name(), i.currency(), i.contractMultiplier()));
+            String id = i.id().value();
+            next.put(id, new InstrumentRef(id, i.assetClass().name(), i.currency(),
+                    i.contractMultiplier(),
+                    decimalAttribute(attributes.getOrDefault(id, Map.of()), "mod_duration")));
         }
         cache = next;
+    }
+
+    /** A decimal instrument attribute (e.g. mod_duration for rates scenarios), or null. */
+    private static java.math.BigDecimal decimalAttribute(Map<String, String> attributes, String name) {
+        String value = attributes.get(name);
+        if (value == null) {
+            return null;
+        }
+        try {
+            return new java.math.BigDecimal(value);
+        } catch (NumberFormatException e) {
+            return null; // malformed refdata never breaks valuation — sensitivity just absent
+        }
     }
 }

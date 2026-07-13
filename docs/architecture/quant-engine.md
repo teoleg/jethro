@@ -109,11 +109,19 @@ Built (overview steps 1–8 partial):
   sizing, position-aware participation, per-class routing/caps → guardrailed
   suggestions/auto-exec (ADR-0018/0019);
 - an interim parametric **VaR/vol/concentration** stat helper (`RiskStats`) — a stopgap
-  Strata's measures framework subsumes.
+  Strata's measures framework subsumes;
+- **scenario/stress, first slice** (layer: risk measures; asset classes: all current):
+  `ScenarioEngine` revalues live positions under the standard shocks (rates ±100bp,
+  equities −5%, USD +2%, combined risk-off) — first-order, exact-decimal, per book and
+  firm; surfaced on the Overview stress panel (`/api/scenarios`) and as a deterministic
+  attention trigger when the worst stress exceeds the firm loss cap (`ScenarioMonitor`).
+  Named limitation: linear/duration/DV01 sensitivities and no cross-terms — full
+  revaluation via Strata `ScenarioMarketData` is the deferred second slice.
 
 Not built (the gap this doc frames):
-- Strata measures: real (measure-based) VaR + **scenario/stress** (curve ±100bp, equity
-  ±5% → portfolio P&L → attention feed) — sequencing step 2, the biggest open box;
+- Strata measures: real (measure-based) VaR and **full-revaluation scenarios** through
+  `ScenarioMarketData` (subsumes the first-order engine above) — sequencing step 2's
+  remainder;
 - curve *sensitivities as risk state* (bucketed DV01 per book), Greeks/options, credit;
 - portfolio (correlation-aware) VaR; regime-aware strategy behaviour (step 5 remainder);
 - swap lifecycle beyond first-order: accrual/roll-down, DV01 refresh, per-trade economics.
