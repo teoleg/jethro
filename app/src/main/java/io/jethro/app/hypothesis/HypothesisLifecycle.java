@@ -48,7 +48,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
 
     private final io.jethro.trading.algo.hypothesis.HypothesisGenerator generator;
     private final HypothesisEvaluator evaluator;
-    private final SimNarrativeFeed narrativeFeed;
+    private final NarrativeFeed narrativeFeed;
     private final BacktestService backtest;
     private final TradingCoreLifecycle tradingCore;
     private final RiskProjection risk;
@@ -67,7 +67,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private volatile ScheduledExecutorService scheduler;
 
     public HypothesisLifecycle(io.jethro.trading.algo.hypothesis.HypothesisGenerator generator,
-                               HypothesisEvaluator evaluator, SimNarrativeFeed narrativeFeed,
+                               HypothesisEvaluator evaluator, NarrativeFeed narrativeFeed,
                                BacktestService backtest, TradingCoreLifecycle tradingCore, RiskProjection risk,
                                InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
                                HypothesisProperties props, OrderService orderService) {

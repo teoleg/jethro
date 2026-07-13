@@ -18,6 +18,9 @@ public record HypothesisProperties(
         Integer maxPerCycle,
         Integer maxOutputTokens,
         Long narrativeSeed,
+        /** Min seconds between real news (Finnhub) refreshes — caps API calls independent of the
+         *  hypothesis cadence. Ignored by the sim feed. Default 60. */
+        Long narrativeRefreshSeconds,
         Integer backtestTicks,
         Autonomy autonomy) {
 
@@ -75,5 +78,9 @@ public record HypothesisProperties(
 
     public long narrativeSeedOrDefault() {
         return narrativeSeed != null ? narrativeSeed : 42L;
+    }
+
+    public long narrativeRefreshSecondsOrDefault() {
+        return narrativeRefreshSeconds != null && narrativeRefreshSeconds > 0 ? narrativeRefreshSeconds : 60;
     }
 }

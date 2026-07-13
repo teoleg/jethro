@@ -37,6 +37,28 @@ data available:
 The composite is a `MarketDataAdapter` wrapping a background `MarketDataAdapter` — no special
 casing downstream; the feed status reports `finnhub` (real-time).
 
+### Real news for the hypothesis layer (fulfils ADR-0022's deferred feed)
+
+ADR-0022 stood up the LLM hypothesis layer on a **seedable sim narrative feed** and explicitly
+deferred a real news provider. The same Finnhub key now supplies that feed via its **REST news
+endpoints** — a second, read-only use of the provider, off the tick path:
+
+- `GET /news?category=general` → market-wide macro headlines (`NarrativeItem.Category.MACRO`).
+- `GET /company-news?symbol=…&from=…&to=…` → per-name headlines for the covered equities
+  (`NEWS`/`EARNINGS`), pulled only for instruments with `finnhub` symbology.
+
+`FinnhubNewsClient` (Jackson-parsed, defensive — any HTTP/parse error yields no items, never
+throws) feeds `FinnhubNarrativeFeed`, which implements the new `NarrativeFeed` port alongside
+`SimNarrativeFeed`. It is selected **whenever a Finnhub token is set** — independent of the price
+`provider`, so a Yahoo/sim price run still gets real headlines; **CI and offline (no token) keep
+the sim fixtures**. Bounds honoured: Finnhub symbols are used **only to query** — every
+`NarrativeItem` keys on the internal `instrumentId` (invariant 2); the model reads only the
+headline text and a **coarse keyword sentiment tag, never a number** into sizing/risk
+(invariant 1/7 — the deterministic quant layer still owns every number). Refreshes are throttled
+(`jethro.hypothesis.narrative-refresh-seconds`, default 60) so the hypothesis cadence never
+hammers the free-tier quota. Sentiment is a documented heuristic, not a classifier — a licensed
+news/NLP provider would be its own ADR.
+
 ## Alternatives considered
 
 **Finnhub for everything.** Rejected — its free tier is US equities only; futures/FX/curve would
@@ -57,5 +79,10 @@ real paper trading (it would be its own ADR).
 - Negative: a third moving part and a **new external dependency requiring an API key**; Finnhub's
   free tier is equity-only and IEX-ish coverage, and the WebSocket needs live verification on the
   host (CI/offline stay on the sim). Still dev/demo — the real-broker gate (ADR-0015) is unchanged.
+- Positive (news): the LLM finally reasons over **real headlines** instead of sim fixtures —
+  closing the "News → LLM Layer" edge of the intended pipeline — reusing the key already required
+  for prices, at zero extra setup.
 - Follow-ups: an Alpaca adapter (crypto / paper trading); surface per-source status distinctly if
-  the composite grows; a licensed provider ADR before any production use.
+  the composite grows; Finnhub `/bond/yield-curve` (real rates), `/stock/candle` (real backtests)
+  and `/forex/rates` (real FX) are further real-data upgrades; a licensed news/market-data provider
+  ADR before any production use.

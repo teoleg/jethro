@@ -20,7 +20,7 @@ import java.util.SplittableRandom;
  * <p>Deterministic: same seed + same regime sequence → same headlines (ADR-0009), so a
  * replay reproduces the narrative the hypotheses were built on.
  */
-public final class SimNarrativeFeed {
+public final class SimNarrativeFeed implements NarrativeFeed {
 
     private static final int MAX_RECENT = 8;
 
@@ -64,6 +64,7 @@ public final class SimNarrativeFeed {
      * (newest last). {@code singleNameInstruments} are the ids eligible for earnings/news
      * (equities/futures); may be empty.
      */
+    @Override
     public synchronized List<NarrativeItem> poll(String regime, List<String> singleNameInstruments, long nowMillis) {
         double emitChance = switch (regime) {
             case "VOLATILE" -> 1.0;

@@ -2,8 +2,9 @@ package io.jethro.trading.algo.hypothesis;
 
 /**
  * One qualitative input to the LLM hypothesis layer (ADR-0022): a headline, econ print, or
- * earnings note. Locally these come from a seedable sim feed (no real news source yet,
- * ADR-0009 spirit); the shape is provider-agnostic so a real feed slots in unchanged.
+ * earnings note. The shape is provider-agnostic: it comes from real Finnhub news when a key is
+ * set (ADR-0024) or a seedable offline sim feed otherwise (ADR-0009 spirit) — the pipeline is
+ * identical either way.
  *
  * @param instrumentId the instrument it concerns, or null for a market-wide macro item.
  * @param sentiment    a coarse ordinal tag — never a number fed into sizing/risk.
