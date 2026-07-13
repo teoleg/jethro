@@ -82,9 +82,17 @@ public final class ScenarioEngine {
                     new Shock(new BigDecimal("-0.05"), new BigDecimal("-25"), new BigDecimal("0.01"))));
 
     private final InstrumentRefSource refs;
+    private final SwapPricingService swaps; // nullable: full-reval swaps when present, else first-order
 
     public ScenarioEngine(InstrumentRefSource refs) {
+        this(refs, null);
+    }
+
+    /** @param swaps when non-null, swap scenario P&amp;L is FULL revaluation on the shocked curve
+     *               (captures convexity), not first-order DV01. */
+    public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps) {
         this.refs = refs;
+        this.swaps = swaps;
     }
 
     /** Runs the standard scenarios over the given positions with the given FX marks. */
@@ -98,6 +106,11 @@ public final class ScenarioEngine {
 
     private ScenarioResult run(Scenario scenario, List<PositionRisk> positions, FxConversion fx) {
         Shock shock = scenario.shock();
+        // Full-revaluation swap P&L per lot on the shocked curve (convexity), computed once per
+        // scenario when a pricer is available and the scenario moves rates; else first-order below.
+        Map<String, BigDecimal> swapReval = swaps != null && shock.ratesBps().signum() != 0
+                ? swaps.swapPnlPerLotUnderShock(shock.ratesBps(), java.time.LocalDate.now())
+                : Map.of();
         Map<String, BigDecimal> byBook = new LinkedHashMap<>();
         BigDecimal firm = ZERO;
         int covered = 0;
@@ -130,13 +143,21 @@ public final class ScenarioEngine {
                                 .multiply(shock.ratesBps().movePointLeft(4));
                     }
                 }
-                case "SWAP" ->
-                    // V9 convention: mark is the par rate in percent, so a parallel Δy of
-                    // b bp moves the mark by b/100 percentage points, first order.
-                    impactCcy = p.quantity()
-                            .multiply(shock.ratesBps().movePointLeft(2))
-                            .multiply(refs.find(p.instrumentId())
-                                    .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE));
+                case "SWAP" -> {
+                    BigDecimal perLot = swapReval.get(p.instrumentId());
+                    if (perLot != null) {
+                        // Full revaluation: qty lots ($1M each) × ΔPV re-priced on the shocked
+                        // curve — carries convexity (a first-order DV01 shock would be symmetric).
+                        impactCcy = p.quantity().multiply(perLot);
+                    } else {
+                        // First-order fallback (no pricer/curve): V9 convention — mark is the par
+                        // rate in percent, so Δy of b bp moves it b/100 pts × the DV01-based multiplier.
+                        impactCcy = p.quantity()
+                                .multiply(shock.ratesBps().movePointLeft(2))
+                                .multiply(refs.find(p.instrumentId())
+                                        .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE));
+                    }
+                }
                 default -> {
                     skipped++; // unknown asset class — never guess a sensitivity
                     continue;

@@ -61,21 +61,37 @@ public final class SwapPricingService {
         return curves.curve().map(curve -> value(curve, valuationDate)).orElse(List.of());
     }
 
-    private List<SwapValuation> value(Curve curve, LocalDate valuationDate) {
-        ImmutableRatesProvider provider = ImmutableRatesProvider.builder(valuationDate)
-                .discountCurve(Currency.USD, curve)
-                .overnightIndexCurve(OvernightIndices.USD_SOFR, curve)
-                .build();
+    /**
+     * Full-revaluation swap P&amp;L per $1M lot under a parallel curve shock (quant-engine step 2,
+     * second slice): {@code ΔPV = PV(shocked curve) − PV(base curve)} for each reference swap,
+     * re-priced through Strata — so the result carries <b>convexity</b>, unlike a first-order
+     * DV01 × Δy shock (which is linear and symmetric). instrumentId → ΔPV (exact decimal,
+     * invariant 1). Empty until the curve is live.
+     */
+    public java.util.Map<String, BigDecimal> swapPnlPerLotUnderShock(BigDecimal shiftBps, LocalDate valuationDate) {
+        var base = curves.curve();
+        var shocked = curves.curveWithShiftBps(shiftBps.doubleValue());
+        if (base.isEmpty() || shocked.isEmpty()) {
+            return java.util.Map.of();
+        }
+        var baseProvider = ratesProvider(base.get(), valuationDate);
+        var shockedProvider = ratesProvider(shocked.get(), valuationDate);
+        java.util.Map<String, BigDecimal> out = new java.util.LinkedHashMap<>();
+        for (ReferenceSwap swap : REFERENCE_SWAPS) {
+            ResolvedSwapTrade trade = referenceTrade(swap, valuationDate);
+            double pvBase = presentValue(trade, baseProvider);
+            double pvShocked = presentValue(trade, shockedProvider);
+            out.put(swap.instrumentId(), money(pvShocked - pvBase));
+        }
+        return out;
+    }
 
+    private List<SwapValuation> value(Curve curve, LocalDate valuationDate) {
+        ImmutableRatesProvider provider = ratesProvider(curve, valuationDate);
         List<SwapValuation> out = new ArrayList<>();
         for (ReferenceSwap swap : REFERENCE_SWAPS) {
-            ResolvedSwapTrade trade = FixedOvernightSwapConventions.USD_FIXED_1Y_SOFR_OIS
-                    .createTrade(valuationDate, Tenor.ofYears(swap.tenorYears()), BuySell.BUY,
-                            swap.notional(), swap.fixedRate(), REF_DATA)
-                    .resolve(REF_DATA);
-
-            double pv = DiscountingSwapTradePricer.DEFAULT
-                    .presentValue(trade, provider).getAmount(Currency.USD).getAmount();
+            ResolvedSwapTrade trade = referenceTrade(swap, valuationDate);
+            double pv = presentValue(trade, provider);
             double parRate = DiscountingSwapProductPricer.DEFAULT.parRate(trade.getProduct(), provider);
             double dv01 = provider
                     .parameterSensitivity(DiscountingSwapTradePricer.DEFAULT.presentValueSensitivity(trade, provider))
@@ -85,6 +101,24 @@ public final class SwapPricingService {
                     swap.notional(), swap.fixedRate(), parRate, money(pv), money(dv01)));
         }
         return out;
+    }
+
+    private static ImmutableRatesProvider ratesProvider(Curve curve, LocalDate valuationDate) {
+        return ImmutableRatesProvider.builder(valuationDate)
+                .discountCurve(Currency.USD, curve)
+                .overnightIndexCurve(OvernightIndices.USD_SOFR, curve)
+                .build();
+    }
+
+    private static ResolvedSwapTrade referenceTrade(ReferenceSwap swap, LocalDate valuationDate) {
+        return FixedOvernightSwapConventions.USD_FIXED_1Y_SOFR_OIS
+                .createTrade(valuationDate, Tenor.ofYears(swap.tenorYears()), BuySell.BUY,
+                        swap.notional(), swap.fixedRate(), REF_DATA)
+                .resolve(REF_DATA);
+    }
+
+    private static double presentValue(ResolvedSwapTrade trade, ImmutableRatesProvider provider) {
+        return DiscountingSwapTradePricer.DEFAULT.presentValue(trade, provider).getAmount(Currency.USD).getAmount();
     }
 
     /** The money boundary: analytics double → exact decimal (invariant 1). */

@@ -56,10 +56,12 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.SwapPricingService(curveService);
     }
 
-    /** Deterministic scenario/stress over live positions (quant-engine step 2). */
+    /** Deterministic scenario/stress over live positions (quant-engine step 2). Swap scenarios
+     *  are full revaluation on the shocked curve (convexity) via the Strata pricer. */
     @Bean
-    io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine(InstrumentRefSource refs) {
-        return new io.jethro.trading.riskpnl.ScenarioEngine(refs);
+    io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine(InstrumentRefSource refs,
+                                                            io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
+        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing);
     }
 
     @Bean
