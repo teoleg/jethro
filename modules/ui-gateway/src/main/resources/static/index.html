@@ -31,6 +31,11 @@
   .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
   .spacer { flex:1; }
   .feeds { display:flex; gap:6px; }
+  /* market indicators strip in the top bar (indices/ETFs, US + international) */
+  .indices { flex:1; display:flex; gap:14px; overflow-x:auto; padding:0 6px; scrollbar-width:none; min-width:0; }
+  .indices::-webkit-scrollbar { display:none; }
+  .ix { display:flex; align-items:baseline; gap:6px; white-space:nowrap; font-size:12px; }
+  .ix .l { color:var(--dim); } .ix .v { font-weight:600; } .ix .c { font-size:11px; }
   .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
   .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); } .pill.on .led { background:var(--up); box-shadow:0 0 8px var(--up); } .pill.off .led { background:var(--warn); }
   .led.ok { background:var(--up); box-shadow:0 0 8px var(--up); } .led.warn { background:var(--warn); } .led.bad { background:var(--down); }
@@ -104,7 +109,7 @@
       <a class="tab" href="/config.html">Config</a>
       <a class="tab" href="/backtest.html">Backtest</a>
     </nav>
-    <span class="spacer"></span>
+    <div class="indices" id="indices"></div>
     <span class="feeds" id="feeds"></span>
     <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
   </div>
@@ -222,6 +227,21 @@
       }).join("") : '<span class="muted" style="padding:4px 8px">no live prices</span>';
     } catch (e) {}
   }
+  // Major indices/ETFs (US + international) in the top bar — context only, delayed.
+  async function loadIndicators() {
+    try {
+      const ix = await (await fetch("/api/indicators")).json();
+      const el = document.getElementById("indices");
+      if (!ix.length) { el.innerHTML = ""; return; }
+      el.innerHTML = ix.map(i => {
+        const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
+        const sign = i.changePercent > 0 ? "+" : "";
+        const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:2});
+        return `<span class="ix" title="${esc(i.symbol)}"><span class="l">${esc(i.label)}</span>
+          <span class="v mono">${v}</span><span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span></span>`;
+      }).join("");
+    } catch (e) {}
+  }
   // Per-feed connection LEDs on the stream line, from real feed status (/api/feeds).
   async function loadFeeds() {
     try {
@@ -308,9 +328,11 @@
   loadHypotheses();
   loadTicker();
   loadFeeds();
+  loadIndicators();
   setInterval(loadRisk, 2000);
   setInterval(loadTicker, 2000);
   setInterval(loadFeeds, 5000);
+  setInterval(loadIndicators, 30000);
   setInterval(loadStress, 10000);
   setInterval(loadHypotheses, 15000);
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only

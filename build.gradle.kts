@@ -42,6 +42,8 @@ subprojects {
         // This overrides application.properties (system props outrank it), so the running app can
         // default to yahoo while every test JVM stays deterministic and network-free.
         systemProperty("jethro.trading.provider", "sim")
+        // Likewise, never poll the market-indicators strip (external Yahoo) from a test JVM.
+        systemProperty("jethro.indicators.enabled", "false")
         // Local `build` skips the unit/module test suite so constrained hardware
         // (e.g. a Raspberry Pi) can produce a runnable jar without forking heavy test
         // JVMs. CI runs the full suite with `-Pci` (see .github/workflows/ci.yml).
