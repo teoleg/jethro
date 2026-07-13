@@ -26,7 +26,7 @@ HEAP="${HEAP:-512m}"
 AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:3b}"   # 3b = usable commentary; MODEL=qwen2.5:0.5b for tight RAM
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
-PROVIDER="${PROVIDER:-sim}"  # sim = seedable offline feed; yahoo = real delayed prices (ADR-0023)
+PROVIDER="${PROVIDER:-yahoo}"  # yahoo = real delayed prices (ADR-0023, default); PROVIDER=sim for offline
 
 wait_for() {  # name, timeout_seconds, command...
   local name="$1" timeout="$2"; shift 2
