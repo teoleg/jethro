@@ -2,6 +2,7 @@ package io.jethro.app.hypothesis;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.jethro.app.trading.FinnhubRateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,10 +35,12 @@ public final class FinnhubNewsClient implements FinnhubNarrativeFeed.NewsSource 
     private final HttpClient http;
     private final String token;
     private final Duration timeout;
+    private final FinnhubRateLimiter limiter;
 
-    public FinnhubNewsClient(String token, Duration timeout) {
+    public FinnhubNewsClient(String token, Duration timeout, FinnhubRateLimiter limiter) {
         this.token = token;
         this.timeout = timeout;
+        this.limiter = limiter;
         this.http = HttpClient.newBuilder().connectTimeout(timeout).build();
     }
 
@@ -55,6 +58,10 @@ public final class FinnhubNewsClient implements FinnhubNarrativeFeed.NewsSource 
     }
 
     private List<FinnhubNarrativeFeed.NewsSource.Article> get(String url) {
+        if (!limiter.tryAcquire()) {
+            log.debug("finnhub news fetch skipped — shared REST budget spent this minute");
+            return List.of();
+        }
         try {
             HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(timeout).GET().build();
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());

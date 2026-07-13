@@ -11,11 +11,20 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties(TradingCoreProperties.class)
 public class TradingCoreConfig {
 
+    /** One shared budget for ALL Finnhub REST calls (news + yield curve) — the free tier's
+     *  60/min limit is account-wide, so a single limiter injected everywhere is the correct
+     *  guard (ADR-0024). The trade WebSocket is exempt and doesn't pass through this. */
+    @Bean
+    FinnhubRateLimiter finnhubRateLimiter(TradingCoreProperties properties) {
+        return new FinnhubRateLimiter(properties.finnhubMaxCallsPerMinuteOrDefault());
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "jethro.trading", name = "enabled", havingValue = "true", matchIfMissing = true)
     TradingCoreLifecycle tradingCoreLifecycle(TradingCoreProperties properties,
-                                              ObjectProvider<RefDataRepository> refData) {
+                                              ObjectProvider<RefDataRepository> refData,
+                                              FinnhubRateLimiter rateLimiter) {
         // RefData present only when persistence is on; needed to map yahoo symbols (ADR-0023).
-        return new TradingCoreLifecycle(properties, refData.getIfAvailable());
+        return new TradingCoreLifecycle(properties, refData.getIfAvailable(), rateLimiter);
     }
 }

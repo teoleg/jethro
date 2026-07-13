@@ -37,6 +37,29 @@ data available:
 The composite is a `MarketDataAdapter` wrapping a background `MarketDataAdapter` — no special
 casing downstream; the feed status reports `finnhub` (real-time).
 
+### Real US Treasury yield curve (replaces the factor sim for rates)
+
+The rates stack (DV01, swap PV, rate scenarios, the Rates-page curve) priced on the seedable
+**factor-sim** SOFR curve — real methodology, simulated levels. With a Finnhub key we now drive
+it from a **live US Treasury curve**:
+
+- A `CurveMarkSource` port abstracts the curve behind the market-data adapters. Two impls:
+  `CurveFactorSimulator` (sim, the default and CI) and `RealTreasuryCurve` (live levels, updated
+  out-of-band). Adapters emit tenor + swap-par marks from whichever is active, so **everything
+  downstream reprices unchanged** — one code path, real or sim.
+- `FinnhubYieldCurveClient` fetches the Treasury curve (Jackson, tolerant of a few payload
+  shapes) and maps it to the `USD.SOFR.*` node zeros the calibration already consumes.
+  `RealTreasuryCurve` interpolates in year-space and computes swap par from those zeros.
+- **Selected when `jethro.trading.real-curve` and a token are set**, via a **synchronous startup
+  probe**: data → live curve (refreshed every `treasury-curve-refresh-seconds`); a gated/empty
+  probe → **fall back to the sim curve, logged** (`RATES CURVE: …`). No fabricated levels —
+  Treasury futures are still priced by the market feed, not the curve.
+- Convention caveat (finance-math rule): Treasury par yields are not SOFR-OIS discounting; we
+  label the curve "US Treasury · live" in the UI rather than silently calling it SOFR.
+- **Premium risk:** Finnhub bond endpoints may not be on the free tier. If the probe is gated,
+  the platform runs on the sim curve and the host log says so; the free **US Treasury direct
+  feed** is the fallback provider (its own follow-up).
+
 ### Real news for the hypothesis layer (fulfils ADR-0022's deferred feed)
 
 ADR-0022 stood up the LLM hypothesis layer on a **seedable sim narrative feed** and explicitly
@@ -70,6 +93,15 @@ tier doesn't, and stays the zero-signup option. Both live behind the same `provi
 **Alpaca (IEX) instead.** Deferred — comparable free real-time equities + crypto and a future
 paper-trading path, but needs key+secret and is a bigger surface; revisit if we want crypto or
 real paper trading (it would be its own ADR).
+
+### Shared REST budget
+
+Finnhub's free-tier limit — **60 calls/min — is account-wide** (keyed on the API key, pooled
+across every REST endpoint; only the trade WebSocket is exempt). So a **single**
+`FinnhubRateLimiter` (sliding 60s window, default cap 55 for headroom) is injected into **every**
+REST client — news and yield curve today, anything added later — and a client that can't acquire
+simply skips that cycle. The combined rate therefore cannot cross the cap regardless of how many
+pollers exist; per-client throttles alone couldn't guarantee that.
 
 ## Consequences
 

@@ -97,14 +97,17 @@ EXTRA_ARGS+=(--jethro.trading.provider="$PROVIDER")
 if [ "$PROVIDER" = "yahoo" ]; then
   echo "==> MARKET DATA: Yahoo (real, ~15-min delayed, dev/demo only — ADR-0023). Needs internet."
 fi
-if [ "$PROVIDER" = "finnhub" ]; then
-  if [ -z "$FINNHUB" ]; then
-    echo "!! PROVIDER=finnhub needs a token: FINNHUB=your_key PROVIDER=finnhub ./scripts/run-local.sh"
-    echo "   (free key at https://finnhub.io) — falling back to sim until set."
-  else
-    echo "==> MARKET DATA: Finnhub (real-time WebSocket, dev/demo only — ADR-0024). Needs internet."
-    EXTRA_ARGS+=(--jethro.trading.finnhub-token="$FINNHUB")
-  fi
+if [ "$PROVIDER" = "finnhub" ] && [ -z "$FINNHUB" ]; then
+  echo "!! PROVIDER=finnhub needs a token: FINNHUB=your_key PROVIDER=finnhub ./scripts/run-local.sh"
+  echo "   (free key at https://finnhub.io) — falling back to sim until set."
+fi
+# A token enables the real-time WS feed (PROVIDER=finnhub) AND — independent of the price
+# provider — real news + a LIVE US Treasury yield curve (ADR-0024). All share one 60/min budget.
+if [ -n "$FINNHUB" ]; then
+  EXTRA_ARGS+=(--jethro.trading.finnhub-token="$FINNHUB")
+  [ "$PROVIDER" = "finnhub" ] && echo "==> MARKET DATA: Finnhub (real-time WebSocket, dev/demo only — ADR-0024)."
+  echo "==> Finnhub key set: real news + live Treasury curve enabled (bond data may be premium —"
+  echo "    check the log line 'RATES CURVE:' to see if the live curve or the sim curve is active)."
 fi
 
 mkdir -p logs

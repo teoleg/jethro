@@ -57,6 +57,7 @@ public class HypothesisConfig {
      */
     @Bean
     NarrativeFeed narrativeFeed(HypothesisProperties props, TradingCoreProperties trading,
+                                io.jethro.app.trading.FinnhubRateLimiter rateLimiter,
                                 ObjectProvider<RefDataRepository> refData) {
         String token = trading.finnhubTokenOrEmpty();
         if (!token.isEmpty()) {
@@ -64,7 +65,7 @@ public class HypothesisConfig {
             log.warn("NARRATIVE: real Finnhub news feeding the hypothesis layer — general market + "
                     + "{} company name(s), refresh ≥{}s (ADR-0024).", names.size(),
                     props.narrativeRefreshSecondsOrDefault());
-            var client = new FinnhubNewsClient(token, Duration.ofSeconds(10));
+            var client = new FinnhubNewsClient(token, Duration.ofSeconds(10), rateLimiter);
             return new FinnhubNarrativeFeed(client, names, props.narrativeRefreshSecondsOrDefault() * 1_000);
         }
         return new SimNarrativeFeed(props.narrativeSeedOrDefault());

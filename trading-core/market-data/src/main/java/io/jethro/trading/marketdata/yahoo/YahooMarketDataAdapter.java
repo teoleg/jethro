@@ -4,7 +4,7 @@ import io.jethro.domain.Decimals;
 import io.jethro.trading.marketdata.FeedStatus;
 import io.jethro.trading.marketdata.MarketDataAdapter;
 import io.jethro.trading.marketdata.MarketDataListener;
-import io.jethro.trading.marketdata.sim.CurveFactorSimulator;
+import io.jethro.trading.marketdata.sim.CurveMarkSource;
 
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,7 +30,7 @@ public final class YahooMarketDataAdapter implements MarketDataAdapter {
 
     private final QuoteSource quotes;
     private final Map<String, String> instrumentToSymbol; // instrumentId → Yahoo symbol
-    private final CurveFactorSimulator curveSim; // nullable: no rates marks when absent
+    private final CurveMarkSource curveSim; // nullable: no rates marks when absent
     private final long requestSpacingNanos; // gap BETWEEN symbol requests — spread, don't burst
     private final long cycleBudgetMillis;   // ~time for one full pass over all symbols
 
@@ -46,7 +46,7 @@ public final class YahooMarketDataAdapter implements MarketDataAdapter {
      *        a steady trickle that mostly succeeds instead of a burst that mostly fails.
      */
     public YahooMarketDataAdapter(QuoteSource quotes, Map<String, String> instrumentToSymbol,
-                                  CurveFactorSimulator curveSim, long requestSpacingMillis) {
+                                  CurveMarkSource curveSim, long requestSpacingMillis) {
         if (instrumentToSymbol.isEmpty()) {
             throw new IllegalArgumentException("at least one instrument→symbol mapping required");
         }
@@ -102,12 +102,12 @@ public final class YahooMarketDataAdapter implements MarketDataAdapter {
                 // (mirrors the sim adapter's curve block). Steps once per full pass.
                 long now = System.currentTimeMillis();
                 curveSim.step();
-                for (int t = 0; t < CurveFactorSimulator.TENOR_IDS.length; t++) {
-                    listener.onTrade(CurveFactorSimulator.TENOR_IDS[t],
+                for (int t = 0; t < CurveMarkSource.TENOR_IDS.length; t++) {
+                    listener.onTrade(CurveMarkSource.TENOR_IDS[t],
                             curveSim.rateScaledPercent(t), 1_000_000L, now, now);
                 }
-                for (int s = 0; s < CurveFactorSimulator.SWAP_IDS.length; s++) {
-                    listener.onTrade(CurveFactorSimulator.SWAP_IDS[s],
+                for (int s = 0; s < CurveMarkSource.SWAP_IDS.length; s++) {
+                    listener.onTrade(CurveMarkSource.SWAP_IDS[s],
                             curveSim.swapParScaledPercent(s), 1_000_000L, now, now);
                 }
             }
