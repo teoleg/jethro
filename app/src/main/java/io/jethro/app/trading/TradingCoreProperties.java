@@ -24,9 +24,21 @@ public record TradingCoreProperties(
         /** Factor-based SOFR curve sim publishing USD.SOFR.* tenor marks; default true. */
         Boolean simCurve,
         long simTickIntervalMillis,
+        /** Market-data provider: "sim" (default) or "yahoo" (dev/demo only, ADR-0023). */
+        String provider,
+        /** Yahoo poll cadence in seconds (rate-limit-friendly); default 15. */
+        Long yahooPollSeconds,
         String lmdbPath,
         long lmdbMaxSizeMb,
         int bufferCapacity) {
+
+    public String providerOrDefault() {
+        return provider != null && !provider.isBlank() ? provider : "sim";
+    }
+
+    public long yahooPollSecondsOrDefault() {
+        return yahooPollSeconds != null && yahooPollSeconds > 0 ? yahooPollSeconds : 15;
+    }
 
     /** Start price for one instrument: its override if present, else the default. */
     public BigDecimal startPriceFor(String instrumentId) {

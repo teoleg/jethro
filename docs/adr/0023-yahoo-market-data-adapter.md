@@ -63,3 +63,21 @@ audit, and rip out.
   15-min delay must stay visible so no one trades it as live.
 - Follow-ups: the adapter + `yahoo` symbology seed; a provider-selection config switch; a licensed
   market-data provider ADR before any production or real-money use.
+
+## Implementation note (2026-07-13)
+
+Built: `YahooMarketDataAdapter` + `YahooQuoteClient` behind the ADR-0009 port; provider switch
+`jethro.trading.provider=sim|yahoo` (default sim) with `yahoo-poll-seconds`; `yahoo` symbology in
+V11; `/api/feeds` + an Overview per-feed LED (connected / delayed / down). Two refinements to the
+Decision above, both within its spirit:
+
+- **Endpoint:** used `/v8/finance/chart/{symbol}` (one GET per symbol) instead of the batch
+  `/v7/finance/quote` — it returns the last price **without the cookie+crumb handshake**, removing
+  the most fragile, most-likely-to-break piece. ~9 symbols at 15s is well within rate limits.
+- **Hybrid:** Yahoo covers only price-quoted names (equity/future/FX); the SOFR curve, curve-linked
+  Treasury futures and swaps stay on the curve sim (no free SOFR curve on Yahoo), so Rates/Swaps
+  keep working. Provider time (delayed) vs ingest time are both carried, so the UI shows "delayed"
+  rather than "down". Failed fetches are counted (`drops()`), never fabricated.
+
+Not verifiable from CI/offline (the sim stays the CI feed); the live fetch + any regional consent
+cookie must be sanity-checked once on the target host. Parser and symbol-mapping are unit-tested.

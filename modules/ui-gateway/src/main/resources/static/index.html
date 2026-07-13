@@ -211,13 +211,6 @@
 
   // ---- price ticker + feed connection indicators ----
   let tickPrev = {};
-  function setFeeds(freshAge) {
-    // Per-feed connection LEDs on the same line as the stream pill. Market data now; per-source
-    // (sim / yahoo) LEDs arrive with the market-data adapter (ADR-0023).
-    const md = freshAge == null ? "bad" : (freshAge < 10000 ? "ok" : "warn");
-    const label = freshAge == null ? "market data: down" : (freshAge < 10000 ? "market data" : "market data: stale");
-    document.getElementById("feeds").innerHTML = `<span class="pill"><span class="led ${md}"></span>${label}</span>`;
-  }
   async function loadTicker() {
     try {
       const marks = (await (await fetch("/api/marks")).json()).filter(m => !m.instrumentId.startsWith("USD.SOFR."));
@@ -227,8 +220,18 @@
         tickPrev[m.instrumentId] = now;
         return `<div class="tk"><span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(m.price)}</span></div>`;
       }).join("") : '<span class="muted" style="padding:4px 8px">no live prices</span>';
-      setFeeds(marks.length ? Math.min(...marks.map(m => m.ageMillis)) : null);
-    } catch (e) { setFeeds(null); }
+    } catch (e) {}
+  }
+  // Per-feed connection LEDs on the stream line, from real feed status (/api/feeds).
+  async function loadFeeds() {
+    try {
+      const feeds = await (await fetch("/api/feeds")).json();
+      document.getElementById("feeds").innerHTML = feeds.map(f => {
+        const led = !f.connected ? "bad" : (f.delayed ? "warn" : "ok");
+        const label = `${esc(f.type)}: ${esc(f.provider)}` + (f.delayed ? ` · delayed ${Math.round(f.delaySeconds/60)}m` : "");
+        return `<span class="pill"><span class="led ${led}"></span>${label}</span>`;
+      }).join("");
+    } catch (e) {}
   }
 
   // ---- scenario / stress panel ----
@@ -304,8 +307,10 @@
   loadStress();
   loadHypotheses();
   loadTicker();
+  loadFeeds();
   setInterval(loadRisk, 2000);
   setInterval(loadTicker, 2000);
+  setInterval(loadFeeds, 5000);
   setInterval(loadStress, 10000);
   setInterval(loadHypotheses, 15000);
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
