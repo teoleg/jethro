@@ -20,10 +20,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class RiskProjectionTest {
 
-    /** Static ref data: AAPL equity (mult 1), ES future (mult 50). */
+    /** Static ref data: AAPL equity (mult 1), ES future (mult 50), SAP EUR equity. */
     private final InstrumentRefSource refs = id -> Optional.ofNullable(Map.of(
             "AAPL", new InstrumentRef("AAPL", "EQUITY", "USD", new BigDecimal("1")),
-            "ES", new InstrumentRef("ES", "FUTURE", "USD", new BigDecimal("50"))
+            "ES", new InstrumentRef("ES", "FUTURE", "USD", new BigDecimal("50")),
+            "SAP", new InstrumentRef("SAP", "EQUITY", "EUR", new BigDecimal("1"))
     ).get(id));
 
     private static Fill fill(String id, String instrument, Side side, String qty, String price) {
@@ -103,6 +104,38 @@ class RiskProjectionTest {
         eq("0", r.unrealizedPnl());
         eq("0", r.grossExposure());
         assertEquals(-1, r.markAgeMillis());
+    }
+
+    @Test
+    void eurPositionConvertsToUsdInRollupsAtTheLiveFxMark() {
+        // Cross-currency rollup (quant-engine phase 3): SAP long 100 @180 EUR, mark 190 EUR
+        // → unrealized 1,000 EUR, gross 19,000 EUR. EURUSD mark 1.085 → rollups report USD:
+        // unrealized 1,085.00, gross 20,615.00. The position row itself stays in EUR.
+        var p = new RiskProjection(refs);
+        p.applyFill(fill("f1", "SAP", Side.BUY, "100", "180"));
+        p.applyMark("SAP", new BigDecimal("190"), 1_000);
+        p.applyMark("EURUSD", new BigDecimal("1.085"), 1_000);
+
+        ConsolidatedRisk risk = p.snapshot(1_000);
+        PositionRisk row = only(risk);
+        assertEquals("EUR", row.currency());
+        eq("1000", row.unrealizedPnl());                       // instrument currency
+
+        var book = risk.byBook().get(0);
+        assertEquals("USD", book.currency(), "rollup reports in USD, not MIXED");
+        eq("1085", book.unrealizedPnl());                      // 1000 × 1.085
+        eq("20615", book.grossExposure());                     // 19000 × 1.085
+        eq("1085", risk.total().unrealizedPnl());
+    }
+
+    @Test
+    void unconvertibleCurrencyKeepsTheHonestMixedMarker() {
+        // Same EUR position but NO EURUSD mark → the rollup must not silently mis-sum.
+        var p = new RiskProjection(refs);
+        p.applyFill(fill("f1", "SAP", Side.BUY, "100", "180"));
+        p.applyMark("SAP", new BigDecimal("190"), 1_000);
+
+        assertEquals("MIXED", p.snapshot(1_000).byBook().get(0).currency());
     }
 
     @Test
