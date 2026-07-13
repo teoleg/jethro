@@ -192,7 +192,9 @@
          <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()}</div></div>`).join("");
   }
 
-  function setStatus(on, text) { document.getElementById("status").className = "pill " + (on?"on":"off"); document.getElementById("statusText").textContent = text; }
+  // Backend service (SSE stream) indicator: always labelled "system"; the LED colour carries
+  // the state — green when connected, amber when reconnecting.
+  function setStatus(on, text) { document.getElementById("status").className = "pill " + (on?"on":"off"); document.getElementById("statusText").textContent = "system"; }
 
   // ---- chat ----
   const chatlog = document.getElementById("chatlog");
@@ -269,9 +271,11 @@
     try {
       const feeds = await (await fetch("/api/feeds")).json();
       document.getElementById("feeds").innerHTML = feeds.map(f => {
-        const led = !f.connected ? "bad" : (f.delayed ? "warn" : "ok");
-        const label = `${esc(f.type)}: ${esc(f.provider)}` + (f.delayed ? ` · delayed ${Math.round(f.delaySeconds/60)}m` : "");
-        return `<span class="pill"><span class="led ${led}"></span>${label}</span>`;
+        const led = f.connected ? "ok" : "bad";
+        // Market-data source label: real (Yahoo) = Live, simulated = SIM.
+        const src = f.provider === "yahoo" ? "Live" : (f.provider === "sim" ? "SIM" : esc(f.provider));
+        return `<span class="pill" title="${esc(f.provider)}${f.delayed ? ' · delayed '+Math.round(f.delaySeconds/60)+'m' : ''}">`
+             + `<span class="led ${led}"></span>MD: ${src}</span>`;
       }).join("");
     } catch (e) {}
   }
