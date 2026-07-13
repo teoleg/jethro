@@ -232,8 +232,12 @@
     try {
       const ix = await (await fetch("/api/indicators")).json();
       const el = document.getElementById("indices");
-      if (!ix.length) { el.innerHTML = ""; return; }
       el.innerHTML = ix.map(i => {
+        const hasData = i.price != null && i.changePercent != null;
+        if (!hasData) {
+          return `<span class="ix" title="${esc(i.symbol)}"><span class="l">${esc(i.label)}</span>
+            <span class="v mono muted">N/A</span></span>`;
+        }
         const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
         const sign = i.changePercent > 0 ? "+" : "";
         const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:2});

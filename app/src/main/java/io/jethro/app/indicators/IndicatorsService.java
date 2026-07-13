@@ -38,17 +38,31 @@ public final class IndicatorsService implements SmartLifecycle {
     private static final Pattern PREV = Pattern.compile("\"chartPreviousClose\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)");
     private static final Pattern PREV2 = Pattern.compile("\"previousClose\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)");
 
-    /** One indicator tile: label, last level (exact string), and % change vs previous close. */
-    public record Indicator(String symbol, String label, String price, double changePercent) {
+    /** One indicator tile. {@code price}/{@code changePercent} are null when there's no data
+     *  yet (or the fetch is failing) — the strip shows the symbol with an "N/A" placeholder
+     *  so every configured index/ETF is always visible. */
+    public record Indicator(String symbol, String label, String price, Double changePercent) {
     }
 
     private final IndicatorsProperties props;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(8)).build();
-    private volatile List<Indicator> latest = List.of();
+    // Last-known good value per symbol — kept so a transient fetch failure doesn't flip a tile
+    // back to N/A; a symbol only shows N/A until its first successful fetch.
+    private final java.util.Map<String, Indicator> lastGood = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile List<Indicator> latest;
     private volatile ScheduledExecutorService scheduler;
 
     public IndicatorsService(IndicatorsProperties props) {
         this.props = props;
+        this.latest = allSymbols(); // every symbol visible from t=0, as N/A until fetched
+    }
+
+    /** All configured symbols in order, using last-known value or an N/A placeholder. */
+    private List<Indicator> allSymbols() {
+        List<Indicator> out = new ArrayList<>();
+        props.symbolsOrDefault().forEach((symbol, label) ->
+                out.add(lastGood.getOrDefault(symbol, new Indicator(symbol, label, null, null))));
+        return out;
     }
 
     public List<Indicator> latest() {
@@ -70,13 +84,11 @@ public final class IndicatorsService implements SmartLifecycle {
 
     private void poll() {
         try {
-            List<Indicator> out = new ArrayList<>();
             for (Map.Entry<String, String> e : props.symbolsOrDefault().entrySet()) {
-                fetch(e.getKey(), e.getValue()).ifPresent(out::add);
+                fetch(e.getKey(), e.getValue()).ifPresent(i -> lastGood.put(e.getKey(), i));
             }
-            if (!out.isEmpty()) {
-                latest = List.copyOf(out);
-            }
+            // Always publish every configured symbol (last-known or N/A) so the strip is complete.
+            latest = allSymbols();
         } catch (Throwable t) {
             log.debug("indicators poll failed: {}", t.toString());
         }

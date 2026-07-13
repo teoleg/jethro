@@ -13,7 +13,7 @@ import java.util.List;
 @RestController
 public final class IndicatorsController {
 
-    public record IndicatorDto(String symbol, String label, String price, double changePercent) {
+    public record IndicatorDto(String symbol, String label, String price, Double changePercent) {
     }
 
     private final ObjectProvider<IndicatorsService> service;
