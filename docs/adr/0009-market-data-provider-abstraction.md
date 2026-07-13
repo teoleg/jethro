@@ -1,6 +1,6 @@
 # ADR-0009: Market data provider abstraction
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** market-data, backend

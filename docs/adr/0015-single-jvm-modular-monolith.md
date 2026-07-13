@@ -1,6 +1,6 @@
 # ADR-0015: Single-JVM modular monolith — one app now, extraction seams preserved
 
-- **Status:** Proposed (amends the deployment topology of ADR-0003/0014; module architecture unchanged)
+- **Status:** Accepted (amends the deployment topology of ADR-0003/0014; module architecture unchanged)
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** architecture, deployment, cost

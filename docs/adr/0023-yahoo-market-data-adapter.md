@@ -1,6 +1,6 @@
 # ADR-0023: Yahoo Finance market-data adapter — a free, delayed, dev/demo-only provider behind the ADR-0009 port
 
-- **Status:** Proposed (realises the ADR-0009 provider abstraction with a first real adapter)
+- **Status:** Accepted (realises the ADR-0009 provider abstraction with a first real adapter)
 - **Date:** 2026-07-13
 - **Deciders:** Oleg
 - **Tags:** market-data, dev, ai

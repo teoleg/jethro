@@ -1,6 +1,6 @@
 # ADR-0021: Operational chat — the SLM parses the question, deterministic code answers, every turn audited to Postgres
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** ui, ai, data

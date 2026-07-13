@@ -1,6 +1,6 @@
 # ADR-0016: Local SLM inference tier — Ollama adapter first, agentic elements pulled forward
 
-- **Status:** Proposed (extends ADR-0010; build-order change to ADR-0014/0015 sequence)
+- **Status:** Accepted (extends ADR-0010; build-order change to ADR-0014/0015 sequence)
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** ai, algo, cost, architecture

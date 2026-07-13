@@ -1,6 +1,6 @@
 # ADR-0003: Event-driven services around a streaming backbone
 
-- **Status:** Proposed — amended by ADR-0014 (market-path services `market-data-gateway`/`algo-engine`/`risk-pnl-service` are fused into the `trading-core` process; order/reference/UI services unchanged)
+- **Status:** Accepted — amended by ADR-0014 (market-path services `market-data-gateway`/`algo-engine`/`risk-pnl-service` are fused into the `trading-core` process; order/reference/UI services unchanged)
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** architecture

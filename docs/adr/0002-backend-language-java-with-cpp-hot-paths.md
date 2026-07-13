@@ -1,6 +1,6 @@
 # ADR-0002: Backend in Java 21, C++ reserved for latency-critical hot paths
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** backend, language

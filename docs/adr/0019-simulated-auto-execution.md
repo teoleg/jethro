@@ -1,6 +1,6 @@
 # ADR-0019: Simulated auto-execution — the deterministic strategy may auto-trade in sim, hard-gated off real brokers
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** order, risk, ai, strategy

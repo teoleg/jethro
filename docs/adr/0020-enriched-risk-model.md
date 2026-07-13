@@ -1,6 +1,6 @@
 # ADR-0020: Multi-asset quant foundation — OpenGamma Strata as the analytics substrate, exact money ledger on top
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** risk, data, backend, architecture

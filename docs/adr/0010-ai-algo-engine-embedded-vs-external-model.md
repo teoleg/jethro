@@ -1,6 +1,6 @@
 # ADR-0010: AI-driven algo engine — model inference SPI, external API first, embedded behind triggers
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** algo, ai, backend, aws, cost

@@ -1,6 +1,6 @@
 # ADR-0008: Domain model — books, instruments, positions, marks
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** domain, backend
