@@ -84,8 +84,10 @@ public final class IndicatorsService implements SmartLifecycle {
 
     private Optional<Indicator> fetch(String symbol, String label) {
         try {
+            // Index symbols start with '^' (^GSPC, ^IXIC…), which is illegal in a URI and makes
+            // URI.create throw — percent-encode it (^ → %5E) so indices actually resolve.
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(BASE + symbol + "?interval=1d&range=5d"))
+                    .uri(URI.create(BASE + symbol.replace("^", "%5E") + "?interval=1d&range=5d"))
                     .header("User-Agent", USER_AGENT)
                     .timeout(Duration.ofSeconds(8))
                     .GET().build();

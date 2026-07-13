@@ -45,7 +45,8 @@ public final class YahooQuoteClient implements QuoteSource {
     public Optional<QuoteSource.Quote> fetch(String yahooSymbol) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(BASE + yahooSymbol + "?interval=1m&range=1d"))
+                    // '^' (index symbols) is illegal in a URI; encode it so URI.create won't throw.
+                    .uri(URI.create(BASE + yahooSymbol.replace("^", "%5E") + "?interval=1m&range=1d"))
                     .header("User-Agent", USER_AGENT)
                     .timeout(timeout)
                     .GET()
