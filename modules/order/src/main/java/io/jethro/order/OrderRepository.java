@@ -74,6 +74,32 @@ public class OrderRepository implements OrderStore {
                 OrderRepository::mapOrder, idempotencyKey).stream().findFirst();
     }
 
+    /** Orders created on {@code day} (server zone), newest first, paginated. */
+    public List<OrderRow> ordersForDay(java.time.LocalDate day, int offset, int limit) {
+        OffsetDateTime start = day.atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime();
+        OffsetDateTime end = start.plusDays(1);
+        return jdbc.query("""
+                select order_id, book_id, instrument_id, side, order_type, quantity,
+                       limit_price, status, reason, created_at
+                from orders where created_at >= ? and created_at < ?
+                order by created_at desc offset ? limit ?
+                """, (rs, i) -> new OrderRow(
+                rs.getString("order_id"), rs.getString("book_id"), rs.getString("instrument_id"),
+                rs.getString("side"), rs.getString("order_type"), rs.getBigDecimal("quantity").toPlainString(),
+                rs.getBigDecimal("limit_price") == null ? null : rs.getBigDecimal("limit_price").toPlainString(),
+                rs.getString("status"), rs.getString("reason"),
+                rs.getTimestamp("created_at").toInstant().toEpochMilli()), start, end, offset, limit);
+    }
+
+    /** Count of orders created on {@code day} (server zone). */
+    public long countOrdersForDay(java.time.LocalDate day) {
+        OffsetDateTime start = day.atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime();
+        Long count = jdbc.queryForObject(
+                "select count(*) from orders where created_at >= ? and created_at < ?",
+                Long.class, start, start.plusDays(1));
+        return count == null ? 0 : count;
+    }
+
     public List<OrderRow> recentOrders(int limit) {
         return jdbc.query("""
                 select order_id, book_id, instrument_id, side, order_type, quantity,

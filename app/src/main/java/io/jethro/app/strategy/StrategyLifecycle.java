@@ -223,7 +223,16 @@ public final class StrategyLifecycle implements SmartLifecycle {
         }
         BigDecimal multiplier = ref.map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
         BigDecimal notionalPerUnit = signal.price().multiply(multiplier);
-        BigDecimal qty = props.targetNotional().divide(notionalPerUnit, 0, RoundingMode.DOWN);
+        // Vol-scaled sizing (quant-engine phase 5): notional = target × clamp(refσ/σ, 0.5, 2),
+        // where σ is the signal window's own realized vol (bps) recovered from move/z.
+        // Sizing is risk-budgeted, not dollar-fixed: half size in wild markets, more in calm.
+        double z = Math.abs(signal.zScore());
+        double sigmaBps = Double.isFinite(z) && z > 1e-9
+                ? Math.abs(signal.changeBps().doubleValue()) / z
+                : props.volReferenceBpsOrDefault();
+        double scale = Math.max(0.5, Math.min(2.0, props.volReferenceBpsOrDefault() / Math.max(sigmaBps, 1e-9)));
+        BigDecimal notionalTarget = props.targetNotional().multiply(BigDecimal.valueOf(scale));
+        BigDecimal qty = notionalTarget.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             if (notionalPerUnit.compareTo(props.maxOrderNotionalOrDefault()) > 0) {
                 return Optional.empty(); // one unit already blows the order cap — unsizeable

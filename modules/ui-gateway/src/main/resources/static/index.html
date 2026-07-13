@@ -53,6 +53,12 @@
   tbody tr:last-child td, tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
   th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
   .cls { font-weight:600; } .muted { color:var(--dim); }
+  .pgbtn { background:var(--surface-2); color:var(--dim); border:1px solid var(--line-2); border-radius:7px;
+           padding:4px 11px; font:inherit; font-size:12px; cursor:pointer; }
+  .pgbtn:hover { color:var(--txt); border-color:var(--brand); }
+  .BUY { color:var(--up); font-weight:600; } .SELL { color:var(--down); font-weight:600; }
+  .st { font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
+  .st.FILLED { color:var(--up); border-color:var(--up); } .st.REJECTED { color:var(--down); border-color:var(--down); }
 
   /* FIXED heights (not max-) so the chat pane never moves as notes come and go */
   .feed { display:flex; flex-direction:column; gap:8px; height:clamp(260px, 44vh, 560px); overflow-y:auto; padding-right:2px; }
@@ -100,6 +106,15 @@
     <div class="stats" id="stats"></div>
     <div class="section-h">By market</div>
     <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
+    <div class="section-h">Today's orders <span class="muted" id="obcount"></span></div>
+    <div class="panel pad">
+      <div id="oblotter" class="muted" style="padding:12px">loading…</div>
+      <div style="display:flex;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid var(--line)">
+        <button class="pgbtn" id="obprev">‹ prev</button>
+        <span class="muted" id="obpage" style="font-size:12px"></span>
+        <button class="pgbtn" id="obnext">next ›</button>
+      </div>
+    </div>
   </div>
 
   <!-- RIGHT: AI (notes + chat) -->
@@ -176,6 +191,26 @@
   });
 
   async function loadRisk() { try { renderRisk(await (await fetch("/api/risk")).json()); } catch (e) {} }
+
+  // ---- today's orders (paginated 100/page) ----
+  let obPage = 0, obTotalPages = 1;
+  async function loadOrders() {
+    try {
+      const r = await (await fetch(`/api/orders/day?page=${obPage}&size=100`)).json();
+      obTotalPages = r.totalPages;
+      document.getElementById("obcount").textContent = "· " + r.total + " today";
+      document.getElementById("obpage").textContent = `page ${r.page + 1} / ${r.totalPages}`;
+      document.getElementById("oblotter").outerHTML = '<div id="oblotter">' + (r.orders.length ?
+        "<table><tr><th>time</th><th>instr</th><th>book</th><th>side</th><th>qty</th><th>status</th></tr>" +
+        r.orders.map(o => `<tr><td class="muted mono">${new Date(o.createdAtMillis).toLocaleTimeString()}</td>
+          <td class="cls">${esc(o.instrumentId)}</td><td class="muted">${esc(o.bookId)}</td>
+          <td class="${esc(o.side)}">${esc(o.side)}</td><td class="mono">${esc(o.quantity)}</td>
+          <td><span class="st ${esc(o.status)}">${esc(o.status)}</span></td></tr>`).join("") + "</table>"
+        : '<div class="muted" style="padding:12px">no orders yet today</div>') + '</div>';
+    } catch (e) {}
+  }
+  document.getElementById("obprev").onclick = () => { if (obPage > 0) { obPage--; loadOrders(); } };
+  document.getElementById("obnext").onclick = () => { if (obPage < obTotalPages - 1) { obPage++; loadOrders(); } };
   async function bootstrap() {
     try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) {}
     loadRisk();
@@ -186,7 +221,9 @@
   es.onerror = () => setStatus(false, "reconnecting…");
   es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
   bootstrap();
+  loadOrders();
   setInterval(loadRisk, 2000);
+  setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
 </script>
 </body>
 </html>

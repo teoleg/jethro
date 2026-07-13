@@ -35,7 +35,10 @@ public record StrategyProperties(
         BigDecimal maxOrderNotional,
         /** Target position cap: once a book holds this much |notional| in an instrument,
          *  same-direction signals are skipped (risk-reducing ones still pass). Default 3× target. */
-        BigDecimal maxPositionNotional) {
+        BigDecimal maxPositionNotional,
+        /** Reference window vol (bps) for vol-scaled sizing: order notional = target ×
+         *  clamp(ref/σ, 0.5, 2) — half size in wild markets, up to double in calm. Default 15. */
+        Double volReferenceBps) {
 
     public double thresholdSigmasOrDefault() {
         return thresholdSigmas != null ? thresholdSigmas : 2.5;
@@ -43,6 +46,10 @@ public record StrategyProperties(
 
     public BigDecimal minSignalBpsOrDefault() {
         return minSignalBps != null ? minSignalBps : new BigDecimal("2");
+    }
+
+    public double volReferenceBpsOrDefault() {
+        return volReferenceBps != null ? volReferenceBps : 15.0;
     }
 
     /** The per-instrument position cap, defaulting to 3× the target notional. */
