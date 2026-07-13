@@ -89,8 +89,21 @@
   .card.WARN .badge { color:var(--warn); border-color:var(--warn); } .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
   .card p { font-size:12.5px; white-space:pre-wrap; margin-top:6px; } .card .meta { color:var(--dim); font-size:11px; margin-top:8px; }
 
-  /* chat — smaller for now (gets the least of the three right-side panels) */
-  .chat { display:flex; flex-direction:column; height:clamp(200px, 22vh, 300px); }
+  /* deterministic (quant) strategy actions — sits under AI hypotheses so both engines are visible */
+  .quant-panel { height:clamp(160px, 22vh, 300px); overflow-y:auto; }
+  .ktag { font-size:9px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); border:1px solid var(--line-2); border-radius:4px; padding:0 4px; margin-left:5px; }
+
+  /* chat is now a floating dock (rarely used) — a button bottom-right opens it */
+  .chat { display:flex; flex-direction:column; height:clamp(220px, 30vh, 340px); }
+  .fab { position:fixed; right:20px; bottom:20px; z-index:60; width:48px; height:48px; border-radius:50%;
+    background:var(--brand); color:#fff; border:0; font-size:20px; cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,.45); }
+  .fab:hover { filter:brightness(1.08); }
+  .chatdock { position:fixed; right:20px; bottom:80px; z-index:60; width:min(380px, 92vw);
+    background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:0 12px 34px rgba(0,0,0,.5); overflow:hidden; }
+  .chatdock[hidden] { display:none; }
+  .chatdock .dh { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--line);
+    font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; }
+  .chatdock .x { background:none; border:0; color:var(--dim); font-size:18px; line-height:1; cursor:pointer; }
   .chatlog { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
   .msg { max-width:88%; padding:7px 11px; border-radius:12px; font-size:13px; white-space:pre-wrap; }
   .msg.user { align-self:flex-end; background:var(--brand); color:#fff; border-bottom-right-radius:4px; }
@@ -147,18 +160,25 @@
   <div class="col">
     <div class="section-h">Needs your attention</div>
     <div id="feed" class="feed"><div class="empty">all quiet</div></div>
-    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— executed decisions persist; live proposals refresh (ADR-0022)</span></div>
+    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM thesis → quant sizes/gates it; trades the AI sleeve (ADR-0022)</span></div>
     <div class="panel pad hypo-panel"><div id="hypotheses" class="muted" style="padding:14px">loading…</div></div>
-    <div class="section-h">Ask</div>
-    <div class="panel chat">
-      <div class="chatlog" id="chatlog"></div>
-      <form class="chatform" id="chatform" autocomplete="off">
-        <input id="chatinput" placeholder="pnl alpha · exposure AAPL · limits?">
-        <button type="submit">Ask</button>
-      </form>
-    </div>
+    <div class="section-h">Strategy actions <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic momentum engine (ALPHA/MACRO), entries &amp; exits with reasons</span></div>
+    <div class="panel pad quant-panel"><div id="quant" class="muted" style="padding:14px">loading…</div></div>
   </div>
 </main>
+
+<!-- chat: a floating dock opened from the button (rarely used, keeps the columns for data) -->
+<button id="chatFab" class="fab" title="Ask a question">💬</button>
+<div id="chatDock" class="chatdock" hidden>
+  <div class="dh"><span>Ask</span><button class="x" id="chatClose" title="close">×</button></div>
+  <div class="chat">
+    <div class="chatlog" id="chatlog"></div>
+    <form class="chatform" id="chatform" autocomplete="off">
+      <input id="chatinput" placeholder="pnl alpha · exposure AAPL · limits?">
+      <button type="submit">Ask</button>
+    </form>
+  </div>
+</div>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
   const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); };
@@ -309,6 +329,27 @@
   }
   async function loadHypotheses() { try { renderHypotheses(await (await fetch("/api/hypotheses")).json()); } catch (e) {} }
 
+  // ---- deterministic (quant) strategy actions — entries & exits, each with its reason ----
+  function renderQuant(rows) {
+    document.getElementById("quant").outerHTML = '<div id="quant" class="muted">' + (rows.length ?
+      "<table><tr><th>time</th><th>action</th><th>instr</th><th>qty</th><th>reason</th></tr>" +
+      rows.map(a => {
+        const isExit = a.kind === "EXIT";
+        return `<tr><td class="muted mono">${new Date(a.timestampMillis).toLocaleTimeString()}</td>
+          <td class="${a.side==='BUY'?'up':'down'}">${esc(a.side)}${isExit?'<span class="ktag">exit</span>':''}</td>
+          <td class="cls">${esc(a.instrumentId)} <span class="muted" style="font-size:10px">${esc(a.book)}</span></td>
+          <td class="mono">${esc(a.quantity)}</td>
+          <td class="muted" title="${esc(a.reason||'')}">${esc(a.reason||'')}</td></tr>`;
+      }).join("") + "</table>"
+      : '<div class="muted" style="padding:12px">no strategy actions yet — the momentum engine auto-trades ALPHA/MACRO; every entry and risk-reducing exit (with its reason) appears here</div>') + '</div>';
+  }
+  async function loadQuant() { try { renderQuant(await (await fetch("/api/strategy/actions")).json()); } catch (e) {} }
+
+  // ---- floating chat dock ----
+  const chatDock = document.getElementById("chatDock");
+  document.getElementById("chatFab").onclick = () => { chatDock.hidden = !chatDock.hidden; if (!chatDock.hidden) document.getElementById("chatinput").focus(); };
+  document.getElementById("chatClose").onclick = () => { chatDock.hidden = true; };
+
   // ---- today's orders (paginated 100/page) ----
   let obPage = 0, obTotalPages = 1;
   async function loadOrders() {
@@ -340,6 +381,7 @@
   bootstrap();
   loadOrders();
   loadHypotheses();
+  loadQuant();
   loadTicker();
   loadFeeds();
   loadIndicators();
@@ -348,6 +390,7 @@
   setInterval(loadFeeds, 5000);
   setInterval(loadIndicators, 30000);
   setInterval(loadHypotheses, 15000);
+  setInterval(loadQuant, 5000);
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
 </script>
 </body>

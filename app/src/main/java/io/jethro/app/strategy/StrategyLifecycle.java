@@ -56,6 +56,9 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final StrategyProperties props;
     private final OrderService orderService; // nullable: null → suggestions only
 
+    private static final int ACTIVITY_CAP = 50;
+    private final java.util.Deque<StrategyActivity> activity = new java.util.ArrayDeque<>(); // newest first
+
     private static final long HEARTBEAT_CYCLES = 24; // ~2 min at a 5s cadence
     // In-flight guard on exits: a close is submitted synchronously but the fill only shrinks
     // the projection after it round-trips Kafka, so suppress re-closing the same position
@@ -300,6 +303,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     book, signal.instrumentId(), signal.side(), OrderType.MARKET, qty, null);
             var order = orderService.submit(command);
             lastAutoExec.put(signal.instrumentId(), now);
+            recordActivity(new StrategyActivity(now, StrategyActivity.ENTRY, signal.instrumentId(), book,
+                    signal.side().name(), qty.toPlainString(), signal.rationale(), String.valueOf(order.status())));
             log.info("auto-executed {} {} {} → {} on {} ({})",
                     signal.side(), qty.toPlainString(), signal.instrumentId(), order.status(), book, order.orderId());
             return true;
@@ -427,12 +432,31 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     p.bookId(), p.instrumentId(), side, OrderType.MARKET, qty, null);
             var order = orderService.submit(command);
             lastExit.put(key, now);
+            recordActivity(new StrategyActivity(now, StrategyActivity.EXIT, p.instrumentId(), p.bookId(),
+                    side.name(), qty.toPlainString(), reason, String.valueOf(order.status())));
             log.info("exit {} {} {} ({}) → {} on {} ({})",
                     side, qty.toPlainString(), p.instrumentId(), reason, order.status(), p.bookId(), order.orderId());
             return true;
         } catch (Exception e) {
             log.warn("exit of {} on {} failed: {}", p.instrumentId(), p.bookId(), e.getMessage());
             return false;
+        }
+    }
+
+    /** Records a strategy action (newest first, capped) for the UI's quant-actions view. */
+    private void recordActivity(StrategyActivity a) {
+        synchronized (activity) {
+            activity.addFirst(a);
+            while (activity.size() > ACTIVITY_CAP) {
+                activity.removeLast();
+            }
+        }
+    }
+
+    /** Recent deterministic-strategy actions (entries + exits with reasons), newest first. */
+    public java.util.List<StrategyActivity> recentActivity() {
+        synchronized (activity) {
+            return java.util.List.copyOf(activity);
         }
     }
 
