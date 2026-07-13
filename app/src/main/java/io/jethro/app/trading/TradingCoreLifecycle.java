@@ -20,6 +20,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     private final TradingCoreProperties properties;
     private volatile TradingCoreRuntime runtime;
+    private volatile SimMarketDataAdapter adapter;
     private volatile ScheduledExecutorService statsLogger;
 
     public TradingCoreLifecycle(TradingCoreProperties properties) {
@@ -46,7 +47,9 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 properties.simInstruments(),
                 startPricesScaled,
                 maxStepMicros,
+                properties.simRegimesOrDefault(),
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
+        this.adapter = adapter;
         var store = LmdbStateStore.open(
                 Path.of(properties.lmdbPath()),
                 properties.lmdbMaxSizeMb() * 1024 * 1024);
@@ -69,8 +72,10 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         var rt = runtime;
         if (rt != null) {
             var stats = rt.stats();
-            log.info("trading-core: ticksIn={} dropped={} instruments={} marksFlushed={}",
-                    stats.ticksIn(), stats.ticksDropped(), rt.markCache().size(), stats.marksFlushedTotal());
+            var sim = adapter;
+            log.info("trading-core: ticksIn={} dropped={} instruments={} marksFlushed={} regime={}",
+                    stats.ticksIn(), stats.ticksDropped(), rt.markCache().size(), stats.marksFlushedTotal(),
+                    sim != null ? sim.regime() : "n/a");
         }
     }
 

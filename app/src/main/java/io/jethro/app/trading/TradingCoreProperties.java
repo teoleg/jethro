@@ -19,6 +19,8 @@ public record TradingCoreProperties(
         Double simAnnualVol,
         /** Optional per-instrument annualized vol overrides (statistical params, not money). */
         Map<String, Double> simAnnualVols,
+        /** Correlated market regimes (calm/trend/volatile/shock episodes); default true. */
+        Boolean simRegimes,
         long simTickIntervalMillis,
         String lmdbPath,
         long lmdbMaxSizeMb,
@@ -28,6 +30,10 @@ public record TradingCoreProperties(
     public BigDecimal startPriceFor(String instrumentId) {
         BigDecimal override = simStartPrices == null ? null : simStartPrices.get(instrumentId);
         return override != null ? override : simStartPrice;
+    }
+
+    public boolean simRegimesOrDefault() {
+        return simRegimes == null || simRegimes;
     }
 
     /** Annualized vol for one instrument: override, else default, else 20%. */

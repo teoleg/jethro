@@ -34,6 +34,12 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
     /** Per-instrument start prices and per-tick max step (millionths of price); null steps = default. */
     public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled,
                                 long[] maxStepMicros, long tickIntervalNanos) {
+        this(seed, instrumentIds, startPricesScaled, maxStepMicros, false, tickIntervalNanos);
+    }
+
+    /** Full control: per-instrument prices/steps plus correlated market regimes (trend/vol/shock). */
+    public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled,
+                                long[] maxStepMicros, boolean regimesEnabled, long tickIntervalNanos) {
         if (instrumentIds.isEmpty()) {
             throw new IllegalArgumentException("at least one instrument required");
         }
@@ -42,9 +48,14 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
         }
         this.generator = maxStepMicros == null
                 ? new SimTickGenerator(seed, startPricesScaled)
-                : new SimTickGenerator(seed, startPricesScaled, maxStepMicros);
+                : new SimTickGenerator(seed, startPricesScaled, maxStepMicros, regimesEnabled);
         this.instrumentIds = instrumentIds.toArray(String[]::new);
         this.tickIntervalNanos = tickIntervalNanos;
+    }
+
+    /** Current sim market regime (observability). */
+    public MarketRegime regime() {
+        return generator.regime();
     }
 
     private static long[] uniform(int count, long startPriceScaled) {
