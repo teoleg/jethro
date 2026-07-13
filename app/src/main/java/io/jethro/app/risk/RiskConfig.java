@@ -50,9 +50,16 @@ public class RiskConfig {
         return new CurveService();
     }
 
+    /** Strata swap valuation (PV/DV01/par) on the live curve. */
     @Bean
-    RiskController riskController(RiskProjection projection, CurveService curveService) {
-        return new RiskController(projection, curveService);
+    io.jethro.trading.riskpnl.SwapPricingService swapPricingService(CurveService curveService) {
+        return new io.jethro.trading.riskpnl.SwapPricingService(curveService);
+    }
+
+    @Bean
+    RiskController riskController(RiskProjection projection, CurveService curveService,
+                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
+        return new RiskController(projection, curveService, swapPricing);
     }
 
     @Bean(destroyMethod = "close")
