@@ -6,9 +6,13 @@ import io.jethro.order.OrderService;
 import io.jethro.domain.OrderType;
 import io.jethro.trading.algo.strategy.MomentumStrategy;
 import io.jethro.trading.algo.strategy.TradeSignal;
+import io.jethro.domain.Side;
+import io.jethro.trading.riskpnl.ConsolidatedRisk;
 import io.jethro.trading.riskpnl.InstrumentRef;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
+import io.jethro.trading.riskpnl.PositionRisk;
 import io.jethro.trading.riskpnl.PreTradeGuardrail;
+import io.jethro.trading.riskpnl.RiskLimitSource;
 import io.jethro.trading.riskpnl.RiskProjection;
 import io.jethro.uigateway.AttentionFeed;
 import io.jethro.uigateway.SseBroadcaster;
@@ -46,28 +50,36 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final InstrumentRefSource refs;
     private final PreTradeGuardrail guardrail;
     private final RiskProjection risk;
+    private final RiskLimitSource limits;
     private final AttentionFeed feed;
     private final SseBroadcaster sse;
     private final StrategyProperties props;
     private final OrderService orderService; // nullable: null → suggestions only
 
     private static final long HEARTBEAT_CYCLES = 24; // ~2 min at a 5s cadence
+    // In-flight guard on exits: a close is submitted synchronously but the fill only shrinks
+    // the projection after it round-trips Kafka, so suppress re-closing the same position
+    // for this window to avoid a burst of duplicate closes before the projection catches up.
+    private static final long EXIT_COOLDOWN_MILLIS = 15_000;
 
     private final Set<String> active = new HashSet<>();
     private final Map<String, Long> lastAutoExec = new ConcurrentHashMap<>();
+    private final Map<String, Long> lastExit = new ConcurrentHashMap<>();
+    private final Set<String> deriskedBooks = new HashSet<>();
     private long cycles;
     private boolean throttledActive;
     private volatile ScheduledExecutorService scheduler;
 
     public StrategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
                              InstrumentRefSource refs, PreTradeGuardrail guardrail, RiskProjection risk,
-                             AttentionFeed feed, SseBroadcaster sse, StrategyProperties props,
-                             OrderService orderService) {
+                             RiskLimitSource limits, AttentionFeed feed, SseBroadcaster sse,
+                             StrategyProperties props, OrderService orderService) {
         this.strategy = strategy;
         this.tradingCore = tradingCore;
         this.refs = refs;
         this.guardrail = guardrail;
         this.risk = risk;
+        this.limits = limits;
         this.feed = feed;
         this.sse = sse;
         this.props = props;
@@ -116,11 +128,15 @@ public final class StrategyLifecycle implements SmartLifecycle {
             int fresh = observations.size() - stale;
 
             long now = System.currentTimeMillis();
+            // Exit pass first (the risk-reducing half of the loop, ADR-0019): stop-loss,
+            // take-profit and book de-risk close positions before we look for new entries.
+            int exited = manageOpenPositions(now);
             Set<String> current = new HashSet<>();
             int signals = 0;
             int suppressed = 0;
             int oversized = 0;
             int atPosition = 0;
+            int shortsBlocked = 0;
             int executed = 0;
             String sampleReason = null;
             for (TradeSignal signal : strategy.evaluate(observations)) {
@@ -135,13 +151,25 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 // target position in this instrument, don't pile on in the same direction —
                 // opposite-direction signals still pass (they REDUCE risk).
                 BigDecimal held = risk.instrumentNetExposure(book, signal.instrumentId());
-                boolean sameDirection = (held.signum() > 0) == (signal.side() == io.jethro.domain.Side.BUY);
+                boolean sameDirection = (held.signum() > 0) == (signal.side() == Side.BUY);
                 if (held.signum() != 0 && sameDirection
                         && held.abs().compareTo(props.maxPositionNotionalOrDefault()) >= 0) {
                     atPosition++;
                     continue;
                 }
                 BigDecimal quantity = sized.get();
+                // Long-only guard (default): a SELL may only REDUCE an existing long, never
+                // open or extend a short. Clamp the reducing order so it stops at flat.
+                if (!props.allowShortOrDefault() && signal.side() == Side.SELL) {
+                    BigDecimal heldQty = risk.positionQuantity(book, signal.instrumentId());
+                    if (heldQty.signum() <= 0) {
+                        shortsBlocked++; // nothing to reduce — a short would be opened; skip
+                        continue;
+                    }
+                    if (quantity.compareTo(heldQty) > 0) {
+                        quantity = heldQty; // reduce to flat, never cross into a short
+                    }
+                }
                 BigDecimal signed = signal.side().signed(quantity);
                 Optional<String> rejection =
                         guardrail.rejectionReason(book, signal.instrumentId(), signed);
@@ -194,9 +222,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
             }
 
             // Heartbeat: the log always shows the strategy is alive and why it is/ isn't trading.
-            if (++cycles % HEARTBEAT_CYCLES == 0 || signals > 0 || suppressed > 0) {
-                log.info("strategy: {} fresh marks ({} stale), {} signals, {} unsizeable, {} at-position, {} suppressed by limits, {} auto-executed{}",
-                        fresh, stale, signals, oversized, atPosition, suppressed, executed,
+            if (++cycles % HEARTBEAT_CYCLES == 0 || signals > 0 || suppressed > 0 || exited > 0) {
+                log.info("strategy: {} fresh marks ({} stale), {} signals, {} unsizeable, {} at-position, "
+                                + "{} short-blocked, {} suppressed by limits, {} auto-executed, {} exited{}",
+                        fresh, stale, signals, oversized, atPosition, shortsBlocked, suppressed, executed, exited,
                         fresh == 0 ? "  — NO FRESH MARKS (feed may be stale)" : "");
             }
         } catch (Throwable t) {
@@ -268,6 +297,149 @@ public final class StrategyLifecycle implements SmartLifecycle {
             log.warn("auto-execute of {} failed: {}", signal.instrumentId(), e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * The risk-reducing half of the loop (ADR-0019): closes positions the strategy manages
+     * when a per-position stop-loss/take-profit trips, or when the whole book is over its
+     * loss cap (de-risk backstop — what makes a floored book actually unwind instead of the
+     * alarm latching forever). Closing orders REDUCE risk, so they always pass the guardrail
+     * even on a loss-breached book. Only runs when auto-executing (nothing to submit else).
+     *
+     * <p>Scope: only books the strategy routes into ({@link #managedBooks()}). It does not
+     * reach into books the strategy never trades. @return number of close orders submitted.
+     */
+    private int manageOpenPositions(long now) {
+        if (!autoExecuting()) {
+            return 0;
+        }
+        ConsolidatedRisk snapshot = risk.snapshot(now);
+        Set<String> managed = managedBooks();
+
+        // Managed books that still hold risk AND are at/over their max-loss cap → flatten.
+        // Gated on live exposure so the card clears once the book is flat (the day's realized
+        // loss legitimately keeps the separate loss ALERT up — that happened, it's honest).
+        Set<String> flatten = new HashSet<>();
+        if (props.deriskOnLossCapOrDefault()) {
+            for (ConsolidatedRisk.Group g : snapshot.byBook()) {
+                if (!managed.contains(g.key()) || g.grossExposure().signum() == 0) {
+                    continue;
+                }
+                BigDecimal cap = limits.limitsFor(g.key()).maxLossPnl();
+                if (cap != null && cap.signum() > 0 && g.totalPnl().signum() < 0
+                        && g.totalPnl().negate().compareTo(cap) >= 0) {
+                    flatten.add(g.key());
+                }
+            }
+        }
+
+        BigDecimal stop = props.stopLossPctOrNull();
+        BigDecimal takeProfit = props.takeProfitPctOrNull();
+        int closed = 0;
+        for (PositionRisk p : snapshot.positions()) {
+            if (p.quantity().signum() == 0 || !managed.contains(p.bookId())) {
+                continue;
+            }
+            String reason = flatten.contains(p.bookId())
+                    ? "book over loss cap — de-risking"
+                    : priceExitReason(p, stop, takeProfit).orElse(null);
+            if (reason != null && closePosition(p, reason, now)) {
+                closed++;
+            }
+        }
+
+        // De-risk cards: shown while a book is being flattened, resolved once it's flat —
+        // so the user SEES the floored book being worked down, not just a latched alarm.
+        boolean changed = false;
+        for (String book : Set.copyOf(deriskedBooks)) {
+            if (!flatten.contains(book)) {
+                feed.resolve("derisk:" + book);
+                deriskedBooks.remove(book);
+                changed = true;
+            }
+        }
+        for (String book : flatten) {
+            feed.upsert(new AttentionFeed.AttentionItem("derisk:" + book, now,
+                    AttentionFeed.Severity.WARN, "strategy-derisk",
+                    book + " over loss cap — auto de-risking",
+                    "The strategy is submitting risk-reducing orders to bring " + book
+                            + " back under its loss limit (simulated, ADR-0019).", "/books.html"));
+            if (deriskedBooks.add(book)) {
+                changed = true;
+            }
+        }
+        if (changed) {
+            sse.broadcast("attention", feed.snapshot());
+        }
+        return closed;
+    }
+
+    /**
+     * The stop-loss / take-profit reason for a price-quoted position, or empty to hold.
+     * Unrealized return is measured in the position's PnL direction: a long profits when
+     * mark &gt; cost, a short when mark &lt; cost. The contract multiplier cancels (both the
+     * move and the basis carry it), so it's {@code (mark − cost)/|cost|} signed by the qty
+     * sign. Package-visible + pure for exact-value testing (finance-math rule).
+     *
+     * <p>Price-quoted classes only: a SWAP is quoted as a par RATE (a 0.8% move on a 4%
+     * rate is ~3bp — a different scale), so a pct stop/TP would be incoherent; swaps are
+     * managed by book de-risk and opposite signals until a bp-denominated rates stop exists.
+     */
+    static Optional<String> priceExitReason(PositionRisk p, BigDecimal stop, BigDecimal takeProfit) {
+        if (!p.hasMark() || p.avgCost().signum() == 0 || "SWAP".equals(p.assetClass())
+                || (stop == null && takeProfit == null)) {
+            return Optional.empty();
+        }
+        BigDecimal ret = p.mark().subtract(p.avgCost())
+                .divide(p.avgCost().abs(), 8, RoundingMode.HALF_EVEN)
+                .multiply(BigDecimal.valueOf(p.quantity().signum()));
+        if (stop != null && ret.compareTo(stop.negate()) <= 0) {
+            return Optional.of("stop-loss " + pct(ret));
+        }
+        if (takeProfit != null && ret.compareTo(takeProfit) >= 0) {
+            return Optional.of("take-profit " + pct(ret));
+        }
+        return Optional.empty();
+    }
+
+    /** Submits a risk-reducing MARKET order that flattens the position, throttled by a short
+     *  in-flight window so the async fill isn't double-closed. @return true if submitted. */
+    private boolean closePosition(PositionRisk p, String reason, long now) {
+        String key = p.bookId() + "|" + p.instrumentId();
+        Long last = lastExit.get(key);
+        if (last != null && now - last < EXIT_COOLDOWN_MILLIS) {
+            return false; // a close is already in flight for this position
+        }
+        Side side = p.quantity().signum() > 0 ? Side.SELL : Side.BUY; // opposite side reduces
+        BigDecimal qty = p.quantity().abs();
+        try {
+            var command = new NewOrder("exit:" + p.instrumentId() + ":" + UUID.randomUUID(),
+                    p.bookId(), p.instrumentId(), side, OrderType.MARKET, qty, null);
+            var order = orderService.submit(command);
+            lastExit.put(key, now);
+            log.info("exit {} {} {} ({}) → {} on {} ({})",
+                    side, qty.toPlainString(), p.instrumentId(), reason, order.status(), p.bookId(), order.orderId());
+            return true;
+        } catch (Exception e) {
+            log.warn("exit of {} on {} failed: {}", p.instrumentId(), p.bookId(), e.getMessage());
+            return false;
+        }
+    }
+
+    /** The books the strategy routes into (default + per-class) — the only ones it manages. */
+    private Set<String> managedBooks() {
+        Set<String> books = new HashSet<>();
+        if (props.book() != null) {
+            books.add(props.book());
+        }
+        if (props.bookByClass() != null) {
+            books.addAll(props.bookByClass().values());
+        }
+        return books;
+    }
+
+    private static String pct(BigDecimal ratio) {
+        return ratio.movePointRight(2).setScale(2, RoundingMode.HALF_UP).toPlainString() + "%";
     }
 
     private AttentionFeed.AttentionItem toItem(TradeSignal s, String book, BigDecimal qty, long now, boolean executed) {
