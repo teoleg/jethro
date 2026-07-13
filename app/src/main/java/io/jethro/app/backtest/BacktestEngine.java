@@ -40,7 +40,8 @@ public final class BacktestEngine {
 
     private static final class Book {
         Position position;
-        BigDecimal realized = BigDecimal.ZERO;
+        BigDecimal realized = BigDecimal.ZERO; // ledger realized, net of costs below
+        BigDecimal costs = BigDecimal.ZERO;
         int trades;
         Book(String instrumentId) {
             this.position = Position.flat(BOOK, new InstrumentId(instrumentId));
@@ -103,13 +104,19 @@ public final class BacktestEngine {
                     Fill fill = new Fill("bt-" + tick + "-" + idx, "bt", BOOK,
                             new InstrumentId(ids[idx]), signal.side(), qty, mark[idx], Instant.EPOCH);
                     Positions.FillApplication applied = Positions.applyFill(book.position, fill, mult[idx]);
-                    if (applied.realizedPnl().signum() != 0) {
+                    // Transaction cost: costBps of the traded notional (fees + slippage proxy),
+                    // charged on every fill. Win/loss is judged on realized NET of this cost.
+                    BigDecimal cost = qty.multiply(mark[idx]).multiply(mult[idx])
+                            .multiply(cfg.costBps()).movePointLeft(4);
+                    BigDecimal realizedNet = applied.realizedPnl().subtract(cost);
+                    if (realizedNet.signum() != 0) {
                         closingFills++;
-                        if (applied.realizedPnl().signum() > 0) {
+                        if (realizedNet.signum() > 0) {
                             winningFills++;
                         }
                     }
                     book.realized = book.realized.add(applied.realizedPnl());
+                    book.costs = book.costs.add(cost);
                     book.position = applied.position();
                     book.trades++;
                     totalTrades++;
@@ -123,21 +130,24 @@ public final class BacktestEngine {
             }
         }
 
-        BigDecimal realizedTotal = BigDecimal.ZERO;
+        BigDecimal realizedNetTotal = BigDecimal.ZERO;
         BigDecimal unrealizedTotal = BigDecimal.ZERO;
+        BigDecimal costsTotal = BigDecimal.ZERO;
         List<BacktestResult.InstrumentResult> perInstrument = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             Book book = books.get(ids[i]);
             BigDecimal unreal = unrealized(book.position, mark[i], mult[i]);
-            realizedTotal = realizedTotal.add(book.realized);
+            BigDecimal realizedNet = book.realized.subtract(book.costs);
+            realizedNetTotal = realizedNetTotal.add(realizedNet);
             unrealizedTotal = unrealizedTotal.add(unreal);
+            costsTotal = costsTotal.add(book.costs);
             perInstrument.add(new BacktestResult.InstrumentResult(
-                    ids[i], book.trades, scale(book.realized), scale(unreal), book.position.quantity()));
+                    ids[i], book.trades, scale(realizedNet), scale(unreal), book.position.quantity()));
         }
         double winRate = closingFills == 0 ? 0.0 : (double) winningFills / closingFills;
         return new BacktestResult(cfg.seed(), cfg.ticks(), evaluations, signalCount, totalTrades,
-                scale(realizedTotal), scale(unrealizedTotal), scale(realizedTotal.add(unrealizedTotal)),
-                scale(maxDrawdown), winRate, perInstrument, equityCurve);
+                scale(realizedNetTotal), scale(unrealizedTotal), scale(realizedNetTotal.add(unrealizedTotal)),
+                scale(maxDrawdown), winRate, scale(costsTotal), perInstrument, equityCurve);
     }
 
     /** Live-mirroring sizing: target notional, per-order cap (never round up), long-only clamp,
@@ -173,7 +183,8 @@ public final class BacktestEngine {
         BigDecimal equity = BigDecimal.ZERO;
         for (int i = 0; i < ids.length; i++) {
             Book book = books.get(ids[i]);
-            equity = equity.add(book.realized).add(unrealized(book.position, mark[i], mult[i]));
+            equity = equity.add(book.realized).subtract(book.costs)
+                    .add(unrealized(book.position, mark[i], mult[i]));
         }
         return equity;
     }

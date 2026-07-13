@@ -10,14 +10,16 @@ import java.util.List;
  * honest expectation is roughly break-even before costs — the point is a reproducible
  * measurement, not a promise of alpha.
  *
- * @param winRate fraction of risk-reducing (closing) fills that realised a profit.
+ * @param winRate fraction of risk-reducing (closing) fills that realised a profit NET of costs.
  * @param maxDrawdown largest peak-to-trough drop of the mark-to-market equity curve (≥ 0).
+ * @param totalCosts cumulative transaction cost charged over the run (already deducted from
+ *                   {@code realizedPnl}/{@code totalPnl} and the equity curve).
  * @param equityCurve sampled mark-to-market equity points (for charting), oldest first.
  */
 public record BacktestResult(
         long seed, int ticks, int evaluations, int signals, int trades,
         BigDecimal realizedPnl, BigDecimal unrealizedPnl, BigDecimal totalPnl,
-        BigDecimal maxDrawdown, double winRate,
+        BigDecimal maxDrawdown, double winRate, BigDecimal totalCosts,
         List<InstrumentResult> byInstrument, List<BigDecimal> equityCurve) {
 
     /** Per-instrument PnL breakdown. */

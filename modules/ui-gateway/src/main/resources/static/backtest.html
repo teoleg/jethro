@@ -70,6 +70,7 @@
     <form class="controls" id="f">
       <div class="field"><label>seed (blank = sim seed)</label><input id="seed" placeholder="42" class="mono"></div>
       <div class="field"><label>ticks (1k–200k)</label><input id="ticks" value="20000" class="mono"></div>
+      <div class="field"><label>cost (bps/fill)</label><input id="costBps" value="1.0" class="mono"></div>
       <div class="field check"><input type="checkbox" id="regimes" checked><label>market regimes</label></div>
       <button class="run" id="run" type="submit">Run backtest</button>
       <span class="hint" id="status"></span>
@@ -112,8 +113,9 @@
     btn.disabled = true; st.textContent = "running…";
     const seed = document.getElementById("seed").value.trim();
     const ticks = document.getElementById("ticks").value.trim() || "20000";
+    const costBps = document.getElementById("costBps").value.trim() || "1.0";
     const regimes = document.getElementById("regimes").checked;
-    const qs = new URLSearchParams({ ticks, regimes }); if (seed) qs.set("seed", seed);
+    const qs = new URLSearchParams({ ticks, regimes, costBps }); if (seed) qs.set("seed", seed);
     try {
       const r = await (await fetch("/api/backtest?" + qs.toString())).json();
       document.getElementById("results").style.display = "";
@@ -122,7 +124,8 @@
         stat("Total P&L", r.totalPnl, true) + stat("Realized", r.realizedPnl, true) +
         stat("Unrealized", r.unrealizedPnl, true) + stat("Max drawdown", "-"+r.maxDrawdown, true) +
         stat("Win rate", (r.winRate*100).toFixed(1)+"%") + stat("Trades", r.trades.toLocaleString()) +
-        stat("Signals", r.signals.toLocaleString()) + stat("Evaluations", r.evaluations.toLocaleString());
+        stat("Costs", "-"+r.totalCosts, true) + stat("Signals", r.signals.toLocaleString()) +
+        stat("Evaluations", r.evaluations.toLocaleString());
       document.getElementById("curve").outerHTML = '<div id="curve">' + curveSvg(r.equityCurve) + '</div>';
       document.getElementById("byinstr").outerHTML = '<div id="byinstr">' + (r.byInstrument.length ?
         "<table><tr><th>instrument</th><th>trades</th><th>realized</th><th>unrealized</th><th>end position</th></tr>" +
