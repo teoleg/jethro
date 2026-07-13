@@ -294,7 +294,8 @@
         const sz = r.quantity ? `${esc(r.quantity)} → ${esc(r.book||'')}` : "—";
         const bt = r.backtestSupports == null ? '<span class="muted">—</span>'
           : (r.backtestSupports ? `<span class="up" title="strategy net-positive on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">supported</span>`
-                                : `<span class="down" title="strategy not profitable on this name">unsupported</span>`);
+          : (!r.backtestTrades ? `<span class="muted" title="the strategy fired no signals on this name in the backtest window (sim tape) — not tested, not a loss">no trades</span>`
+                               : `<span class="down" title="strategy traded but was net-negative on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">unsupported</span>`));
         const verdictCell = r.autonomous
           ? '<span class="up" title="auto-executed within the risk envelope (simulated) — see the blotter for the order">AUTO ✓</span>'
           : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</span>`;
