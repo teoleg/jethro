@@ -87,6 +87,15 @@ public class HypothesisConfig {
         return map;
     }
 
+    /** Durable store for executed hypotheses — Postgres when persistence is on, else in-memory
+     *  only (they still stay on the page for the session, just don't survive a restart). */
+    @Bean
+    HypothesisRecordStore hypothesisRecordStore(
+            ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbc) {
+        var template = jdbc.getIfAvailable();
+        return template != null ? new HypothesisRecordStore.Jdbc(template) : HypothesisRecordStore.NOOP;
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "jethro.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
     HypothesisLifecycle hypothesisLifecycle(ModelInferenceClient client, BufferingDecisionSink buffer,
@@ -95,7 +104,8 @@ public class HypothesisConfig {
                                             io.jethro.app.backtest.BacktestService backtest,
                                             TradingCoreLifecycle tradingCore, RiskProjection risk,
                                             InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
-                                            ObjectProvider<OrderService> orderService) {
+                                            ObjectProvider<OrderService> orderService,
+                                            HypothesisRecordStore recordStore) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
         // the broker is wired — every hypothesis-generation run is an audited AiDecision.
         DecisionSink sink = decision -> {
@@ -110,7 +120,7 @@ public class HypothesisConfig {
         // OrderService present only when persistence is on; without it (or with autonomy off)
         // the layer is human-in-loop even if autonomy is configured on.
         return new HypothesisLifecycle(generator, evaluator, narrativeFeed, backtest,
-                tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable());
+                tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable(), recordStore);
     }
 
     @Bean

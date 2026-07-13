@@ -22,7 +22,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 
 import java.math.BigDecimal;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -58,7 +60,10 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private final HypothesisProperties props;
     private final AutonomyEnvelope envelope;
     private final OrderService orderService; // nullable: null → human-in-loop only
+    private final HypothesisRecordStore recordStore;
 
+    private static final int EXECUTED_CAP = 50;
+    private final Deque<HypothesisRecord> executed = new ArrayDeque<>(); // sticky, newest first
     private final Set<String> active = new HashSet<>();
     private final Map<String, Long> lastAutoExec = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicLong consecutiveFailures = new AtomicLong();
@@ -70,13 +75,15 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                                HypothesisEvaluator evaluator, NarrativeFeed narrativeFeed,
                                BacktestService backtest, TradingCoreLifecycle tradingCore, RiskProjection risk,
                                InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
-                               HypothesisProperties props, OrderService orderService) {
+                               HypothesisProperties props, OrderService orderService,
+                               HypothesisRecordStore recordStore) {
         this.generator = generator;
         this.evaluator = evaluator;
         this.narrativeFeed = narrativeFeed;
         this.backtest = backtest;
         this.envelope = new AutonomyEnvelope(props.autonomyOrDefault());
         this.orderService = orderService;
+        this.recordStore = recordStore;
         this.tradingCore = tradingCore;
         this.risk = risk;
         this.refs = refs;
@@ -92,6 +99,12 @@ public final class HypothesisLifecycle implements SmartLifecycle {
 
     @Override
     public void start() {
+        // Reload persisted executed hypotheses so they stay on the page across restarts.
+        synchronized (executed) {
+            for (HypothesisRecord r : recordStore.recent(EXECUTED_CAP)) {
+                executed.addLast(r); // recent() is newest-first
+            }
+        }
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "hypothesis");
             t.setDaemon(true);
@@ -114,6 +127,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     }
 
     private void runOnce() {
+        long startNanos = System.nanoTime();
         try {
             var runtime = tradingCore.runtime();
             if (runtime == null) {
@@ -132,9 +146,13 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 }
                 tradable.add(mark.instrumentId());
                 priceMap.put(mark.instrumentId(), mark.price());
-                markViews.add(new HypothesisContext.MarkView(
-                        mark.instrumentId(), mark.price().toPlainString(), mark.stale()));
                 String assetClass = ref.get().assetClass();
+                // Tell the model WHAT each instrument is (asset class + description), so it reasons
+                // about the real instrument instead of inventing an issuer for the ticker.
+                markViews.add(new HypothesisContext.MarkView(
+                        mark.instrumentId(), assetClass, ref.get().currency(),
+                        InstrumentDescriptions.of(mark.instrumentId(), assetClass),
+                        mark.price().toPlainString(), mark.stale()));
                 if ("EQUITY".equals(assetClass) || "FUTURE".equals(assetClass)) {
                     singleNames.add(mark.instrumentId());
                 }
@@ -193,8 +211,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                     .filter(e -> e.verdict() == HypothesisEvaluator.Verdict.ADMISSIBLE).count();
             // Log every cycle so "no hypotheses" is explained: the model ran (Ollama up) but
             // returned 0 usable structured theses, vs the layer being disabled or the model down.
-            log.info("hypotheses: model proposed {}, {} admissible, {} auto-traded (regime {})",
-                    evaluated.size(), admissible, autoTraded.size(), tradingCore.regime());
+            // The elapsed time is dominated by the local SLM inference — it's the real floor on how
+            // often the cycle can run (scheduleWithFixedDelay waits interval AFTER this completes).
+            long tookMs = (System.nanoTime() - startNanos) / 1_000_000;
+            log.info("hypotheses: model proposed {}, {} admissible, {} auto-traded (regime {}) — took {}ms",
+                    evaluated.size(), admissible, autoTraded.size(), tradingCore.regime(), tookMs);
         } catch (Throwable t) {
             log.warn("hypothesis cycle failed: {}", t.toString());
         }
@@ -237,6 +258,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                     e.book(), h.instrumentId(), h.direction(), OrderType.MARKET, e.quantity(), null);
             var order = orderService.submit(command);
             lastAutoExec.put(h.instrumentId(), now);
+            recordExecuted(e, now, order.orderId(), String.valueOf(order.status()));
             log.warn("AUTONOMY auto-executed {} {} {} → {} on {} ({}) — thesis: {}",
                     h.direction(), e.quantity().toPlainString(), h.instrumentId(), order.status(),
                     e.book(), order.orderId(), h.thesis());
@@ -250,6 +272,33 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     /** Instruments auto-traded by autonomy in the last cycle (for the UI). */
     public Set<String> autoTradedIds() {
         return autoTradedIds;
+    }
+
+    /** Persists an executed hypothesis and pins it to the sticky list (newest first, capped). */
+    private void recordExecuted(HypothesisEvaluator.Evaluated e, long now, String orderId, String orderStatus) {
+        Hypothesis h = e.hypothesis();
+        Boolean backtestSupported = e.backtest() != null ? e.backtest().supports() : null;
+        HypothesisRecord record = new HypothesisRecord(orderId, now, h.instrumentId(),
+                h.direction().name(), h.horizon().name(), h.conviction().name(), h.thesis(),
+                e.book(), e.quantity(), backtestSupported, orderId, orderStatus);
+        try {
+            recordStore.save(record); // durable; NOOP when persistence is off
+        } catch (Exception ex) {
+            log.warn("could not persist executed hypothesis {}: {}", orderId, ex.toString());
+        }
+        synchronized (executed) {
+            executed.addFirst(record);
+            while (executed.size() > EXECUTED_CAP) {
+                executed.removeLast();
+            }
+        }
+    }
+
+    /** Executed (autonomy) hypotheses, newest first — persisted, sticky across cycles/restarts. */
+    public List<HypothesisRecord> executed() {
+        synchronized (executed) {
+            return List.copyOf(executed);
+        }
     }
 
     /** Admissible candidates become INFO cards on the attention feed; stale ones resolve. */

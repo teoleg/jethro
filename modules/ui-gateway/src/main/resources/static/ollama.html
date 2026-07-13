@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — LLM ops</title>
+<style>
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f; --warn:#f0a53f;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; } .hint { color:var(--dim); font-size:12px; }
+
+  main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  .tiles { display:grid; gap:12px; grid-template-columns:repeat(6, 1fr); margin-bottom:18px; }
+  @media (max-width:900px) { .tiles { grid-template-columns:repeat(3, 1fr); } }
+  .tile { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .tile .k { font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); }
+  .tile .v { font-size:22px; font-weight:650; margin-top:4px; }
+  .tile .v.mono { font-variant-numeric:tabular-nums; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:4px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
+  th:first-child, td:first-child { text-align:left; }
+  tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .up { color:var(--up); } .down { color:var(--down); } .warn { color:var(--warn); } .muted { color:var(--dim); }
+  .st { font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-2); }
+  .st.ok { color:var(--up); border-color:var(--up); } .st.err { color:var(--down); border-color:var(--down); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+      <a class="tab" href="/config.html">Config</a>
+      <a class="tab" href="/backtest.html">Backtest</a>
+      <a class="tab active" href="/ollama.html">Ops</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="hint">Local SLM (Ollama) load · ADR-0016 — operations view</span>
+  </div>
+</div>
+<main>
+  <div class="section-h">Model load <span class="muted" id="asof"></span></div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="section-h">Recent inference calls <span class="muted" style="text-transform:none;letter-spacing:0">— every Ollama call (commentary · hypotheses · chat), newest first</span></div>
+  <div class="panel"><div id="runs" class="muted">waiting for the model…</div></div>
+</main>
+<script>
+  const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
+  const ms = v => v == null ? "—" : (v >= 1000 ? (v/1000).toFixed(1) + "s" : v + "ms");
+  const tile = (k, v, cls) => `<div class="tile"><div class="k">${k}</div><div class="v mono ${cls||''}">${v}</div></div>`;
+
+  function render(data) {
+    const s = data.summary;
+    document.getElementById("asof").textContent = s.lastRunMillis ? "· last " + new Date(s.lastRunMillis).toLocaleTimeString() : "";
+    document.getElementById("tiles").innerHTML =
+      tile("Model", `<span style="font-size:15px">${esc(s.model || "—")}</span>`) +
+      tile("Calls (window)", s.total) +
+      tile("Failures", s.failures, s.failures > 0 ? "down" : "up") +
+      tile("Avg latency", ms(s.avgLatencyMillis)) +
+      tile("p95 latency", ms(s.p95LatencyMillis)) +
+      tile("Avg tok/s", s.avgTokensPerSecond ? s.avgTokensPerSecond.toFixed(1) : "—");
+
+    const rows = data.runs;
+    document.getElementById("runs").outerHTML = '<div id="runs" class="muted">' + (rows.length ?
+      "<table><tr><th>time</th><th>status</th><th>latency</th><th>prompt tok</th><th>gen tok</th><th>tok/s</th><th>note</th></tr>" +
+      rows.map(r => `<tr><td class="muted mono">${new Date(r.timestampMillis).toLocaleTimeString()}</td>
+        <td><span class="st ${r.ok?'ok':'err'}">${r.ok?'ok':'fail'}</span></td>
+        <td class="mono ${r.latencyMillis>20000?'warn':''}">${ms(r.latencyMillis)}</td>
+        <td class="mono">${r.inputTokens||'—'}</td><td class="mono">${r.outputTokens||'—'}</td>
+        <td class="mono">${r.ok&&r.tokensPerSecond?r.tokensPerSecond.toFixed(1):'—'}</td>
+        <td class="muted" title="${esc(r.error||'')}">${r.ok?'':esc((r.error||'').slice(0,80))}</td></tr>`).join("") + "</table>"
+      : '<div class="muted" style="padding:14px">no inference calls yet — the model runs on a cadence once Ollama is up (see the app log line "LLM inference […]")</div>') + '</div>';
+  }
+
+  async function refresh() { try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {} }
+  refresh();
+  setInterval(refresh, 3000);
+</script>
+</body>
+</html>

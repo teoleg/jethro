@@ -11,6 +11,8 @@ import io.jethro.trading.algo.agent.DecisionSink;
 import io.jethro.trading.algo.inference.InferenceRequest;
 import io.jethro.trading.algo.inference.InferenceResult;
 import io.jethro.trading.algo.inference.ModelInferenceClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -34,6 +36,7 @@ import java.util.UUID;
  */
 public final class HypothesisGenerator {
 
+    private static final Logger log = LoggerFactory.getLogger(HypothesisGenerator.class);
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final int MAX_THESIS_CHARS = 240;
 
@@ -56,6 +59,12 @@ public final class HypothesisGenerator {
 
             Rules:
             - Choose "instrument" ONLY from tradableInstruments. Never invent a ticker.
+            - Each mark carries assetClass (EQUITY, FUTURE, FX, SWAP, BOND) and usually a \
+            description of what it actually is. TREAT THESE AS GROUND TRUTH. NEVER invent an \
+            issuer, company, or product name for a ticker: a FUTURE, SWAP, or FX pair is NOT a \
+            company's stock. Reason about the index, rate, or currency it represents — e.g. ZN is \
+            a 10Y Treasury future (rates), USD_IRS_10Y is an interest-rate swap, EURUSD is FX. \
+            For SWAP/BOND/rates instruments, reason in terms of yields and rates, not an equity story.
             - Do NOT output any price, size, quantity, percentage, or numeric target. \
             Direction and conviction only — the risk system computes all numbers.
             - Base each thesis on the narrative and marks. Prefer names with the strongest recent \
@@ -81,6 +90,13 @@ public final class HypothesisGenerator {
         String contextJson = toJson(context);
         InferenceResult result = client.complete(new InferenceRequest(
                 String.format(SYSTEM_PROMPT, maxPerCycle), contextJson, maxOutputTokens));
+        // How long the LLM itself took (Ollama's own latency + token counts) — the real floor on
+        // how often the hypothesis cycle can run. tok/s makes the model/box comparable at a glance.
+        long latency = result.latencyMillis();
+        double tokensPerSec = latency > 0 ? result.outputTokens() * 1000.0 / latency : 0;
+        log.info("LLM inference [{}]: {}ms, {} prompt + {} gen tokens ({} tok/s)",
+                result.modelId(), latency, result.inputTokens(), result.outputTokens(),
+                String.format("%.1f", tokensPerSec));
         List<Hypothesis> hypotheses = parse(result.text(), context);
         record(contextJson, hypotheses, result);
         return hypotheses;
@@ -237,7 +253,17 @@ public final class HypothesisGenerator {
         ObjectNode root = JSON.createObjectNode();
         ArrayNode marks = root.putArray("marks");
         for (var m : context.marks()) {
-            marks.addObject().put("instrumentId", m.instrumentId()).put("price", m.price()).put("stale", m.stale());
+            ObjectNode mk = marks.addObject().put("instrumentId", m.instrumentId());
+            if (m.assetClass() != null) {
+                mk.put("assetClass", m.assetClass());
+            }
+            if (m.currency() != null) {
+                mk.put("currency", m.currency());
+            }
+            if (m.description() != null) {
+                mk.put("description", m.description());
+            }
+            mk.put("price", m.price()).put("stale", m.stale());
         }
         ArrayNode narrative = root.putArray("narrative");
         for (var n : context.narrative()) {

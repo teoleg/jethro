@@ -24,11 +24,20 @@ public class AiConfig {
         return new BufferingDecisionSink();
     }
 
+    /** Operational telemetry for local-SLM load (latency/tokens per call) — the ops page. */
+    @Bean
+    InferenceMonitor inferenceMonitor() {
+        return new InferenceMonitor();
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "jethro.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
-    ModelInferenceClient modelInferenceClient(AiProperties properties) {
-        return new OllamaClient(properties.baseUrl(), properties.model(),
+    ModelInferenceClient modelInferenceClient(AiProperties properties, InferenceMonitor monitor) {
+        // Wrap the real Ollama client so every call (commentary, hypotheses, chat) is recorded
+        // for the ops view in one place, with no change to any caller.
+        var ollama = new OllamaClient(properties.baseUrl(), properties.model(),
                 Duration.ofSeconds(properties.requestTimeoutSeconds()));
+        return new MonitoringInferenceClient(ollama, monitor);
     }
 
     @Bean
