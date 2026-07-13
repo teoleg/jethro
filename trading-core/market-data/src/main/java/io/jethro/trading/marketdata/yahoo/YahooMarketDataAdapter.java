@@ -31,7 +31,8 @@ public final class YahooMarketDataAdapter implements MarketDataAdapter {
     private final QuoteSource quotes;
     private final Map<String, String> instrumentToSymbol; // instrumentId → Yahoo symbol
     private final CurveFactorSimulator curveSim; // nullable: no rates marks when absent
-    private final long pollIntervalNanos;
+    private final long requestSpacingNanos; // gap BETWEEN symbol requests — spread, don't burst
+    private final long cycleBudgetMillis;   // ~time for one full pass over all symbols
 
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicLong lastUpdateMillis = new AtomicLong(0);
@@ -39,15 +40,22 @@ public final class YahooMarketDataAdapter implements MarketDataAdapter {
     private final AtomicLong drops = new AtomicLong(0);
     private volatile Thread feedThread;
 
+    /**
+     * @param requestSpacingMillis gap between individual symbol requests. Yahoo throttles
+     *        bursts (all-at-once gets 429'd after ~1), so we fetch one symbol, wait, next —
+     *        a steady trickle that mostly succeeds instead of a burst that mostly fails.
+     */
     public YahooMarketDataAdapter(QuoteSource quotes, Map<String, String> instrumentToSymbol,
-                                  CurveFactorSimulator curveSim, long pollIntervalMillis) {
+                                  CurveFactorSimulator curveSim, long requestSpacingMillis) {
         if (instrumentToSymbol.isEmpty()) {
             throw new IllegalArgumentException("at least one instrument→symbol mapping required");
         }
         this.quotes = quotes;
         this.instrumentToSymbol = Map.copyOf(instrumentToSymbol);
         this.curveSim = curveSim;
-        this.pollIntervalNanos = pollIntervalMillis * 1_000_000;
+        long spacing = Math.max(1, requestSpacingMillis);
+        this.requestSpacingNanos = spacing * 1_000_000;
+        this.cycleBudgetMillis = spacing * this.instrumentToSymbol.size();
     }
 
     @Override
@@ -75,21 +83,23 @@ public final class YahooMarketDataAdapter implements MarketDataAdapter {
                 }
                 var quote = quotes.fetch(entry.getValue());
                 long now = System.currentTimeMillis();
-                if (quote.isEmpty()) {
+                if (quote.isPresent()) {
+                    long priceScaled = Decimals.toScaledLong(quote.get().price(), Decimals.PRICE_SCALE);
+                    long providerMillis = quote.get().epochSeconds() * 1000;
+                    listener.onTrade(entry.getKey(), priceScaled, Decimals.toScaledLong(
+                            java.math.BigDecimal.ONE, Decimals.QTY_SCALE), providerMillis, now);
+                    lastUpdateMillis.set(now);
+                    lastProviderEpoch.set(quote.get().epochSeconds());
+                    ok++;
+                } else {
                     drops.incrementAndGet(); // count, log, expose — never silently drop (data-path rule)
-                    continue;
                 }
-                long priceScaled = Decimals.toScaledLong(quote.get().price(), Decimals.PRICE_SCALE);
-                long providerMillis = quote.get().epochSeconds() * 1000;
-                listener.onTrade(entry.getKey(), priceScaled, Decimals.toScaledLong(
-                        java.math.BigDecimal.ONE, Decimals.QTY_SCALE), providerMillis, now);
-                lastUpdateMillis.set(now);
-                lastProviderEpoch.set(quote.get().epochSeconds());
-                ok++;
+                // Space every request so we trickle instead of burst (avoids Yahoo's 429s).
+                LockSupport.parkNanos(requestSpacingNanos);
             }
             if (curveSim != null) {
                 // Keep the SOFR curve, linked Treasury futures and swaps alive alongside Yahoo
-                // (mirrors the sim adapter's curve block). Steps once per poll — rates move slowly.
+                // (mirrors the sim adapter's curve block). Steps once per full pass.
                 long now = System.currentTimeMillis();
                 curveSim.step();
                 for (int t = 0; t < CurveFactorSimulator.TENOR_IDS.length; t++) {
@@ -101,7 +111,10 @@ public final class YahooMarketDataAdapter implements MarketDataAdapter {
                             curveSim.swapParScaledPercent(s), 1_000_000L, now, now);
                 }
             }
-            LockSupport.parkNanos(pollIntervalNanos + (ok == 0 ? ERROR_BACKOFF_NANOS : 0));
+            // If a whole pass failed (throttled), back off a while to let Yahoo cool down.
+            if (ok == 0) {
+                LockSupport.parkNanos(ERROR_BACKOFF_NANOS);
+            }
         }
     }
 
@@ -109,7 +122,7 @@ public final class YahooMarketDataAdapter implements MarketDataAdapter {
     public FeedStatus status() {
         long last = lastUpdateMillis.get();
         boolean connected = running.get() && last > 0
-                && System.currentTimeMillis() - last < Math.max(60_000, pollIntervalNanos / 1_000_000 * 4);
+                && System.currentTimeMillis() - last < Math.max(60_000, cycleBudgetMillis * 3);
         long delaySeconds = lastProviderEpoch.get() == 0 ? 0
                 : Math.max(0, System.currentTimeMillis() / 1000 - lastProviderEpoch.get());
         return new FeedStatus(NAME, connected, last, delaySeconds);

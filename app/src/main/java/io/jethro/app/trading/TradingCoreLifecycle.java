@@ -75,12 +75,13 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 log.warn("provider=yahoo but no 'yahoo' symbology found (persistence off or unseeded) — "
                         + "falling back to the sim feed");
             } else {
+                long spacing = properties.yahooRequestSpacingMillisOrDefault();
                 log.warn("MARKET DATA: Yahoo (dev/demo only, ~15-min delayed, unofficial/ToS-limited) — "
-                        + "{} instruments mapped, polling every {}s. Never a production/real-money feed (ADR-0023).",
-                        map.size(), properties.yahooPollSecondsOrDefault());
+                        + "{} instruments, {}ms between requests (~{}s per full refresh). "
+                        + "Never a production/real-money feed (ADR-0023).",
+                        map.size(), spacing, spacing * map.size() / 1000);
                 return new YahooMarketDataAdapter(
-                        new YahooQuoteClient(Duration.ofSeconds(10)), map, curveSim,
-                        properties.yahooPollSecondsOrDefault() * 1000);
+                        new YahooQuoteClient(Duration.ofSeconds(10)), map, curveSim, spacing);
             }
         }
         return simAdapter = buildSimAdapter(curveSim);

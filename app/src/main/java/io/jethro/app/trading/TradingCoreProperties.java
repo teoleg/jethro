@@ -26,8 +26,9 @@ public record TradingCoreProperties(
         long simTickIntervalMillis,
         /** Market-data provider: "sim" (default) or "yahoo" (dev/demo only, ADR-0023). */
         String provider,
-        /** Yahoo poll cadence in seconds (rate-limit-friendly); default 15. */
-        Long yahooPollSeconds,
+        /** Gap between individual Yahoo symbol requests, in ms (spread, not burst — avoids
+         *  429s). Default 700; each symbol then refreshes every ~spacing×instrumentCount. */
+        Long yahooRequestSpacingMillis,
         String lmdbPath,
         long lmdbMaxSizeMb,
         int bufferCapacity) {
@@ -36,8 +37,9 @@ public record TradingCoreProperties(
         return provider != null && !provider.isBlank() ? provider : "sim";
     }
 
-    public long yahooPollSecondsOrDefault() {
-        return yahooPollSeconds != null && yahooPollSeconds > 0 ? yahooPollSeconds : 15;
+    public long yahooRequestSpacingMillisOrDefault() {
+        return yahooRequestSpacingMillis != null && yahooRequestSpacingMillis > 0
+                ? yahooRequestSpacingMillis : 700;
     }
 
     /** Start price for one instrument: its override if present, else the default. */
