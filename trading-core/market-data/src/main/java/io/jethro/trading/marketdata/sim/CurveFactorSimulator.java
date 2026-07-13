@@ -28,7 +28,20 @@ public final class CurveFactorSimulator {
     private static final double SLOPE_STEP = 0.55e-6;
     private static final double MIN_RATE = 0.0001; // 1bp floor — no negative demo rates
 
+    /** Curve-linked instruments: bond futures priced FROM the curve so rates signals on
+     *  them are economically meaningful (not an independent walk). CONVENTION: price ≈
+     *  base × (1 − modDuration × Δyield(tenor)); durations ~ CTD conventions. */
+    private record Linked(double tenorYears, double modDuration, double basePrice) {
+    }
+
+    private static final java.util.Map<String, Linked> LINKED = java.util.Map.of(
+            "ZT", new Linked(2, 1.9, 102.90),
+            "ZF", new Linked(5, 4.2, 107.30),
+            "ZN", new Linked(10, 6.3, 110.50),
+            "ZB", new Linked(30, 17.0, 118.20));
+
     private final SplittableRandom random;
+    private final java.util.Map<String, Double> initialZeros = new java.util.HashMap<>();
     private double level;
     private double slope;
 
@@ -37,6 +50,23 @@ public final class CurveFactorSimulator {
         this.random = new SplittableRandom(seed);
         this.level = startLevel;
         this.slope = startSlope;
+        LINKED.forEach((id, l) -> initialZeros.put(id, zeroRate(l.tenorYears())));
+    }
+
+    /** True if this instrument's price derives from the curve (Treasury futures). */
+    public boolean isLinked(String instrumentId) {
+        return LINKED.containsKey(instrumentId);
+    }
+
+    /**
+     * Curve-implied futures price, scaled 1e-6: base × (1 − D·Δz(tenor)). A 10bp yield
+     * rise moves ZN (D≈6.3) down ~0.63 points — bond futures now trade WITH the curve.
+     */
+    public long linkedPriceScaled(String instrumentId) {
+        Linked l = LINKED.get(instrumentId);
+        double deltaYield = zeroRate(l.tenorYears()) - initialZeros.get(instrumentId);
+        double price = l.basePrice() * (1.0 - l.modDuration() * deltaYield);
+        return Math.max(10_000L, Math.round(price * 1_000_000));
     }
 
     /** Advances both factors one tick. */

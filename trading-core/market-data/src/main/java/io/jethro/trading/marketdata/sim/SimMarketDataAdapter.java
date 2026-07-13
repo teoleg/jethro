@@ -93,7 +93,9 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
         while (running.get()) {
             long now = System.currentTimeMillis();
             for (int i = 0; i < instrumentIds.length; i++) {
-                long price = generator.nextPriceScaled(i);
+                long price = curveSim != null && curveSim.isLinked(instrumentIds[i])
+                        ? curveSim.linkedPriceScaled(instrumentIds[i]) // priced FROM the curve
+                        : generator.nextPriceScaled(i);
                 long qty = generator.nextQuantityScaled();
                 // Sim is its own provider: provider ts == ingest ts
                 listener.onTrade(instrumentIds[i], price, qty, now, now);

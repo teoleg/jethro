@@ -38,7 +38,10 @@ public record StrategyProperties(
         BigDecimal maxPositionNotional,
         /** Reference window vol (bps) for vol-scaled sizing: order notional = target ×
          *  clamp(ref/σ, 0.5, 2) — half size in wild markets, up to double in calm. Default 15. */
-        Double volReferenceBps) {
+        Double volReferenceBps,
+        /** Per-asset-class order-notional caps (e.g. BOND=150000 so one Treasury contract
+         *  is sizeable); classes not listed use maxOrderNotional. */
+        Map<String, BigDecimal> maxOrderNotionalByClass) {
 
     public double thresholdSigmasOrDefault() {
         return thresholdSigmas != null ? thresholdSigmas : 2.5;
@@ -62,6 +65,17 @@ public record StrategyProperties(
     public BigDecimal maxOrderNotionalOrDefault() {
         return maxOrderNotional != null ? maxOrderNotional
                 : targetNotional.multiply(new BigDecimal("2"));
+    }
+
+    /** Order-notional cap for an asset class: class override else the default. */
+    public BigDecimal maxOrderNotionalFor(String assetClass) {
+        if (assetClass != null && maxOrderNotionalByClass != null) {
+            BigDecimal override = maxOrderNotionalByClass.get(assetClass);
+            if (override != null) {
+                return override;
+            }
+        }
+        return maxOrderNotionalOrDefault();
     }
 
     /** Resolves the target book for an instrument's asset class, or the default. */

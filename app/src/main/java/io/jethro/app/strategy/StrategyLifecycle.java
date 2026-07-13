@@ -234,7 +234,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
         BigDecimal notionalTarget = props.targetNotional().multiply(BigDecimal.valueOf(scale));
         BigDecimal qty = notionalTarget.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
-            if (notionalPerUnit.compareTo(props.maxOrderNotionalOrDefault()) > 0) {
+            // Cap is per asset class: one Treasury contract (~$110k) is a legitimate order
+            // for a rates book even though it dwarfs the equity-sized default cap.
+            BigDecimal cap = props.maxOrderNotionalFor(ref.map(InstrumentRef::assetClass).orElse(null));
+            if (notionalPerUnit.compareTo(cap) > 0) {
                 return Optional.empty(); // one unit already blows the order cap — unsizeable
             }
             qty = BigDecimal.ONE;
