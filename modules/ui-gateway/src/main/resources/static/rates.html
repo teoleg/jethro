@@ -71,6 +71,10 @@
     <div class="section-h">Swap valuations <span class="muted">— reference $1M pay-fixed, Strata pricer</span></div>
     <div class="panel"><div id="swaps" class="muted">waiting for the curve…</div></div>
   </div>
+  <div style="grid-column:1 / -1">
+    <div class="section-h">Rates risk — DV01 by tenor <span class="muted">— signed P&amp;L per +1bp parallel move, by book</span></div>
+    <div class="panel"><div id="dv01" class="muted">no rates positions yet — trade a Treasury future or a swap to build rates risk.</div></div>
+  </div>
 </main>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
@@ -116,6 +120,23 @@
           'discounted and forecast on the live curve. PV ≈ (par − fixed) × DV01 × 10⁴. ' +
           'Live par-rate quotes tick under <a href="/markets.html" style="color:inherit">Markets → Swaps</a>; ' +
           'swaps are tradeable from the Orders ticket (1 lot = $1M notional, BUY = pay fixed).</div></div>';
+      }
+      const dv01 = await (await fetch("/api/dv01")).json();
+      if (dv01.length) {
+        const cols = ["2Y","5Y","10Y","30Y","other"];
+        const cell = m => c => { const v = m[c]; return `<td class="mono ${v!=null?cls(v):''}">${v!=null?money(v):'·'}</td>`; };
+        document.getElementById("dv01").outerHTML = '<div id="dv01"><table>' +
+          "<tr><th>book</th>" + cols.map(c=>`<th>${c}</th>`).join("") + "<th>total /bp</th></tr>" +
+          dv01.map(b => { const m={}; b.buckets.forEach(x=>m[x.tenor]=x.dv01); const firm=b.book==="FIRM";
+            return `<tr${firm?' style="border-top:2px solid var(--line-2);font-weight:600"':''}><td><b>${esc(b.book)}</b></td>` +
+              cols.map(cell(m)).join("") +
+              `<td class="mono ${cls(b.totalDv01)}"><b>${money(b.totalDv01)}</b></td></tr>`; }).join("") + "</table>" +
+          '<div class="muted" style="font-size:11px;margin-top:8px">DV01 = P&L for a +1bp parallel rise in yields. ' +
+          'Negative = the book loses as rates rise (long bond futures); positive = gains (pay-fixed swaps). ' +
+          'Bond DV01 = net exposure × (−mod duration) × 10⁻⁴; swap DV01 = lots × the Strata per-$1M number above.</div></div>';
+      } else {
+        document.getElementById("dv01").outerHTML = '<div id="dv01" class="muted">no rates positions yet — ' +
+          'trade a Treasury future or a swap to build rates risk.</div>';
       }
     } catch (e) {}
   }

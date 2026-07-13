@@ -64,11 +64,20 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing);
     }
 
+    /** Per-book bucketed DV01 (rates risk beyond notional, quant-engine step 5). Reuses the
+     *  Strata swap pricer for per-$1M swap DV01; bond DV01 from reference-data mod duration. */
+    @Bean
+    io.jethro.trading.riskpnl.RatesRiskService ratesRiskService(InstrumentRefSource refs,
+                                                               io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
+        return new io.jethro.trading.riskpnl.RatesRiskService(refs, swapPricing);
+    }
+
     @Bean
     RiskController riskController(RiskProjection projection, CurveService curveService,
                                   io.jethro.trading.riskpnl.SwapPricingService swapPricing,
-                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine) {
-        return new RiskController(projection, curveService, swapPricing, scenarioEngine);
+                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine,
+                                  io.jethro.trading.riskpnl.RatesRiskService ratesRiskService) {
+        return new RiskController(projection, curveService, swapPricing, scenarioEngine, ratesRiskService);
     }
 
     @Bean(destroyMethod = "close")
