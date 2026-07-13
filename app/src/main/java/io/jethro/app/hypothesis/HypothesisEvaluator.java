@@ -1,5 +1,6 @@
 package io.jethro.app.hypothesis;
 
+import io.jethro.app.backtest.BacktestResult;
 import io.jethro.app.strategy.StrategyProperties;
 import io.jethro.domain.Side;
 import io.jethro.trading.algo.hypothesis.Hypothesis;
@@ -30,9 +31,15 @@ public final class HypothesisEvaluator {
     /** Why a hypothesis did or didn't become an actionable candidate. */
     public enum Verdict { ADMISSIBLE, UNKNOWN_INSTRUMENT, NO_MARK, UNSIZEABLE, BLOCKED }
 
+    /** Backtest support for the thesis's instrument (the future bounded-autonomy gate,
+     *  ADR-0022): the strategy's measured PnL on this name over the sim tape. {@code supports}
+     *  = net-positive on some trades. Null when no backtest was supplied. */
+    public record Backtest(BigDecimal pnl, int trades, boolean supports) {
+    }
+
     /** A hypothesis after the quant layer: the deterministic sizing/verdict the model never saw. */
     public record Evaluated(Hypothesis hypothesis, Verdict verdict, String book,
-                            BigDecimal quantity, BigDecimal price, String note) {
+                            BigDecimal quantity, BigDecimal price, String note, Backtest backtest) {
     }
 
     private final InstrumentRefSource refs;
@@ -45,15 +52,26 @@ public final class HypothesisEvaluator {
         this.sizing = sizing;
     }
 
-    /** Evaluates a hypothesis against live marks. {@code marks}: instrumentId → current price. */
+    /** Evaluates a hypothesis against live marks, no backtest context. */
     public Evaluated evaluate(Hypothesis h, Map<String, BigDecimal> marks) {
+        return evaluate(h, marks, Map.of());
+    }
+
+    /**
+     * Evaluates a hypothesis against live marks, attaching the backtest support for its
+     * instrument. {@code marks}: instrumentId → current price; {@code backtest}: instrumentId
+     * → the strategy's measured result on that name (may be empty).
+     */
+    public Evaluated evaluate(Hypothesis h, Map<String, BigDecimal> marks,
+                              Map<String, BacktestResult.InstrumentResult> backtest) {
+        Backtest bt = backtestFor(h.instrumentId(), backtest);
         Optional<InstrumentRef> ref = refs.find(h.instrumentId());
         if (ref.isEmpty()) {
-            return verdict(h, Verdict.UNKNOWN_INSTRUMENT, null, null, null, "not in the instrument master");
+            return verdict(h, Verdict.UNKNOWN_INSTRUMENT, null, null, null, "not in the instrument master", bt);
         }
         BigDecimal price = marks.get(h.instrumentId());
         if (price == null || price.signum() <= 0) {
-            return verdict(h, Verdict.NO_MARK, null, null, null, "no live mark to value it");
+            return verdict(h, Verdict.NO_MARK, null, null, null, "no live mark to value it", bt);
         }
         String assetClass = ref.get().assetClass();
         String book = sizing.bookFor(assetClass);
@@ -64,21 +82,30 @@ public final class HypothesisEvaluator {
             // One unit already exceeds the per-class order cap → unsizeable, never round up.
             if (notionalPerUnit.compareTo(sizing.maxOrderNotionalFor(assetClass)) > 0) {
                 return verdict(h, Verdict.UNSIZEABLE, book, null, price,
-                        "one unit (" + plain(notionalPerUnit) + ") exceeds the " + assetClass + " order cap");
+                        "one unit (" + plain(notionalPerUnit) + ") exceeds the " + assetClass + " order cap", bt);
             }
             qty = BigDecimal.ONE;
         }
         BigDecimal signed = h.direction().signed(qty);
         Optional<String> rejection = guardrail.rejectionReason(book, h.instrumentId(), signed);
         if (rejection.isPresent()) {
-            return verdict(h, Verdict.BLOCKED, book, qty, price, rejection.get());
+            return verdict(h, Verdict.BLOCKED, book, qty, price, rejection.get(), bt);
         }
-        return verdict(h, Verdict.ADMISSIBLE, book, qty, price, "pre-trade check passed");
+        return verdict(h, Verdict.ADMISSIBLE, book, qty, price, "pre-trade check passed", bt);
+    }
+
+    private static Backtest backtestFor(String instrumentId, Map<String, BacktestResult.InstrumentResult> backtest) {
+        BacktestResult.InstrumentResult ir = backtest.get(instrumentId);
+        if (ir == null) {
+            return null;
+        }
+        BigDecimal pnl = ir.realizedPnl().add(ir.unrealizedPnl());
+        return new Backtest(pnl, ir.trades(), pnl.signum() > 0 && ir.trades() > 0);
     }
 
     private static Evaluated verdict(Hypothesis h, Verdict v, String book,
-                                     BigDecimal qty, BigDecimal price, String note) {
-        return new Evaluated(h, v, book, qty, price, note);
+                                     BigDecimal qty, BigDecimal price, String note, Backtest bt) {
+        return new Evaluated(h, v, book, qty, price, note, bt);
     }
 
     private static String plain(BigDecimal v) {

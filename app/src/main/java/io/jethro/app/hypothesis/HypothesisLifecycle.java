@@ -1,5 +1,7 @@
 package io.jethro.app.hypothesis;
 
+import io.jethro.app.backtest.BacktestResult;
+import io.jethro.app.backtest.BacktestService;
 import io.jethro.app.trading.TradingCoreLifecycle;
 import io.jethro.domain.Side;
 import io.jethro.trading.algo.hypothesis.Hypothesis;
@@ -42,6 +44,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private final io.jethro.trading.algo.hypothesis.HypothesisGenerator generator;
     private final HypothesisEvaluator evaluator;
     private final SimNarrativeFeed narrativeFeed;
+    private final BacktestService backtest;
     private final TradingCoreLifecycle tradingCore;
     private final RiskProjection risk;
     private final InstrumentRefSource refs;
@@ -56,11 +59,13 @@ public final class HypothesisLifecycle implements SmartLifecycle {
 
     public HypothesisLifecycle(io.jethro.trading.algo.hypothesis.HypothesisGenerator generator,
                                HypothesisEvaluator evaluator, SimNarrativeFeed narrativeFeed,
-                               TradingCoreLifecycle tradingCore, RiskProjection risk, InstrumentRefSource refs,
-                               AttentionFeed feed, SseBroadcaster sse, HypothesisProperties props) {
+                               BacktestService backtest, TradingCoreLifecycle tradingCore, RiskProjection risk,
+                               InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
+                               HypothesisProperties props) {
         this.generator = generator;
         this.evaluator = evaluator;
         this.narrativeFeed = narrativeFeed;
+        this.backtest = backtest;
         this.tradingCore = tradingCore;
         this.risk = risk;
         this.refs = refs;
@@ -140,9 +145,23 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 return;
             }
 
+            // Backtest the strategy on the current universe once per cycle, so each thesis
+            // carries the measured edge on its instrument (the bounded-autonomy gate, ADR-0022).
+            // Cheap and only when there's something to evaluate; a failure just omits the annotation.
+            Map<String, BacktestResult.InstrumentResult> backtestByInstrument = new HashMap<>();
+            if (!hypotheses.isEmpty()) {
+                try {
+                    for (var ir : backtest.run(null, props.backtestTicksOrDefault(), null, null).byInstrument()) {
+                        backtestByInstrument.put(ir.instrumentId(), ir);
+                    }
+                } catch (Exception e) {
+                    log.debug("hypothesis backtest annotation skipped: {}", e.toString());
+                }
+            }
+
             List<HypothesisEvaluator.Evaluated> evaluated = new ArrayList<>(hypotheses.size());
             for (Hypothesis h : hypotheses) {
-                evaluated.add(evaluator.evaluate(h, priceMap));
+                evaluated.add(evaluator.evaluate(h, priceMap, backtestByInstrument));
             }
             latest = List.copyOf(evaluated);
             surface(evaluated, now);
@@ -191,9 +210,16 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         Hypothesis h = e.hypothesis();
         String dir = h.direction() == Side.BUY ? "LONG" : "SHORT";
         String title = "Hypothesis: " + dir + " " + h.instrumentId() + " (" + h.conviction() + ")";
+        String backtestNote = "";
+        if (e.backtest() != null) {
+            backtestNote = e.backtest().supports()
+                    ? " Backtest supports it (+" + e.backtest().pnl().toPlainString()
+                        + " on " + e.backtest().trades() + " trades)."
+                    : " Backtest does NOT support it (strategy not profitable on this name).";
+        }
         String body = h.thesis() + " — Quant sized " + e.quantity().toPlainString() + " " + h.instrumentId()
-                + " on " + e.book() + " (" + h.horizon() + " horizon); pre-trade check passed. "
-                + "Review and execute on the Orders ticket.";
+                + " on " + e.book() + " (" + h.horizon() + " horizon); pre-trade check passed." + backtestNote
+                + " Review and execute on the Orders ticket.";
         return new AttentionFeed.AttentionItem(id, now, AttentionFeed.Severity.INFO,
                 "hypothesis", title, body, "/orders.html");
     }

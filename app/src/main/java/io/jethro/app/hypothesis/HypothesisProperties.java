@@ -13,7 +13,12 @@ public record HypothesisProperties(
         long intervalSeconds,
         Integer maxPerCycle,
         Integer maxOutputTokens,
-        Long narrativeSeed) {
+        Long narrativeSeed,
+        Integer backtestTicks) {
+
+    public int backtestTicksOrDefault() {
+        return backtestTicks != null && backtestTicks > 0 ? backtestTicks : 15_000;
+    }
 
     public int maxPerCycleOrDefault() {
         return maxPerCycle != null && maxPerCycle > 0 ? maxPerCycle : 3;

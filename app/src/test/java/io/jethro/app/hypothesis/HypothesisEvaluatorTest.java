@@ -1,5 +1,6 @@
 package io.jethro.app.hypothesis;
 
+import io.jethro.app.backtest.BacktestResult;
 import io.jethro.app.strategy.StrategyProperties;
 import io.jethro.domain.Side;
 import io.jethro.trading.algo.hypothesis.Hypothesis;
@@ -18,6 +19,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Exact-value tests for the deterministic quant layer: the model gives a direction, this
@@ -77,6 +79,24 @@ class HypothesisEvaluatorTest {
         var eval = evaluator(book -> RiskLimits.none(), new RiskProjection(refs));
         var e = eval.evaluate(h("AAPL", Side.BUY), Map.of()); // no price for AAPL
         assertEquals(HypothesisEvaluator.Verdict.NO_MARK, e.verdict());
+    }
+
+    @Test
+    void backtestAnnotationReflectsInstrumentEdge() {
+        var eval = evaluator(book -> RiskLimits.none(), new RiskProjection(refs));
+        var marks = Map.of("AAPL", new BigDecimal("190"));
+        // Net-positive on trades → supported.
+        var supported = eval.evaluate(h("AAPL", Side.BUY), marks, Map.of("AAPL",
+                new BacktestResult.InstrumentResult("AAPL", 8, new BigDecimal("1200"), new BigDecimal("50"), BigDecimal.ZERO)));
+        assertEquals(HypothesisEvaluator.Verdict.ADMISSIBLE, supported.verdict());
+        assertTrue(supported.backtest().supports());
+        // Losing on this name → not supported.
+        var unsupported = eval.evaluate(h("AAPL", Side.BUY), marks, Map.of("AAPL",
+                new BacktestResult.InstrumentResult("AAPL", 8, new BigDecimal("-1200"), BigDecimal.ZERO, BigDecimal.ZERO)));
+        assertTrue(!unsupported.backtest().supports());
+        // No backtest for the instrument → null annotation, still evaluated.
+        var none = eval.evaluate(h("AAPL", Side.BUY), marks, Map.of());
+        assertNull(none.backtest());
     }
 
     @Test

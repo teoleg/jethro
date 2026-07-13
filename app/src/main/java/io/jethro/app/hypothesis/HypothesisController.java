@@ -17,7 +17,8 @@ public final class HypothesisController {
 
     public record HypothesisDto(String instrumentId, String direction, String horizon, String conviction,
                                 String thesis, List<String> sources, String verdict, String book,
-                                String quantity, String price, String note) {
+                                String quantity, String price, String note,
+                                String backtestPnl, Integer backtestTrades, Boolean backtestSupports) {
     }
 
     private final ObjectProvider<HypothesisLifecycle> lifecycle;
@@ -43,6 +44,9 @@ public final class HypothesisController {
                 e.book(),
                 e.quantity() != null ? e.quantity().toPlainString() : null,
                 e.price() != null ? e.price().toPlainString() : null,
-                e.note())).toList();
+                e.note(),
+                e.backtest() != null ? e.backtest().pnl().toPlainString() : null,
+                e.backtest() != null ? e.backtest().trades() : null,
+                e.backtest() != null ? e.backtest().supports() : null)).toList();
     }
 }

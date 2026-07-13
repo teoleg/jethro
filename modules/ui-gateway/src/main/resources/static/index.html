@@ -218,14 +218,17 @@
   const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
   function renderHypotheses(rows) {
     document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
-      "<table><tr><th>thesis</th><th>view</th><th>conv</th><th>quant verdict</th><th>size</th></tr>" +
+      "<table><tr><th>thesis</th><th>view</th><th>conv</th><th>quant verdict</th><th>size</th><th>backtest</th></tr>" +
       rows.map(r => {
         const dir = r.direction === "BUY" ? "LONG" : "SHORT";
         const sz = r.quantity ? `${esc(r.quantity)} → ${esc(r.book||'')}` : "—";
+        const bt = r.backtestSupports == null ? '<span class="muted">—</span>'
+          : (r.backtestSupports ? `<span class="up" title="strategy net-positive on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">supported</span>`
+                                : `<span class="down" title="strategy not profitable on this name">unsupported</span>`);
         return `<tr><td title="${esc(r.note||'')}">${esc(r.instrumentId)} — ${esc(r.thesis)}</td>
           <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conviction)}</td>
           <td class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</td>
-          <td class="mono">${sz}</td></tr>`;
+          <td class="mono">${sz}</td><td>${bt}</td></tr>`;
       }).join("") + "</table>" +
       '<div class="muted" style="font-size:11px;padding:6px 12px">Model proposes direction only; every number is the quant layer\'s. Admissible ones also appear on the attention feed for one-click execution.</div>'
       : '<div class="muted" style="padding:14px">no hypotheses yet — the model runs on a cadence (needs Ollama up)</div>') + '</div>';

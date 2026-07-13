@@ -46,6 +46,7 @@ public class HypothesisConfig {
     HypothesisLifecycle hypothesisLifecycle(ModelInferenceClient client, BufferingDecisionSink buffer,
                                             ObjectProvider<KafkaEventPublisher> kafka, HypothesisProperties props,
                                             HypothesisEvaluator evaluator, SimNarrativeFeed narrativeFeed,
+                                            io.jethro.app.backtest.BacktestService backtest,
                                             TradingCoreLifecycle tradingCore, RiskProjection risk,
                                             InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
@@ -59,7 +60,8 @@ public class HypothesisConfig {
         };
         var generator = new HypothesisGenerator(client, sink,
                 props.maxPerCycleOrDefault(), props.maxOutputTokensOrDefault());
-        return new HypothesisLifecycle(generator, evaluator, narrativeFeed, tradingCore, risk, refs, feed, sse, props);
+        return new HypothesisLifecycle(generator, evaluator, narrativeFeed, backtest,
+                tradingCore, risk, refs, feed, sse, props);
     }
 
     @Bean
