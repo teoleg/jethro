@@ -107,6 +107,12 @@ public final class RiskProjection {
                 rollup(rows, PositionRisk::assetClass, fx), rollup(rows, PositionRisk::bookId, fx), rows);
     }
 
+    /** The FX converter over the current *USD pair marks — for consumers (scenario
+     *  engine) that convert alongside a snapshot with the SAME marks it was built from. */
+    public synchronized FxConversion fx() {
+        return fxFromMarks();
+    }
+
     /** FX converter from the current *USD pair marks (EURUSD, GBPUSD, ...). */
     private FxConversion fxFromMarks() {
         Map<String, BigDecimal> pairs = new LinkedHashMap<>();

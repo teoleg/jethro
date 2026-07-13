@@ -93,17 +93,38 @@ FX is the pivotal one: it unlocks **cross-currency** so the risk rollups stop re
 Built (overview steps 1–8 partial):
 - exact positions + average-cost realized PnL (`Positions`), mark-to-market unrealized,
   **notional** gross/net exposure, per-book/asset-class/firm rollups (`RiskProjection`);
-- deterministic **limits + pre-trade guardrail** (`RiskLimitEvaluator`, `PreTradeGuardrail`);
-- a deterministic momentum **strategy** → guardrailed suggestions/auto-exec (ADR-0018/0019);
-- an interim parametric **VaR/vol/concentration** stat helper (`RiskStats`) — a stopgap that
-  Strata's measures framework subsumes once the substrate lands.
+- deterministic **limits + pre-trade guardrail** (`RiskLimitEvaluator`, `PreTradeGuardrail`),
+  including loss gates, instrument concentration, firm caps and in-flight reservations;
+- the Strata substrate (sequencing steps 1/3/4): **FX cross-currency** rollups via
+  `FxMatrix` (`FxConversion`), a calibrated **USD SOFR zero curve** from live sim quotes
+  (`CurveService`), and **swap PV / par / DV01** via the discounting pricers
+  (`SwapPricingService`) — analytics in `double`, money at the boundary (invariant 1);
+- **rates & swaps as market participants** (layer: market data + strategy; asset class:
+  rates): Treasury futures priced *from* the factor curve (duration link + small basis),
+  the curve coupled to the sim's market regimes (trends/vol/shocks), and swap par rates
+  quoted live (`USD_IRS_*`) and tradeable under the V9 quoting convention — price = par
+  rate %, 1 lot = $1M, multiplier = inception DV01×100. Named limitation: constant-DV01
+  first-order PnL; exact revaluation stays with the Strata pricer;
+- a deterministic momentum **strategy** — z-score (vol-adaptive) signals, vol-scaled
+  sizing, position-aware participation, per-class routing/caps → guardrailed
+  suggestions/auto-exec (ADR-0018/0019);
+- an interim parametric **VaR/vol/concentration** stat helper (`RiskStats`) — a stopgap
+  Strata's measures framework subsumes;
+- **scenario/stress, first slice** (layer: risk measures; asset classes: all current):
+  `ScenarioEngine` revalues live positions under the standard shocks (rates ±100bp,
+  equities −5%, USD +2%, combined risk-off) — first-order, exact-decimal, per book and
+  firm; surfaced on the Overview stress panel (`/api/scenarios`) and as a deterministic
+  attention trigger when the worst stress exceeds the firm loss cap (`ScenarioMonitor`).
+  Named limitation: linear/duration/DV01 sensitivities and no cross-terms — full
+  revaluation via Strata `ScenarioMarketData` is the deferred second slice.
 
 Not built (the gap this doc frames):
-- the Strata substrate itself (curves, pricers, measures) and instrument→product mapping;
-- Greeks and curve-based pricing; real (measure-based) VaR + **scenario/stress**;
-- cross-currency conversion; portfolio (correlation-aware) VaR;
-- feeding the *risk-aware* snapshot back into the strategy (vol-scaled sizing, concentration
-  damping) so signals stop being portfolio-blind.
+- Strata measures: real (measure-based) VaR and **full-revaluation scenarios** through
+  `ScenarioMarketData` (subsumes the first-order engine above) — sequencing step 2's
+  remainder;
+- curve *sensitivities as risk state* (bucketed DV01 per book), Greeks/options, credit;
+- portfolio (correlation-aware) VaR; regime-aware strategy behaviour (step 5 remainder);
+- swap lifecycle beyond first-order: accrual/roll-down, DV01 refresh, per-trade economics.
 
 ## Sequencing (every future task has a home here)
 

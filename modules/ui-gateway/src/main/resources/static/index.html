@@ -107,6 +107,8 @@
     <div class="stats" id="stats"></div>
     <div class="section-h">By market</div>
     <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
+    <div class="section-h">Stress <span class="muted" style="text-transform:none;letter-spacing:0">— what the standard shocks would do to today's book (first-order)</span></div>
+    <div class="panel pad"><div id="stress" class="muted" style="padding:14px">loading…</div></div>
     <div class="section-h">Today's orders <span class="muted" id="obcount"></span></div>
     <div class="panel pad">
       <div id="oblotter" class="muted" style="padding:12px">loading…</div>
@@ -193,6 +195,22 @@
 
   async function loadRisk() { try { renderRisk(await (await fetch("/api/risk")).json()); } catch (e) {} }
 
+  // ---- scenario / stress panel ----
+  function renderStress(rows) {
+    const covered = rows.some(s => s.positionsCovered > 0);
+    document.getElementById("stress").outerHTML = '<div id="stress">' + (covered ?
+      "<table><tr><th>scenario</th><th>firm P&L</th><th>worst book</th><th>coverage</th></tr>" +
+      rows.map(s => {
+        const worst = s.byBook.length ? s.byBook[0] : null;
+        return `<tr><td class="cls">${esc(s.name)}</td>
+          <td class="mono ${cls(s.firmPnlUsd)}">${money(s.firmPnlUsd)}</td>
+          <td>${worst ? `<span class="muted">${esc(worst.bookId)}</span> <span class="mono ${cls(worst.pnlUsd)}">${money(worst.pnlUsd)}</span>` : '—'}</td>
+          <td class="muted mono">${s.positionsCovered}${s.positionsSkipped ? ` <span title="positions skipped (no mark, duration or FX)">+${s.positionsSkipped} skipped</span>` : ''}</td></tr>`;
+      }).join("") + "</table>"
+      : '<div class="muted" style="padding:14px">no positions to stress yet</div>') + '</div>';
+  }
+  async function loadStress() { try { renderStress(await (await fetch("/api/scenarios")).json()); } catch (e) {} }
+
   // ---- today's orders (paginated 100/page) ----
   let obPage = 0, obTotalPages = 1;
   async function loadOrders() {
@@ -223,7 +241,9 @@
   es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
   bootstrap();
   loadOrders();
+  loadStress();
   setInterval(loadRisk, 2000);
+  setInterval(loadStress, 10000);
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
 </script>
 </body>

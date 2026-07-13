@@ -92,21 +92,40 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
     private void run(MarketDataListener listener) {
         while (running.get()) {
             long now = System.currentTimeMillis();
+            int shockSign = 0;
+            boolean shockCaptured = false;
             for (int i = 0; i < instrumentIds.length; i++) {
-                long price = curveSim != null && curveSim.isLinked(instrumentIds[i])
-                        ? curveSim.linkedPriceScaled(instrumentIds[i]) // priced FROM the curve
-                        : generator.nextPriceScaled(i);
+                long price;
+                if (curveSim != null && curveSim.isLinked(instrumentIds[i])) {
+                    price = curveSim.linkedPriceScaled(instrumentIds[i]); // priced FROM the curve
+                } else {
+                    price = generator.nextPriceScaled(i);
+                    if (!shockCaptured) {
+                        // A shock lasts one correlated round and is cleared as the round
+                        // wraps — read its sign while it is definitely still in flight.
+                        shockSign = generator.shockSign();
+                        shockCaptured = true;
+                    }
+                }
                 long qty = generator.nextQuantityScaled();
                 // Sim is its own provider: provider ts == ingest ts
                 listener.onTrade(instrumentIds[i], price, qty, now, now);
             }
             if (curveSim != null) {
+                // The curve shares the regime (trends drift the level, VOLATILE scales
+                // factor vol, shocks jump it) so rates have episodes like equities do.
+                curveSim.step(generator.regime(), shockSign);
                 // Curve tenor rates ride the same mark pipeline as pseudo-instruments;
                 // risk-pnl routes USD.SOFR.* to curve calibration, not to positions.
-                curveSim.step();
                 for (int t = 0; t < CurveFactorSimulator.TENOR_IDS.length; t++) {
                     listener.onTrade(CurveFactorSimulator.TENOR_IDS[t],
                             curveSim.rateScaledPercent(t), 1_000_000L, now, now);
+                }
+                // Swap par rates are REAL instrument marks (USD_IRS_*): they land in the
+                // mark cache, tick on the Markets → Swaps tab, and are tradeable (V9).
+                for (int s = 0; s < CurveFactorSimulator.SWAP_IDS.length; s++) {
+                    listener.onTrade(CurveFactorSimulator.SWAP_IDS[s],
+                            curveSim.swapParScaledPercent(s), 1_000_000L, now, now);
                 }
             }
             java.util.concurrent.locks.LockSupport.parkNanos(tickIntervalNanos);

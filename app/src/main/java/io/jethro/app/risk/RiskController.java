@@ -40,12 +40,36 @@ public final class RiskController {
     private final RiskProjection projection;
     private final CurveService curveService;
     private final SwapPricingService swapPricing;
+    private final io.jethro.trading.riskpnl.ScenarioEngine scenarios;
 
     public RiskController(RiskProjection projection, CurveService curveService,
-                          SwapPricingService swapPricing) {
+                          SwapPricingService swapPricing,
+                          io.jethro.trading.riskpnl.ScenarioEngine scenarios) {
         this.projection = projection;
         this.curveService = curveService;
         this.swapPricing = swapPricing;
+        this.scenarios = scenarios;
+    }
+
+    public record BookImpactDto(String bookId, String pnlUsd) {
+    }
+
+    public record ScenarioDto(String id, String name, String firmPnlUsd,
+                              List<BookImpactDto> byBook, int positionsCovered, int positionsSkipped) {
+    }
+
+    /** Scenario/stress P&L: current positions revalued under the standard shocks
+     *  (first-order, deterministic — quant-engine step 2). Decimals as strings. */
+    @GetMapping("/api/scenarios")
+    public List<ScenarioDto> scenarios() {
+        ConsolidatedRisk r = projection.snapshot(System.currentTimeMillis());
+        return scenarios.run(r.positions(), projection.fx()).stream()
+                .map(s -> new ScenarioDto(s.id(), s.name(), s.firmPnlUsd().toPlainString(),
+                        s.byBook().stream()
+                                .map(b -> new BookImpactDto(b.bookId(), b.pnlUsd().toPlainString()))
+                                .toList(),
+                        s.positionsCovered(), s.positionsSkipped()))
+                .toList();
     }
 
     /** PV/DV01 as strings (money boundary, invariant 1); rates are analytics doubles. */

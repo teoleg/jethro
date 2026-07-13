@@ -112,7 +112,9 @@
             <td class="mono ${cls(s.presentValue)}">${money(s.presentValue)}</td>
             <td class="mono">${money(s.dv01)}</td></tr>`).join("") + "</table>" +
           '<div class="muted" style="font-size:11px;margin-top:8px">Pay-fixed reference swaps on USD_FIXED_1Y_SOFR_OIS conventions, ' +
-          'discounted and forecast on the live curve. PV ≈ (par − fixed) × DV01 × 10⁴.</div></div>';
+          'discounted and forecast on the live curve. PV ≈ (par − fixed) × DV01 × 10⁴. ' +
+          'Live par-rate quotes tick under <a href="/markets.html" style="color:inherit">Markets → Swaps</a>; ' +
+          'swaps are tradeable from the Orders ticket (1 lot = $1M notional, BUY = pay fixed).</div></div>';
       }
     } catch (e) {}
   }

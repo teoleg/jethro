@@ -143,6 +143,11 @@ public final class SimTickGenerator {
         return regime;
     }
 
+    /** Sign of the current round's correlated shock jump; 0 when no shock is in flight. */
+    public int shockSign() {
+        return Long.signum(shockSteps);
+    }
+
     /** Deterministic pseudo-random trade quantity: 1..1000 whole units, scaled. */
     public long nextQuantityScaled() {
         return (random.nextInt(1000) + 1) * 1_000_000L;
