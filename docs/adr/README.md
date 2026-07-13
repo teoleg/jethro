@@ -25,7 +25,8 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0019](0019-simulated-auto-execution.md) | Simulated auto-execution — deterministic strategy may auto-trade in sim, hard-gated off real brokers | Proposed |
 | [0020](0020-enriched-risk-model.md) | Multi-asset quant foundation — OpenGamma Strata as the analytics substrate, exact money ledger on top | Proposed |
 | [0021](0021-operational-chat.md) | Operational chat — SLM parses the question, deterministic code answers, every turn audited to Postgres | Proposed |
-| [0022](0022-llm-hypothesis-layer-bounded-autonomy.md) | LLM hypothesis layer — model synthesises structured theses, quant layer computes, a deterministic risk envelope decides auto-execute vs human approval | Proposed |
+| [0022](0022-llm-hypothesis-layer-bounded-autonomy.md) | LLM hypothesis layer — model synthesises structured theses, quant layer computes, a deterministic risk envelope decides auto-execute vs human approval | Accepted |
+| [0023](0023-yahoo-market-data-adapter.md) | Yahoo Finance market-data adapter — a free, delayed, dev/demo-only provider behind the ADR-0009 port | Proposed |
 
 ## Lifecycle
 
