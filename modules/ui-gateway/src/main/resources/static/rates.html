@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — rates</title>
+<style>
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; } .hint { color:var(--dim); font-size:12px; }
+
+  main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; display:grid; gap:18px; grid-template-columns:1.1fr .9fr; align-items:start; }
+  @media (max-width:920px) { main { grid-template-columns:1fr; } }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  #curveChart svg { width:100%; height:auto; display:block; }
+  #curveChart svg text { fill:var(--dim); font-size:11px; font-variant-numeric:tabular-nums; }
+  #curveChart svg .grid { stroke:var(--line); stroke-width:1; }
+  #curveChart svg .line { fill:none; stroke:var(--brand); stroke-width:2; }
+  #curveChart svg .node { fill:var(--brand); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:3px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
+  th:first-child, td:first-child { text-align:left; }
+  tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .up { color:var(--up); } .down { color:var(--down); } .muted { color:var(--dim); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab active" href="/rates.html">Rates</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="hint">USD SOFR curve · Strata pricing (quant-engine phase 4)</span>
+  </div>
+</div>
+<main>
+  <div>
+    <div class="section-h">USD SOFR zero curve <span class="muted" id="asof"></span></div>
+    <div class="panel">
+      <div id="curveChart"><span class="muted">waiting for curve quotes…</span></div>
+      <div style="margin-top:10px"><div id="curveTable" class="muted">loading…</div></div>
+    </div>
+  </div>
+  <div>
+    <div class="section-h">Swap valuations <span class="muted">— reference $1M pay-fixed, Strata pricer</span></div>
+    <div class="panel"><div id="swaps" class="muted">waiting for the curve…</div></div>
+  </div>
+</main>
+<script>
+  const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
+  const pct = v => (v*100).toFixed(4) + "%";
+  const money = s => { const n=Number(s); return (n<0?"−$":"$") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  const cls = s => Number(s) > 0 ? "up" : (Number(s) < 0 ? "down" : "");
+
+  function curveSvg(points) {
+    const W=760, H=280, pl=64, pr=16, pt=16, pb=30;
+    const xs = points.map(p=>p.tenorYears), ys = points.map(p=>p.zeroRate);
+    const mn = Math.min(...ys), mx = Math.max(...ys), span = (mx-mn) || 0.0001;
+    const X = t => pl + (Math.log(t)-Math.log(xs[0]))/(Math.log(xs[xs.length-1])-Math.log(xs[0]))*(W-pl-pr);
+    const Y = v => H-pb - ((v-mn)/span)*(H-pt-pb);
+    const line = points.map((p,i)=>`${i?'L':'M'}${X(p.tenorYears).toFixed(1)},${Y(p.zeroRate).toFixed(1)}`).join(" ");
+    const grid = [mx,(mx+mn)/2,mn].map(v=>`<line class="grid" x1="${pl}" y1="${Y(v).toFixed(1)}" x2="${W-pr}" y2="${Y(v).toFixed(1)}"/>
+      <text x="${pl-8}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end">${pct(v)}</text>`).join("");
+    const nodes = points.map(p=>`<circle class="node" cx="${X(p.tenorYears).toFixed(1)}" cy="${Y(p.zeroRate).toFixed(1)}" r="3.5"/>
+      <text x="${X(p.tenorYears).toFixed(1)}" y="${H-8}" text-anchor="middle">${p.tenorYears}Y</text>`).join("");
+    return `<svg viewBox="0 0 ${W} ${H}">${grid}<path class="line" d="${line}"/>${nodes}</svg>`;
+  }
+
+  async function refresh() {
+    try {
+      const curve = await (await fetch("/api/curve")).json();
+      if (curve.length) {
+        document.getElementById("asof").textContent = "· " + new Date().toLocaleTimeString();
+        document.getElementById("curveChart").innerHTML = curveSvg(curve);
+        document.getElementById("curveTable").outerHTML = '<div id="curveTable"><table>' +
+          "<tr><th>tenor</th><th>zero rate</th><th>discount factor</th></tr>" +
+          curve.map(p=>`<tr><td>${p.tenorYears}Y</td><td class="mono">${pct(p.zeroRate)}</td>
+            <td class="mono">${p.discountFactor.toFixed(6)}</td></tr>`).join("") + "</table></div>";
+      }
+      const swaps = await (await fetch("/api/swaps")).json();
+      if (swaps.length) {
+        document.getElementById("swaps").outerHTML = '<div id="swaps"><table>' +
+          "<tr><th>swap</th><th>tenor</th><th>notional</th><th>fixed</th><th>par (live)</th><th>PV</th><th>DV01/bp</th></tr>" +
+          swaps.map(s=>`<tr><td><b>${esc(s.instrumentId)}</b></td><td>${esc(s.tenor)}</td>
+            <td class="mono">$${Number(s.notional).toLocaleString()}</td>
+            <td class="mono">${pct(s.fixedRate)}</td><td class="mono">${pct(s.parRate)}</td>
+            <td class="mono ${cls(s.presentValue)}">${money(s.presentValue)}</td>
+            <td class="mono">${money(s.dv01)}</td></tr>`).join("") + "</table>" +
+          '<div class="muted" style="font-size:11px;margin-top:8px">Pay-fixed reference swaps on USD_FIXED_1Y_SOFR_OIS conventions, ' +
+          'discounted and forecast on the live curve. PV ≈ (par − fixed) × DV01 × 10⁴.</div></div>';
+      }
+    } catch (e) {}
+  }
+  refresh();
+  setInterval(refresh, 2000);
+</script>
+</body>
+</html>

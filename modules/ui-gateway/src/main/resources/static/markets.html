@@ -61,6 +61,7 @@
     <nav class="tabs">
       <a class="tab" href="/">Overview</a>
       <a class="tab active" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
       <a class="tab" href="/books.html">Books</a>
       <a class="tab" href="/orders.html">Orders</a>
     </nav>
@@ -106,7 +107,7 @@
 
   function render() {
     renderSubtabs();
-    const ms = marks.filter(m => match(m.instrumentId));
+    const ms = marks.filter(m => !m.instrumentId.startsWith("USD.SOFR.")).filter(m => match(m.instrumentId));
     document.getElementById("marks").innerHTML = ms.length ? ms.map(m =>
       `<div class="m ${m.ageMillis>10000?'stale':''}" data-i="${esc(m.instrumentId)}" title="click for price history"><span class="sym">${esc(m.instrumentId)}</span>
         <span class="px mono">${esc(m.price)}</span><span class="age">${fmtAge(m.ageMillis)}</span>
