@@ -81,6 +81,7 @@
   /* FIXED heights (not max-) so the right column's three panels never jump as content changes */
   .feed { display:flex; flex-direction:column; gap:8px; height:clamp(180px, 24vh, 320px); overflow-y:auto; padding-right:2px; }
   .hypo-panel { height:clamp(200px, 28vh, 360px); overflow-y:auto; }
+  tr.hypo-exec td:first-child { border-left:2px solid var(--up); }
   .empty { color:var(--dim); text-align:center; padding:24px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
   .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:12px; padding:11px 14px; }
   .card.WARN { border-left-color:var(--warn); } .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
@@ -302,32 +303,50 @@
     } catch (e) {}
   }
 
-  // ---- AI hypotheses (LLM thesis + deterministic quant verdict) — one table; the order
-  //      itself lands on the blotter (left), so we don't repeat order rows here. Auto-executed
-  //      theses are marked "AUTO ✓" in the verdict column. ----
+  // ---- AI hypotheses: PERSISTED executed decisions (don't vanish) + current live proposals,
+  //      merged into one time-ordered table. Executed rows are pinned (green edge, AUTO ✓). ----
   const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
+  function btCell(s, pnl, trades) {
+    if (s == null) return '<span class="muted">—</span>';
+    if (s) return `<span class="up" title="strategy net-positive on this name${pnl?` (${esc(pnl)}, ${trades} trades)`:''}">supported</span>`;
+    if (trades === 0) return '<span class="muted" title="strategy fired no signals in the backtest window — not tested, not a loss">no trades</span>';
+    return `<span class="down" title="strategy traded but was net-negative on this name">unsupported</span>`;
+  }
   function renderHypotheses(rows) {
     document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
-      "<table><tr><th>thesis</th><th>view</th><th>conv</th><th>quant verdict</th><th>size</th><th>backtest</th></tr>" +
+      "<table><tr><th>time</th><th>thesis</th><th>view</th><th>conv</th><th>verdict</th><th>backtest</th></tr>" +
       rows.map(r => {
-        const dir = r.direction === "BUY" ? "LONG" : "SHORT";
-        const sz = r.quantity ? `${esc(r.quantity)} → ${esc(r.book||'')}` : "—";
-        const bt = r.backtestSupports == null ? '<span class="muted">—</span>'
-          : (r.backtestSupports ? `<span class="up" title="strategy net-positive on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">supported</span>`
-          : (!r.backtestTrades ? `<span class="muted" title="the strategy fired no signals on this name in the backtest window (sim tape) — not tested, not a loss">no trades</span>`
-                               : `<span class="down" title="strategy traded but was net-negative on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">unsupported</span>`));
-        const verdictCell = r.autonomous
-          ? '<span class="up" title="auto-executed within the risk envelope (simulated) — see the blotter for the order">AUTO ✓</span>'
+        const dir = r.dir === "BUY" ? "LONG" : "SHORT";
+        const v = r.auto
+          ? '<span class="up" title="auto-executed on the AI sleeve — the order is on the blotter">AUTO ✓</span>'
           : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</span>`;
-        return `<tr><td title="${esc(r.note||'')}">${esc(r.instrumentId)} — ${esc(r.thesis)}</td>
-          <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conviction)}</td>
-          <td>${verdictCell}</td>
-          <td class="mono">${sz}</td><td>${bt}</td></tr>`;
+        return `<tr class="${r.executed?'hypo-exec':''}"><td class="muted mono">${new Date(r.ts).toLocaleTimeString()}</td>
+          <td title="${esc(r.note||'')}">${esc(r.instr)} — ${esc(r.thesis)}</td>
+          <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conv||'')}</td>
+          <td>${v}</td><td>${btCell(r.btSupports, r.btPnl, r.btTrades)}</td></tr>`;
       }).join("") + "</table>" +
-      '<div class="muted" style="font-size:11px;padding:6px 12px">Model proposes direction only; every number is the quant layer\'s. AUTO ✓ = auto-executed within the risk envelope (the order is on the blotter).</div>'
-      : '<div class="muted" style="padding:14px">no hypotheses right now — the model runs on a cadence; a small model often returns none until a directional headline appears (see the app log line "hypotheses: model proposed N")</div>') + '</div>';
+      '<div class="muted" style="font-size:11px;padding:6px 12px">AUTO ✓ = auto-executed on the AI sleeve (persisted — stays across cycles; order on the blotter). Others are live proposals for review.</div>'
+      : '<div class="muted" style="padding:14px">no hypotheses yet — the model runs on a cadence; a small model often returns none until a directional headline appears (see the app log "hypotheses: model proposed N")</div>') + '</div>';
   }
-  async function loadHypotheses() { try { renderHypotheses(await (await fetch("/api/hypotheses")).json()); } catch (e) {} }
+  async function loadHypotheses() {
+    try {
+      const [execs, proposals] = await Promise.all([
+        fetch("/api/hypotheses/executed").then(r => r.json()),
+        fetch("/api/hypotheses").then(r => r.json())]);
+      const execInstr = new Set(execs.map(e => e.instrumentId));
+      const rows = [];
+      execs.forEach(e => rows.push({ ts:e.timestampMillis, instr:e.instrumentId, thesis:e.thesis, dir:e.direction,
+        conv:e.conviction, verdict:"AUTO ✓", auto:true, executed:true, btSupports:e.backtestSupported,
+        note:"auto-executed on the AI sleeve — order "+(e.orderStatus||"") }));
+      // Live proposals not already shown as an executed decision (avoid duplicating the same name).
+      proposals.filter(p => !execInstr.has(p.instrumentId)).forEach(p => rows.push({ ts:Date.now(),
+        instr:p.instrumentId, thesis:p.thesis, dir:p.direction, conv:p.conviction, verdict:p.verdict,
+        auto:p.autonomous, executed:false, btSupports:p.backtestSupports, btPnl:p.backtestPnl,
+        btTrades:p.backtestTrades, note:p.note }));
+      rows.sort((a, b) => b.ts - a.ts);
+      renderHypotheses(rows);
+    } catch (e) {}
+  }
 
   // ---- deterministic (quant) strategy actions — entries & exits, each with its reason ----
   function renderQuant(rows) {

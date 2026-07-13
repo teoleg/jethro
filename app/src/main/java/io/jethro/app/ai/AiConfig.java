@@ -33,11 +33,12 @@ public class AiConfig {
     @Bean
     @ConditionalOnProperty(prefix = "jethro.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
     ModelInferenceClient modelInferenceClient(AiProperties properties, InferenceMonitor monitor) {
-        // Wrap the real Ollama client so every call (commentary, hypotheses, chat) is recorded
-        // for the ops view in one place, with no change to any caller.
+        // Layers (outer → inner): single-flight (one inference at a time, skip if busy — the
+        // fast busy-skip is NOT monitored) → monitor (records real calls for the ops view) →
+        // Ollama. So overlapping loops can't pile up and time out as "ollama unreachable".
         var ollama = new OllamaClient(properties.baseUrl(), properties.model(),
                 Duration.ofSeconds(properties.requestTimeoutSeconds()));
-        return new MonitoringInferenceClient(ollama, monitor);
+        return new SingleFlightInferenceClient(new MonitoringInferenceClient(ollama, monitor));
     }
 
     /** Loads the model at startup so the first real inference isn't a slow cold-start failure. */
