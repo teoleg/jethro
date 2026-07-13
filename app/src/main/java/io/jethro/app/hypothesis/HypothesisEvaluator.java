@@ -45,11 +45,14 @@ public final class HypothesisEvaluator {
     private final InstrumentRefSource refs;
     private final PreTradeGuardrail guardrail;
     private final StrategyProperties sizing;
+    private final String book; // the AI sleeve — separate from the momentum strategy's books
 
-    public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail, StrategyProperties sizing) {
+    public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                               StrategyProperties sizing, String book) {
         this.refs = refs;
         this.guardrail = guardrail;
         this.sizing = sizing;
+        this.book = book;
     }
 
     /** Evaluates a hypothesis against live marks, no backtest context. */
@@ -74,7 +77,8 @@ public final class HypothesisEvaluator {
             return verdict(h, Verdict.NO_MARK, null, null, null, "no live mark to value it", bt);
         }
         String assetClass = ref.get().assetClass();
-        String book = sizing.bookFor(assetClass);
+        // The AI sleeve trades its own book (not routed to the strategy's ALPHA/MACRO), so the
+        // momentum algo never flattens an AI-opened position (ADR-0022).
         BigDecimal multiplier = ref.get().multiplier();
         BigDecimal notionalPerUnit = price.multiply(multiplier);
         BigDecimal qty = sizing.targetNotional().divide(notionalPerUnit, 0, RoundingMode.DOWN);

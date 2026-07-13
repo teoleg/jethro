@@ -22,6 +22,9 @@ public record HypothesisProperties(
          *  hypothesis cadence. Ignored by the sim feed. Default 60. */
         Long narrativeRefreshSeconds,
         Integer backtestTicks,
+        /** Book the AI hypothesis sleeve trades — kept separate from the momentum strategy's
+         *  books so the two engines don't flatten each other's positions. Default "AI". */
+        String book,
         Autonomy autonomy) {
 
     /**
@@ -78,6 +81,10 @@ public record HypothesisProperties(
 
     public long narrativeSeedOrDefault() {
         return narrativeSeed != null ? narrativeSeed : 42L;
+    }
+
+    public String bookOrDefault() {
+        return book != null && !book.isBlank() ? book : "AI";
     }
 
     public long narrativeRefreshSecondsOrDefault() {

@@ -44,8 +44,8 @@ public class HypothesisConfig {
 
     @Bean
     HypothesisEvaluator hypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
-                                            StrategyProperties sizing) {
-        return new HypothesisEvaluator(refs, guardrail, sizing);
+                                            StrategyProperties sizing, HypothesisProperties props) {
+        return new HypothesisEvaluator(refs, guardrail, sizing, props.bookOrDefault());
     }
 
     /**

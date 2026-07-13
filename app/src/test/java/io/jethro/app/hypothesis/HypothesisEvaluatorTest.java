@@ -44,16 +44,17 @@ class HypothesisEvaluatorTest {
     }
 
     private HypothesisEvaluator evaluator(RiskLimitSource limits, RiskProjection projection) {
-        return new HypothesisEvaluator(refs, new PreTradeGuardrail(projection, limits), sizing);
+        return new HypothesisEvaluator(refs, new PreTradeGuardrail(projection, limits), sizing, "AI");
     }
 
     @Test
-    void admissibleSizesToTargetNotionalAndRoutesByAssetClass() {
+    void admissibleSizesToTargetNotionalAndRoutesToTheAiSleeve() {
         var eval = evaluator(book -> RiskLimits.none(), new RiskProjection(refs));
-        // 25,000 / (190 × 1) = 131.57 → floor 131; EQUITY routes to ALPHA.
+        // 25,000 / (190 × 1) = 131.57 → floor 131; the AI sleeve trades its own book, not the
+        // strategy's — so the momentum algo can't flatten it.
         var e = eval.evaluate(h("AAPL", Side.BUY), Map.of("AAPL", new BigDecimal("190")));
         assertEquals(HypothesisEvaluator.Verdict.ADMISSIBLE, e.verdict());
-        assertEquals("ALPHA", e.book());
+        assertEquals("AI", e.book());
         assertEquals(0, new BigDecimal("131").compareTo(e.quantity()));
     }
 
@@ -63,7 +64,7 @@ class HypothesisEvaluatorTest {
         // 1 ES = 5450 × 50 = 272,500 > 50,000 cap → unsizeable, never rounded up.
         var e = eval.evaluate(h("ES", Side.BUY), Map.of("ES", new BigDecimal("5450")));
         assertEquals(HypothesisEvaluator.Verdict.UNSIZEABLE, e.verdict());
-        assertEquals("MACRO", e.book());
+        assertEquals("AI", e.book());
         assertNull(e.quantity());
     }
 

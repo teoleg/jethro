@@ -40,6 +40,13 @@ public class AiConfig {
         return new MonitoringInferenceClient(ollama, monitor);
     }
 
+    /** Loads the model at startup so the first real inference isn't a slow cold-start failure. */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
+    OllamaWarmup ollamaWarmup(ModelInferenceClient client) {
+        return new OllamaWarmup(client);
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "jethro.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
     RiskCommentatorLifecycle riskCommentatorLifecycle(ModelInferenceClient client,
