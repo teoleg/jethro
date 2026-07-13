@@ -270,13 +270,14 @@
   async function loadFeeds() {
     try {
       const feeds = await (await fetch("/api/feeds")).json();
+      // One pill per active feed (a composite shows Finnhub + Yahoo side by side). LED: green =
+      // connected & live, amber = connected but delayed, red = down. Label names the source.
+      const NAMES = { finnhub: "Finnhub", yahoo: "Yahoo", sim: "Sim", none: "—" };
       document.getElementById("feeds").innerHTML = feeds.map(f => {
-        const led = f.connected ? "ok" : "bad";
-        // Market-data source label: real feeds (Finnhub/Yahoo) = Live, simulated = SIM.
-        const src = (f.provider === "yahoo" || f.provider === "finnhub") ? "Live"
-                  : (f.provider === "sim" ? "SIM" : esc(f.provider));
-        return `<span class="pill" title="${esc(f.provider)}${f.delayed ? ' · delayed '+Math.round(f.delaySeconds/60)+'m' : ''}">`
-             + `<span class="led ${led}"></span>MD: ${src}</span>`;
+        const led = !f.connected ? "bad" : (f.delayed ? "warn" : "ok");
+        const name = NAMES[f.provider] || esc(f.provider);
+        return `<span class="pill" title="market data${f.delayed ? ' · delayed '+Math.round(f.delaySeconds/60)+'m' : ' · live'}">`
+             + `<span class="led ${led}"></span>${name}</span>`;
       }).join("");
     } catch (e) {}
   }

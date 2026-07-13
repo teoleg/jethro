@@ -35,9 +35,11 @@ public final class FeedsController {
         if (core == null) {
             return List.of(new FeedDto("market-data", "none", false, -1, false, 0));
         }
-        FeedStatus s = core.feedStatus();
-        long ageMillis = s.lastUpdateMillis() > 0 ? System.currentTimeMillis() - s.lastUpdateMillis() : -1;
-        return List.of(new FeedDto("market-data", s.provider(), s.connected(), ageMillis,
-                s.dataDelaySeconds() > DELAYED_THRESHOLD_SECONDS, s.dataDelaySeconds()));
+        long now = System.currentTimeMillis();
+        return core.feedStatuses().stream().map(s -> {
+            long ageMillis = s.lastUpdateMillis() > 0 ? now - s.lastUpdateMillis() : -1;
+            return new FeedDto("market-data", s.provider(), s.connected(), ageMillis,
+                    s.dataDelaySeconds() > DELAYED_THRESHOLD_SECONDS, s.dataDelaySeconds());
+        }).toList();
     }
 }

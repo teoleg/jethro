@@ -237,9 +237,10 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         return sim != null ? sim.regime().name() : "CALM";
     }
 
-    /** Market-data feed status for the UI's connection indicator (ADR-0023). */
-    public FeedStatus feedStatus() {
+    /** Market-data feed status(es) for the UI's connection indicators — one per source, so a
+     *  composite feed (Finnhub + Yahoo, ADR-0024) shows a pill each. */
+    public List<FeedStatus> feedStatuses() {
         var a = adapter;
-        return a != null ? a.status() : new FeedStatus("none", false, 0, 0);
+        return a != null ? a.statuses() : List.of(new FeedStatus("none", false, 0, 0));
     }
 }

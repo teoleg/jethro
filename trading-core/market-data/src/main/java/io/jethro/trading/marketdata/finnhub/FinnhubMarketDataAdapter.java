@@ -75,6 +75,15 @@ public final class FinnhubMarketDataAdapter implements MarketDataAdapter {
         return new FeedStatus(NAME, connected, lastUpdateMillis.get(), delaySeconds);
     }
 
+    /** Both feeds this composite drives: Finnhub (real-time equities) + the background (Yahoo/sim). */
+    @Override
+    public java.util.List<FeedStatus> statuses() {
+        java.util.List<FeedStatus> all = new java.util.ArrayList<>();
+        all.add(status());
+        all.addAll(background.statuses());
+        return all;
+    }
+
     @Override
     public void stop() {
         var c = client;
