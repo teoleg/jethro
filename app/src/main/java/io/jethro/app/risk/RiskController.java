@@ -1,6 +1,7 @@
 package io.jethro.app.risk;
 
 import io.jethro.trading.riskpnl.ConsolidatedRisk;
+import io.jethro.trading.riskpnl.CurveService;
 import io.jethro.trading.riskpnl.PositionRisk;
 import io.jethro.trading.riskpnl.RiskProjection;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,9 +37,17 @@ public final class RiskController {
     }
 
     private final RiskProjection projection;
+    private final CurveService curveService;
 
-    public RiskController(RiskProjection projection) {
+    public RiskController(RiskProjection projection, CurveService curveService) {
         this.projection = projection;
+        this.curveService = curveService;
+    }
+
+    /** Live SOFR zero curve (rates/DFs are analytics estimates, not ledger money). */
+    @GetMapping("/api/curve")
+    public java.util.List<CurveService.CurvePoint> curve() {
+        return curveService.snapshot();
     }
 
     @GetMapping("/api/risk")

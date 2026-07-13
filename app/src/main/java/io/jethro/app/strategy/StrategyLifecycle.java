@@ -203,8 +203,11 @@ public final class StrategyLifecycle implements SmartLifecycle {
      * (one ES contract ≈ $272k vs a $25k target), the signal is skipped — empty result.
      */
     private Optional<BigDecimal> size(TradeSignal signal) {
-        BigDecimal multiplier = refs.find(signal.instrumentId())
-                .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
+        Optional<InstrumentRef> ref = refs.find(signal.instrumentId());
+        if (ref.isEmpty()) {
+            return Optional.empty(); // not in the instrument master (e.g. a curve quote) — never trade it
+        }
+        BigDecimal multiplier = ref.map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
         BigDecimal notionalPerUnit = signal.price().multiply(multiplier);
         BigDecimal qty = props.targetNotional().divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {

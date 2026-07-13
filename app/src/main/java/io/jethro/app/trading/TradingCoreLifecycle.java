@@ -1,6 +1,7 @@
 package io.jethro.app.trading;
 
 import io.jethro.domain.Decimals;
+import io.jethro.trading.marketdata.sim.CurveFactorSimulator;
 import io.jethro.trading.marketdata.sim.SimMarketDataAdapter;
 import io.jethro.trading.runtime.LmdbStateStore;
 import io.jethro.trading.runtime.TradingCoreRuntime;
@@ -48,6 +49,10 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 startPricesScaled,
                 maxStepMicros,
                 properties.simRegimesOrDefault(),
+                properties.simCurveOrDefault()
+                        // CONVENTION: demo curve starts at 3.8% level, +90bp long-short slope.
+                        ? new CurveFactorSimulator(properties.simSeed() + 1, 0.038, 0.009)
+                        : null,
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
         this.adapter = adapter;
         var store = LmdbStateStore.open(

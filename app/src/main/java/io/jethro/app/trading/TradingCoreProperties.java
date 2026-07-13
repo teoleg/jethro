@@ -21,6 +21,8 @@ public record TradingCoreProperties(
         Map<String, Double> simAnnualVols,
         /** Correlated market regimes (calm/trend/volatile/shock episodes); default true. */
         Boolean simRegimes,
+        /** Factor-based SOFR curve sim publishing USD.SOFR.* tenor marks; default true. */
+        Boolean simCurve,
         long simTickIntervalMillis,
         String lmdbPath,
         long lmdbMaxSizeMb,
@@ -34,6 +36,10 @@ public record TradingCoreProperties(
 
     public boolean simRegimesOrDefault() {
         return simRegimes == null || simRegimes;
+    }
+
+    public boolean simCurveOrDefault() {
+        return simCurve == null || simCurve;
     }
 
     /** Annualized vol for one instrument: override, else default, else 20%. */
