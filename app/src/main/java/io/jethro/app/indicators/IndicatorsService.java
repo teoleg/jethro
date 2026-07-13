@@ -57,6 +57,14 @@ public final class IndicatorsService implements SmartLifecycle {
         this.latest = allSymbols(); // every symbol visible from t=0, as N/A until fetched
     }
 
+    private static void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     /** All configured symbols in order, using last-known value or an N/A placeholder. */
     private List<Indicator> allSymbols() {
         List<Indicator> out = new ArrayList<>();
@@ -82,10 +90,20 @@ public final class IndicatorsService implements SmartLifecycle {
                 props.symbolsOrDefault().size(), period);
     }
 
+    // Yahoo rate-limits by burst: firing all symbols back-to-back gets throttled after ~1.
+    // Space the per-symbol requests so the poll trickles instead of bursting (indices are
+    // delayed and slow-moving, so a long, gentle cadence is plenty).
+    private static final long REQUEST_SPACING_MILLIS = 1_500;
+
     private void poll() {
         try {
             int ok = 0;
+            boolean first = true;
             for (Map.Entry<String, String> e : props.symbolsOrDefault().entrySet()) {
+                if (!first) {
+                    sleepQuietly(REQUEST_SPACING_MILLIS);
+                }
+                first = false;
                 var got = fetch(e.getKey(), e.getValue());
                 if (got.isPresent()) {
                     lastGood.put(e.getKey(), got.get());

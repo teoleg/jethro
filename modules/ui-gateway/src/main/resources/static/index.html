@@ -239,20 +239,29 @@
       const ix = await (await fetch("/api/indicators")).json();
       const el = document.getElementById("indices");
       if (!ix.length) { el.innerHTML = ""; return; }
-      const tiles = ix.map(i => {
+      const inner = i => {
         const hasData = i.price != null && i.changePercent != null;
-        if (!hasData) {
-          return `<span class="ix" title="${esc(i.symbol)}"><span class="l">${esc(i.label)}</span>
-            <span class="v mono muted">N/A</span></span>`;
-        }
+        if (!hasData) return `<span class="l">${esc(i.label)}</span><span class="v mono muted">N/A</span>`;
         const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
         const sign = i.changePercent > 0 ? "+" : "";
         const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:2});
-        return `<span class="ix" title="${esc(i.symbol)}"><span class="l">${esc(i.label)}</span>
-          <span class="v mono">${v}</span><span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span></span>`;
-      }).join("");
-      // Two copies so the -50% scroll loops seamlessly (running-text ticker).
-      el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
+        return `<span class="l">${esc(i.label)}</span><span class="v mono">${v}</span>`
+             + `<span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span>`;
+      };
+      let track = el.querySelector(".marquee");
+      if (!track) {
+        // Build the ticker ONCE (two copies for a seamless -50% loop). Rebuilding on every
+        // refresh would restart the CSS animation and cause the jump — so we update in place below.
+        const tiles = ix.map(i => `<span class="ix" data-sym="${esc(i.symbol)}">${inner(i)}</span>`).join("");
+        el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
+      } else {
+        // Update numbers in place (both copies of each symbol) — animation keeps running smoothly.
+        const bySym = {}; ix.forEach(i => bySym[i.symbol] = i);
+        track.querySelectorAll(".ix").forEach(node => {
+          const i = bySym[node.dataset.sym];
+          if (i) node.innerHTML = inner(i);
+        });
+      }
     } catch (e) {}
   }
   // Per-feed connection LEDs on the stream line, from real feed status (/api/feeds).
