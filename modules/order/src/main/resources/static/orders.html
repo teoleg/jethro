@@ -16,7 +16,7 @@
   .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
 
   .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
-  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
   .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
   .tabs { display:flex; gap:4px; margin-left:8px; }
@@ -28,7 +28,7 @@
   .btn { background:var(--brand); color:#fff; border:0; border-radius:8px; padding:9px 16px; font:inherit; font-weight:600; cursor:pointer; transition:.15s; }
   .btn:hover { filter:brightness(1.08); } .btn:active { transform:translateY(1px); }
 
-  main { max-width:1200px; margin:0 auto; padding:18px 24px 48px; }
+  main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
   .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:0 2px 12px; display:flex; align-items:center; }
   .section-h .muted { margin-left:auto; text-transform:none; letter-spacing:0; font-size:12px; }
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:2px 4px; }
@@ -41,6 +41,9 @@
   th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
   .BUY { color:var(--buy); font-weight:600; } .SELL { color:var(--sell); font-weight:600; }
   .muted { color:var(--dim); }
+  .pgbtn { background:var(--surface-2); color:var(--dim); border:1px solid var(--line-2); border-radius:7px;
+           padding:4px 10px; font:inherit; font-size:12px; cursor:pointer; }
+  .pgbtn:hover { color:var(--txt); border-color:var(--brand); }
   .st { font-size:10px; letter-spacing:.05em; padding:2px 8px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
   .st.FILLED { color:var(--buy); border-color:var(--buy); }
   .st.PARTIALLY_FILLED { color:#e0a83d; border-color:#e0a83d; }
@@ -74,15 +77,23 @@
     <nav class="tabs">
       <a class="tab" href="/">Overview</a>
       <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
       <a class="tab" href="/books.html">Books</a>
       <a class="tab active" href="/orders.html">Orders</a>
+      <a class="tab" href="/config.html">Config</a>
     </nav>
     <span class="spacer"></span>
     <button class="btn" id="open">+ New order</button>
   </div>
 </div>
 <main>
-  <div class="section-h">Blotter <span class="muted" id="count"></span></div>
+  <div class="section-h">Blotter <span class="muted" id="count"></span>
+    <span class="muted" style="margin-left:auto;display:flex;gap:8px;align-items:center">
+      <input type="date" id="obdate" style="background:#0c1019;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:5px 9px;font:inherit;font-size:12px">
+      <button type="button" class="pgbtn" id="obprev">‹</button>
+      <span id="obpage" style="font-size:12px"></span>
+      <button type="button" class="pgbtn" id="obnext">›</button>
+    </span></div>
   <div class="panel"><div id="blotter" class="muted" style="padding:16px">loading…</div></div>
 </main>
 
@@ -117,7 +128,7 @@
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const t = ms => new Date(ms).toLocaleTimeString();
-  const QTY_LABEL = { EQUITY:"Shares", FUTURE:"Contracts", FX:"Notional", BOND:"Contracts", OPTION:"Contracts" };
+  const QTY_LABEL = { EQUITY:"Shares", FUTURE:"Contracts", FX:"Notional", BOND:"Contracts", SWAP:"Notional", OPTION:"Contracts" };
   let instrClass = {}, cusipOf = {};
   const primaryId = sym => (sym && (sym.CUSIP || sym.ISIN || sym.GLOBEX || sym.ISO)) || null;
 
@@ -155,7 +166,8 @@
     try {
       const instruments = await (await fetch("/api/instruments")).json();
       instruments.forEach(i => { instrClass[i.instrumentId] = i.assetClass; cusipOf[i.instrumentId] = primaryId(i.symbology); });
-      document.getElementById("instrument").innerHTML = instruments.map(i =>
+      // Swaps are definitions only (no marks, no pricing yet) — not orderable.
+      document.getElementById("instrument").innerHTML = instruments.filter(i => i.assetClass !== "SWAP").map(i =>
         `<option value="${esc(i.instrumentId)}">${esc(i.instrumentId)} — ${esc(i.assetClass)}</option>`).join("");
       const books = flatten(await (await fetch("/api/books")).json(), []);
       document.getElementById("book").innerHTML = books.map(b =>
@@ -180,12 +192,21 @@
   });
 
   // ---- blotter (single table; fill is the order's outcome, not a second table) ----
+  let obPage = 0, obTotalPages = 1;
+  const today = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD local
   async function refresh() {
-    let orders = [], fills = [];
-    try { orders = await (await fetch("/api/orders")).json(); fills = await (await fetch("/api/fills")).json(); } catch (e) { return; }
+    let page = null, fills = [];
+    const date = document.getElementById("obdate").value || today();
+    try {
+      page = await (await fetch(`/api/orders/day?date=${date}&page=${obPage}&size=100`)).json();
+      fills = await (await fetch("/api/fills")).json();
+    } catch (e) { return; }
+    const orders = page.orders;
+    obTotalPages = page.totalPages;
+    document.getElementById("obpage").textContent = `page ${page.page + 1}/${page.totalPages}`;
     const fillByOrder = {};
-    fills.forEach(f => fillByOrder[f.orderId] = f); // one fill per order today
-    document.getElementById("count").textContent = orders.length ? orders.length + " orders" : "";
+    fills.forEach(f => fillByOrder[f.orderId] = f); // best-effort: recent fills only
+    document.getElementById("count").textContent = page.total + " orders on " + date;
     document.getElementById("blotter").outerHTML = '<div id="blotter">' + (orders.length ?
       "<table><tr><th>time</th><th>instr</th><th>CUSIP / ID</th><th>book</th><th>side</th><th>type</th><th>qty</th><th>limit</th><th>status</th><th>fill</th></tr>" +
       orders.map(o => { const f = fillByOrder[o.orderId]; return `<tr>
@@ -194,8 +215,12 @@
         <td class="mono">${esc(o.quantity)}</td><td class="mono muted">${esc(o.limitPrice||"—")}</td>
         <td><span class="st ${esc(o.status)}">${esc(o.status)}</span></td>
         <td class="mono">${f ? esc(f.price) : '<span class="muted">—</span>'}</td></tr>`; }).join("") + "</table>"
-      : '<div class="muted" style="padding:16px">no orders yet — hit <b>+ New order</b> to submit one</div>') + '</div>';
+      : '<div class="muted" style="padding:16px">no orders on this date</div>') + '</div>';
   }
+  document.getElementById("obdate").value = today();
+  document.getElementById("obdate").onchange = () => { obPage = 0; refresh(); };
+  document.getElementById("obprev").onclick = () => { if (obPage > 0) { obPage--; refresh(); } };
+  document.getElementById("obnext").onclick = () => { if (obPage < obTotalPages - 1) { obPage++; refresh(); } };
 
   populate();
   refresh();

@@ -18,6 +18,7 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
     private final SimTickGenerator generator;
     private final String[] instrumentIds; // constant references: no per-tick allocation
     private final long tickIntervalNanos;
+    private final CurveFactorSimulator curveSim; // nullable: no curve marks when absent
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
 
@@ -26,17 +27,44 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
         this(seed, instrumentIds, uniform(instrumentIds.size(), startPriceScaled), tickIntervalNanos);
     }
 
-    /** Per-instrument start prices, aligned to {@code instrumentIds} order. */
+    /** Per-instrument start prices, aligned to {@code instrumentIds} order; default vol. */
     public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled, long tickIntervalNanos) {
+        this(seed, instrumentIds, startPricesScaled, null, tickIntervalNanos);
+    }
+
+    /** Per-instrument start prices and per-tick max step (millionths of price); null steps = default. */
+    public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled,
+                                long[] maxStepMicros, long tickIntervalNanos) {
+        this(seed, instrumentIds, startPricesScaled, maxStepMicros, false, tickIntervalNanos);
+    }
+
+    /** Full control: per-instrument prices/steps plus correlated market regimes (trend/vol/shock). */
+    public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled,
+                                long[] maxStepMicros, boolean regimesEnabled, long tickIntervalNanos) {
+        this(seed, instrumentIds, startPricesScaled, maxStepMicros, regimesEnabled, null, tickIntervalNanos);
+    }
+
+    /** As above plus a curve simulator whose SOFR tenor rates are published as marks (phase 4). */
+    public SimMarketDataAdapter(long seed, List<String> instrumentIds, long[] startPricesScaled,
+                                long[] maxStepMicros, boolean regimesEnabled,
+                                CurveFactorSimulator curveSim, long tickIntervalNanos) {
         if (instrumentIds.isEmpty()) {
             throw new IllegalArgumentException("at least one instrument required");
         }
         if (startPricesScaled.length != instrumentIds.size()) {
             throw new IllegalArgumentException("start prices must align with instruments");
         }
-        this.generator = new SimTickGenerator(seed, startPricesScaled);
+        this.generator = maxStepMicros == null
+                ? new SimTickGenerator(seed, startPricesScaled)
+                : new SimTickGenerator(seed, startPricesScaled, maxStepMicros, regimesEnabled);
         this.instrumentIds = instrumentIds.toArray(String[]::new);
         this.tickIntervalNanos = tickIntervalNanos;
+        this.curveSim = curveSim;
+    }
+
+    /** Current sim market regime (observability). */
+    public MarketRegime regime() {
+        return generator.regime();
     }
 
     private static long[] uniform(int count, long startPriceScaled) {
@@ -65,10 +93,21 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
         while (running.get()) {
             long now = System.currentTimeMillis();
             for (int i = 0; i < instrumentIds.length; i++) {
-                long price = generator.nextPriceScaled(i);
+                long price = curveSim != null && curveSim.isLinked(instrumentIds[i])
+                        ? curveSim.linkedPriceScaled(instrumentIds[i]) // priced FROM the curve
+                        : generator.nextPriceScaled(i);
                 long qty = generator.nextQuantityScaled();
                 // Sim is its own provider: provider ts == ingest ts
                 listener.onTrade(instrumentIds[i], price, qty, now, now);
+            }
+            if (curveSim != null) {
+                // Curve tenor rates ride the same mark pipeline as pseudo-instruments;
+                // risk-pnl routes USD.SOFR.* to curve calibration, not to positions.
+                curveSim.step();
+                for (int t = 0; t < CurveFactorSimulator.TENOR_IDS.length; t++) {
+                    listener.onTrade(CurveFactorSimulator.TENOR_IDS[t],
+                            curveSim.rateScaledPercent(t), 1_000_000L, now, now);
+                }
             }
             java.util.concurrent.locks.LockSupport.parkNanos(tickIntervalNanos);
         }

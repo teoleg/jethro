@@ -97,8 +97,25 @@ public final class RiskProjection {
         }
         rows.sort((a, b) -> b.grossExposure().compareTo(a.grossExposure()));
 
-        return new ConsolidatedRisk(nowMillis, totals(rows),
-                rollup(rows, PositionRisk::assetClass), rollup(rows, PositionRisk::bookId), rows);
+        // Cross-currency rollups (quant-engine phase 3, ADR-0020): positions stay in their
+        // instrument currency; buckets and totals convert to USD via Strata's FxMatrix
+        // built from the LIVE *USD pair marks the sim/feed is already publishing — every
+        // conversion names its FX mark. An unconvertible currency keeps the honest MIXED
+        // marker rather than silently mis-summing (finance-math rule).
+        FxConversion fx = fxFromMarks();
+        return new ConsolidatedRisk(nowMillis, totals(rows, fx),
+                rollup(rows, PositionRisk::assetClass, fx), rollup(rows, PositionRisk::bookId, fx), rows);
+    }
+
+    /** FX converter from the current *USD pair marks (EURUSD, GBPUSD, ...). */
+    private FxConversion fxFromMarks() {
+        Map<String, BigDecimal> pairs = new LinkedHashMap<>();
+        marks.forEach((id, m) -> {
+            if (id.length() == 6 && id.endsWith("USD")) {
+                pairs.put(id, m.price());
+            }
+        });
+        return FxConversion.fromUsdPairMarks(pairs);
     }
 
     /** A book's gross/net exposure — for pre-trade limit checks. */
@@ -138,6 +155,59 @@ public final class RiskProjection {
         return new Exposure(p8(gross), p8(net));
     }
 
+    /**
+     * The SIGNED notional a book currently holds in one instrument (positive = long) —
+     * lets the strategy distinguish adding to a position from reducing it. Zero without
+     * a mark or position.
+     */
+    public synchronized BigDecimal instrumentNetExposure(String bookId, String instrumentId) {
+        Position pos = positions.get(key(bookId, instrumentId));
+        if (pos == null) {
+            return BigDecimal.ZERO;
+        }
+        return p8(exposureOf(instrumentId, pos.quantity()));
+    }
+
+    /**
+     * Projects the |notional| the book would hold in one instrument if {@code signedQtyDelta}
+     * were applied — the concentration input of the pre-trade guardrail. Zero without a mark.
+     */
+    public synchronized BigDecimal projectedInstrumentExposure(String bookId, String instrumentId,
+                                                               BigDecimal signedQtyDelta) {
+        Position pos = positions.get(key(bookId, instrumentId));
+        BigDecimal qty = (pos == null ? BigDecimal.ZERO : pos.quantity()).add(signedQtyDelta);
+        return p8(exposureOf(instrumentId, qty).abs());
+    }
+
+    /**
+     * Projects the firm-wide gross/net exposure (across every book) if {@code signedQtyDelta}
+     * were applied to one (book, instrument) — the firm-cap input of the guardrail.
+     */
+    public synchronized Exposure projectedFirmExposure(String bookId, String instrumentId,
+                                                       BigDecimal signedQtyDelta) {
+        BigDecimal gross = BigDecimal.ZERO;
+        BigDecimal net = BigDecimal.ZERO;
+        String targetKey = key(bookId, instrumentId);
+        boolean targetSeen = false;
+        for (Map.Entry<String, Position> entry : positions.entrySet()) {
+            Position pos = entry.getValue();
+            BigDecimal qty = pos.quantity();
+            if (entry.getKey().equals(targetKey)) {
+                qty = qty.add(signedQtyDelta);
+                targetSeen = true;
+            }
+            BigDecimal contrib = exposureOf(pos.instrumentId().value(), qty);
+            net = net.add(contrib);
+            gross = gross.add(contrib.abs());
+        }
+        if (!targetSeen) {
+            BigDecimal contrib = exposureOf(instrumentId, signedQtyDelta);
+            net = net.add(contrib);
+            gross = gross.add(contrib.abs());
+        }
+        return new Exposure(p8(gross), p8(net));
+    }
+
     private BigDecimal exposureOf(String instrumentId, BigDecimal qty) {
         MarkPoint m = marks.get(instrumentId);
         if (m == null) {
@@ -146,23 +216,21 @@ public final class RiskProjection {
         return qty.multiply(m.price()).multiply(ref(instrumentId).multiplier());
     }
 
-    private static ConsolidatedRisk.Totals totals(List<PositionRisk> rows) {
-        BigDecimal realized = BigDecimal.ZERO, unrealized = BigDecimal.ZERO;
-        BigDecimal gross = BigDecimal.ZERO, net = BigDecimal.ZERO;
+    private static ConsolidatedRisk.Totals totals(List<PositionRisk> rows, FxConversion fx) {
+        Acc acc = new Acc(fx);
         for (PositionRisk r : rows) {
-            realized = realized.add(r.realizedPnl());
-            unrealized = unrealized.add(r.unrealizedPnl());
-            gross = gross.add(r.grossExposure());
-            net = net.add(r.netExposure());
+            acc.add(r);
         }
         return new ConsolidatedRisk.Totals(
-                p8(realized), p8(unrealized), p8(realized.add(unrealized)), p8(gross), p8(net));
+                p8(acc.realized), p8(acc.unrealized), p8(acc.realized.add(acc.unrealized)),
+                p8(acc.gross), p8(acc.net));
     }
 
-    private static List<ConsolidatedRisk.Group> rollup(List<PositionRisk> rows, Function<PositionRisk, String> keyFn) {
+    private static List<ConsolidatedRisk.Group> rollup(List<PositionRisk> rows,
+                                                       Function<PositionRisk, String> keyFn, FxConversion fx) {
         Map<String, Acc> grouped = new LinkedHashMap<>();
         for (PositionRisk r : rows) {
-            grouped.computeIfAbsent(keyFn.apply(r), k -> new Acc()).add(r);
+            grouped.computeIfAbsent(keyFn.apply(r), k -> new Acc(fx)).add(r);
         }
         List<ConsolidatedRisk.Group> out = new ArrayList<>();
         grouped.forEach((k, a) -> out.add(new ConsolidatedRisk.Group(
@@ -172,29 +240,41 @@ public final class RiskProjection {
         return out;
     }
 
-    /** Mutable rollup accumulator; collapses currency to MIXED when a bucket spans currencies. */
+    /**
+     * Rollup accumulator reporting in USD: each position's figures convert from its
+     * instrument currency at the live FX marks (quant-engine phase 3). If a currency
+     * can't be converted (no pair mark yet), the bucket keeps the honest MIXED marker —
+     * never a silent mis-sum across currencies.
+     */
     private static final class Acc {
+        final FxConversion fx;
         BigDecimal realized = BigDecimal.ZERO, unrealized = BigDecimal.ZERO;
         BigDecimal gross = BigDecimal.ZERO, net = BigDecimal.ZERO;
         int count;
-        String currency;
-        boolean mixed;
+        boolean unconvertible;
+
+        Acc(FxConversion fx) {
+            this.fx = fx;
+        }
 
         void add(PositionRisk r) {
-            realized = realized.add(r.realizedPnl());
-            unrealized = unrealized.add(r.unrealizedPnl());
-            gross = gross.add(r.grossExposure());
-            net = net.add(r.netExposure());
             count++;
-            if (currency == null) {
-                currency = r.currency();
-            } else if (!currency.equals(r.currency())) {
-                mixed = true;
+            if (fx.canConvert(r.currency(), "USD")) {
+                realized = realized.add(fx.convert(r.realizedPnl(), r.currency(), "USD"));
+                unrealized = unrealized.add(fx.convert(r.unrealizedPnl(), r.currency(), "USD"));
+                gross = gross.add(fx.convert(r.grossExposure(), r.currency(), "USD"));
+                net = net.add(fx.convert(r.netExposure(), r.currency(), "USD"));
+            } else {
+                unconvertible = true;
+                realized = realized.add(r.realizedPnl());
+                unrealized = unrealized.add(r.unrealizedPnl());
+                gross = gross.add(r.grossExposure());
+                net = net.add(r.netExposure());
             }
         }
 
         String currency() {
-            return mixed ? "MIXED" : (currency == null ? "USD" : currency);
+            return unconvertible ? "MIXED" : "USD";
         }
     }
 

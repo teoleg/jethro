@@ -9,70 +9,84 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Deterministic momentum signals from a price series — exact, seed-free. */
+/**
+ * Vol-adaptive momentum signals. Worked example used below (lookback 4, single jump in an
+ * otherwise flat window [100,100,100,100,102]): returns [0,0,0,ln1.02], mean .00495,
+ * sample σ = .009895, move = ln1.02 = .019803 → z = .019803/(.009895·√4) ≈ 1.0006.
+ */
 class MomentumStrategyTest {
-
-    // lookback 2, threshold 50bps (0.50%)
-    private final MomentumStrategy strategy = new MomentumStrategy(2, new BigDecimal("50"));
 
     private static MomentumStrategy.Observation obs(String price) {
         return new MomentumStrategy.Observation("AAPL", new BigDecimal(price), false);
     }
 
-    private List<TradeSignal> feed(String price) {
-        return strategy.evaluate(List.of(obs(price)));
+    private static List<TradeSignal> feedSeries(MomentumStrategy s, String... prices) {
+        List<TradeSignal> last = List.of();
+        for (String p : prices) {
+            last = s.evaluate(List.of(obs(p)));
+        }
+        return last;
     }
 
     @Test
     void noSignalUntilTheWindowIsFull() {
-        assertTrue(feed("100").isEmpty());   // 1 obs
-        assertTrue(feed("100").isEmpty());   // 2 obs — window needs lookback+1 = 3
+        var s = new MomentumStrategy(4, 1.0, new BigDecimal("2"));
+        assertTrue(feedSeries(s, "100", "100", "100", "100").isEmpty(), "needs lookback+1 prices");
     }
 
     @Test
-    void buyWhenPriceRisesPastTheThreshold() {
-        feed("100");
-        feed("100");
-        // window [100,100,100.6] vs ref 100 → +60bps >= 50 → BUY
-        List<TradeSignal> signals = feed("100.60");
+    void flatWindowNeverSignals() {
+        var s = new MomentumStrategy(4, 0.5, new BigDecimal("0"));
+        assertTrue(feedSeries(s, "100", "100", "100", "100", "100").isEmpty());
+    }
+
+    @Test
+    void jumpFiresWhenItsZScoreClearsTheThreshold() {
+        // z ≈ 1.0006 (worked example above): fires at 0.95σ, not at 1.2σ.
+        var loose = new MomentumStrategy(4, 0.95, new BigDecimal("2"));
+        List<TradeSignal> signals = feedSeries(loose, "100", "100", "100", "100", "102");
         assertEquals(1, signals.size());
         assertEquals(Side.BUY, signals.get(0).side());
-        assertEquals(0, new BigDecimal("60").compareTo(signals.get(0).changeBps()));
-        assertEquals(0, new BigDecimal("100").compareTo(signals.get(0).referencePrice()));
+        assertEquals(0, new BigDecimal("200").compareTo(
+                signals.get(0).changeBps().setScale(0, java.math.RoundingMode.HALF_UP)));
+        assertEquals(1.0006, signals.get(0).zScore(), 0.01);
+
+        var tight = new MomentumStrategy(4, 1.2, new BigDecimal("2"));
+        assertTrue(feedSeries(tight, "100", "100", "100", "100", "102").isEmpty());
     }
 
     @Test
-    void sellWhenPriceFallsPastTheThreshold() {
-        feed("100");
-        feed("100");
-        // -70bps <= -50 → SELL
-        List<TradeSignal> signals = feed("99.30");
+    void downJumpFiresSell() {
+        var s = new MomentumStrategy(4, 0.95, new BigDecimal("2"));
+        List<TradeSignal> signals = feedSeries(s, "100", "100", "100", "100", "98");
         assertEquals(1, signals.size());
         assertEquals(Side.SELL, signals.get(0).side());
     }
 
     @Test
-    void noSignalForMovesInsideTheThreshold() {
-        feed("100");
-        feed("100");
-        assertTrue(feed("100.40").isEmpty(), "+40bps < 50bps threshold → no signal");
+    void steadyTrendIsInfiniteZAndSignals() {
+        // Equal returns each step → σ = 0, move > 0 → trending, fires at any threshold.
+        var s = new MomentumStrategy(4, 5.0, new BigDecimal("2"));
+        List<TradeSignal> signals =
+                feedSeries(s, "100", "101", "102.01", "103.0301", "104.060401");
+        assertEquals(1, signals.size());
+        assertEquals(Side.BUY, signals.get(0).side());
+        assertTrue(Double.isInfinite(signals.get(0).zScore()));
     }
 
     @Test
-    void referenceRollsForwardSoASettledPriceStopsSignalling() {
-        feed("100");
-        feed("101");
-        // [100,101,101], ref 100 → +100bps → BUY
-        assertEquals(Side.BUY, feed("101").get(0).side());
-        // window rolls to [101,101,101], ref 101 → 0bps → no further signal
-        assertTrue(feed("101").isEmpty(), "reference rolled forward to 101");
+    void dustMovesBelowTheBpsFloorAreIgnoredEvenAtHighZ() {
+        // Same z ≈ 1.0 shape but the move is 0.01bps — below the 2bps floor.
+        var s = new MomentumStrategy(4, 0.9, new BigDecimal("2"));
+        assertTrue(feedSeries(s, "100", "100", "100", "100", "100.0001").isEmpty());
     }
 
     @Test
     void staleMarksAreIgnored() {
-        var s = new MomentumStrategy(1, new BigDecimal("10"));
-        s.evaluate(List.of(new MomentumStrategy.Observation("AAPL", new BigDecimal("100"), true)));
-        s.evaluate(List.of(new MomentumStrategy.Observation("AAPL", new BigDecimal("200"), true)));
-        assertTrue(s.evaluate(List.of(new MomentumStrategy.Observation("AAPL", new BigDecimal("300"), true))).isEmpty());
+        var s = new MomentumStrategy(2, 0.5, new BigDecimal("0"));
+        for (int i = 0; i < 5; i++) {
+            assertTrue(s.evaluate(List.of(new MomentumStrategy.Observation(
+                    "AAPL", new BigDecimal(100 + i * 10), true))).isEmpty());
+        }
     }
 }

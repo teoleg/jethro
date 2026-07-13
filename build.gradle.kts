@@ -48,5 +48,9 @@ subprojects {
 
     tasks.withType<JavaCompile> {
         options.encoding = "UTF-8"
+        // Spring resolves @PathVariable/@RequestParam names by reflection; the boot plugin
+        // adds -parameters to the app module only, so controllers in library modules 500
+        // without it (seen on /api/history). Apply it everywhere.
+        options.compilerArgs.add("-parameters")
     }
 }

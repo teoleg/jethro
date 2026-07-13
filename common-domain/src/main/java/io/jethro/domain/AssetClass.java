@@ -6,5 +6,7 @@ public enum AssetClass {
     FUTURE,
     OPTION,
     FX,
-    BOND
+    BOND,
+    /** OTC interest-rate swaps — definitions only until Strata pricing lands (ADR-0020). */
+    SWAP
 }

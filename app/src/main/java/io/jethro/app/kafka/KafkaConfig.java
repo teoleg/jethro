@@ -3,6 +3,7 @@ package io.jethro.app.kafka;
 import io.jethro.app.trading.TradingCoreLifecycle;
 import io.jethro.uigateway.AttentionFeed;
 import io.jethro.uigateway.AttentionRules;
+import io.jethro.uigateway.MarkHistory;
 import io.jethro.uigateway.MarkState;
 import io.jethro.uigateway.SseBroadcaster;
 import io.jethro.uigateway.UiController;
@@ -38,8 +39,10 @@ public class KafkaConfig {
 
         @Bean(destroyMethod = "close")
         UiGatewayRuntime uiGatewayRuntime(JethroKafkaProperties properties, MarkState markState,
-                                          AttentionFeed feed, AttentionRules rules, SseBroadcaster sse) {
-            var runtime = new UiGatewayRuntime(properties.bootstrapServers(), markState, feed, rules, sse);
+                                          MarkHistory markHistory, AttentionFeed feed,
+                                          AttentionRules rules, SseBroadcaster sse) {
+            var runtime = new UiGatewayRuntime(
+                    properties.bootstrapServers(), markState, markHistory, feed, rules, sse);
             runtime.start();
             return runtime;
         }
@@ -48,6 +51,11 @@ public class KafkaConfig {
     @Bean
     MarkState markState() {
         return new MarkState();
+    }
+
+    @Bean
+    MarkHistory markHistory(@org.springframework.beans.factory.annotation.Value("${jethro.ui.history-hours:2}") long historyHours) {
+        return new MarkHistory(historyHours * 3_600_000L);
     }
 
     @Bean
@@ -67,7 +75,7 @@ public class KafkaConfig {
     }
 
     @Bean
-    UiController uiController(MarkState markState, AttentionFeed feed, SseBroadcaster sse) {
-        return new UiController(markState, feed, sse);
+    UiController uiController(MarkState markState, MarkHistory markHistory, AttentionFeed feed, SseBroadcaster sse) {
+        return new UiController(markState, markHistory, feed, sse);
     }
 }

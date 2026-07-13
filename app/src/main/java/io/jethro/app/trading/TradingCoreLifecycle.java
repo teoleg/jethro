@@ -1,6 +1,7 @@
 package io.jethro.app.trading;
 
 import io.jethro.domain.Decimals;
+import io.jethro.trading.marketdata.sim.CurveFactorSimulator;
 import io.jethro.trading.marketdata.sim.SimMarketDataAdapter;
 import io.jethro.trading.runtime.LmdbStateStore;
 import io.jethro.trading.runtime.TradingCoreRuntime;
@@ -20,6 +21,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     private final TradingCoreProperties properties;
     private volatile TradingCoreRuntime runtime;
+    private volatile SimMarketDataAdapter adapter;
     private volatile ScheduledExecutorService statsLogger;
 
     public TradingCoreLifecycle(TradingCoreProperties properties) {
@@ -31,11 +33,28 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         long[] startPricesScaled = properties.simInstruments().stream()
                 .mapToLong(id -> Decimals.toScaledLong(properties.startPriceFor(id), Decimals.PRICE_SCALE))
                 .toArray();
+        // Per-tick step calibrated from annualized vol: maxStep(1e-6 of price) =
+        // σ_annual · √(Δt / trading-year) · √3 (uniform→σ match). Worked example: 25% vol,
+        // 100ms tick, year = 252d·6.5h ≈ 5.9e6s → 0.25·√(0.1/5.9e6)·1.732·1e6 ≈ 56 →
+        // a typical 5-minute move of ~0.18%, instead of the old multi-percent jumps.
+        double tickSeconds = properties.simTickIntervalMillis() / 1_000.0;
+        double tradingYearSeconds = 252 * 6.5 * 3_600;
+        long[] maxStepMicros = properties.simInstruments().stream()
+                .mapToLong(id -> Math.max(1, Math.round(properties.annualVolFor(id)
+                        * Math.sqrt(tickSeconds / tradingYearSeconds) * Math.sqrt(3.0) * 1_000_000)))
+                .toArray();
         var adapter = new SimMarketDataAdapter(
                 properties.simSeed(),
                 properties.simInstruments(),
                 startPricesScaled,
+                maxStepMicros,
+                properties.simRegimesOrDefault(),
+                properties.simCurveOrDefault()
+                        // CONVENTION: demo curve starts at 3.8% level, +90bp long-short slope.
+                        ? new CurveFactorSimulator(properties.simSeed() + 1, 0.038, 0.009)
+                        : null,
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
+        this.adapter = adapter;
         var store = LmdbStateStore.open(
                 Path.of(properties.lmdbPath()),
                 properties.lmdbMaxSizeMb() * 1024 * 1024);
@@ -58,8 +77,10 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         var rt = runtime;
         if (rt != null) {
             var stats = rt.stats();
-            log.info("trading-core: ticksIn={} dropped={} instruments={} marksFlushed={}",
-                    stats.ticksIn(), stats.ticksDropped(), rt.markCache().size(), stats.marksFlushedTotal());
+            var sim = adapter;
+            log.info("trading-core: ticksIn={} dropped={} instruments={} marksFlushed={} regime={}",
+                    stats.ticksIn(), stats.ticksDropped(), rt.markCache().size(), stats.marksFlushedTotal(),
+                    sim != null ? sim.regime() : "n/a");
         }
     }
 

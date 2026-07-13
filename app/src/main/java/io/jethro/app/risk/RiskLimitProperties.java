@@ -7,18 +7,21 @@ import java.util.Map;
 
 /**
  * Risk-limit configuration (jethro.risk). Default caps apply to every book; per-book
- * entries under {@code books.<BOOK>} override any subset. A null/absent value means no
- * limit for that metric.
+ * entries under {@code books.<BOOK>} override any subset; {@code firm.*} caps the
+ * aggregate across all books. A null/absent value means no limit for that metric.
  */
 @ConfigurationProperties(prefix = "jethro.risk")
 public record RiskLimitProperties(
         BigDecimal maxGrossExposure,
         BigDecimal maxNetExposure,
         BigDecimal maxLossPnl,
+        BigDecimal maxInstrumentExposure,
         BigDecimal warnRatio,
-        Map<String, BookLimits> books) {
+        Map<String, BookLimits> books,
+        BookLimits firm) {
 
-    public record BookLimits(BigDecimal maxGrossExposure, BigDecimal maxNetExposure, BigDecimal maxLossPnl) {
+    public record BookLimits(BigDecimal maxGrossExposure, BigDecimal maxNetExposure,
+                             BigDecimal maxLossPnl, BigDecimal maxInstrumentExposure) {
     }
 
     /** Warn ratio, defaulting to 80% when unset. */

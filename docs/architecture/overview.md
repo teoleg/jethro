@@ -1,6 +1,8 @@
 # Jethro — Architecture Overview
 
 Status: design phase. Decisions referenced as ADR-XXXX live in [`docs/adr/`](../adr/README.md).
+The risk/pricing analytics layer has its own target architecture (north star):
+[`quant-engine.md`](quant-engine.md).
 
 ## System at a glance
 

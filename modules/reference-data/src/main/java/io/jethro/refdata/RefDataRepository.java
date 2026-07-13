@@ -30,6 +30,16 @@ public class RefDataRepository {
                         Optional.ofNullable(rs.getString("parent_id")).map(BookId::new)));
     }
 
+    /** Product terms (tenor, index, day counts) per instrument — OTC definitions (V7). */
+    public Map<String, Map<String, String>> findAllAttributes() {
+        Map<String, Map<String, String>> attributes = new HashMap<>();
+        jdbc.query("select instrument_id, name, value from instrument_attributes", rs -> {
+            attributes.computeIfAbsent(rs.getString("instrument_id"), k -> new HashMap<>())
+                    .put(rs.getString("name"), rs.getString("value"));
+        });
+        return attributes;
+    }
+
     public List<Instrument> findAllInstruments() {
         Map<String, Map<String, String>> symbology = new HashMap<>();
         jdbc.query("select instrument_id, source, symbol from instrument_symbology", rs -> {

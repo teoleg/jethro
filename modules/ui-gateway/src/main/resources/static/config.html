@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — config</title>
+<style>
+  :root { --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f; --warn:#e0a83d; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; } .hint { color:var(--dim); font-size:12px; }
+  main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; display:grid; gap:18px; grid-template-columns:1.2fr .8fr; align-items:start; }
+  @media (max-width:920px) { main { grid-template-columns:1fr; } }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:10px 12px; margin-bottom:18px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:3px 10px; border-bottom:1px solid var(--line); line-height:1.7; }
+  th:first-child, td:first-child { text-align:left; }
+  tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .muted { color:var(--dim); }
+  .util { display:inline-block; min-width:52px; text-align:right; }
+  .ok { color:var(--up); } .warnc { color:var(--warn); } .alert { color:var(--down); }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+      <a class="tab active" href="/config.html">Config</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="hint">running configuration — read-only (edits via application.properties)</span>
+  </div>
+</div>
+<main>
+  <div>
+    <div class="section-h">Risk limits — with live utilization</div>
+    <div class="panel"><div id="limits" class="muted">loading…</div></div>
+    <div class="section-h">Strategy</div>
+    <div class="panel"><div id="strategy" class="muted">loading…</div></div>
+  </div>
+  <div>
+    <div class="section-h">Simulation</div>
+    <div class="panel"><div id="sim" class="muted">loading…</div></div>
+  </div>
+</main>
+<script>
+  const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
+  const money = v => v==null ? "—" : "$" + Number(v).toLocaleString();
+  const utilCls = p => p==null ? "" : p >= 100 ? "alert" : p >= 80 ? "warnc" : "ok";
+  const util = (used, cap) => {
+    if (cap==null || used==null) return '<span class="muted">—</span>';
+    const p = Math.round(Math.abs(Number(used)) / Number(cap) * 100);
+    return `<span class="util mono ${utilCls(p)}">${p}%</span>`;
+  };
+
+  function kvTable(obj, labels) {
+    return "<table>" + Object.entries(labels).map(([k, label]) => {
+      let v = obj[k];
+      if (v == null) v = "—";
+      else if (Array.isArray(v)) v = v.join(", ");
+      else if (typeof v === "object") v = Object.entries(v).map(([a,b])=>`${a}=${b}`).join("  ");
+      return `<tr><td>${esc(label)}</td><td class="mono" style="text-align:right">${esc(String(v))}</td></tr>`;
+    }).join("") + "</table>";
+  }
+
+  async function load() {
+    try {
+      const [cfg, risk] = await Promise.all([
+        (await fetch("/api/config")).json(), (await fetch("/api/risk")).json()]);
+      const r = cfg.risk, byBook = {};
+      (risk.byBook||[]).forEach(g => byBook[g.key] = g);
+
+      // effective limits per scope: default row, each book (override||default), firm
+      const eff = b => ({
+        gross: (b && b.maxGrossExposure) ?? r.maxGrossExposure,
+        net:   (b && b.maxNetExposure) ?? r.maxNetExposure,
+        loss:  (b && b.maxLossPnl) ?? r.maxLossPnl,
+        instr: (b && b.maxInstrumentExposure) ?? r.maxInstrumentExposure });
+      const bookIds = [...new Set([...(Object.keys(r.books||{})), ...Object.keys(byBook)])].sort();
+      const row = (name, lim, live, tag) => {
+        const g = live ? live.grossExposure : null, n = live ? live.netExposure : null;
+        const loss = live && Number(live.totalPnl) < 0 ? -Number(live.totalPnl) : (live ? 0 : null);
+        return `<tr><td><b>${esc(name)}</b>${tag?` <span class="muted" style="font-size:10px">${tag}</span>`:""}</td>
+          <td class="mono">${money(lim.gross)}</td><td>${util(g, lim.gross)}</td>
+          <td class="mono">${money(lim.net)}</td><td>${util(n, lim.net)}</td>
+          <td class="mono">${money(lim.loss)}</td><td>${util(loss, lim.loss)}</td>
+          <td class="mono">${money(lim.instr)}</td></tr>`;
+      };
+      let html = "<table><tr><th>scope</th><th>gross cap</th><th>used</th><th>net cap</th><th>used</th><th>max loss</th><th>used</th><th>instr cap</th></tr>";
+      html += row("DEFAULT (any book)", eff(null), null, "");
+      bookIds.forEach(b => html += row(b, eff((r.books||{})[b]), byBook[b], (r.books||{})[b] ? "override" : "default"));
+      const firmLive = risk.total ? { grossExposure: risk.total.grossExposure, netExposure: risk.total.netExposure, totalPnl: risk.total.totalPnl } : null;
+      html += row("FIRM (aggregate)", { gross:r.firm&&r.firm.maxGrossExposure, net:r.firm&&r.firm.maxNetExposure, loss:r.firm&&r.firm.maxLossPnl, instr:null }, firmLive, "");
+      html += `</table><div class="muted" style="font-size:11px;margin-top:8px">WARN at ${Number(r.warnRatio||0.8)*100}% of a cap, ALERT at/over it; loss caps are enforced pre-trade (risk-reducing orders only). Read-only — edit in application.properties.</div>`;
+      document.getElementById("limits").outerHTML = `<div id="limits">${html}</div>`;
+
+      document.getElementById("strategy").outerHTML = '<div id="strategy">' + kvTable(cfg.strategy, {
+        enabled:"enabled", intervalSeconds:"evaluation interval (s)", lookback:"lookback (samples)",
+        thresholdSigmas:"signal threshold (σ)", minSignalBps:"min signal (bps)",
+        targetNotional:"target order notional", maxOrderNotional:"max order notional (default)",
+        maxOrderNotionalByClass:"max order notional by class", maxPositionNotional:"max position notional",
+        volReferenceBps:"vol reference (bps)", book:"default book", bookByClass:"book routing",
+        autoExecute:"auto-execute (sim only)", autoCooldownSeconds:"auto cooldown (s)"}) + '</div>';
+
+      document.getElementById("sim").outerHTML = '<div id="sim">' + kvTable(cfg.sim, {
+        enabled:"trading-core enabled", simSeed:"seed", simInstruments:"instruments",
+        simStartPrice:"default start price", simStartPrices:"start prices",
+        simAnnualVol:"default annual vol", simAnnualVols:"annual vols",
+        simRegimes:"market regimes", simCurve:"SOFR curve sim",
+        simTickIntervalMillis:"tick interval (ms)", bufferCapacity:"ring buffer"}) + '</div>';
+    } catch (e) { document.getElementById("limits").textContent = "config unavailable: " + e; }
+  }
+  load();
+  setInterval(load, 5000);
+</script>
+</body>
+</html>

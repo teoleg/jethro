@@ -1,6 +1,7 @@
 package io.jethro.trading.algo.strategy;
 
 import io.jethro.domain.Side;
+import org.apache.commons.math3.stat.descriptive.DescriptiveStatistics;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -12,31 +13,45 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * A deterministic momentum (trend-following) toy strategy (step 8). Keeps a short price
- * window per instrument and signals BUY when the price has risen at least {@code
- * thresholdBps} over the window, SELL when it has fallen as much. Pure and stateful:
- * given the same sequence of observations it emits the same signals — exact decimals, no
- * float (invariant 1). It proposes; it never trades (invariant 7).
+ * A deterministic, volatility-adaptive momentum toy strategy (step 8). Keeps a rolling
+ * price window per instrument and signals when the move over the window is statistically
+ * unusual <em>for that instrument</em>:
  *
- * <p>Not investment logic — a stand-in to exercise the candidate → guardrail → attention
- * path until real strategies (and the ADR-0010 frontier tier) arrive.
+ * <pre>
+ *   returns rᵢ = ln(pᵢ/pᵢ₋₁) over the window (Commons Math sample std-dev, ADR-0020)
+ *   z = Σrᵢ / (σ(r) · √lookback)          — the window move in units of its own vol
+ *   BUY  when z ≥ +thresholdSigmas, SELL when z ≤ −thresholdSigmas
+ *   subject to |move| ≥ minSignalBps      — floor against economically meaningless dust
+ * </pre>
+ *
+ * A fixed-bps threshold cannot fit instruments whose vols differ 10× (equities vs
+ * Treasury futures): any constant either fires on noise or never fires. The z-score
+ * self-calibrates per instrument. A perfectly steady trend (σ = 0, move ≠ 0) counts as
+ * infinite z — trending, so it signals if above the floor. Deterministic given the same
+ * observations (invariant: it proposes, never trades — ADR-0018/0019 downstream).
  */
 public final class MomentumStrategy {
 
     private final int lookback;
-    private final BigDecimal thresholdBps;
+    private final double thresholdSigmas;
+    private final BigDecimal minSignalBps;
     private final Map<String, Deque<BigDecimal>> history = new HashMap<>();
 
     /**
-     * @param lookback     number of prior observations to compare against (window length).
-     * @param thresholdBps move, in basis points, needed to fire a signal (e.g. 50 = 0.50%).
+     * @param lookback        number of returns in the window (window = lookback+1 prices).
+     * @param thresholdSigmas z-score at which a signal fires (e.g. 2.5).
+     * @param minSignalBps    minimum absolute move, in bps, for any signal.
      */
-    public MomentumStrategy(int lookback, BigDecimal thresholdBps) {
-        if (lookback < 1) {
-            throw new IllegalArgumentException("lookback must be >= 1");
+    public MomentumStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps) {
+        if (lookback < 2) {
+            throw new IllegalArgumentException("lookback must be >= 2");
+        }
+        if (thresholdSigmas <= 0) {
+            throw new IllegalArgumentException("thresholdSigmas must be positive");
         }
         this.lookback = lookback;
-        this.thresholdBps = thresholdBps;
+        this.thresholdSigmas = thresholdSigmas;
+        this.minSignalBps = minSignalBps;
     }
 
     /** Feeds one observation snapshot and returns any signals it triggers. */
@@ -58,13 +73,40 @@ public final class MomentumStrategy {
             BigDecimal changeBps = obs.price().subtract(reference)
                     .divide(reference, 8, RoundingMode.HALF_EVEN)
                     .multiply(BigDecimal.valueOf(10_000));
-            if (changeBps.compareTo(thresholdBps) >= 0) {
-                signals.add(new TradeSignal(obs.instrumentId(), Side.BUY, reference, obs.price(), changeBps));
-            } else if (changeBps.compareTo(thresholdBps.negate()) <= 0) {
-                signals.add(new TradeSignal(obs.instrumentId(), Side.SELL, reference, obs.price(), changeBps));
+            if (changeBps.abs().compareTo(minSignalBps) < 0) {
+                continue; // below the dust floor regardless of z
+            }
+
+            double z = windowZScore(window);
+            if (z >= thresholdSigmas) {
+                signals.add(new TradeSignal(obs.instrumentId(), Side.BUY, reference, obs.price(), changeBps, z));
+            } else if (z <= -thresholdSigmas) {
+                signals.add(new TradeSignal(obs.instrumentId(), Side.SELL, reference, obs.price(), changeBps, z));
             }
         }
         return signals;
+    }
+
+    /** Signed z: window log-move divided by (per-return σ · √lookback); ±∞ for a steady trend. */
+    private double windowZScore(Deque<BigDecimal> window) {
+        DescriptiveStatistics returns = new DescriptiveStatistics();
+        double previous = Double.NaN;
+        double move = 0.0;
+        for (BigDecimal p : window) {
+            double price = p.doubleValue();
+            if (!Double.isNaN(previous) && previous > 0 && price > 0) {
+                double r = Math.log(price / previous);
+                returns.addValue(r);
+                move += r;
+            }
+            previous = price;
+        }
+        double sigma = returns.getStandardDeviation();
+        if (sigma == 0.0) {
+            // Every return identical: flat (move 0 → z 0) or a perfectly steady trend (±∞).
+            return move == 0.0 ? 0.0 : (move > 0 ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY);
+        }
+        return move / (sigma * Math.sqrt(lookback));
     }
 
     /** One instrument's current mark for the strategy to consider. */

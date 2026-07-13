@@ -9,6 +9,7 @@ import io.jethro.trading.algo.strategy.TradeSignal;
 import io.jethro.trading.riskpnl.InstrumentRef;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.trading.riskpnl.PreTradeGuardrail;
+import io.jethro.trading.riskpnl.RiskProjection;
 import io.jethro.uigateway.AttentionFeed;
 import io.jethro.uigateway.SseBroadcaster;
 import org.slf4j.Logger;
@@ -44,23 +45,29 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final TradingCoreLifecycle tradingCore;
     private final InstrumentRefSource refs;
     private final PreTradeGuardrail guardrail;
+    private final RiskProjection risk;
     private final AttentionFeed feed;
     private final SseBroadcaster sse;
     private final StrategyProperties props;
     private final OrderService orderService; // nullable: null → suggestions only
 
+    private static final long HEARTBEAT_CYCLES = 24; // ~2 min at a 5s cadence
+
     private final Set<String> active = new HashSet<>();
     private final Map<String, Long> lastAutoExec = new ConcurrentHashMap<>();
+    private long cycles;
+    private boolean throttledActive;
     private volatile ScheduledExecutorService scheduler;
 
     public StrategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
-                             InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                             InstrumentRefSource refs, PreTradeGuardrail guardrail, RiskProjection risk,
                              AttentionFeed feed, SseBroadcaster sse, StrategyProperties props,
                              OrderService orderService) {
         this.strategy = strategy;
         this.tradingCore = tradingCore;
         this.refs = refs;
         this.guardrail = guardrail;
+        this.risk = risk;
         this.feed = feed;
         this.sse = sse;
         this.props = props;
@@ -80,12 +87,13 @@ public final class StrategyLifecycle implements SmartLifecycle {
         });
         scheduler.scheduleWithFixedDelay(this::runOnce,
                 props.intervalSeconds(), props.intervalSeconds(), TimeUnit.SECONDS);
-        log.info("momentum strategy started: every {}s, lookback {}, threshold {}bps, book {}",
-                props.intervalSeconds(), props.lookback(), props.thresholdBps(), props.book());
+        log.info("momentum strategy started: every {}s, lookback {}, threshold {}σ (floor {}bps), default book {}",
+                props.intervalSeconds(), props.lookback(), props.thresholdSigmasOrDefault(),
+                props.minSignalBpsOrDefault(), props.book());
         if (autoExecuting()) {
             log.warn("AUTO-EXECUTE ON (ADR-0019): strategy signals auto-submit SIMULATED orders "
-                    + "to book {} (cooldown {}s). Never enable against a real broker.",
-                    props.book(), props.autoCooldownSeconds());
+                    + "(routed by asset class {}, default {}; cooldown {}s). Never enable against a real broker.",
+                    props.bookByClass(), props.book(), props.autoCooldownSeconds());
         } else if (props.autoExecute()) {
             log.warn("jethro.strategy.auto-execute=true but no order service available — suggestions only");
         }
@@ -98,23 +106,57 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 return;
             }
             List<MomentumStrategy.Observation> observations = new ArrayList<>();
+            int stale = 0;
             for (var mark : runtime.markCache().snapshot()) {
                 observations.add(new MomentumStrategy.Observation(mark.instrumentId(), mark.price(), mark.stale()));
+                if (mark.stale()) {
+                    stale++;
+                }
             }
+            int fresh = observations.size() - stale;
+
             long now = System.currentTimeMillis();
             Set<String> current = new HashSet<>();
+            int signals = 0;
+            int suppressed = 0;
+            int oversized = 0;
+            int atPosition = 0;
+            int executed = 0;
+            String sampleReason = null;
             for (TradeSignal signal : strategy.evaluate(observations)) {
-                BigDecimal quantity = size(signal);
+                signals++;
+                String book = bookFor(signal.instrumentId()); // route by asset class, not all to one book
+                Optional<BigDecimal> sized = size(signal);
+                if (sized.isEmpty()) {
+                    oversized++; // one unit exceeds the order-notional cap — unsizeable, skip
+                    continue;
+                }
+                // Position-aware (quant-engine phase 5): once the book already holds the
+                // target position in this instrument, don't pile on in the same direction —
+                // opposite-direction signals still pass (they REDUCE risk).
+                BigDecimal held = risk.instrumentNetExposure(book, signal.instrumentId());
+                boolean sameDirection = (held.signum() > 0) == (signal.side() == io.jethro.domain.Side.BUY);
+                if (held.signum() != 0 && sameDirection
+                        && held.abs().compareTo(props.maxPositionNotionalOrDefault()) >= 0) {
+                    atPosition++;
+                    continue;
+                }
+                BigDecimal quantity = sized.get();
                 BigDecimal signed = signal.side().signed(quantity);
                 Optional<String> rejection =
-                        guardrail.rejectionReason(props.book(), signal.instrumentId(), signed);
+                        guardrail.rejectionReason(book, signal.instrumentId(), signed);
                 if (rejection.isPresent()) {
+                    suppressed++;
+                    sampleReason = rejection.get();
                     continue; // not admissible under the book's limits — don't suggest it
                 }
-                boolean executed = autoExecuting() && maybeAutoExecute(signal, quantity, now);
+                boolean traded = autoExecuting() && maybeAutoExecute(signal, book, quantity, now);
+                if (traded) {
+                    executed++;
+                }
                 String id = "signal:" + signal.instrumentId();
                 current.add(id);
-                feed.upsert(toItem(signal, quantity, now, executed));
+                feed.upsert(toItem(signal, book, quantity, now, traded));
             }
             boolean changed = false;
             for (String id : Set.copyOf(active)) {
@@ -129,21 +171,78 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     changed = true;
                 }
             }
+
+            // Surface "why did it go quiet" on the feed the user already watches: every
+            // signal blocked by the guardrail (e.g. the book hit an exposure limit).
+            if (suppressed > 0 && current.isEmpty()) {
+                if (!throttledActive) {
+                    feed.upsert(new AttentionFeed.AttentionItem("strategy-throttled", now,
+                            AttentionFeed.Severity.WARN, "strategy-throttled",
+                            "Strategy idling — a book is at a risk limit",
+                            suppressed + " signal(s) blocked by the pre-trade guardrail: " + sampleReason
+                                    + ". Auto-trading resumes when the book's exposure frees up.", "/books.html"));
+                    throttledActive = true;
+                    changed = true;
+                }
+            } else if (throttledActive) {
+                feed.resolve("strategy-throttled");
+                throttledActive = false;
+                changed = true;
+            }
             if (changed) {
                 sse.broadcast("attention", feed.snapshot());
             }
-        } catch (Exception e) {
-            log.warn("strategy run failed: {}", e.getMessage());
+
+            // Heartbeat: the log always shows the strategy is alive and why it is/ isn't trading.
+            if (++cycles % HEARTBEAT_CYCLES == 0 || signals > 0 || suppressed > 0) {
+                log.info("strategy: {} fresh marks ({} stale), {} signals, {} unsizeable, {} at-position, {} suppressed by limits, {} auto-executed{}",
+                        fresh, stale, signals, oversized, atPosition, suppressed, executed,
+                        fresh == 0 ? "  — NO FRESH MARKS (feed may be stale)" : "");
+            }
+        } catch (Throwable t) {
+            // Never let a Throwable silently cancel the scheduled task — that would stop the
+            // strategy for good with no further logging. Catch, log, keep the cadence alive.
+            log.warn("strategy run failed: {}", t.toString());
         }
     }
 
-    /** Sizes a suggestion to the target notional: qty = targetNotional / (price × multiplier), min 1. */
-    private BigDecimal size(TradeSignal signal) {
-        BigDecimal multiplier = refs.find(signal.instrumentId())
-                .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
+    /** Routes an instrument to the book that fits its asset class (falls back to the default). */
+    private String bookFor(String instrumentId) {
+        return props.bookFor(refs.find(instrumentId).map(InstrumentRef::assetClass).orElse(null));
+    }
+
+    /**
+     * Sizes a suggestion to the target notional: qty = targetNotional / (price × multiplier),
+     * rounded down. Never rounds up: if even one unit exceeds the max-order-notional cap
+     * (one ES contract ≈ $272k vs a $25k target), the signal is skipped — empty result.
+     */
+    private Optional<BigDecimal> size(TradeSignal signal) {
+        Optional<InstrumentRef> ref = refs.find(signal.instrumentId());
+        if (ref.isEmpty()) {
+            return Optional.empty(); // not in the instrument master (e.g. a curve quote) — never trade it
+        }
+        BigDecimal multiplier = ref.map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
         BigDecimal notionalPerUnit = signal.price().multiply(multiplier);
-        BigDecimal qty = props.targetNotional().divide(notionalPerUnit, 0, RoundingMode.DOWN);
-        return qty.signum() > 0 ? qty : BigDecimal.ONE;
+        // Vol-scaled sizing (quant-engine phase 5): notional = target × clamp(refσ/σ, 0.5, 2),
+        // where σ is the signal window's own realized vol (bps) recovered from move/z.
+        // Sizing is risk-budgeted, not dollar-fixed: half size in wild markets, more in calm.
+        double z = Math.abs(signal.zScore());
+        double sigmaBps = Double.isFinite(z) && z > 1e-9
+                ? Math.abs(signal.changeBps().doubleValue()) / z
+                : props.volReferenceBpsOrDefault();
+        double scale = Math.max(0.5, Math.min(2.0, props.volReferenceBpsOrDefault() / Math.max(sigmaBps, 1e-9)));
+        BigDecimal notionalTarget = props.targetNotional().multiply(BigDecimal.valueOf(scale));
+        BigDecimal qty = notionalTarget.divide(notionalPerUnit, 0, RoundingMode.DOWN);
+        if (qty.signum() <= 0) {
+            // Cap is per asset class: one Treasury contract (~$110k) is a legitimate order
+            // for a rates book even though it dwarfs the equity-sized default cap.
+            BigDecimal cap = props.maxOrderNotionalFor(ref.map(InstrumentRef::assetClass).orElse(null));
+            if (notionalPerUnit.compareTo(cap) > 0) {
+                return Optional.empty(); // one unit already blows the order cap — unsizeable
+            }
+            qty = BigDecimal.ONE;
+        }
+        return Optional.of(qty);
     }
 
     /**
@@ -151,7 +250,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
      * (ADR-0019: sim only, guardrail re-checked in OrderService), throttled by cooldown.
      * @return true if an order was submitted this cycle.
      */
-    private boolean maybeAutoExecute(TradeSignal signal, BigDecimal qty, long now) {
+    private boolean maybeAutoExecute(TradeSignal signal, String book, BigDecimal qty, long now) {
         long cooldownMillis = props.autoCooldownSeconds() * 1_000;
         Long last = lastAutoExec.get(signal.instrumentId());
         if (last != null && now - last < cooldownMillis) {
@@ -159,11 +258,11 @@ public final class StrategyLifecycle implements SmartLifecycle {
         }
         try {
             var command = new NewOrder("auto:" + signal.instrumentId() + ":" + UUID.randomUUID(),
-                    props.book(), signal.instrumentId(), signal.side(), OrderType.MARKET, qty, null);
+                    book, signal.instrumentId(), signal.side(), OrderType.MARKET, qty, null);
             var order = orderService.submit(command);
             lastAutoExec.put(signal.instrumentId(), now);
-            log.info("auto-executed {} {} {} → {} ({})",
-                    signal.side(), qty.toPlainString(), signal.instrumentId(), order.status(), order.orderId());
+            log.info("auto-executed {} {} {} → {} on {} ({})",
+                    signal.side(), qty.toPlainString(), signal.instrumentId(), order.status(), book, order.orderId());
             return true;
         } catch (Exception e) {
             log.warn("auto-execute of {} failed: {}", signal.instrumentId(), e.getMessage());
@@ -171,7 +270,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         }
     }
 
-    private AttentionFeed.AttentionItem toItem(TradeSignal s, BigDecimal qty, long now, boolean executed) {
+    private AttentionFeed.AttentionItem toItem(TradeSignal s, String book, BigDecimal qty, long now, boolean executed) {
         String action = s.side() + " " + qty.toPlainString() + " " + s.instrumentId();
         String title = (executed ? "Auto-traded: " : "Signal: ") + action;
         String tail = executed
@@ -180,7 +279,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         String body = (executed ? "Auto-" + s.side() + " " : "Suggested " + s.side() + " ")
                 + qty.toPlainString() + " " + s.instrumentId()
                 + " @ " + s.price().setScale(2, RoundingMode.HALF_UP).toPlainString()
-                + " → " + props.book() + ". " + s.rationale() + ". " + tail;
+                + " → " + book + ". " + s.rationale() + ". " + tail;
         return new AttentionFeed.AttentionItem("signal:" + s.instrumentId(), now,
                 AttentionFeed.Severity.INFO, "strategy-signal", title, body, "/orders.html");
     }

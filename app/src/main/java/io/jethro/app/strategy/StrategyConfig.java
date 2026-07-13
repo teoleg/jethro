@@ -5,6 +5,7 @@ import io.jethro.order.OrderService;
 import io.jethro.trading.algo.strategy.MomentumStrategy;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.trading.riskpnl.PreTradeGuardrail;
+import io.jethro.trading.riskpnl.RiskProjection;
 import io.jethro.uigateway.AttentionFeed;
 import io.jethro.uigateway.SseBroadcaster;
 import org.springframework.beans.factory.ObjectProvider;
@@ -25,17 +26,19 @@ public class StrategyConfig {
 
     @Bean
     MomentumStrategy momentumStrategy(StrategyProperties props) {
-        return new MomentumStrategy(props.lookback(), props.thresholdBps());
+        return new MomentumStrategy(props.lookback(), props.thresholdSigmasOrDefault(),
+                props.minSignalBpsOrDefault());
     }
 
     @Bean
     StrategyLifecycle strategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
                                         InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                                        RiskProjection risk,
                                         AttentionFeed feed, SseBroadcaster sse, StrategyProperties props,
                                         ObjectProvider<OrderService> orderService) {
         // OrderService present only when persistence is on; without it the strategy is
         // suggestion-only even if auto-execute is set.
-        return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, feed, sse, props,
+        return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, risk, feed, sse, props,
                 orderService.getIfAvailable());
     }
 }

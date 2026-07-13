@@ -116,7 +116,7 @@ class FullStackIT {
         assertEquals(3, books.get(0).get("children").size(), "ALPHA, BETA and MACRO under FIRM");
 
         JsonNode instruments = getJson("/api/instruments");
-        assertEquals(9, instruments.size(), "seeded multi-asset sim instruments");
+        assertEquals(15, instruments.size(), "seeded multi-asset instruments incl. rates, swaps + EUR equity");
         assertEquals("AAPL", instruments.get(0).get("instrumentId").asText(), "sorted by id");
         assertEquals("1.00000000", instruments.get(0).get("contractMultiplier").asText(),
                 "multiplier arrives as exact decimal string");
@@ -161,6 +161,17 @@ class FullStackIT {
         });
         assertTrue(rejected.get("reason").asText().toLowerCase().contains("exceed"),
                 "reason states the limit breach: " + rejected.get("reason").asText());
+    }
+
+    @Test
+    void operationalChatAnswersAndAudits() {
+        // Exercises /api/chat end to end (intent parse → deterministic answer → chat_audit
+        // write via the V6 migration). Content is deterministic; don't assert the model's
+        // parse (0.5b may vary) — just that a real, non-empty answer comes back.
+        JsonNode resp = postJson("/api/chat", "{\"question\":\"what is the firm pnl?\"}");
+        assertTrue(resp != null, "chat endpoint responded");
+        assertTrue(resp.path("answer").asText("").length() > 0, "answer is non-empty");
+        assertTrue(resp.path("intent").asText("").length() > 0, "intent was classified");
     }
 
     private JsonNode postJson(String path, String body) {

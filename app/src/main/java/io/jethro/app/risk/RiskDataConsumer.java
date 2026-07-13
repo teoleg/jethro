@@ -8,6 +8,7 @@ import io.jethro.messaging.AvroCodec;
 import io.jethro.messaging.FillEvent;
 import io.jethro.messaging.MarkEvent;
 import io.jethro.messaging.Topics;
+import io.jethro.trading.riskpnl.CurveService;
 import io.jethro.trading.riskpnl.RiskProjection;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
@@ -38,13 +39,15 @@ public final class RiskDataConsumer implements AutoCloseable {
 
     private final String bootstrapServers;
     private final RiskProjection projection;
+    private final CurveService curveService;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicLong skipped = new AtomicLong();
     private volatile Thread thread;
 
-    public RiskDataConsumer(String bootstrapServers, RiskProjection projection) {
+    public RiskDataConsumer(String bootstrapServers, RiskProjection projection, CurveService curveService) {
         this.bootstrapServers = bootstrapServers;
         this.projection = projection;
+        this.curveService = curveService;
     }
 
     public void start() {
@@ -93,8 +96,13 @@ public final class RiskDataConsumer implements AutoCloseable {
                             projection.applyFill(toFill(AvroCodec.decode(record.value(), FillEvent.class)));
                         } else {
                             MarkEvent mark = AvroCodec.decode(record.value(), MarkEvent.class);
-                            projection.applyMark(mark.getInstrumentId().toString(), mark.getPrice(),
-                                    mark.getMeta().getIngestTimestamp().toEpochMilli());
+                            String id = mark.getInstrumentId().toString();
+                            if (CurveService.isCurveQuote(id)) {
+                                curveService.onRate(id, mark.getPrice()); // curve, not a position mark
+                            } else {
+                                projection.applyMark(id, mark.getPrice(),
+                                        mark.getMeta().getIngestTimestamp().toEpochMilli());
+                            }
                         }
                     } catch (RuntimeException e) {
                         log.warn("skipping undecodable {} record ({} total): {}",

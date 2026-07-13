@@ -63,6 +63,27 @@ public class OrderController {
         return repository.recentOrders(100);
     }
 
+    /** One page of a day's blotter (server zone). */
+    public record OrderPage(long total, int page, int size, int totalPages,
+                            List<OrderRepository.OrderRow> orders) {
+    }
+
+    /** Day-scoped, paginated blotter: /api/orders/day?date=YYYY-MM-DD&page=0&size=100. */
+    @GetMapping("/api/orders/day")
+    public OrderPage ordersForDay(
+            @org.springframework.web.bind.annotation.RequestParam(name = "date", required = false) String date,
+            @org.springframework.web.bind.annotation.RequestParam(name = "page", defaultValue = "0") int page,
+            @org.springframework.web.bind.annotation.RequestParam(name = "size", defaultValue = "100") int size) {
+        java.time.LocalDate day = date == null || date.isBlank()
+                ? java.time.LocalDate.now() : java.time.LocalDate.parse(date);
+        int pageSize = Math.min(Math.max(size, 1), 500);
+        int pageIndex = Math.max(page, 0);
+        long total = repository.countOrdersForDay(day);
+        int totalPages = (int) Math.max(1, (total + pageSize - 1) / pageSize);
+        return new OrderPage(total, pageIndex, pageSize, totalPages,
+                repository.ordersForDay(day, pageIndex * pageSize, pageSize));
+    }
+
     @GetMapping("/api/fills")
     public List<OrderRepository.FillRow> fills() {
         return repository.recentFills(100);

@@ -1,8 +1,10 @@
 package io.jethro.app.risk;
 
 import io.jethro.trading.riskpnl.ConsolidatedRisk;
+import io.jethro.trading.riskpnl.CurveService;
 import io.jethro.trading.riskpnl.PositionRisk;
 import io.jethro.trading.riskpnl.RiskProjection;
+import io.jethro.trading.riskpnl.SwapPricingService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -36,9 +38,34 @@ public final class RiskController {
     }
 
     private final RiskProjection projection;
+    private final CurveService curveService;
+    private final SwapPricingService swapPricing;
 
-    public RiskController(RiskProjection projection) {
+    public RiskController(RiskProjection projection, CurveService curveService,
+                          SwapPricingService swapPricing) {
         this.projection = projection;
+        this.curveService = curveService;
+        this.swapPricing = swapPricing;
+    }
+
+    /** PV/DV01 as strings (money boundary, invariant 1); rates are analytics doubles. */
+    public record SwapDto(String instrumentId, String tenor, double notional, double fixedRate,
+                          double parRate, String presentValue, String dv01) {
+    }
+
+    /** Reference-swap valuations (Strata pricer over the live curve). */
+    @GetMapping("/api/swaps")
+    public List<SwapDto> swaps() {
+        return swapPricing.valueAll(java.time.LocalDate.now()).stream()
+                .map(v -> new SwapDto(v.instrumentId(), v.tenor(), v.notional(), v.fixedRate(),
+                        v.parRate(), v.presentValue().toPlainString(), v.dv01().toPlainString()))
+                .toList();
+    }
+
+    /** Live SOFR zero curve (rates/DFs are analytics estimates, not ledger money). */
+    @GetMapping("/api/curve")
+    public java.util.List<CurveService.CurvePoint> curve() {
+        return curveService.snapshot();
     }
 
     @GetMapping("/api/risk")

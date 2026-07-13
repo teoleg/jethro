@@ -95,4 +95,41 @@ class RiskLimitEvaluatorTest {
         RiskLimitSource none = book -> RiskLimits.none();
         assertTrue(evaluator.evaluate(p.snapshot(0), none).isEmpty());
     }
+
+    @Test
+    void instrumentConcentrationBreachNamesTheInstrument() {
+        var p = new RiskProjection(refs);
+        p.applyFill(buy("f1", "100", "10"));      // AAPL |exposure| 1000
+        p.applyMark("AAPL", new BigDecimal("10"), 0);
+
+        RiskLimitSource instrCap = book -> new RiskLimits(null, null, null, new BigDecimal("1000"));
+        List<LimitBreach> breaches = evaluator.evaluate(p.snapshot(0), instrCap);
+        assertEquals(1, breaches.size());
+        assertEquals(LimitBreach.Metric.INSTRUMENT_EXPOSURE, breaches.get(0).metric());
+        assertEquals("AAPL", breaches.get(0).subject());
+        assertEquals("risk:ALPHA:INSTRUMENT_EXPOSURE:AAPL", breaches.get(0).id());
+    }
+
+    @Test
+    void firmLimitBreachesOnTheAggregate() {
+        var p = new RiskProjection(refs);
+        p.applyFill(buy("f1", "100", "10"));      // gross 1000, one book
+        p.applyMark("AAPL", new BigDecimal("10"), 0);
+
+        RiskLimitSource firmCap = new RiskLimitSource() {
+            @Override
+            public RiskLimits limitsFor(String bookId) {
+                return RiskLimits.none();
+            }
+
+            @Override
+            public RiskLimits firmLimits() {
+                return new RiskLimits(new BigDecimal("1000"), null, null);
+            }
+        };
+        List<LimitBreach> breaches = evaluator.evaluate(p.snapshot(0), firmCap);
+        assertEquals(1, breaches.size());
+        assertEquals(RiskLimitEvaluator.FIRM, breaches.get(0).bookId());
+        assertEquals(LimitBreach.Severity.ALERT, breaches.get(0).severity());
+    }
 }

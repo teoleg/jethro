@@ -88,6 +88,7 @@ public final class RiskLimitMonitor implements SmartLifecycle {
             case GROSS_EXPOSURE -> "gross exposure";
             case NET_EXPOSURE -> "net exposure";
             case LOSS -> "loss";
+            case INSTRUMENT_EXPOSURE -> b.subject() + " concentration";
         };
         String title = b.bookId() + " "
                 + (b.severity() == LimitBreach.Severity.ALERT ? "at/over " : "approaching ") + metric + " limit";

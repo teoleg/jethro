@@ -3,6 +3,7 @@ package io.jethro.app.risk;
 import io.jethro.app.kafka.KafkaConfig;
 import io.jethro.app.kafka.KafkaEventPublisher;
 import io.jethro.refdata.RefDataRepository;
+import io.jethro.trading.riskpnl.CurveService;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.trading.riskpnl.PreTradeGuardrail;
 import io.jethro.trading.riskpnl.RiskLimitEvaluator;
@@ -43,15 +44,29 @@ public class RiskConfig {
         return new RiskProjection(refs);
     }
 
+    /** Live SOFR curve from streamed tenor quotes (quant-engine phase 4). */
     @Bean
-    RiskController riskController(RiskProjection projection) {
-        return new RiskController(projection);
+    CurveService curveService() {
+        return new CurveService();
+    }
+
+    /** Strata swap valuation (PV/DV01/par) on the live curve. */
+    @Bean
+    io.jethro.trading.riskpnl.SwapPricingService swapPricingService(CurveService curveService) {
+        return new io.jethro.trading.riskpnl.SwapPricingService(curveService);
+    }
+
+    @Bean
+    RiskController riskController(RiskProjection projection, CurveService curveService,
+                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
+        return new RiskController(projection, curveService, swapPricing);
     }
 
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
-    RiskDataConsumer riskDataConsumer(KafkaConfig.JethroKafkaProperties properties, RiskProjection projection) {
-        var consumer = new RiskDataConsumer(properties.bootstrapServers(), projection);
+    RiskDataConsumer riskDataConsumer(KafkaConfig.JethroKafkaProperties properties, RiskProjection projection,
+                                      CurveService curveService) {
+        var consumer = new RiskDataConsumer(properties.bootstrapServers(), projection, curveService);
         consumer.start();
         return consumer;
     }

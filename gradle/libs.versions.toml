@@ -10,8 +10,12 @@ jackson = "2.17.2"
 kafka = "3.8.0"
 postgresql = "42.7.4"
 flyway = "10.20.1"
+commonsMath = "3.6.1"
+strata = "2.12.20"
 
 [libraries]
+commons-math = { module = "org.apache.commons:commons-math3", version.ref = "commonsMath" }
+strata-measure = { module = "com.opengamma.strata:strata-measure", version.ref = "strata" }
 avro = { module = "org.apache.avro:avro", version.ref = "avro" }
 lmdbjava = { module = "org.lmdbjava:lmdbjava", version.ref = "lmdbjava" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
