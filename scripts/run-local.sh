@@ -11,10 +11,12 @@
 #   ./scripts/run-local.sh                       # everything on (AI + auto-execute)
 #   AI=off AUTOEXEC=off ./scripts/run-local.sh   # market path + UI only, no AI, no trading
 #   MODEL=qwen2.5:0.5b ./scripts/run-local.sh    # lighter model for tight RAM (weaker text)
+#   PROVIDER=yahoo ./scripts/run-local.sh        # real (delayed) prices from Yahoo (ADR-0023)
 #   PROFILE=default HEAP=1g ./scripts/run-local.sh
 #
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
-#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b)
+#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b),
+#            PROVIDER (sim|yahoo, default: sim)
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -24,6 +26,7 @@ HEAP="${HEAP:-512m}"
 AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:3b}"   # 3b = usable commentary; MODEL=qwen2.5:0.5b for tight RAM
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
+PROVIDER="${PROVIDER:-sim}"  # sim = seedable offline feed; yahoo = real delayed prices (ADR-0023)
 
 wait_for() {  # name, timeout_seconds, command...
   local name="$1" timeout="$2"; shift 2
@@ -78,6 +81,10 @@ EXTRA_ARGS=()
 if [ "$AUTOEXEC" = "on" ]; then
   echo "==> AUTO-EXECUTE ON: the strategy will auto-submit SIMULATED orders (ADR-0019)"
   EXTRA_ARGS+=(--jethro.strategy.auto-execute=true)
+fi
+EXTRA_ARGS+=(--jethro.trading.provider="$PROVIDER")
+if [ "$PROVIDER" = "yahoo" ]; then
+  echo "==> MARKET DATA: Yahoo (real, ~15-min delayed, dev/demo only — ADR-0023). Needs internet."
 fi
 
 mkdir -p logs
