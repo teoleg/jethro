@@ -13,8 +13,15 @@ import java.util.Set;
 public record HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
                                 List<PortfolioLine> portfolio, Set<String> tradableInstruments) {
 
-    /** A current price the model may reference (decimal as string). */
-    public record MarkView(String instrumentId, String price, boolean stale) {
+    /**
+     * A current price the model may reference (decimal as string), plus WHAT the instrument is —
+     * asset class, currency, and a short description. Without these the model guesses an identity
+     * from the ticker (e.g. calling the future "ZN" a stock named "Zapata Resources"); with them
+     * it reasons about the actual instrument. {@code assetClass}/{@code description} may be null
+     * when reference data is absent.
+     */
+    public record MarkView(String instrumentId, String assetClass, String currency,
+                           String description, String price, boolean stale) {
     }
 
     /** A current holding, so the model can reason about the book it already has. */

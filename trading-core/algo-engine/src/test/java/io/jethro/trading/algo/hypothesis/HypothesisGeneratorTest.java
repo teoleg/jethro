@@ -35,8 +35,8 @@ class HypothesisGeneratorTest {
 
     private HypothesisContext context() {
         return new HypothesisContext(
-                List.of(new HypothesisContext.MarkView("AAPL", "190.00", false),
-                        new HypothesisContext.MarkView("ES", "5450.00", false)),
+                List.of(new HypothesisContext.MarkView("AAPL", "EQUITY", "USD", "Apple Inc. common stock", "190.00", false),
+                        new HypothesisContext.MarkView("ES", "FUTURE", "USD", "E-mini S&P 500 future", "5450.00", false)),
                 List.of(new NarrativeItem("sim-news-1", 0, NarrativeItem.Category.EARNINGS,
                         "AAPL", NarrativeItem.Sentiment.BULLISH, "AAPL beats")),
                 List.of(), Set.of("AAPL", "ES"));

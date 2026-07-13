@@ -146,9 +146,13 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 }
                 tradable.add(mark.instrumentId());
                 priceMap.put(mark.instrumentId(), mark.price());
-                markViews.add(new HypothesisContext.MarkView(
-                        mark.instrumentId(), mark.price().toPlainString(), mark.stale()));
                 String assetClass = ref.get().assetClass();
+                // Tell the model WHAT each instrument is (asset class + description), so it reasons
+                // about the real instrument instead of inventing an issuer for the ticker.
+                markViews.add(new HypothesisContext.MarkView(
+                        mark.instrumentId(), assetClass, ref.get().currency(),
+                        InstrumentDescriptions.of(mark.instrumentId(), assetClass),
+                        mark.price().toPlainString(), mark.stale()));
                 if ("EQUITY".equals(assetClass) || "FUTURE".equals(assetClass)) {
                     singleNames.add(mark.instrumentId());
                 }
