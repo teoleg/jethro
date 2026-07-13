@@ -5,6 +5,7 @@ import io.jethro.domain.Instrument;
 import io.jethro.refdata.RefDataRepository;
 import io.jethro.trading.marketdata.FeedStatus;
 import io.jethro.trading.marketdata.MarketDataAdapter;
+import io.jethro.trading.marketdata.finnhub.FinnhubMarketDataAdapter;
 import io.jethro.trading.marketdata.sim.CurveFactorSimulator;
 import io.jethro.trading.marketdata.sim.SimMarketDataAdapter;
 import io.jethro.trading.marketdata.yahoo.YahooMarketDataAdapter;
@@ -18,6 +19,7 @@ import org.springframework.context.SmartLifecycle;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -69,7 +71,17 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 ? new CurveFactorSimulator(properties.simSeed() + 1, 0.038, 0.009) // 3.8% level, +90bp slope
                 : null;
 
-        if ("yahoo".equalsIgnoreCase(properties.providerOrDefault())) {
+        String provider = properties.providerOrDefault();
+
+        if ("finnhub".equalsIgnoreCase(provider)) {
+            MarketDataAdapter finnhub = buildFinnhubAdapter(curveSim);
+            if (finnhub != null) {
+                return finnhub;
+            }
+            // token missing or nothing mapped — buildFinnhubAdapter logged why; fall through to sim.
+        }
+
+        if ("yahoo".equalsIgnoreCase(provider)) {
             Map<String, String> map = yahooSymbolMap();
             if (map.isEmpty()) {
                 log.warn("provider=yahoo but no 'yahoo' symbology found (persistence off or unseeded) — "
@@ -84,25 +96,87 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                         new YahooQuoteClient(Duration.ofSeconds(10)), map, curveSim, spacing);
             }
         }
-        return simAdapter = buildSimAdapter(curveSim);
+        return simAdapter = buildSimAdapter(curveSim, properties.simInstruments());
     }
 
-    private SimMarketDataAdapter buildSimAdapter(CurveFactorSimulator curveSim) {
-        long[] startPricesScaled = properties.simInstruments().stream()
+    /** Finnhub real-time equities (WebSocket) composed with a background feed for everything
+     *  Finnhub's free tier doesn't stream: Yahoo (delayed) for the futures/FX it covers, else
+     *  sim; the SOFR curve rides the background either way. Null if no token/symbology — caller
+     *  falls back to sim. */
+    private MarketDataAdapter buildFinnhubAdapter(CurveFactorSimulator curveSim) {
+        String token = properties.finnhubTokenOrEmpty();
+        Map<String, String> covered = finnhubSymbolMap();
+        if (token.isEmpty()) {
+            log.warn("provider=finnhub but jethro.trading.finnhub-token is blank — falling back to the sim feed. "
+                    + "Get a free key at finnhub.io and set FINNHUB=... (ADR-0024).");
+            return null;
+        }
+        if (covered.isEmpty()) {
+            log.warn("provider=finnhub but no 'finnhub' symbology found — falling back to the sim feed");
+            return null;
+        }
+        // Background for what Finnhub doesn't stream. Prefer Yahoo (real, delayed) for the
+        // price-quoted rest (futures/FX/SAP), else sim; the curve rides the background either way.
+        Map<String, String> yahooRest = yahooSymbolMap();
+        covered.keySet().forEach(yahooRest::remove); // equities are on Finnhub now
+        MarketDataAdapter background;
+        if (!yahooRest.isEmpty()) {
+            long spacing = properties.yahooRequestSpacingMillisOrDefault();
+            background = new YahooMarketDataAdapter(
+                    new YahooQuoteClient(Duration.ofSeconds(10)), yahooRest, curveSim, spacing);
+            log.warn("MARKET DATA: Finnhub real-time WS for {} equities + Yahoo (delayed) for {} others "
+                    + "+ sim curve. Dev/demo only, never production/real-money (ADR-0024).",
+                    covered.size(), yahooRest.size());
+        } else {
+            List<String> uncovered = properties.simInstruments().stream()
+                    .filter(id -> !covered.containsKey(id)).toList();
+            SimMarketDataAdapter sim = buildSimAdapter(curveSim, uncovered);
+            this.simAdapter = sim; // regime() reads the sim
+            background = sim;
+            log.warn("MARKET DATA: Finnhub real-time WS for {} equities + sim for {} others. "
+                    + "Dev/demo only (ADR-0024).", covered.size(), uncovered.size());
+        }
+        return new FinnhubMarketDataAdapter(token, covered, background);
+    }
+
+    private SimMarketDataAdapter buildSimAdapter(CurveFactorSimulator curveSim, List<String> instruments) {
+        if (instruments.isEmpty()) {
+            // Nothing left for the sim (all covered by the real feed): a 1-instrument idle sim keeps
+            // the curve alive if configured; otherwise the market path just carries the real feed.
+            instruments = properties.simInstruments().subList(0, 1);
+        }
+        List<String> ids = instruments;
+        long[] startPricesScaled = ids.stream()
                 .mapToLong(id -> Decimals.toScaledLong(properties.startPriceFor(id), Decimals.PRICE_SCALE))
                 .toArray();
         // Per-tick step calibrated from annualized vol: maxStep(1e-6 of price) =
         // σ_annual · √(Δt / trading-year) · √3 (uniform→σ match).
         double tickSeconds = properties.simTickIntervalMillis() / 1_000.0;
         double tradingYearSeconds = 252 * 6.5 * 3_600;
-        long[] maxStepMicros = properties.simInstruments().stream()
+        long[] maxStepMicros = ids.stream()
                 .mapToLong(id -> Math.max(1, Math.round(properties.annualVolFor(id)
                         * Math.sqrt(tickSeconds / tradingYearSeconds) * Math.sqrt(3.0) * 1_000_000)))
                 .toArray();
         return new SimMarketDataAdapter(
-                properties.simSeed(), properties.simInstruments(), startPricesScaled, maxStepMicros,
+                properties.simSeed(), ids, startPricesScaled, maxStepMicros,
                 properties.simRegimesOrDefault(), curveSim,
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
+    }
+
+    /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'
+     *  symbology (invariant 2). */
+    private Map<String, String> finnhubSymbolMap() {
+        Map<String, String> map = new LinkedHashMap<>();
+        if (refData == null) {
+            return map;
+        }
+        for (Instrument i : refData.findAllInstruments()) {
+            String symbol = i.symbology().get("finnhub");
+            if (symbol != null) {
+                map.put(i.id().value(), symbol);
+            }
+        }
+        return map;
     }
 
     /** instrumentId → Yahoo symbol for the price-quoted names (equity/future/FX); rates stay on

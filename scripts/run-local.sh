@@ -32,7 +32,8 @@ AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:3b}"   # 3b = usable commentary; MODEL=qwen2.5:0.5b for tight RAM
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
-PROVIDER="${PROVIDER:-yahoo}"  # yahoo = real delayed prices (ADR-0023, default); PROVIDER=sim for offline
+PROVIDER="${PROVIDER:-yahoo}"  # sim | yahoo (delayed, ADR-0023) | finnhub (real-time WS, ADR-0024)
+FINNHUB="${FINNHUB:-}"         # Finnhub API token (free at finnhub.io); needed for PROVIDER=finnhub
 
 wait_for() {  # name, timeout_seconds, command...
   local name="$1" timeout="$2"; shift 2
@@ -95,6 +96,15 @@ fi
 EXTRA_ARGS+=(--jethro.trading.provider="$PROVIDER")
 if [ "$PROVIDER" = "yahoo" ]; then
   echo "==> MARKET DATA: Yahoo (real, ~15-min delayed, dev/demo only — ADR-0023). Needs internet."
+fi
+if [ "$PROVIDER" = "finnhub" ]; then
+  if [ -z "$FINNHUB" ]; then
+    echo "!! PROVIDER=finnhub needs a token: FINNHUB=your_key PROVIDER=finnhub ./scripts/run-local.sh"
+    echo "   (free key at https://finnhub.io) — falling back to sim until set."
+  else
+    echo "==> MARKET DATA: Finnhub (real-time WebSocket, dev/demo only — ADR-0024). Needs internet."
+    EXTRA_ARGS+=(--jethro.trading.finnhub-token="$FINNHUB")
+  fi
 fi
 
 mkdir -p logs

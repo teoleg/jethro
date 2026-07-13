@@ -27,6 +27,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0021](0021-operational-chat.md) | Operational chat — SLM parses the question, deterministic code answers, every turn audited to Postgres | Accepted |
 | [0022](0022-llm-hypothesis-layer-bounded-autonomy.md) | LLM hypothesis layer — model synthesises structured theses, quant layer computes, a deterministic risk envelope decides auto-execute vs human approval | Accepted |
 | [0023](0023-yahoo-market-data-adapter.md) | Yahoo Finance market-data adapter — a free, delayed, dev/demo-only provider behind the ADR-0009 port | Accepted |
+| [0024](0024-finnhub-realtime-market-data.md) | Finnhub real-time market data — free WebSocket equities feed, composed with Yahoo/sim for the rest | Accepted |
 
 ## Lifecycle
 

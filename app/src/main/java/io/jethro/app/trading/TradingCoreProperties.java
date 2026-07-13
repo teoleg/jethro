@@ -24,11 +24,14 @@ public record TradingCoreProperties(
         /** Factor-based SOFR curve sim publishing USD.SOFR.* tenor marks; default true. */
         Boolean simCurve,
         long simTickIntervalMillis,
-        /** Market-data provider: "sim" (default) or "yahoo" (dev/demo only, ADR-0023). */
+        /** Market-data provider: "sim" (default), "yahoo" (ADR-0023), or "finnhub" (ADR-0024,
+         *  real-time equities over WebSocket — needs finnhub-token). Dev/demo only. */
         String provider,
         /** Gap between individual Yahoo symbol requests, in ms (spread, not burst — avoids
          *  429s). Default 700; each symbol then refreshes every ~spacing×instrumentCount. */
         Long yahooRequestSpacingMillis,
+        /** Finnhub API token (free key) for the real-time WebSocket feed; blank falls back to sim. */
+        String finnhubToken,
         String lmdbPath,
         long lmdbMaxSizeMb,
         int bufferCapacity) {
@@ -40,6 +43,10 @@ public record TradingCoreProperties(
     public long yahooRequestSpacingMillisOrDefault() {
         return yahooRequestSpacingMillis != null && yahooRequestSpacingMillis > 0
                 ? yahooRequestSpacingMillis : 700;
+    }
+
+    public String finnhubTokenOrEmpty() {
+        return finnhubToken != null ? finnhubToken.trim() : "";
     }
 
     /** Start price for one instrument: its override if present, else the default. */
