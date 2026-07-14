@@ -46,13 +46,23 @@ public final class RiskDataConsumer implements AutoCloseable {
     private volatile Thread thread;
 
     private final TreasuryCurveView treasuryCurve;
+    private final java.util.function.Consumer<Fill> fillTap; // nullable: swap-trade registry etc.
 
     public RiskDataConsumer(String bootstrapServers, RiskProjection projection,
                             CurveService curveService, TreasuryCurveView treasuryCurve) {
+        this(bootstrapServers, projection, curveService, treasuryCurve, null);
+    }
+
+    /** @param fillTap called after each fill is applied to the projection (replayed from the
+     *                 beginning on every boot — taps must be idempotent, invariant 6). */
+    public RiskDataConsumer(String bootstrapServers, RiskProjection projection,
+                            CurveService curveService, TreasuryCurveView treasuryCurve,
+                            java.util.function.Consumer<Fill> fillTap) {
         this.bootstrapServers = bootstrapServers;
         this.projection = projection;
         this.curveService = curveService;
         this.treasuryCurve = treasuryCurve;
+        this.fillTap = fillTap;
     }
 
     public void start() {
@@ -98,7 +108,11 @@ public final class RiskDataConsumer implements AutoCloseable {
                 for (var record : records) {
                     try {
                         if (Topics.FILLS.equals(record.topic())) {
-                            projection.applyFill(toFill(AvroCodec.decode(record.value(), FillEvent.class)));
+                            Fill fill = toFill(AvroCodec.decode(record.value(), FillEvent.class));
+                            projection.applyFill(fill);
+                            if (fillTap != null) {
+                                fillTap.accept(fill);
+                            }
                         } else {
                             MarkEvent mark = AvroCodec.decode(record.value(), MarkEvent.class);
                             String id = mark.getInstrumentId().toString();

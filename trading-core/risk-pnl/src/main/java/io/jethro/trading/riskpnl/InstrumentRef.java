@@ -14,22 +14,31 @@ import java.math.BigDecimal;
  *                    instruments; null where not applicable/known.
  * @param advUsd average daily volume in USD notional (market-impact + participation
  *               inputs, ADR-0025); null = unmodelled, never guessed.
+ * @param notionalPerLot gross notional of ONE unit for notional-quoted instruments
+ *               (a swap lot = $1M) — the exposure convention input; null for price-quoted
+ *               instruments (their exposure is qty × price × multiplier).
  */
 public record InstrumentRef(String instrumentId, String assetClass, String currency,
-                            BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd) {
+                            BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd,
+                            BigDecimal notionalPerLot) {
+
+    public InstrumentRef(String instrumentId, String assetClass, String currency,
+                         BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd) {
+        this(instrumentId, assetClass, currency, multiplier, modDuration, advUsd, null);
+    }
 
     public InstrumentRef(String instrumentId, String assetClass, String currency,
                          BigDecimal multiplier, BigDecimal modDuration) {
-        this(instrumentId, assetClass, currency, multiplier, modDuration, null);
+        this(instrumentId, assetClass, currency, multiplier, modDuration, null, null);
     }
 
     /** Instruments without a rates sensitivity (equities, FX, ...): no duration. */
     public InstrumentRef(String instrumentId, String assetClass, String currency, BigDecimal multiplier) {
-        this(instrumentId, assetClass, currency, multiplier, null, null);
+        this(instrumentId, assetClass, currency, multiplier, null, null, null);
     }
 
     /** Fallback when reference data is missing: multiplier 1, so PnL is at least well-defined. */
     public static InstrumentRef unknown(String instrumentId) {
-        return new InstrumentRef(instrumentId, "UNKNOWN", "USD", BigDecimal.ONE, null, null);
+        return new InstrumentRef(instrumentId, "UNKNOWN", "USD", BigDecimal.ONE, null, null, null);
     }
 }

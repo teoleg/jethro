@@ -84,6 +84,10 @@
     <div class="section-h">Rates risk — DV01 by tenor <span class="muted">— signed P&amp;L per +1bp parallel move, by book</span></div>
     <div class="panel"><div id="dv01" class="muted">no rates positions yet — trade a Treasury future or a swap to build rates risk.</div></div>
   </div>
+  <div style="grid-column:1 / -1">
+    <div class="section-h">Swap book — trade-dated <span class="muted">— each fill priced as a SEASONED swap (entry par, remaining schedule → roll-down); the precise rates view beside the ledger's convention</span></div>
+    <div class="panel"><div id="swapbook" class="muted">no swap trades yet — fills on USD_IRS_5Y/10Y appear here dated and revalued.</div></div>
+  </div>
 </main>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
@@ -171,8 +175,26 @@
       }
     } catch (e) {}
   }
+  async function loadSwapBook() {
+    try {
+      const b = await fetch("/api/swaps/book").then(r => r.json());
+      if (!b.trades || !b.trades.length) return;
+      document.getElementById("swapbook").outerHTML = '<div id="swapbook"><table>' +
+        "<tr><th>trade day</th><th>instrument</th><th>book</th><th>side</th><th>lots</th><th>entry par</th><th>maturity</th><th>PV</th><th>DV01</th></tr>" +
+        b.trades.map(t => `<tr${t.matured?' class="muted"':''}><td class="mono">${esc(t.tradeDay)}</td><td>${esc(t.instrument)}</td><td class="muted">${esc(t.book)}</td>
+          <td class="${t.side==='BUY'?'up':'down'}" title="BUY = pay fixed">${esc(t.side)}</td>
+          <td class="mono">${esc(t.lots)}</td><td class="mono">${esc(t.entryPar)}%</td><td class="mono muted">${esc(t.maturity)}${t.matured?' (matured)':''}</td>
+          <td class="mono ${cls(t.presentValue)}">${t.presentValue!=null?money(t.presentValue):'—'}</td>
+          <td class="mono">${t.dv01!=null?money(t.dv01):'—'}</td></tr>`).join("") +
+        `<tr><td colspan="7" style="text-align:right" class="muted">net (valued ${esc(b.valuationDay)})</td>
+          <td class="mono ${cls(b.totalPv)}">${money(b.totalPv)}</td><td class="mono">${money(b.totalDv01)}</td></tr>` +
+        '</table></div>';
+    } catch (e) {}
+  }
   refresh();
+  loadSwapBook();
   setInterval(refresh, 2000);
+  setInterval(loadSwapBook, 5000);
 </script>
 </body>
 </html>

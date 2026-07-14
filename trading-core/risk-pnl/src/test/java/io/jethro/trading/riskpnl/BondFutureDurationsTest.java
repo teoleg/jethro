@@ -41,15 +41,28 @@ class BondFutureDurationsTest {
     }
 
     @Test
-    void liveCurveDrivesTheDurationAndYieldMovesIt() {
+    void liveCurveDrivesTheDurationViaTheCtdWindow() {
+        // Flat 4.50% curve < the 6% conversion-factor pivot → ZN's CTD is the SHORT end of
+        // its 6.5–10y deliverable window: D(0.045, 6.5) = 5.5818 — not the naive 10y 7.9819,
+        // and not the refdata static 6.3.
         var durations = new BondFutureDurations(curveAt(4.50), REFS);
-        assertEquals(0, new BigDecimal("7.9819").compareTo(durations.modifiedDuration("ZN").orElseThrow()),
-                "ZN keys off the live 10Y yield, not the refdata 6.3");
+        assertEquals(0, new BigDecimal("5.5818").compareTo(durations.modifiedDuration("ZN").orElseThrow()),
+                "CTD at the short window end below the 6% pivot");
 
         var lowRates = new BondFutureDurations(curveAt(1.50), REFS);
         assertTrue(lowRates.modifiedDuration("ZN").orElseThrow()
                         .compareTo(durations.modifiedDuration("ZN").orElseThrow()) > 0,
                 "duration extends as yields fall");
+    }
+
+    @Test
+    void aboveTheSixPercentPivotTheLongEndBecomesCtd() {
+        // At 7% yields the conversion-factor advantage flips: ZN's CTD is the 10y end.
+        // D(0.07, 10) = (1/0.07)(1 − 1.035⁻²⁰) = 7.1062.
+        var durations = new BondFutureDurations(curveAt(7.00), REFS);
+        assertEquals(0, BondFutureDurations.parBondModifiedDuration(0.07, 10)
+                        .compareTo(durations.modifiedDuration("ZN").orElseThrow()),
+                "long window end above the pivot");
     }
 
     @Test

@@ -160,9 +160,11 @@ class RiskProjectionTest {
         eq("12200", risk.byBook().get(0).grossExposure());
     }
 
-    /** SWAP refdata per V9: mark = par rate in %, static multiplier = inception DV01 × 100. */
+    /** SWAP refdata per V9/V22: mark = par rate in %, static multiplier = inception DV01 × 100,
+     *  exposure = gross notional ($1M per lot). */
     private final InstrumentRefSource swapRefs = id -> Optional.ofNullable(Map.of(
-            "USD_IRS_5Y", new InstrumentRef("USD_IRS_5Y", "SWAP", "USD", new BigDecimal("45000"))
+            "USD_IRS_5Y", new InstrumentRef("USD_IRS_5Y", "SWAP", "USD", new BigDecimal("45000"),
+                    null, null, new BigDecimal("1000000"))
     ).get(id));
 
     @Test
@@ -178,6 +180,9 @@ class RiskProjectionTest {
         // unrealized = 2 × (4.14 − 4.04) × (430 × 100) = 2 × 0.10 × 43,000 = 8,600
         // (the static 45,000 constant would overstate it as 9,000).
         eq("8600", r.unrealizedPnl());
+        // Exposure is gross NOTIONAL (V22): 2 lots × $1M — not 2 × 4.14 × 43,000 ≈ 356k.
+        eq("2000000", r.netExposure());
+        eq("2000000", r.grossExposure());
     }
 
     @Test

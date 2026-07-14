@@ -100,7 +100,12 @@ public final class RiskProjection {
             BigDecimal unrealized = hasMark
                     ? p8(qty.multiply(m.price().subtract(pos.avgCost())).multiply(multiplier))
                     : zero();
-            BigDecimal net = hasMark ? p8(qty.multiply(m.price()).multiply(multiplier)) : zero();
+            // Exposure: gross NOTIONAL for notional-quoted instruments (a swap lot = $1M —
+            // qty × par-rate × DV01-multiplier would understate it ~5×); price × multiplier
+            // for everything else. P&L above is unaffected — only the exposure measure.
+            BigDecimal net = ref.notionalPerLot() != null
+                    ? p8(qty.multiply(ref.notionalPerLot()))
+                    : (hasMark ? p8(qty.multiply(m.price()).multiply(multiplier)) : zero());
 
             rows.add(new PositionRisk(
                     pos.bookId().value(), pos.instrumentId().value(), ref.assetClass(), ref.currency(),
@@ -235,11 +240,15 @@ public final class RiskProjection {
     }
 
     private BigDecimal exposureOf(String instrumentId, BigDecimal qty) {
+        InstrumentRef ref = ref(instrumentId);
+        if (ref.notionalPerLot() != null) {
+            return qty.multiply(ref.notionalPerLot()); // notional-quoted: no mark needed
+        }
         MarkPoint m = marks.get(instrumentId);
         if (m == null) {
             return BigDecimal.ZERO;
         }
-        return qty.multiply(m.price()).multiply(effectiveMultiplier(instrumentId, ref(instrumentId)));
+        return qty.multiply(m.price()).multiply(effectiveMultiplier(instrumentId, ref));
     }
 
     /**

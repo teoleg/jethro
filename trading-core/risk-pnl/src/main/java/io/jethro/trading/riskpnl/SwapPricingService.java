@@ -61,6 +61,45 @@ public final class SwapPricingService {
         return curves.curve().map(curve -> value(curve, valuationDate)).orElse(List.of());
     }
 
+    /** A seasoned (trade-dated) swap's live economics: full Strata revaluation with the
+     *  REMAINING schedule — the annuity rolls down as the trade ages, which the avg-cost
+     *  ledger's fresh-tenor approximation cannot see. */
+    public record SeasonedValuation(BigDecimal presentValue, BigDecimal dv01) {
+    }
+
+    /**
+     * Values one trade-dated swap on the current curve: fixed leg = the ENTRY par rate,
+     * schedule = tradeDate → tradeDate + tenor, so the remaining maturity (and DV01) shrink
+     * as the valuation date advances. {@code payFixed} per the V9 convention (BUY = pay).
+     * Empty when the curve isn't live or the swap has matured.
+     *
+     * <p>CONVENTION, stated: elapsed SOFR fixings (the float leg's history since the trade
+     * date) are approximated FLAT at the current curve's short rate — the platform doesn't
+     * archive fixings. This only touches the in-progress accrual period's carry; the forward
+     * schedule prices off the live curve exactly.
+     */
+    public java.util.Optional<SeasonedValuation> valueSeasoned(LocalDate tradeDate, int tenorYears,
+                                                               boolean payFixed, double fixedRate,
+                                                               double notional, LocalDate valuationDate) {
+        return curves.curve().map(curve -> {
+            LocalDate endDate = tradeDate.plusYears(tenorYears);
+            if (!endDate.isAfter(valuationDate)) {
+                return new SeasonedValuation(money(0), money(0)); // matured — carries nothing
+            }
+            ImmutableRatesProvider provider =
+                    seasonedProvider(curve, valuationDate, tradeDate);
+            ResolvedSwapTrade trade = FixedOvernightSwapConventions.USD_FIXED_1Y_SOFR_OIS
+                    .toTrade(tradeDate, tradeDate, endDate,
+                            payFixed ? BuySell.BUY : BuySell.SELL, notional, fixedRate)
+                    .resolve(REF_DATA);
+            double pv = presentValue(trade, provider);
+            double dv01 = provider
+                    .parameterSensitivity(DiscountingSwapTradePricer.DEFAULT.presentValueSensitivity(trade, provider))
+                    .total().getAmount(Currency.USD).getAmount() * 1e-4;
+            return new SeasonedValuation(money(pv), money(dv01));
+        });
+    }
+
     /**
      * Full-revaluation swap P&amp;L per $1M lot under a parallel curve shock (quant-engine step 2,
      * second slice): {@code ΔPV = PV(shocked curve) − PV(base curve)} for each reference swap,
@@ -107,6 +146,21 @@ public final class SwapPricingService {
         return ImmutableRatesProvider.builder(valuationDate)
                 .discountCurve(Currency.USD, curve)
                 .overnightIndexCurve(OvernightIndices.USD_SOFR, curve)
+                .build();
+    }
+
+    /** Provider with a FLAT past-fixing series at the current short rate (see valueSeasoned). */
+    private static ImmutableRatesProvider seasonedProvider(Curve curve, LocalDate valuationDate,
+                                                           LocalDate tradeDate) {
+        double shortRate = curve.yValue(1.0 / 365.0);
+        var fixings = com.opengamma.strata.collect.timeseries.LocalDateDoubleTimeSeries.builder();
+        for (LocalDate d = tradeDate; !d.isAfter(valuationDate); d = d.plusDays(1)) {
+            fixings.put(d, shortRate);
+        }
+        return ImmutableRatesProvider.builder(valuationDate)
+                .discountCurve(Currency.USD, curve)
+                .overnightIndexCurve(OvernightIndices.USD_SOFR, curve)
+                .timeSeries(OvernightIndices.USD_SOFR, fixings.build())
                 .build();
     }
 

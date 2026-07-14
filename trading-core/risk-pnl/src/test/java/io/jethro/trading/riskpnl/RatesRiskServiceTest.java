@@ -100,9 +100,9 @@ class RatesRiskServiceTest {
 
     @Test
     void liveTreasuryCurveMakesBondDv01Dynamic() {
-        // Same ZN position as above, but the Treasury curve has quoted 4.50%: duration is the
-        // live 10Y par-bond figure 7.9819, not the refdata 6.3.
-        // DV01 = 110,500 × −7.9819 × 1e-4 = −88.199995 exactly.
+        // Same ZN position as above, but the Treasury curve has quoted 4.50%: below the 6%
+        // conversion-factor pivot ZN's CTD is the SHORT end of its 6.5–10y window →
+        // D(0.045, 6.5) = 5.5818. DV01 = 110,500 × −5.5818 × 1e-4 = −61.67889 exactly.
         var refs = refs(Map.of("ZN",
                 new InstrumentRef("ZN", "BOND", "USD", new BigDecimal("1000"), new BigDecimal("6.3"))));
         var curve = new TreasuryCurveView();
@@ -113,8 +113,8 @@ class RatesRiskServiceTest {
 
         var pos = position("MACRO", "ZN", "BOND", BigDecimal.ONE, new BigDecimal("110500"), true);
         var out = svc.bucketedDv01(List.of(pos), VAL_DATE);
-        assertEquals(0, out.get(0).totalDv01().compareTo(new BigDecimal("-88.199995")),
-                "dynamic DV01 at the live yield, not the static −69.615");
+        assertEquals(0, out.get(0).totalDv01().compareTo(new BigDecimal("-61.67889")),
+                "dynamic CTD-window DV01 at the live yield, not the static −69.615");
     }
 
     @Test

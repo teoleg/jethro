@@ -86,3 +86,24 @@ replacing the static refdata duration in both `RatesRiskService` (bucketed DV01)
 `ScenarioEngine` (rates shocks). Falls back to the static duration until the curve quotes;
 skipped (counted) when neither exists. CONVENTION: par-bond proxy for the CTD — a delivery
 basket/conversion-factor model is the tracked refinement, not faked here.
+
+## Implementation note — rates refinements (2026-07-14, task #16)
+
+Three refinements. (1) **CTD-window bond-future duration**: the future's duration now uses
+the published CME deliverable maturity window plus the conversion-factor 6% rule (CFs price
+every deliverable at 6%: below 6% market yields the SHORT window end is cheapest-to-deliver,
+above it the LONG end), with the par yield interpolated at that CTD maturity. Worked: ZN's
+window is 6.5–10y; at 4.5% the CTD sits at 6.5y → D = 5.58, not the naive 10y figure 7.98 —
+the error real CTD selection removes. Per-ISSUE selection (actual basket, repo) still needs
+real bond reference data — stated, not faked. (2) **Swap gross-notional exposure** (V22):
+a swap position's exposure is now qty × $1M notional per lot (`notional_per_lot` refdata
+attribute) instead of qty × par × multiplier (which understated a $1M lot ~5×); P&L math is
+unchanged; MACRO book limits recalibrated with the convention. (3) **Trade-dated swap book**
+(V23): every SWAP fill is registered as a dated trade (idempotent on fill_id; session-day
+dated, so compressed sim days age trades in minutes) and priced as a SEASONED swap — fixed
+leg at its OWN entry par, REMAINING schedule from its own trade day — via full Strata reval
+on the live curve: PV carries roll-down and per-trade DV01 shrinks with age (3y into a 5y
+swap ≲ 2/5 of the annuity remains). Elapsed SOFR fixings are approximated flat at the current
+short rate (no fixing archive; touches only the in-progress accrual period — stated). The
+fills-projected ledger remains the P&L source of truth (invariant 3); `/api/swaps/book` and
+the Rates page's "Swap book — trade-dated" panel expose the precise view beside it.

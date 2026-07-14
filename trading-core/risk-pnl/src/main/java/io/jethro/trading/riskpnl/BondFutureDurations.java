@@ -7,28 +7,42 @@ import java.util.Optional;
 
 /**
  * Live modified duration for the Treasury futures — the input that makes bond-future DV01
- * <b>dynamic</b> instead of a static reference-data constant. Each future keys off its CTD's
- * tenor sector (ZT→2Y, ZF→5Y, ZN→10Y, ZB→30Y); duration is the closed-form modified duration
- * of a semiannual PAR bond at the LIVE Treasury par yield for that tenor:
+ * <b>dynamic</b> instead of a static reference-data constant. The CTD maturity comes from
+ * the contract's PUBLISHED CME deliverable window plus the classic conversion-factor rule:
+ * CME conversion factors price every deliverable at a 6% yield, so with market yields
+ * BELOW 6% the cheapest-to-deliver is the SHORT-maturity end of the window (low duration),
+ * and above 6% the LONG end. Duration is then the closed-form modified duration of a
+ * semiannual PAR bond at the LIVE Treasury par yield interpolated at that CTD maturity:
  *
- * <pre>  D(y, T) = (1/y) · (1 − (1 + y/2)^(−2T))</pre>
+ * <pre>  D(y, T_ctd) = (1/y) · (1 − (1 + y/2)^(−2·T_ctd))</pre>
  *
- * Worked: y = 4.5%, T = 10 → (1/0.045)(1 − 1.0225⁻²⁰) = 22.22 × 0.3592 ≈ 7.98 — and at
- * y = 1.5% the same 10Y is ≈ 9.25: duration extends as yields fall, shortens as they rise,
- * which a static constant misses across a 2022-style ±300bp regime. Falls back to the
- * refdata modified duration when the curve hasn't quoted (or y ≤ 0) — disclosed by
- * {@link #source}, never guessed.
+ * Worked: ZN's deliverable window is 6.5–10y; at y = 4.5% (&lt; 6%) the CTD sits at the
+ * 6.5y end → D(0.045, 6.5) = 22.22 × (1 − 1.0225⁻¹³) = <b>5.58</b> — materially lower than
+ * the naive 10y par-bond figure (7.98), which is exactly the error a real CTD selection
+ * removes. Duration still breathes with the yield level, and the 6% pivot flips the window
+ * end if yields ever cross it. Falls back to the refdata modified duration when the curve
+ * hasn't quoted (or y ≤ 0) — disclosed by {@link #source}, never guessed.
  *
  * <p>Analytics double internally, {@link BigDecimal} at the boundary — duration is a
  * sensitivity parameter, not money (invariant 1 applies where it's multiplied into P&amp;L).
- * CONVENTION: par-bond proxy for the CTD — no delivery basket / conversion-factor model
- * (that refinement is a real CTD model; tracked as follow-up, not faked here).
+ * Stated limits: the window ends and the 6% rule are the real contract mechanics, but the
+ * true CTD needs the actual deliverable basket (issue-level coupons/maturities and repo) —
+ * per-issue selection remains open until real bond reference data exists.
  */
 public final class BondFutureDurations {
 
-    /** Future → the key tenor (years) its CTD sector tracks. */
-    private static final Map<String, Double> KEY_TENOR_YEARS =
-            Map.of("ZT", 2.0, "ZF", 5.0, "ZN", 10.0, "ZB", 30.0);
+    /** Published CME deliverable maturity windows (years) per future. */
+    record DeliverableWindow(double shortYears, double longYears) {
+    }
+
+    private static final Map<String, DeliverableWindow> DELIVERABLE = Map.of(
+            "ZT", new DeliverableWindow(1.75, 2.0),
+            "ZF", new DeliverableWindow(4.17, 5.25),
+            "ZN", new DeliverableWindow(6.5, 10.0),
+            "ZB", new DeliverableWindow(15.0, 25.0));
+
+    /** CME conversion factors assume a 6% yield: below it the SHORT window end is CTD. */
+    private static final double CF_PIVOT_YIELD = 0.06;
 
     private final TreasuryCurveView curve; // nullable → static refdata fallback only
     private final InstrumentRefSource refs;
@@ -63,16 +77,48 @@ public final class BondFutureDurations {
     }
 
     private Optional<BigDecimal> liveDuration(String instrumentId) {
-        Double tenor = KEY_TENOR_YEARS.get(instrumentId);
-        if (tenor == null || curve == null) {
+        DeliverableWindow window = DELIVERABLE.get(instrumentId);
+        if (window == null || curve == null) {
             return Optional.empty();
         }
-        for (TreasuryCurveView.TsyPoint p : curve.snapshot()) {
-            if (p.tenorYears() == tenor && p.parYield() > 1e-4) {
-                return Optional.of(parBondModifiedDuration(p.parYield(), tenor));
+        var points = curve.snapshot();
+        if (points.isEmpty()) {
+            return Optional.empty();
+        }
+        // First pass at the long end's yield decides which window end is CTD (6% rule);
+        // then the final duration prices at the yield interpolated AT the CTD maturity.
+        double longEndYield = interpolatedYield(points, window.longYears());
+        if (longEndYield <= 1e-4) {
+            return Optional.empty();
+        }
+        double ctdMaturity = longEndYield < CF_PIVOT_YIELD ? window.shortYears() : window.longYears();
+        double y = interpolatedYield(points, ctdMaturity);
+        if (y <= 1e-4) {
+            return Optional.empty();
+        }
+        return Optional.of(parBondModifiedDuration(y, ctdMaturity));
+    }
+
+    /** Linear par-yield interpolation on the live tenor grid (flat extrapolation at the ends). */
+    private static double interpolatedYield(java.util.List<TreasuryCurveView.TsyPoint> points, double t) {
+        TreasuryCurveView.TsyPoint below = null;
+        TreasuryCurveView.TsyPoint above = null;
+        for (TreasuryCurveView.TsyPoint p : points) {
+            if (p.tenorYears() <= t && (below == null || p.tenorYears() > below.tenorYears())) {
+                below = p;
+            }
+            if (p.tenorYears() >= t && (above == null || p.tenorYears() < above.tenorYears())) {
+                above = p;
             }
         }
-        return Optional.empty();
+        if (below == null) {
+            return above != null ? above.parYield() : 0;
+        }
+        if (above == null || above.tenorYears() == below.tenorYears()) {
+            return below.parYield();
+        }
+        double w = (t - below.tenorYears()) / (above.tenorYears() - below.tenorYears());
+        return below.parYield() + w * (above.parYield() - below.parYield());
     }
 
     /** D(y,T) = (1/y)(1 − (1+y/2)^(−2T)), y as a fraction. Worked: (0.045, 10) → 7.9819. */

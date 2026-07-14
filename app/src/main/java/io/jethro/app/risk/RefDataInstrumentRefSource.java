@@ -45,7 +45,8 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
             next.put(id, new InstrumentRef(id, i.assetClass().name(), i.currency(),
                     i.contractMultiplier(),
                     decimalAttribute(attrs, "mod_duration"),
-                    decimalAttribute(attrs, "adv_usd")));
+                    decimalAttribute(attrs, "adv_usd"),
+                    decimalAttribute(attrs, "notional_per_lot")));
         }
         cache = next;
     }

@@ -121,11 +121,35 @@ public class RiskConfig {
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
     RiskDataConsumer riskDataConsumer(KafkaConfig.JethroKafkaProperties properties, RiskProjection projection,
                                       CurveService curveService,
-                                      io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView) {
+                                      io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView,
+                                      ObjectProvider<SwapTradeRecorder> swapTrades) {
+        SwapTradeRecorder recorder = swapTrades.getIfAvailable();
         var consumer = new RiskDataConsumer(properties.bootstrapServers(), projection, curveService,
-                treasuryCurveView);
+                treasuryCurveView, recorder != null ? recorder::onFill : null);
         consumer.start();
         return consumer;
+    }
+
+    /** Trade-dated swap registry (V23) — feeds the seasoned swap book; needs DB + calendar. */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
+    SwapTradeRecorder swapTradeRecorder(org.springframework.jdbc.core.JdbcTemplate jdbc,
+                                        InstrumentRefSource refs,
+                                        ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
+        return new SwapTradeRecorder(jdbc, refs,
+                cal != null ? cal::sessionDay : java.time.LocalDate::now);
+    }
+
+    /** Seasoned (trade-dated) swap book valuation — the precise rates-desk view. */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
+    SwapBookService swapBookService(org.springframework.jdbc.core.JdbcTemplate jdbc,
+                                    io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                                    ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
+        return new SwapBookService(jdbc, swapPricing,
+                cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
     @Bean
