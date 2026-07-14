@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Config for the LLM hypothesis layer (ADR-0022, jethro.hypothesis). The model proposes
@@ -26,6 +27,10 @@ public record HypothesisProperties(
          *  net-positive on a MAJORITY of these independent paths (seeds disjoint from the live
          *  sim seed). Odd numbers make the median-majority exact. Default 5. */
         Integer oosSeeds,
+        /** Horizon → lifetime in seconds (ADR-0027): at expiry the AI-sleeve position is closed
+         *  and the thesis scored. Defaults: INTRADAY 6h, SWING 5 days, POSITION 20 days —
+         *  real-feed wall-clock; override for compressed sim runs. */
+        Map<String, Long> horizonSeconds,
         /** Book the AI hypothesis sleeve trades — kept separate from the momentum strategy's
          *  books so the two engines don't flatten each other's positions. Default "AI". */
         String book,
@@ -73,6 +78,20 @@ public record HypothesisProperties(
 
     public int oosSeedsOrDefault() {
         return oosSeeds != null && oosSeeds > 0 ? oosSeeds : 5;
+    }
+
+    private static final Map<String, Long> DEFAULT_HORIZON_SECONDS = Map.of(
+            "INTRADAY", 6L * 3600,
+            "SWING", 5L * 24 * 3600,
+            "POSITION", 20L * 24 * 3600);
+
+    /** Lifetime of a horizon in seconds; unknown horizons get the conservative INTRADAY. */
+    public long horizonSecondsFor(String horizon) {
+        if (horizonSeconds != null && horizon != null && horizonSeconds.containsKey(horizon)) {
+            return horizonSeconds.get(horizon);
+        }
+        Long fallback = horizon != null ? DEFAULT_HORIZON_SECONDS.get(horizon) : null;
+        return fallback != null ? fallback : DEFAULT_HORIZON_SECONDS.get("INTRADAY");
     }
 
     public int maxPerCycleOrDefault() {

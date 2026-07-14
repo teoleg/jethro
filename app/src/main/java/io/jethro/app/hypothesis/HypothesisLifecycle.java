@@ -134,7 +134,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                         h.conviction().name(), h.thesis(), e.verdict().name(), auto,
                         bt != null ? bt.supports() : null,
                         bt != null ? bt.pnl().toPlainString() : null,
-                        bt != null ? bt.trades() : null, e.note(), autonomyReason));
+                        bt != null ? bt.trades() : null, e.note(), autonomyReason,
+                        prev != null ? prev.outcome() : null,          // a scored outcome is final
+                        prev != null ? prev.outcomePnl() : null));
             }
             while (ledger.size() > LEDGER_CAP) {
                 var it = ledger.keySet().iterator();
@@ -160,7 +162,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 ledger.putIfAbsent(r.instrumentId() + "|" + r.thesis(), new HypothesisEvent(
                         r.timestampMillis(), r.instrumentId(), r.direction(), r.conviction(), r.thesis(),
                         "ADMISSIBLE", true, r.backtestSupported(), null, null,
-                        "auto-executed on the AI sleeve — order " + (r.orderStatus() == null ? "" : r.orderStatus()), null));
+                        "auto-executed on the AI sleeve — order " + (r.orderStatus() == null ? "" : r.orderStatus()),
+                        null, r.outcome(),
+                        r.outcomePnl() != null ? r.outcomePnl().toPlainString() : null));
             }
         }
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -218,6 +222,10 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             if (tradable.isEmpty()) {
                 return; // nothing to reason about yet
             }
+
+            // Horizon-expiry sweep BEFORE generation (ADR-0027): exits and scoring must happen
+            // even when the model is slow or down — the market path never waits on inference.
+            settleExpired(now, priceMap);
 
             List<NarrativeItem> narrative = narrativeFeed.poll(tradingCore.regime(), singleNames, now);
             // Cap the narrative fed to the model — every extra headline is more prompt to eval,
@@ -337,13 +345,16 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         return autoTradedIds;
     }
 
-    /** Persists an executed hypothesis and pins it to the sticky list (newest first, capped). */
+    /** Persists an executed hypothesis (with entry mark + horizon expiry, ADR-0027) and pins
+     *  it to the sticky list (newest first, capped). */
     private void recordExecuted(HypothesisEvaluator.Evaluated e, long now, String orderId, String orderStatus) {
         Hypothesis h = e.hypothesis();
         Boolean backtestSupported = e.backtest() != null ? e.backtest().supports() : null;
-        HypothesisRecord record = new HypothesisRecord(orderId, now, h.instrumentId(),
+        long expiresAt = now + props.horizonSecondsFor(h.horizon().name()) * 1_000;
+        HypothesisRecord record = HypothesisRecord.open(orderId, now, h.instrumentId(),
                 h.direction().name(), h.horizon().name(), h.conviction().name(), h.thesis(),
-                e.book(), e.quantity(), backtestSupported, orderId, orderStatus);
+                e.book(), e.quantity(), backtestSupported, orderId, orderStatus,
+                e.price(), expiresAt);
         try {
             recordStore.save(record); // durable; NOOP when persistence is off
         } catch (Exception ex) {
@@ -357,11 +368,116 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         }
     }
 
+    /**
+     * Horizon-expiry sweep (ADR-0027): for every OPEN executed hypothesis past its expiry —
+     * (1) CLOSE the AI-sleeve position it opened (the sleeve's missing exit: an opposite-side
+     * MARKET order, clamped to what the book still holds, so a manual close is never fought);
+     * (2) SCORE the call mark-to-mark (entry vs the current mark) and persist WIN/LOSS/FLAT;
+     * (3) reflect the outcome on the ledger so the panel shows it. Skips (and retries next
+     * cycle) when the instrument has no live mark — never scores against a stale guess.
+     */
+    private void settleExpired(long now, Map<String, BigDecimal> marks) {
+        List<HypothesisRecord> due;
+        synchronized (executed) {
+            due = executed.stream()
+                    .filter(r -> r.isOpen() && r.expiresAtMillis() > 0 && r.expiresAtMillis() <= now)
+                    .toList();
+        }
+        for (HypothesisRecord r : due) {
+            BigDecimal exitMark = marks.get(r.instrumentId());
+            if (exitMark == null || r.entryPrice() == null) {
+                continue; // no live mark (or a pre-outcome-era record) — retry next cycle
+            }
+            closeSleevePosition(r, now);
+            BigDecimal multiplier = refs.find(r.instrumentId())
+                    .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
+            var score = HypothesisOutcomes.score(r.direction(), r.entryPrice(), exitMark,
+                    r.quantity(), multiplier);
+            try {
+                recordStore.markOutcome(r.id(), score.outcome(), score.pnl(), exitMark,
+                        java.time.Instant.ofEpochMilli(now));
+            } catch (Exception ex) {
+                log.warn("could not persist outcome for {}: {}", r.id(), ex.toString());
+            }
+            HypothesisRecord scored = r.scored(score.outcome(), score.pnl(), exitMark);
+            synchronized (executed) {
+                executed.removeIf(x -> x.id().equals(r.id()));
+                executed.addFirst(scored);
+            }
+            synchronized (ledger) {
+                String key = r.instrumentId() + "|" + r.thesis();
+                HypothesisEvent event = ledger.get(key);
+                if (event != null) {
+                    ledger.put(key, event.withOutcome(score.outcome(), score.pnl().toPlainString()));
+                }
+            }
+            log.info("HYPOTHESIS {}: {} {} {} scored {} ({}) at horizon expiry — entry {} exit {}",
+                    score.outcome(), r.direction(), r.quantity().toPlainString(), r.instrumentId(),
+                    score.outcome(), score.pnl().toPlainString(),
+                    r.entryPrice().toPlainString(), exitMark.toPlainString());
+        }
+    }
+
+    /** Closes what the AI sleeve still holds of this record's position (clamped, opposite side). */
+    private void closeSleevePosition(HypothesisRecord r, long now) {
+        if (orderService == null) {
+            return; // human-in-loop mode: score the call, the human manages the position
+        }
+        BigDecimal held = risk.positionQuantity(r.book(), r.instrumentId());
+        if (held.signum() == 0) {
+            return; // already flat (manual close or an earlier expiry) — nothing to unwind
+        }
+        // Close at most this record's quantity, never crossing through flat.
+        BigDecimal qty = r.quantity().min(held.abs());
+        Side side = held.signum() > 0 ? Side.SELL : Side.BUY;
+        try {
+            var command = new NewOrder("hypo-exit:" + r.id() + ":" + UUID.randomUUID(),
+                    r.book(), r.instrumentId(), side, OrderType.MARKET, qty, null);
+            var order = orderService.submit(command);
+            log.info("AI-sleeve exit at horizon expiry: {} {} {} → {} ({})",
+                    side, qty.toPlainString(), r.instrumentId(), order.status(), order.orderId());
+        } catch (Exception ex) {
+            log.warn("AI-sleeve exit of {} failed: {}", r.instrumentId(), ex.getMessage());
+        }
+    }
+
     /** Executed (autonomy) hypotheses, newest first — persisted, sticky across cycles/restarts. */
     public List<HypothesisRecord> executed() {
         synchronized (executed) {
             return List.copyOf(executed);
         }
+    }
+
+    /** Measured hit-rate/expectancy per conviction (ADR-0027) — what the model's labels are
+     *  actually worth, and the data the autonomy min-conviction dial should be set from. */
+    public record ConvictionStats(String conviction, int total, int open, int wins, int losses,
+                                  int flat, BigDecimal outcomePnl) {
+    }
+
+    public List<ConvictionStats> outcomeStats() {
+        Map<String, int[]> counts = new java.util.LinkedHashMap<>(); // [total, open, win, loss, flat]
+        Map<String, BigDecimal> pnl = new java.util.LinkedHashMap<>();
+        synchronized (executed) {
+            for (HypothesisRecord r : executed) {
+                String c = r.conviction() == null ? "UNKNOWN" : r.conviction();
+                int[] k = counts.computeIfAbsent(c, x -> new int[5]);
+                k[0]++;
+                if (r.isOpen()) {
+                    k[1]++;
+                } else {
+                    switch (r.outcome()) {
+                        case "WIN" -> k[2]++;
+                        case "LOSS" -> k[3]++;
+                        default -> k[4]++;
+                    }
+                    pnl.merge(c, r.outcomePnl() != null ? r.outcomePnl() : BigDecimal.ZERO, BigDecimal::add);
+                }
+            }
+        }
+        List<ConvictionStats> out = new ArrayList<>();
+        counts.forEach((c, k) -> out.add(new ConvictionStats(
+                c, k[0], k[1], k[2], k[3], k[4], pnl.getOrDefault(c, BigDecimal.ZERO))));
+        return out;
     }
 
     /** Admissible candidates become INFO cards on the attention feed; stale ones resolve. */

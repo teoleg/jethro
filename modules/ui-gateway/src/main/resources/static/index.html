@@ -162,8 +162,9 @@
   <div class="col">
     <div class="section-h">Needs your attention</div>
     <div id="feed" class="feed"><div class="empty">all quiet</div></div>
-    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM thesis → quant sizes/gates it; trades the AI sleeve (ADR-0022)</span></div>
+    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM thesis → quant sizes/gates it; scored at horizon expiry (ADR-0022/0027)</span></div>
     <div class="panel pad hypo-panel"><div id="hypotheses" class="muted" style="padding:14px">loading…</div></div>
+    <div id="hypoStats" class="muted" style="font-size:11px;padding:2px 4px"></div>
     <div class="section-h">Strategy actions <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic momentum engine (ALPHA/MACRO), entries &amp; exits with reasons</span></div>
     <div class="panel pad quant-panel"><div id="quant" class="muted" style="padding:14px">loading…</div></div>
   </div>
@@ -318,8 +319,11 @@
       "<table><tr><th>time</th><th>thesis</th><th>view</th><th>conv</th><th>verdict</th><th>backtest</th></tr>" +
       rows.map(r => {
         const dir = r.dir === "BUY" ? "LONG" : "SHORT";
+        const oc = r.outcome
+          ? ` <span class="${r.outcome==='WIN'?'up':(r.outcome==='LOSS'?'down':'muted')}" title="scored mark-to-mark at horizon expiry: ${esc(r.outcomePnl||'')}">${esc(r.outcome)}</span>`
+          : (r.auto ? ' <span class="whyno">open</span>' : '');
         const v = r.auto
-          ? '<span class="up" title="auto-executed on the AI sleeve — the order is on the blotter">AUTO ✓</span>'
+          ? '<span class="up" title="auto-executed on the AI sleeve — closed & scored at horizon expiry">AUTO ✓</span>' + oc
           : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}" title="${esc(r.reason||'')}">${esc(r.verdict)}</span>`
             + (r.reason ? ` <span class="whyno" title="${esc(r.reason)}">· ${esc(r.reason)}</span>` : '');
         return `<tr class="${r.executed?'hypo-exec':''}"><td class="muted mono">${new Date(r.ts).toLocaleTimeString()}</td>
@@ -332,12 +336,21 @@
   }
   async function loadHypotheses() {
     try {
-      // /api/hypotheses is now the event ledger (each distinct thesis retained, newest first).
-      const led = await (await fetch("/api/hypotheses")).json();
+      // /api/hypotheses is the event ledger (each distinct thesis retained, newest first);
+      // /api/hypotheses/stats is the measured hit-rate per conviction (ADR-0027).
+      const [led, stats] = await Promise.all([
+        fetch("/api/hypotheses").then(r => r.json()),
+        fetch("/api/hypotheses/stats").then(r => r.json()).catch(() => [])]);
       renderHypotheses(led.map(r => ({ ts:r.timestampMillis, instr:r.instrumentId, thesis:r.thesis,
         dir:r.direction, conv:r.conviction, verdict:r.verdict, auto:r.autonomous, executed:r.autonomous,
         btSupports:r.backtestSupports, btPnl:r.backtestPnl, btTrades:r.backtestTrades, note:r.note,
-        reason:r.autonomyReason })));
+        reason:r.autonomyReason, outcome:r.outcome, outcomePnl:r.outcomePnl })));
+      const scored = stats.filter(s => s.wins + s.losses + s.flat > 0);
+      const statsEl = document.getElementById("hypoStats");
+      if (statsEl) statsEl.textContent = scored.length
+        ? "measured hit-rate — " + scored.map(s =>
+            `${s.conviction}: ${s.wins}/${s.wins+s.losses+s.flat} (${(s.hitRate*100).toFixed(0)}%, ${s.outcomePnl})`).join(" · ")
+        : "";
     } catch (e) {}
   }
 
