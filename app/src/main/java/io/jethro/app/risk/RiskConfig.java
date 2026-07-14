@@ -89,14 +89,49 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.SwapPricingService(curveService);
     }
 
-    /** Deterministic scenario/stress over live positions (quant-engine step 2). Swap scenarios
-     *  are full revaluation on the shocked curve (convexity) via the Strata pricer. */
+    /** Deterministic scenario/stress over live positions (quant-engine step 2). Rates legs
+     *  are FULL revaluation on the shifted curve: bond futures re-price the CTD par bond
+     *  (convexity), swaps re-price the trade-dated book's seasoned trades (aging + convexity)
+     *  via the read port below — with the engine's stated first-order fallbacks. */
     @Bean
     io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine(InstrumentRefSource refs,
                                                             io.jethro.trading.riskpnl.SwapPricingService swapPricing,
-                                                            io.jethro.trading.riskpnl.BondFutureDurations durations) {
-        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations);
+                                                            io.jethro.trading.riskpnl.BondFutureDurations durations,
+                                                            Dv01Service.SwapTradeSource swapTrades,
+                                                            ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
+        java.util.function.Supplier<java.time.LocalDate> sessionDay =
+                cal != null ? cal::sessionDay : java.time.LocalDate::now;
+        io.jethro.trading.riskpnl.ScenarioEngine.SeasonedSwapReval seasoned = (book, instrument, shiftBps) -> {
+            var tenor = SWAP_TENOR_YEARS.get(instrument);
+            if (tenor == null) {
+                return Optional.empty(); // unknown product — engine falls back, never guesses
+            }
+            java.time.LocalDate valuation = sessionDay.get();
+            java.math.BigDecimal total = java.math.BigDecimal.ZERO;
+            boolean any = false;
+            for (var t : swapTrades.trades()) {
+                if (!book.equals(t.book()) || !instrument.equals(t.instrument())) {
+                    continue;
+                }
+                var pnl = swapPricing.seasonedPnlUnderShock(t.tradeDay(), tenor,
+                        "BUY".equals(t.side()),                       // V9: BUY = pay fixed
+                        t.entryPar().movePointLeft(2).doubleValue(),  // par % → fraction
+                        t.lots().doubleValue() * 1_000_000.0, valuation, shiftBps);
+                if (pnl.isEmpty()) {
+                    return Optional.empty(); // curve died mid-loop — whole leg falls back
+                }
+                total = total.add(pnl.get());
+                any = true;
+            }
+            return any ? Optional.of(total) : Optional.empty();
+        };
+        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations, seasoned);
     }
+
+    /** Tenor per tradeable swap (V7/V9), shared by the scenario and DV01 wiring. */
+    private static final Map<String, Integer> SWAP_TENOR_YEARS =
+            Map.of("USD_IRS_5Y", 5, "USD_IRS_10Y", 10);
 
     @Bean
     RiskController riskController(RiskProjection projection, CurveService curveService,

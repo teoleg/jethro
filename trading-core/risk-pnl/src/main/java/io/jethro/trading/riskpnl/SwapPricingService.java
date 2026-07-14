@@ -100,6 +100,40 @@ public final class SwapPricingService {
         });
     }
 
+    /**
+     * FULL-REVALUATION scenario P&amp;L of one trade-dated swap under a parallel curve shift
+     * (quant-engine step 2 remainder): ΔPV = PV(shifted curve) − PV(base curve), both via
+     * the Strata pricer with the trade's REMAINING schedule — so the shock response shrinks
+     * as the trade ages (a 10Y traded 6y ago responds like a 4y), and convexity is carried.
+     * Past SOFR fixings are pinned to the BASE curve's short rate in both legs: history is
+     * a fact, a scenario must not rewrite it. Empty when the curve isn't live; a matured
+     * trade shocks to zero.
+     */
+    public java.util.Optional<BigDecimal> seasonedPnlUnderShock(LocalDate tradeDate, int tenorYears,
+                                                                boolean payFixed, double fixedRate,
+                                                                double notional, LocalDate valuationDate,
+                                                                BigDecimal shiftBps) {
+        var base = curves.curve();
+        var shocked = curves.curveWithShiftBps(shiftBps.doubleValue());
+        if (base.isEmpty() || shocked.isEmpty()) {
+            return java.util.Optional.empty();
+        }
+        LocalDate endDate = tradeDate.plusYears(tenorYears);
+        if (!endDate.isAfter(valuationDate)) {
+            return java.util.Optional.of(money(0));
+        }
+        ResolvedSwapTrade trade = FixedOvernightSwapConventions.USD_FIXED_1Y_SOFR_OIS
+                .toTrade(tradeDate, tradeDate, endDate,
+                        payFixed ? BuySell.BUY : BuySell.SELL, notional, fixedRate)
+                .resolve(REF_DATA);
+        double fixingRate = base.get().yValue(1.0 / 365.0); // history: same in both worlds
+        double pvBase = presentValue(trade,
+                seasonedProvider(base.get(), valuationDate, tradeDate, fixingRate));
+        double pvShocked = presentValue(trade,
+                seasonedProvider(shocked.get(), valuationDate, tradeDate, fixingRate));
+        return java.util.Optional.of(money(pvShocked - pvBase));
+    }
+
     /** One curve node's share of a swap's DV01: P&amp;L per +1bp move of THAT node only. */
     public record TenorDv01(String tenor, double tenorYears, BigDecimal dv01) {
     }
@@ -209,13 +243,18 @@ public final class SwapPricingService {
                 .build();
     }
 
-    /** Provider with a FLAT past-fixing series at the current short rate (see valueSeasoned). */
+    /** Provider with a FLAT past-fixing series at the curve's own short rate (see valueSeasoned). */
     private static ImmutableRatesProvider seasonedProvider(Curve curve, LocalDate valuationDate,
                                                            LocalDate tradeDate) {
-        double shortRate = curve.yValue(1.0 / 365.0);
+        return seasonedProvider(curve, valuationDate, tradeDate, curve.yValue(1.0 / 365.0));
+    }
+
+    /** As above with the fixing level supplied — scenario reval pins fixings to the BASE curve. */
+    private static ImmutableRatesProvider seasonedProvider(Curve curve, LocalDate valuationDate,
+                                                           LocalDate tradeDate, double fixingRate) {
         var fixings = com.opengamma.strata.collect.timeseries.LocalDateDoubleTimeSeries.builder();
         for (LocalDate d = tradeDate; !d.isAfter(valuationDate); d = d.plusDays(1)) {
-            fixings.put(d, shortRate);
+            fixings.put(d, fixingRate);
         }
         return ImmutableRatesProvider.builder(valuationDate)
                 .discountCurve(Currency.USD, curve)

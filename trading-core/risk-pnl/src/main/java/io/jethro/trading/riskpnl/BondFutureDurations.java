@@ -89,20 +89,19 @@ public final class BondFutureDurations {
         if (window == null) {
             return Optional.empty();
         }
-        if (curve != null) {
-            var points = curve.snapshot();
-            if (!points.isEmpty()) {
-                double longEndYield = interpolatedYield(points, window.longYears());
-                if (longEndYield > 1e-4) {
-                    return Optional.of(longEndYield < CF_PIVOT_YIELD
-                            ? window.shortYears() : window.longYears());
-                }
-            }
-        }
-        return Optional.of(window.shortYears());
+        return Optional.of(ctd(instrumentId).map(CtdPoint::maturityYears)
+                .orElse(window.shortYears()));
     }
 
     private Optional<BigDecimal> liveDuration(String instrumentId) {
+        return ctd(instrumentId).map(c -> parBondModifiedDuration(c.yield(), c.maturityYears()));
+    }
+
+    /** The live CTD point (yield at the CTD maturity) — shared by duration and full reval. */
+    private record CtdPoint(double yield, double maturityYears) {
+    }
+
+    private Optional<CtdPoint> ctd(String instrumentId) {
         DeliverableWindow window = DELIVERABLE.get(instrumentId);
         if (window == null || curve == null) {
             return Optional.empty();
@@ -122,7 +121,38 @@ public final class BondFutureDurations {
         if (y <= 1e-4) {
             return Optional.empty();
         }
-        return Optional.of(parBondModifiedDuration(y, ctdMaturity));
+        return Optional.of(new CtdPoint(y, ctdMaturity));
+    }
+
+    /**
+     * FULL-REVALUATION price change (fraction of par) of the CTD par bond under a parallel
+     * yield shift (quant-engine step 2 remainder): re-prices the bond at the shocked yield
+     * instead of extrapolating −D·Δy, so the result carries <b>convexity</b> — at ±100bp on
+     * ZB (D≈10.8) the linear number is wrong by ~7 points of the move, and rates DOWN gains
+     * more than rates UP loses, which linear can't show. Empty without a live curve (the
+     * engine falls back to first-order duration, disclosed). Empty too if the shift would
+     * take the yield non-positive (no sane reprice — callers fall back, never guess).
+     */
+    public Optional<BigDecimal> priceChangeUnderShock(String instrumentId, BigDecimal shiftBps) {
+        return ctd(instrumentId).flatMap(c -> {
+            double shifted = c.yield() + shiftBps.doubleValue() / 10_000.0;
+            if (shifted <= 1e-4) {
+                return Optional.empty();
+            }
+            return Optional.of(parBondPriceChange(c.yield(), shifted, c.maturityYears()));
+        });
+    }
+
+    /**
+     * ΔP of a semiannual par bond (coupon = base yield {@code y}, price 1 at base) re-priced
+     * at {@code yShifted}: P = (y/y')(1 − (1+y'/2)^(−2T)) + (1+y'/2)^(−2T), ΔP = P − 1.
+     * Worked (ZN CTD 6.5y, y 4.5%): +100bp → −0.0540350543, −100bp → +0.0576882049 —
+     * linear ±0.055818 sits between them, the convexity asymmetry. Fraction at scale 10.
+     */
+    public static BigDecimal parBondPriceChange(double y, double yShifted, double tenorYears) {
+        double disc = Math.pow(1.0 + yShifted / 2.0, -2.0 * tenorYears);
+        double price = (y / yShifted) * (1.0 - disc) + disc;
+        return BigDecimal.valueOf(price - 1.0).setScale(10, RoundingMode.HALF_UP);
     }
 
     /** Linear par-yield interpolation on the live tenor grid (flat extrapolation at the ends). */

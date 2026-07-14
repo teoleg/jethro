@@ -124,3 +124,29 @@ long 2 ZN @ 110.50 × $1000, D 6.3 → DV01 −139.23; CTD 6.5y ⇒ w(10Y) = (6.
 static key-tenor `RatesRiskService` (fresh-tenor swap DV01, fixed instrument→bucket map),
 which is deleted. Positions with missing data are skipped AND counted; a dead curve is
 disclosed (`curveLive=false`), never zeroed silently.
+
+## Implementation note — full-revaluation scenarios (2026-07-14, task #24)
+
+The scenario engine's rates legs are now FULL revaluation on the shifted curve
+(quant-engine step 2 remainder), replacing the first-order extrapolations:
+
+**Bond futures** re-price the CTD par bond at the shocked yield —
+P(y′) = (y/y′)(1 − (1+y′/2)^(−2T)) + (1+y′/2)^(−2T), the same CTD window + 6% CF rule the
+duration model uses — so scenarios carry convexity. Worked (ZN, CTD 6.5y @ 4.5%, net
+110,500): +100bp → −5,970.87 and −100bp → +6,374.55, where linear said ±6,168 — long
+bonds gain more on the way down than they lose on the way up, which −D·Δy cannot show; on
+ZB (D≈10.8) the linear error at ±100bp is ~7 points of the move. A shift that would take
+the yield non-positive refuses to reprice and falls back to first-order (disclosed, never
+guessed).
+
+**Swaps** re-price the trade-dated book's seasoned trades on base vs shifted curve
+(`seasonedPnlUnderShock` via the `SeasonedSwapReval` hook): an aged trade responds like
+its REMAINING tenor (a 10Y traded 6y ago shocks like a 4y), payer convexity comes through
+(gains less than DV01×Δ on +Δ, loses more on −Δ — asserted as pricing identities), and
+past SOFR fixings are pinned to the BASE curve in both worlds — history is a fact a
+scenario must not rewrite. Fallback order: seasoned book → fresh-tenor per-lot reval →
+first-order V9 convention.
+
+Stated: this is direct shifted-curve repricing through the same Strata pricers, not the
+`ScenarioMarketData` scenario-set wrapper — identical math at this scale; adopt the
+wrapper if scenario sets grow. Equity×FX cross-terms remain first-order (documented).

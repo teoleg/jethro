@@ -110,13 +110,19 @@ Built (overview steps 1–8 partial):
   suggestions/auto-exec (ADR-0018/0019);
 - an interim parametric **VaR/vol/concentration** stat helper (`RiskStats`) — a stopgap
   Strata's measures framework subsumes;
-- **scenario/stress, first slice** (layer: risk measures; asset classes: all current):
+- **scenario/stress, full revaluation on the rates legs** (layer: risk measures):
   `ScenarioEngine` revalues live positions under the standard shocks (rates ±100bp,
-  equities −5%, USD +2%, combined risk-off) — first-order, exact-decimal, per book and
-  firm; surfaced on the Overview stress panel (`/api/scenarios`) and as a deterministic
-  attention trigger when the worst stress exceeds the firm loss cap (`ScenarioMonitor`).
-  Named limitation: linear/duration/DV01 sensitivities and no cross-terms — full
-  revaluation via Strata `ScenarioMarketData` is the deferred second slice.
+  equities −5%, USD +2%, combined risk-off), per book and firm, exact-decimal; surfaced
+  on the Overview stress panel (`/api/scenarios`) and as a deterministic attention
+  trigger when the worst stress exceeds the firm loss cap (`ScenarioMonitor`). Rates
+  legs are FULL revaluation on the shifted curve: bond futures re-price the CTD par
+  bond at the shocked yield (convexity — ±100bp on ZB moves ~7 points off linear), and
+  swaps re-price the trade-dated book's seasoned trades (aging + convexity, past
+  fixings pinned to the base curve), with stated first-order fallbacks when curves
+  aren't live. Note: implemented as direct shifted-curve repricing through the same
+  Strata pricers rather than the `ScenarioMarketData` scenario-set wrapper — identical
+  math at one-scenario-at-a-time scale; adopt the wrapper if scenario sets grow.
+  Named limitation: no equity×FX cross-terms (first-order translation, documented).
 
 - shipped since this gap list was first written (kept here so the doc stays honest):
   **portfolio VaR** — historical (`VarMath`) AND parametric with an EWMA covariance
@@ -128,9 +134,8 @@ Built (overview steps 1–8 partial):
   `Dv01Service`, `/api/dv01`), superseding the static key-tenor `RatesRiskService`.
 
 Not built (the gap this doc frames):
-- Strata measures: real (measure-based) VaR and **full-revaluation scenarios** through
-  `ScenarioMarketData` (subsumes the first-order engine above; the swap leg already
-  full-revalues via `swapPnlPerLotUnderShock`) — sequencing step 2's remainder;
+- Strata **measure-based VaR** (the measures framework subsuming the parametric/
+  historical stopgaps) — the last piece of sequencing step 2;
 - Greeks/options, credit (CS01) — no options or credit products exist yet;
 - regime-aware strategy behaviour beyond the volatile-regime sizing scale
   (step 5 remainder).
