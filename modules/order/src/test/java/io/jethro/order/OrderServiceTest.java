@@ -10,12 +10,8 @@ import io.jethro.domain.TimeInForce;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -29,82 +25,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * CAS guard that makes a working order fill exactly once.
  */
 class OrderServiceTest {
-
-    /** In-memory OrderStore honouring the JDBC store's semantics, incl. the CAS transition. */
-    private static final class InMemoryStore implements OrderStore {
-        final Map<String, Order> byKey = new HashMap<>();
-        final Map<String, Order> byId = new HashMap<>();
-        final List<Fill> fills = new ArrayList<>();
-        final Map<String, BigDecimal> arrivals = new HashMap<>();
-
-        @Override
-        public void recordArrivalPrice(String orderId, BigDecimal price) {
-            arrivals.put(orderId, price);
-        }
-
-        @Override
-        public Optional<BigDecimal> arrivalPrice(String orderId) {
-            return Optional.ofNullable(arrivals.get(orderId));
-        }
-
-        @Override
-        public boolean insertIfAbsent(Order order, Instant now) {
-            if (byKey.containsKey(order.idempotencyKey())) {
-                return false;
-            }
-            byKey.put(order.idempotencyKey(), order);
-            byId.put(order.orderId(), order);
-            return true;
-        }
-
-        @Override
-        public void updateStatus(String orderId, OrderStatus status, String reason, Instant now) {
-            Order updated = byId.get(orderId).withStatus(status);
-            byId.put(orderId, updated);
-            byKey.put(updated.idempotencyKey(), updated);
-        }
-
-        @Override
-        public boolean transitionIfCurrent(String orderId, OrderStatus expected, OrderStatus next,
-                                           String reason, Instant now) {
-            Order current = byId.get(orderId);
-            if (current == null || current.status() != expected) {
-                return false;
-            }
-            updateStatus(orderId, next, reason, now);
-            return true;
-        }
-
-        @Override
-        public void insertFill(Fill fill) {
-            fills.add(fill);
-        }
-
-        @Override
-        public Optional<Order> findByIdempotencyKey(String idempotencyKey) {
-            return Optional.ofNullable(byKey.get(idempotencyKey));
-        }
-
-        @Override
-        public Optional<Order> findById(String orderId) {
-            return Optional.ofNullable(byId.get(orderId));
-        }
-
-        @Override
-        public List<Order> findWorkingLimitOrders(String instrumentId) {
-            return byId.values().stream()
-                    .filter(o -> o.instrumentId().value().equals(instrumentId)
-                            && o.status() == OrderStatus.ROUTED && o.type() == OrderType.LIMIT)
-                    .toList();
-        }
-
-        @Override
-        public List<Order> findAllWorkingLimitOrders() {
-            return byId.values().stream()
-                    .filter(o -> o.status() == OrderStatus.ROUTED && o.type() == OrderType.LIMIT)
-                    .toList();
-        }
-    }
 
     /** Recording publisher: counts lifecycle events and fills emitted downstream. */
     private static final class RecordingPublisher implements OrderEventPublisher {
@@ -122,7 +42,7 @@ class OrderServiceTest {
         }
     }
 
-    private final InMemoryStore store = new InMemoryStore();
+    private final InMemoryOrderStore store = new InMemoryOrderStore();
     private final LastPriceCache prices = new LastPriceCache();
     private final RecordingPublisher publisher = new RecordingPublisher();
     private final OrderService service =
