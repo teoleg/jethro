@@ -52,22 +52,32 @@ public final class HypothesisEvaluator {
     private final StrategyProperties sizing;
     private final String book; // the AI sleeve — separate from the momentum strategy's books
     private final io.jethro.app.risk.InstrumentVolSource vols;
+    private final io.jethro.app.risk.PortfolioCorrelationSource correlations;
 
     public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
                                StrategyProperties sizing, String book) {
-        this(refs, guardrail, sizing, book, io.jethro.app.risk.InstrumentVolSource.NONE);
+        this(refs, guardrail, sizing, book, io.jethro.app.risk.InstrumentVolSource.NONE,
+                io.jethro.app.risk.PortfolioCorrelationSource.NONE);
     }
 
-    /** With measured vol: theses are vol-TARGETED (riskBudgetDaily / σ_daily, per-class cap)
-     *  instead of flat target-notional — same formula as the strategy ({@code VolTargeting}). */
     public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
                                StrategyProperties sizing, String book,
                                io.jethro.app.risk.InstrumentVolSource vols) {
+        this(refs, guardrail, sizing, book, vols, io.jethro.app.risk.PortfolioCorrelationSource.NONE);
+    }
+
+    /** With measured vol (and ρ when the history covers it): theses are vol-TARGETED —
+     *  covariance-aware exactly like the strategy ({@code VolTargeting}). */
+    public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                               StrategyProperties sizing, String book,
+                               io.jethro.app.risk.InstrumentVolSource vols,
+                               io.jethro.app.risk.PortfolioCorrelationSource correlations) {
         this.refs = refs;
         this.guardrail = guardrail;
         this.sizing = sizing;
         this.book = book;
         this.vols = vols;
+        this.correlations = correlations;
     }
 
     /** Evaluates a hypothesis against live marks, no backtest context. */
@@ -100,8 +110,11 @@ public final class HypothesisEvaluator {
         // capped per class — same formula as the strategy); flat target notional during warm-up.
         BigDecimal targetNotional = vols.dailyVol(h.instrumentId())
                 .filter(v -> v.signum() > 0)
-                .map(v -> io.jethro.app.risk.VolTargeting.notionalFor(
-                        sizing.riskBudgetDailyOrDefault(), v, sizing.maxOrderNotionalFor(assetClass)))
+                .map(v -> correlations.correlationToPortfolio(h.instrumentId())
+                        .map(rho -> io.jethro.app.risk.VolTargeting.marginalNotionalFor(
+                                sizing.riskBudgetDailyOrDefault(), v, rho, sizing.maxOrderNotionalFor(assetClass)))
+                        .orElseGet(() -> io.jethro.app.risk.VolTargeting.notionalFor(
+                                sizing.riskBudgetDailyOrDefault(), v, sizing.maxOrderNotionalFor(assetClass))))
                 .orElse(sizing.targetNotional());
         BigDecimal qty = targetNotional.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {

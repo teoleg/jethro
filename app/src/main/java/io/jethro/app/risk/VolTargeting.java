@@ -24,4 +24,28 @@ public final class VolTargeting {
         BigDecimal notional = riskBudgetDaily.divide(dailyVol, 2, RoundingMode.DOWN);
         return cap != null && notional.compareTo(cap) > 0 ? cap : notional;
     }
+
+    /** ρ never enters sizing below this floor: a low measured correlation quadruples size at
+     *  most (4× at 0.25), and negative ρ (a hedge) gets the same conservative floor — we do
+     *  not super-size hedges on a correlation estimate. */
+    static final BigDecimal RHO_FLOOR = new BigDecimal("0.25");
+
+    /**
+     * Marginal-risk sizing (covariance-aware): size to the position's CONTRIBUTION to
+     * portfolio vol, not its standalone vol —
+     *
+     * <pre>  notional = riskBudgetDaily / (σ_daily × clamp(ρ_ip, 0.25, 1))</pre>
+     *
+     * ρ_ip = correlation of the instrument with the current portfolio. A name that just
+     * duplicates the book (ρ→1) sizes like standalone; a genuine diversifier (low ρ) earns
+     * up to 4× (the ρ floor), still bounded by the per-class cap. Worked: budget $250,
+     * σ=2%/day, ρ=0.5 → 250/(0.02×0.5) = $25,000 — twice the standalone $12,500, because
+     * only half its vol adds to the book.
+     */
+    public static BigDecimal marginalNotionalFor(BigDecimal riskBudgetDaily, BigDecimal dailyVol,
+                                                 BigDecimal rho, BigDecimal cap) {
+        BigDecimal clamped = rho.max(RHO_FLOOR).min(BigDecimal.ONE);
+        BigDecimal notional = riskBudgetDaily.divide(dailyVol.multiply(clamped), 2, RoundingMode.DOWN);
+        return cap != null && notional.compareTo(cap) > 0 ? cap : notional;
+    }
 }

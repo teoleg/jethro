@@ -1,6 +1,7 @@
 package io.jethro.app.risk;
 
 import io.jethro.trading.riskpnl.ConsolidatedRisk;
+import io.jethro.trading.riskpnl.CovMath;
 import io.jethro.trading.riskpnl.FxConversion;
 import io.jethro.trading.riskpnl.PositionRisk;
 import io.jethro.trading.riskpnl.RiskProjection;
@@ -33,9 +34,57 @@ public final class VarService {
     private final JdbcTemplate jdbc;
     private final RiskProjection projection;
 
+    private final java.util.concurrent.atomic.AtomicReference<Map.Entry<Long, java.util.Optional<CovMath.Covariance>>>
+            covCache = new java.util.concurrent.atomic.AtomicReference<>();
+
     public VarService(JdbcTemplate jdbc, RiskProjection projection) {
         this.jdbc = jdbc;
         this.projection = projection;
+    }
+
+    /** EWMA covariance over the same daily history (30s memo — off any hot path). */
+    private java.util.Optional<CovMath.Covariance> covariance() {
+        long now = System.currentTimeMillis();
+        var cached = covCache.get();
+        if (cached != null && now - cached.getKey() <= 30_000) {
+            return cached.getValue();
+        }
+        java.util.Optional<CovMath.Covariance> fresh = CovMath.ewmaCovariance(dayVectors(), MIN_OBSERVATIONS);
+        covCache.set(Map.entry(now, fresh));
+        return fresh;
+    }
+
+    /** Parametric (variance–covariance) VaR beside the historical one — assumption disclosed. */
+    public java.util.Optional<CovMath.ParametricVar> parametric() {
+        return covariance().map(cov -> CovMath.parametricVar(measurableExposures(), cov));
+    }
+
+    /**
+     * The instrument's correlation with the CURRENT portfolio's returns (ρ_ip) — the input
+     * for marginal-risk sizing. Empty during warm-up / uncovered instruments — callers fall
+     * back to standalone vol-targeting, disclosed.
+     */
+    public java.util.Optional<java.math.BigDecimal> correlationToPortfolio(String instrumentId) {
+        return covariance().flatMap(cov ->
+                cov.correlationToPortfolio(instrumentId, measurableExposures())
+                        .map(java.math.BigDecimal::valueOf));
+    }
+
+    /** USD exposures of the measurable (price-quoted, convertible) positions — shared input. */
+    private Map<String, BigDecimal> measurableExposures() {
+        ConsolidatedRisk snapshot = projection.snapshot(System.currentTimeMillis());
+        FxConversion fx = projection.fx();
+        Map<String, BigDecimal> exposures = new LinkedHashMap<>();
+        for (PositionRisk p : snapshot.positions()) {
+            if (p.quantity().signum() == 0 || !p.hasMark()) {
+                continue;
+            }
+            if (PRICE_QUOTED.contains(p.assetClass()) && fx.canConvert(p.currency(), "USD")) {
+                exposures.merge(p.instrumentId(), fx.convert(p.netExposure(), p.currency(), "USD"),
+                        BigDecimal::add);
+            }
+        }
+        return exposures;
     }
 
     public VarMath.VarResult compute() {

@@ -57,6 +57,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final OrderService orderService; // nullable: null → suggestions only
     private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
     private final io.jethro.app.risk.InstrumentVolSource vols; // measured daily vol (sizing)
+    private final io.jethro.app.risk.PortfolioCorrelationSource correlations; // covariance-aware sizing
 
     private static final int ACTIVITY_CAP = 50;
     private final java.util.Deque<StrategyActivity> activity = new java.util.ArrayDeque<>(); // newest first
@@ -80,7 +81,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
                              RiskLimitSource limits, AttentionFeed feed, SseBroadcaster sse,
                              StrategyProperties props, OrderService orderService,
                              io.jethro.app.risk.TradingHaltSwitch halt,
-                             io.jethro.app.risk.InstrumentVolSource vols) {
+                             io.jethro.app.risk.InstrumentVolSource vols,
+                             io.jethro.app.risk.PortfolioCorrelationSource correlations) {
         this.strategy = strategy;
         this.tradingCore = tradingCore;
         this.refs = refs;
@@ -93,6 +95,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.orderService = orderService;
         this.halt = halt;
         this.vols = vols;
+        this.correlations = correlations;
     }
 
     private boolean autoExecuting() {
@@ -281,8 +284,16 @@ public final class StrategyLifecycle implements SmartLifecycle {
         BigDecimal notionalTarget;
         var dailyVol = vols.dailyVol(signal.instrumentId());
         if (dailyVol.isPresent() && dailyVol.get().signum() > 0) {
-            notionalTarget = io.jethro.app.risk.VolTargeting.notionalFor(
-                    props.riskBudgetDailyOrDefault(), dailyVol.get(), props.maxOrderNotionalFor(assetClass));
+            // Covariance-aware when ρ_ip is measured: size to the position's CONTRIBUTION to
+            // portfolio vol (a duplicate of the book sizes like standalone; a real diversifier
+            // earns more, floored at ρ=0.25). Standalone vol-targeting until then, disclosed.
+            var rho = correlations.correlationToPortfolio(signal.instrumentId());
+            notionalTarget = rho.isPresent()
+                    ? io.jethro.app.risk.VolTargeting.marginalNotionalFor(
+                            props.riskBudgetDailyOrDefault(), dailyVol.get(), rho.get(),
+                            props.maxOrderNotionalFor(assetClass))
+                    : io.jethro.app.risk.VolTargeting.notionalFor(
+                            props.riskBudgetDailyOrDefault(), dailyVol.get(), props.maxOrderNotionalFor(assetClass));
         } else {
             double z = Math.abs(signal.zScore());
             double sigmaBps = Double.isFinite(z) && z > 1e-9

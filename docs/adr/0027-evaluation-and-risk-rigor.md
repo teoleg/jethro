@@ -164,3 +164,20 @@ positive on a strict majority of folds. Defaults: fit 252d / eval 63d. Surfaces:
 explicitly labels fit P&L as in-sample flattery and the OOS column as the only evidence.
 The sandbox cannot fetch data (no egress) — the bars file is generated on the Pi; a missing
 file reports "no historical bars", never a fabricated tape.
+
+## Implementation note — parametric VaR + covariance-aware sizing (2026-07-14)
+
+The last "Alternatives considered" deferral landed. `CovMath` estimates the EWMA (λ=0.94)
+covariance over the SAME daily-close return history the historical VaR window reads (strict
+coverage: only instruments present in every day enter Σ; the axis is sorted for
+determinism). Two consumers: (1) **parametric VaR** — VaR_α = z_α·√(wᵀΣw) with normal
+quantiles (z₉₅=1.645, z₉₉=2.326, ES₉₅ = 2.0627σ) — shown BESIDE the historical number on
+`/api/var` and the tile tooltip with the assumption stated ("thin-tailed by assumption");
+neither replaces the other. Worked: single asset σ=2%/day on $10k → σ_p=$200 → VaR₉₅
+$329.00 / ES₉₅ $412.54 / VaR₉₉ $465.20. (2) **Covariance-aware sizing**: both engines now
+size to the position's CONTRIBUTION to portfolio vol when ρ_ip is measured — notional =
+budget / (σ · clamp(ρ_ip, 0.25, 1)): a name that duplicates the book sizes like standalone,
+a genuine diversifier earns up to 4× (the ρ floor — a hedge or near-zero ρ is never
+super-sized on a correlation estimate), per-class caps still bound everything, and warm-up
+falls back to standalone vol-targeting, disclosed. Worked: $250 budget, σ=2%/day, ρ=0.5 →
+$25,000 (twice standalone — only half its vol adds to the book).

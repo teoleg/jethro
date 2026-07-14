@@ -189,6 +189,16 @@ public class RiskConfig {
         return new InstrumentVolService(jdbc);
     }
 
+    /** Measured instrument↔portfolio correlation for covariance-aware sizing; NONE until
+     *  the daily history warms up (callers fall back to standalone vol-targeting). */
+    @Bean
+    PortfolioCorrelationSource portfolioCorrelationSource(ObjectProvider<VarService> varService) {
+        return instrumentId -> {
+            VarService service = varService.getIfAvailable();
+            return service != null ? service.correlationToPortfolio(instrumentId) : Optional.empty();
+        };
+    }
+
     /** Historical-simulation VaR over recorded daily closes (ADR-0027); needs the DB. */
     @Bean
     @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)

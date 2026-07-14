@@ -15,7 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 public final class VarController {
 
     public record VarDto(String var95, String es95, String var99, int observations,
-                         String coveredExposure, String skippedExposure, String note) {
+                         String coveredExposure, String skippedExposure, String note,
+                         ParametricDto parametric) {
+    }
+
+    /** Variance–covariance VaR beside the historical one — normal EWMA assumption, disclosed. */
+    public record ParametricDto(String var95, String es95, String var99, int observations,
+                                String coveredExposure, String skippedExposure, String note) {
     }
 
     public record BreakerDto(boolean halted, String reason, Long trippedAtMillis) {
@@ -34,12 +40,17 @@ public final class VarController {
         VarService service = varService.getIfAvailable();
         if (service == null) {
             return new VarDto("0.00", "0.00", "0.00", 0, "0.00", "0.00",
-                    "persistence off — no daily-close history to measure against");
+                    "persistence off — no daily-close history to measure against", null);
         }
         VarMath.VarResult r = service.compute();
+        ParametricDto parametric = service.parametric()
+                .map(pv -> new ParametricDto(pv.var95().toPlainString(), pv.es95().toPlainString(),
+                        pv.var99().toPlainString(), pv.observations(), pv.coveredExposure().toPlainString(),
+                        pv.skippedExposure().toPlainString(), pv.note()))
+                .orElse(null);
         return new VarDto(r.var95().toPlainString(), r.es95().toPlainString(), r.var99().toPlainString(),
                 r.observations(), r.coveredExposure().toPlainString(),
-                r.skippedExposure().toPlainString(), r.note());
+                r.skippedExposure().toPlainString(), r.note(), parametric);
     }
 
     @GetMapping("/api/breaker")
