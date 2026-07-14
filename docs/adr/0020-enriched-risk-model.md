@@ -61,3 +61,28 @@ vision path — a pile of inconsistent numbers instead of one coherent multi-ass
 - Follow-ups: verify the Strata artifact/version resolves; map instruments→products and
   marks→curves per asset class; wire VaR/sensitivities/scenario into the risk snapshot;
   feed the enriched snapshot to the strategy and limits; QuantLib service for exotics.
+
+## Implementation note — live swap economics + dynamic bond-future DV01 (2026-07-14)
+
+Two deliberately-deferred first-order conventions became live analytics:
+
+**Swap ledger multiplier is now dynamic.** The V9 quoting convention (mark = par rate in
+percent, P&L = qty × Δpar-points × multiplier, multiplier = DV01 × 100) held the multiplier
+at its inception constant (45,000/pt 5Y, 80,000/pt 10Y). The ledger (`RiskProjection`) now
+reads the multiplier from the LIVE Strata per-lot DV01 via `SwapDv01Source` (1s memo in the
+wiring, off the tick path): the swap annuity drifts with the curve, so a constant multiplier
+mis-states P&L exactly when rates move most. Worked: BUY 2 USD_IRS_5Y @ 4.04, par now 4.14
+(+10bp), live DV01 $430/bp/lot → unrealized = 2 × 0.10 × 43,000 = **$8,600** (the static
+45,000 would say $9,000). Realized P&L on closing fills monetizes at the same live
+multiplier. No curve yet → static refdata multiplier (the disclosed V9 approximation),
+never zero. Remaining approximation, stated: the avg-cost ledger has no per-trade maturity
+dates, so the annuity is the fresh reference-tenor annuity — no roll-down; a trade-dated
+swap book is the refinement.
+
+**Bond-future DV01 breathes with the curve.** `BondFutureDurations` computes the closed-form
+modified duration of a semiannual PAR bond at the LIVE Treasury yield for the future's key
+tenor — D(y,T) = (1/y)(1 − (1+y/2)^(−2T)); worked: 10Y @ 4.5% → 7.9819, @ 1.5% → 9.254 —
+replacing the static refdata duration in both `RatesRiskService` (bucketed DV01) and
+`ScenarioEngine` (rates shocks). Falls back to the static duration until the curve quotes;
+skipped (counted) when neither exists. CONVENTION: par-bond proxy for the CTD — a delivery
+basket/conversion-factor model is the tracked refinement, not faked here.

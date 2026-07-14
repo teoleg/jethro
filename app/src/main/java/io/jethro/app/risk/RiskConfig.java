@@ -17,6 +17,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -39,9 +40,35 @@ public class RiskConfig {
         return instrumentId -> Optional.empty();
     }
 
+    /** The ledger with LIVE swap economics: SWAP positions value at the Strata per-lot DV01
+     *  × 100 (re-read on a 1s memo — off the tick path) instead of the V9 inception-constant
+     *  multiplier; falls back to the static multiplier until the curve prices. */
     @Bean
-    RiskProjection riskProjection(InstrumentRefSource refs) {
-        return new RiskProjection(refs);
+    RiskProjection riskProjection(InstrumentRefSource refs,
+                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
+        var cache = new java.util.concurrent.atomic.AtomicReference<Map.Entry<Long, Map<String, java.math.BigDecimal>>>();
+        io.jethro.trading.riskpnl.SwapDv01Source dv01 = instrumentId -> {
+            long now = System.currentTimeMillis();
+            var entry = cache.get();
+            if (entry == null || now - entry.getKey() > 1_000) {
+                Map<String, java.math.BigDecimal> fresh = new java.util.LinkedHashMap<>();
+                for (var v : swapPricing.valueAll(java.time.LocalDate.now())) {
+                    fresh.put(v.instrumentId(), v.dv01());
+                }
+                entry = Map.entry(now, fresh);
+                cache.set(entry);
+            }
+            return Optional.ofNullable(entry.getValue().get(instrumentId));
+        };
+        return new RiskProjection(refs, dv01);
+    }
+
+    /** Live bond-future durations off the Treasury curve (dynamic DV01); static refdata
+     *  durations until it quotes. */
+    @Bean
+    io.jethro.trading.riskpnl.BondFutureDurations bondFutureDurations(
+            io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView, InstrumentRefSource refs) {
+        return new io.jethro.trading.riskpnl.BondFutureDurations(treasuryCurveView, refs);
     }
 
     /** Live SOFR curve from streamed tenor quotes (quant-engine phase 4). */
@@ -66,16 +93,18 @@ public class RiskConfig {
      *  are full revaluation on the shocked curve (convexity) via the Strata pricer. */
     @Bean
     io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine(InstrumentRefSource refs,
-                                                            io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
-        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing);
+                                                            io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                                                            io.jethro.trading.riskpnl.BondFutureDurations durations) {
+        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations);
     }
 
     /** Per-book bucketed DV01 (rates risk beyond notional, quant-engine step 5). Reuses the
      *  Strata swap pricer for per-$1M swap DV01; bond DV01 from reference-data mod duration. */
     @Bean
     io.jethro.trading.riskpnl.RatesRiskService ratesRiskService(InstrumentRefSource refs,
-                                                               io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
-        return new io.jethro.trading.riskpnl.RatesRiskService(refs, swapPricing);
+                                                               io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                                                               io.jethro.trading.riskpnl.BondFutureDurations durations) {
+        return new io.jethro.trading.riskpnl.RatesRiskService(refs, swapPricing, durations);
     }
 
     @Bean

@@ -99,6 +99,25 @@ class RatesRiskServiceTest {
     }
 
     @Test
+    void liveTreasuryCurveMakesBondDv01Dynamic() {
+        // Same ZN position as above, but the Treasury curve has quoted 4.50%: duration is the
+        // live 10Y par-bond figure 7.9819, not the refdata 6.3.
+        // DV01 = 110,500 × −7.9819 × 1e-4 = −88.199995 exactly.
+        var refs = refs(Map.of("ZN",
+                new InstrumentRef("ZN", "BOND", "USD", new BigDecimal("1000"), new BigDecimal("6.3"))));
+        var curve = new TreasuryCurveView();
+        for (String id : List.of("USD.TSY.1Y", "USD.TSY.2Y", "USD.TSY.5Y", "USD.TSY.10Y", "USD.TSY.30Y")) {
+            curve.onRate(id, new BigDecimal("4.50"));
+        }
+        var svc = new RatesRiskService(refs, noSwaps(), new BondFutureDurations(curve, refs));
+
+        var pos = position("MACRO", "ZN", "BOND", BigDecimal.ONE, new BigDecimal("110500"), true);
+        var out = svc.bucketedDv01(List.of(pos), VAL_DATE);
+        assertEquals(0, out.get(0).totalDv01().compareTo(new BigDecimal("-88.199995")),
+                "dynamic DV01 at the live yield, not the static −69.615");
+    }
+
+    @Test
     void payFixedSwapDv01IsPositiveAndMatchesStrataPerLot() {
         var swaps = swapsAt("4.00");
         BigDecimal perLot = swaps.valueAll(VAL_DATE).stream()

@@ -159,4 +159,33 @@ class RiskProjectionTest {
         assertEquals(1, risk.byBook().size(), "both positions are in ALPHA");
         eq("12200", risk.byBook().get(0).grossExposure());
     }
+
+    /** SWAP refdata per V9: mark = par rate in %, static multiplier = inception DV01 × 100. */
+    private final InstrumentRefSource swapRefs = id -> Optional.ofNullable(Map.of(
+            "USD_IRS_5Y", new InstrumentRef("USD_IRS_5Y", "SWAP", "USD", new BigDecimal("45000"))
+    ).get(id));
+
+    @Test
+    void swapPnlUsesTheLiveDv01NotTheInceptionConstant() {
+        // Live annuity fell as rates rose: DV01 now $430/bp per lot (was $450 at inception).
+        SwapDv01Source live = id -> "USD_IRS_5Y".equals(id)
+                ? Optional.of(new BigDecimal("430")) : Optional.empty();
+        var p = new RiskProjection(swapRefs, live);
+        p.applyFill(fill("f1", "USD_IRS_5Y", Side.BUY, "2", "4.04")); // pay fixed, 2 lots
+        p.applyMark("USD_IRS_5Y", new BigDecimal("4.14"), 1_000);     // +10bp
+
+        PositionRisk r = only(p.snapshot(1_000));
+        // unrealized = 2 × (4.14 − 4.04) × (430 × 100) = 2 × 0.10 × 43,000 = 8,600
+        // (the static 45,000 constant would overstate it as 9,000).
+        eq("8600", r.unrealizedPnl());
+    }
+
+    @Test
+    void swapPnlFallsBackToTheStaticMultiplierUntilTheCurvePrices() {
+        var p = new RiskProjection(swapRefs, SwapDv01Source.NONE);
+        p.applyFill(fill("f1", "USD_IRS_5Y", Side.BUY, "2", "4.04"));
+        p.applyMark("USD_IRS_5Y", new BigDecimal("4.14"), 1_000);
+        // V9 static convention: 2 × 0.10 × 45,000 = 9,000 — disclosed approximation, never zero.
+        eq("9000", only(p.snapshot(1_000)).unrealizedPnl());
+    }
 }

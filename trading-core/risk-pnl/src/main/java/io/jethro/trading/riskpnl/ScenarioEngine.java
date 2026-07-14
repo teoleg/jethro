@@ -23,7 +23,8 @@ import java.util.Map;
  *       ΔP&amp;L = netExposure × s. Worked: long 100 AAPL @ 190 → net 19,000;
  *       equities −5% → −950.00.</li>
  *   <li><b>BOND</b> (Treasury futures) under rate shock Δy: ΔP&amp;L = netExposure ×
- *       (−D·Δy), D = modified duration from reference data. Worked: long 1 ZN @
+ *       (−D·Δy), D = LIVE par-bond modified duration at the current Treasury yield
+ *       ({@link BondFutureDurations}; static refdata duration until the curve quotes). Worked: long 1 ZN @
  *       110.50 × $1000 (net 110,500, D 6.3), rates +100bp → 110,500 × −0.063 =
  *       −6,961.50. No duration on file → the position is SKIPPED and counted, never
  *       silently treated as insensitive.</li>
@@ -83,6 +84,7 @@ public final class ScenarioEngine {
 
     private final InstrumentRefSource refs;
     private final SwapPricingService swaps; // nullable: full-reval swaps when present, else first-order
+    private final BondFutureDurations durations;
 
     public ScenarioEngine(InstrumentRefSource refs) {
         this(refs, null);
@@ -91,8 +93,15 @@ public final class ScenarioEngine {
     /** @param swaps when non-null, swap scenario P&amp;L is FULL revaluation on the shocked curve
      *               (captures convexity), not first-order DV01. */
     public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps) {
+        this(refs, swaps, BondFutureDurations.staticOnly(refs));
+    }
+
+    /** @param durations bond-future duration source — live par-bond duration at the current
+     *                   Treasury yield when the curve has quoted, static refdata otherwise. */
+    public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps, BondFutureDurations durations) {
         this.refs = refs;
         this.swaps = swaps;
+        this.durations = durations;
     }
 
     /** Runs the standard scenarios over the given positions with the given FX marks. */
@@ -128,8 +137,7 @@ public final class ScenarioEngine {
                 case "EQUITY", "FUTURE" -> impactCcy = p.netExposure().multiply(shock.equityPct());
                 case "FX" -> impactCcy = p.netExposure().multiply(shock.usdPct().negate());
                 case "BOND" -> {
-                    BigDecimal duration = refs.find(p.instrumentId())
-                            .map(InstrumentRef::modDuration).orElse(null);
+                    BigDecimal duration = durations.modifiedDuration(p.instrumentId()).orElse(null);
                     if (duration == null) {
                         if (shock.ratesBps().signum() != 0) {
                             skipped++; // rates shock but no duration on file — honest skip

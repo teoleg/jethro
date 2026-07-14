@@ -18,7 +18,8 @@ import java.util.Map;
  * summed per book and firm-wide — the desk's rates exposure profile at a glance.
  *
  * <p>Exact decimals (invariant 1): DV01 is money. Bond DV01 = netExposure × (−D) × 1e-4
- * (D = modified duration from reference data); swap DV01 = quantity(lots) × the Strata
+ * (D = LIVE par-bond modified duration at the current Treasury yield when the curve has
+ * quoted — {@link BondFutureDurations} — else the static refdata duration); swap DV01 = quantity(lots) × the Strata
  * per-$1M DV01 ({@link SwapPricingService}). Instruments without a duration/curve are skipped,
  * never guessed (finance-math rule).
  */
@@ -44,10 +45,19 @@ public final class RatesRiskService {
 
     private final InstrumentRefSource refs;
     private final SwapPricingService swaps;
+    private final BondFutureDurations durations;
 
     public RatesRiskService(InstrumentRefSource refs, SwapPricingService swaps) {
+        this(refs, swaps, BondFutureDurations.staticOnly(refs));
+    }
+
+    /** With a live Treasury curve: bond-future DV01 becomes DYNAMIC — the par-bond duration
+     *  at the current yield for the future's key tenor — instead of the refdata constant. */
+    public RatesRiskService(InstrumentRefSource refs, SwapPricingService swaps,
+                            BondFutureDurations durations) {
         this.refs = refs;
         this.swaps = swaps;
+        this.durations = durations;
     }
 
     /** Bucketed DV01 per book (rates positions only), newest firms first; empty if none. */
@@ -91,10 +101,9 @@ public final class RatesRiskService {
                 if (!p.hasMark()) {
                     return null; // can't value without a mark
                 }
-                BigDecimal duration = refs.find(p.instrumentId())
-                        .map(InstrumentRef::modDuration).orElse(null);
+                BigDecimal duration = durations.modifiedDuration(p.instrumentId()).orElse(null);
                 if (duration == null) {
-                    return null; // no duration on file — never guess
+                    return null; // no live curve AND no duration on file — never guess
                 }
                 // netExposure = qty × mark × mult (signed). +1bp → price ×(−D·1e-4) → this P&L.
                 return p8(p.netExposure().multiply(duration.negate()).movePointLeft(4));
