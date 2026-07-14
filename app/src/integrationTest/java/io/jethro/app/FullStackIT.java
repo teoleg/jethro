@@ -113,7 +113,7 @@ class FullStackIT {
             return body != null && body.size() == 1 ? body : null;
         });
         assertEquals("FIRM", books.get(0).get("bookId").asText());
-        assertEquals(3, books.get(0).get("children").size(), "ALPHA, BETA and MACRO under FIRM");
+        assertEquals(4, books.get(0).get("children").size(), "ALPHA, BETA, MACRO and the AI sleeve under FIRM");
 
         JsonNode instruments = getJson("/api/instruments");
         assertEquals(15, instruments.size(), "seeded multi-asset instruments incl. rates, swaps + EUR equity");
