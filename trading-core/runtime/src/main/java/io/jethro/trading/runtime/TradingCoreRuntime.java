@@ -20,6 +20,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final MarketDataAdapter adapter;
     private final TickRingBuffer buffer;
     private final MarkCache markCache;
+    private final QuoteCache quoteCache = new QuoteCache();
     private final LmdbStateStore stateStore; // nullable: runtime works without persistence
     private final TradingCoreStats stats;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -61,9 +62,22 @@ public final class TradingCoreRuntime implements AutoCloseable {
     }
 
     private MarketDataListener feedListener() {
-        // Producer side: runs on the feed thread, writes into the ring buffer only.
-        return (instrumentId, priceScaled, qtyScaled, providerTs, ingestTs) ->
+        // Producer side: runs on the feed thread. Trades go through the ring buffer (they're
+        // archived + consumed in order); quotes conflate straight to last-value — context,
+        // not ticks — into their own structure, so each structure keeps a single writer.
+        return new MarketDataListener() {
+            @Override
+            public void onTrade(String instrumentId, long priceScaled, long qtyScaled,
+                                long providerTs, long ingestTs) {
                 buffer.offer(instrumentId, priceScaled, qtyScaled, providerTs, ingestTs);
+            }
+
+            @Override
+            public void onQuote(String instrumentId, long bidScaled, long askScaled,
+                                long providerTs, long ingestTs) {
+                quoteCache.update(instrumentId, bidScaled, askScaled, providerTs);
+            }
+        };
     }
 
     private void consumeLoop() {
@@ -103,6 +117,10 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     public MarkCache markCache() {
         return markCache;
+    }
+
+    public QuoteCache quoteCache() {
+        return quoteCache;
     }
 
     public TradingCoreStats stats() {

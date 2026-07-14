@@ -48,6 +48,10 @@ public final class MarkPublisher implements SmartLifecycle {
             if (mark.stale()) {
                 continue;
             }
+            // Top-of-book quote alongside the mark (ADR-0025, optional fields — invariant 4):
+            // consumers without quote data see nulls and keep their synthetic-spread fallback.
+            var quote = runtime.quoteCache().get(mark.instrumentId());
+            boolean hasQuote = quote != null && quote.bidScaled() > 0 && quote.askScaled() > 0;
             publisher.publish(Topics.MD_MARKS, mark.instrumentId(), MarkEvent.newBuilder()
                     .setMeta(EventMeta.newBuilder()
                             .setEventId(UUID.randomUUID().toString())
@@ -57,6 +61,8 @@ public final class MarkPublisher implements SmartLifecycle {
                     .setInstrumentId(mark.instrumentId())
                     .setPrice(mark.price())
                     .setSource(mark.source())
+                    .setBid(hasQuote ? quote.bid() : null)
+                    .setAsk(hasQuote ? quote.ask() : null)
                     .build());
         }
     }

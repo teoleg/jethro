@@ -26,6 +26,9 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
     private final CurveMarkSource curveSim;        // nullable: no curve marks when absent
     private final String[] factorIds;              // priced by the factor model
     private final String[] linkedIds;              // priced FROM the curve (Treasury futures)
+    private final Quotes.QuoteSpec[] factorSpecs;  // per-id quote synthesis; null = no quotes
+    private final Quotes.QuoteSpec[] linkedSpecs;
+    private final Quotes.QuoteSpec[] swapSpecs;
     private final long tickIntervalNanos;
     private final long ticksPerDay;                // 0 disables overnight gaps
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -38,6 +41,16 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
     public CorrelatedMarketDataAdapter(long seed, FactorModelConfig config, List<String> instrumentIds,
                                        long[] startPricesScaled, CurveMarkSource curveSim,
                                        long tickIntervalNanos, double simSecondsPerDay) {
+        this(seed, config, instrumentIds, startPricesScaled, curveSim, tickIntervalNanos,
+                simSecondsPerDay, id -> null);
+    }
+
+    /** @param quoteSpecs per-instrument bid/ask synthesis around the emitted mid (ADR-0025) —
+     *                    the SAME spreads the execution model charges; null spec = no quotes. */
+    public CorrelatedMarketDataAdapter(long seed, FactorModelConfig config, List<String> instrumentIds,
+                                       long[] startPricesScaled, CurveMarkSource curveSim,
+                                       long tickIntervalNanos, double simSecondsPerDay,
+                                       Quotes.QuoteSpecSource quoteSpecs) {
         if (instrumentIds.isEmpty()) {
             throw new IllegalArgumentException("at least one instrument required");
         }
@@ -55,12 +68,31 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
         }
         this.factorIds = factor.toArray(String[]::new);
         this.linkedIds = linked.toArray(String[]::new);
+        this.factorSpecs = specsFor(this.factorIds, quoteSpecs);
+        this.linkedSpecs = specsFor(this.linkedIds, quoteSpecs);
+        this.swapSpecs = specsFor(CurveMarkSource.SWAP_IDS, quoteSpecs);
         this.curveSim = curveSim;
         this.tickIntervalNanos = tickIntervalNanos;
         this.ticksPerDay = Math.round(simSecondsPerDay / (tickIntervalNanos / 1_000_000_000.0));
         this.sim = new CorrelatedFactorSimulator(seed, config, factor,
                 factorStarts.stream().mapToLong(Long::longValue).toArray(),
                 tickIntervalNanos / 1_000_000_000.0, simSecondsPerDay);
+    }
+
+    private static Quotes.QuoteSpec[] specsFor(String[] ids, Quotes.QuoteSpecSource source) {
+        Quotes.QuoteSpec[] specs = new Quotes.QuoteSpec[ids.length];
+        for (int i = 0; i < ids.length; i++) {
+            specs[i] = source.specFor(ids[i]);
+        }
+        return specs;
+    }
+
+    /** Emits a synthesized top-of-book quote around the mid when the instrument has a spec. */
+    private static void quote(MarketDataListener listener, String id, Quotes.QuoteSpec spec,
+                              long midScaled, long now) {
+        if (spec != null) {
+            listener.onQuote(id, Quotes.bidScaled(midScaled, spec), Quotes.askScaled(midScaled, spec), now, now);
+        }
     }
 
     /** Current market regime — narrative feed + regime-aware sizing read this. */
@@ -102,13 +134,17 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
             tickCount++;
             sim.nextTick();
             for (int i = 0; i < factorIds.length; i++) {
-                listener.onTrade(factorIds[i], sim.priceScaled(i), sim.nextQuantityScaled(), now, now);
+                long mid = sim.priceScaled(i);
+                listener.onTrade(factorIds[i], mid, sim.nextQuantityScaled(), now, now);
+                quote(listener, factorIds[i], factorSpecs[i], mid, now);
             }
             if (curveSim != null) {
                 // The curve consumes the SAME tick's RATES innovations — cross-asset coherence.
                 curveSim.applyExternalStep(sim.lastLevelDelta(), sim.lastSlopeDelta());
-                for (String id : linkedIds) {
-                    listener.onTrade(id, curveSim.linkedPriceScaled(id), sim.nextQuantityScaled(), now, now);
+                for (int i = 0; i < linkedIds.length; i++) {
+                    long mid = curveSim.linkedPriceScaled(linkedIds[i]);
+                    listener.onTrade(linkedIds[i], mid, sim.nextQuantityScaled(), now, now);
+                    quote(listener, linkedIds[i], linkedSpecs[i], mid, now);
                 }
                 for (int t = 0; t < CurveMarkSource.TENOR_IDS.length; t++) {
                     listener.onTrade(CurveMarkSource.TENOR_IDS[t],
@@ -120,8 +156,9 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
                             curveSim.tsyRateScaledPercent(t), 1_000_000L, now, now);
                 }
                 for (int s = 0; s < CurveMarkSource.SWAP_IDS.length; s++) {
-                    listener.onTrade(CurveMarkSource.SWAP_IDS[s],
-                            curveSim.swapParScaledPercent(s), 1_000_000L, now, now);
+                    long mid = curveSim.swapParScaledPercent(s);
+                    listener.onTrade(CurveMarkSource.SWAP_IDS[s], mid, 1_000_000L, now, now);
+                    quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, now);
                 }
             }
             java.util.concurrent.locks.LockSupport.parkNanos(tickIntervalNanos);

@@ -193,7 +193,10 @@ public final class OrderService {
      * if it couldn't fill now (not marketable / no mark / lost the CAS).
      */
     private synchronized Order tryFill(Order order, BigDecimal mark) {
-        Optional<Fill> fill = executor.tryExecute(order, mark);
+        // The quote riding with the mark (bid/ask), when the feed carries one (ADR-0025).
+        LastPriceCache.Quote quote = prices.quote(order.instrumentId()).orElse(null);
+        Optional<Fill> fill = executor.tryExecute(order, mark,
+                quote != null ? quote.bid() : null, quote != null ? quote.ask() : null);
         if (fill.isEmpty()) {
             return null;
         }

@@ -10,6 +10,7 @@ import io.jethro.trading.marketdata.sim.CorrelatedMarketDataAdapter;
 import io.jethro.trading.marketdata.sim.CurveFactorSimulator;
 import io.jethro.trading.marketdata.sim.CurveMarkSource;
 import io.jethro.trading.marketdata.sim.FactorModelConfig;
+import io.jethro.trading.marketdata.sim.Quotes;
 import io.jethro.trading.marketdata.sim.RealTreasuryCurve;
 import io.jethro.trading.marketdata.sim.SimMarketDataAdapter;
 import io.jethro.trading.marketdata.yahoo.YahooMarketDataAdapter;
@@ -38,6 +39,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private final TradingCoreProperties properties;
     private final RefDataRepository refData; // nullable: needed to map yahoo symbols
     private final FinnhubRateLimiter rateLimiter; // shared Finnhub REST budget (news + curve)
+    private final io.jethro.app.order.ExecutionProperties executionCosts; // sim quote spreads (ADR-0025)
     private volatile TradingCoreRuntime runtime;
     private volatile MarketDataAdapter adapter;
     private volatile java.util.function.Supplier<String> regimeSource; // non-null only in sim mode
@@ -49,9 +51,16 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     public TradingCoreLifecycle(TradingCoreProperties properties, RefDataRepository refData,
                                 FinnhubRateLimiter rateLimiter) {
+        this(properties, refData, rateLimiter, new io.jethro.app.order.ExecutionProperties(null, null));
+    }
+
+    public TradingCoreLifecycle(TradingCoreProperties properties, RefDataRepository refData,
+                                FinnhubRateLimiter rateLimiter,
+                                io.jethro.app.order.ExecutionProperties executionCosts) {
         this.properties = properties;
         this.refData = refData;
         this.rateLimiter = rateLimiter;
+        this.executionCosts = executionCosts;
     }
 
     @Override
@@ -249,7 +258,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 var sim = new CorrelatedMarketDataAdapter(
                         properties.simSeed(), calibration, ids, startPricesScaled, curveSim,
                         TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()),
-                        properties.simSecondsPerDayOrDefault());
+                        properties.simSecondsPerDayOrDefault(), quoteSpecSource());
                 this.regimeSource = () -> sim.regime().name();
                 log.info("SIM ENGINE: correlated factor model (ADR-0026) — {} instruments, {} regimes, "
                                 + "t(ν={}) tails, {}s per simulated trading day",
@@ -293,6 +302,25 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         }
         int fallback = properties.markJumpBpsFor(null);
         return id -> byInstrument.getOrDefault(id, fallback);
+    }
+
+    /**
+     * Per-instrument quote synthesis for the sim feed (ADR-0025): bid/ask around the mid at
+     * the SAME per-class spreads the execution cost model charges — the quoted touch and the
+     * synthetic touch agree by construction. Swaps are rate-quoted (additive bp). Instruments
+     * outside the master (curve pseudo-quotes) get no quotes.
+     */
+    private Quotes.QuoteSpecSource quoteSpecSource() {
+        Map<String, Quotes.QuoteSpec> byId = new LinkedHashMap<>();
+        if (refData != null) {
+            for (Instrument i : refData.findAllInstruments()) {
+                String assetClass = i.assetClass().name();
+                int centiBps = executionCosts.spreadFor(assetClass)
+                        .movePointRight(2).setScale(0, java.math.RoundingMode.HALF_UP).intValueExact();
+                byId.put(i.id().value(), new Quotes.QuoteSpec(centiBps, "SWAP".equals(assetClass)));
+            }
+        }
+        return byId::get;
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'

@@ -66,7 +66,7 @@ public final class OrderMarketDataConsumer implements AutoCloseable {
                     try {
                         MarkEvent mark = AvroCodec.decode(record.value(), MarkEvent.class);
                         String instrumentId = mark.getInstrumentId().toString();
-                        prices.update(instrumentId, mark.getPrice());
+                        prices.update(instrumentId, mark.getPrice(), mark.getBid(), mark.getAsk());
                         if (onMark != null) {
                             onMark.accept(instrumentId, mark.getPrice()); // working-order matching
                         }

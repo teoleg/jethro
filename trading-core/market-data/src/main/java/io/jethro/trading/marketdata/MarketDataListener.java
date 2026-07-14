@@ -15,4 +15,13 @@ public interface MarketDataListener {
      */
     void onTrade(String instrumentId, long priceScaled, long qtyScaled,
                  long providerTimestampMillis, long ingestTimestampMillis);
+
+    /**
+     * A top-of-book quote (ADR-0025): best bid/ask, same scaled-long conventions as
+     * {@link #onTrade}. Default no-op — adapters without quote data (and listeners that
+     * only care about trades) need no change.
+     */
+    default void onQuote(String instrumentId, long bidScaled, long askScaled,
+                         long providerTimestampMillis, long ingestTimestampMillis) {
+    }
 }

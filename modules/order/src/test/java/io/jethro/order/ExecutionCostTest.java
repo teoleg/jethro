@@ -34,6 +34,33 @@ class ExecutionCostTest {
     }
 
     @Test
+    void quotedTouchOverridesTheSyntheticSpread() {
+        // A REAL quote rides with the mark (ADR-0025): BUY crosses to the ASK as quoted —
+        // 190.05 ask + 1bp fee = 190.05 × 1.0001 = 190.069005 — not mid × (1 + spread/2).
+        var exec = new SimulatedExecutor(EQUITY_COSTS);
+        var buy = exec.tryExecute(order(Side.BUY, OrderType.MARKET, null),
+                new BigDecimal("190.00"), new BigDecimal("189.95"), new BigDecimal("190.05")).orElseThrow();
+        assertEquals(new BigDecimal("190.069005"), buy.price());
+        // SELL hits the BID: 189.95 × (1 − 0.0001) = 189.931005.
+        var sell = exec.tryExecute(order(Side.SELL, OrderType.MARKET, null),
+                new BigDecimal("190.00"), new BigDecimal("189.95"), new BigDecimal("190.05")).orElseThrow();
+        assertEquals(new BigDecimal("189.931005"), sell.price());
+    }
+
+    @Test
+    void limitMarketabilityUsesTheQuotedAsk() {
+        // BUY LIMIT 190.02: the synthetic touch (190.0475) says unmarketable, but the REAL
+        // ask is 190.01 ≤ limit → fills at the limit. Quotes beat estimates.
+        var exec = new SimulatedExecutor(EQUITY_COSTS);
+        var fill = exec.tryExecute(order(Side.BUY, OrderType.LIMIT, "190.02"),
+                new BigDecimal("190.00"), new BigDecimal("189.99"), new BigDecimal("190.01")).orElseThrow();
+        assertEquals(0, new BigDecimal("190.02").compareTo(fill.price()));
+        // And the reverse: quoted ask 190.03 > limit → not marketable even though mid is below.
+        assertTrue(exec.tryExecute(order(Side.BUY, OrderType.LIMIT, "190.02"),
+                new BigDecimal("190.00"), new BigDecimal("189.99"), new BigDecimal("190.03")).isEmpty());
+    }
+
+    @Test
     void buyMarketCrossesHalfSpreadAndPaysFee() {
         // mid 190.00, spread 5bp, fee 1bp:
         // touch = 190 × 1.00025 = 190.0475; fill = 190.0475 × 1.0001 = 190.06650475 → 190.066505

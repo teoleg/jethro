@@ -44,13 +44,25 @@ public final class SimulatedExecutor {
         this.costs = costs;
     }
 
-    /** Attempts to execute an order at the given mid mark. Empty = cannot fill now. */
+    /** Attempts to execute at the mid alone (no quote data — synthetic spread). */
     public Optional<Fill> tryExecute(Order order, BigDecimal mid) {
+        return tryExecute(order, mid, null, null);
+    }
+
+    /**
+     * Attempts to execute an order. When a REAL top-of-book quote rides with the mark
+     * (ADR-0025: the sim publishes bid/ask synthesized from the same spread config), the
+     * marketable side IS the quoted touch — BUY crosses to the ask, SELL hits the bid; the
+     * synthetic mid±half-spread only remains as the fallback for feeds without quote data.
+     * Empty = cannot fill now.
+     */
+    public Optional<Fill> tryExecute(Order order, BigDecimal mid, BigDecimal bid, BigDecimal ask) {
         if (mid == null) {
             return Optional.empty(); // no market data — caller rejects
         }
         ExecutionCostSource.Cost cost = costs.costFor(order.instrumentId().value());
-        BigDecimal touch = touch(order.side(), mid, cost);
+        BigDecimal quoted = order.side() == Side.BUY ? ask : bid;
+        BigDecimal touch = quoted != null && quoted.signum() > 0 ? quoted : touch(order.side(), mid, cost);
         BigDecimal fillPrice = switch (order.type()) {
             case MARKET -> withFee(order.side(), touch, cost.feeBps());
             case LIMIT -> marketable(order, touch) ? order.limitPrice().orElseThrow() : null;

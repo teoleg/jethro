@@ -7,6 +7,10 @@
     {"name": "meta", "type": "io.jethro.messaging.EventMeta"},
     {"name": "instrumentId", "type": "string"},
     {"name": "price", "type": {"type": "bytes", "logicalType": "decimal", "precision": 20, "scale": 6}},
-    {"name": "source", "type": "string", "doc": "Provider adapter that produced the mark"}
+    {"name": "source", "type": "string", "doc": "Provider adapter that produced the mark"},
+    {"name": "bid", "type": ["null", {"type": "bytes", "logicalType": "decimal", "precision": 20, "scale": 6}], "default": null,
+     "doc": "Best bid alongside the mark (ADR-0025); null when the feed has no quote data. Added backward-compatibly (invariant 4)."},
+    {"name": "ask", "type": ["null", {"type": "bytes", "logicalType": "decimal", "precision": 20, "scale": 6}], "default": null,
+     "doc": "Best ask alongside the mark; null when the feed has no quote data."}
   ]
 }

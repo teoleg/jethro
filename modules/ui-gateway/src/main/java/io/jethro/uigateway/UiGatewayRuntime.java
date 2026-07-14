@@ -150,7 +150,10 @@ public final class UiGatewayRuntime implements AutoCloseable {
         String instrumentId = event.getInstrumentId().toString();
         String price = event.getPrice().toPlainString();
         long providerMillis = event.getMeta().getProviderTimestamp().toEpochMilli();
-        markState.update(event.getInstrumentId(), price, event.getSource(), providerMillis);
+        markState.update(instrumentId, price,
+                event.getBid() != null ? event.getBid().toPlainString() : null,
+                event.getAsk() != null ? event.getAsk().toPlainString() : null,
+                event.getSource(), providerMillis);
         markHistory.record(instrumentId, price, providerMillis);
         // Diagnostic: prove history is filling. Logs about every ~20s of marks.
         long n = marksConsumed.incrementAndGet();

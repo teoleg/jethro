@@ -58,3 +58,20 @@ incentive distortion in place — strategies and autonomy gates act on the infla
   spreads are estimates, not live quotes, and per-class constants miss per-name variation.
 - Follow-ups: bid/ask emitted by the market-data pipeline (per-name spreads); fee as a
   separate cash line in the ledger rather than price-embedded; market impact + ADV.
+
+## Implementation note — bid/ask through the market-data pipeline (2026-07-14)
+
+The first follow-up landed: quotes are now first-class through the whole path.
+`MarketDataListener.onQuote` (default no-op — adapters/listeners without quote data need no
+change) → the correlated sim synthesizes top-of-book around every emitted mid (`Quotes`,
+scaled-long centi-bps so SWAP's 0.4bp is the exact integer 40; the SAME per-class spreads the
+execution model charges, so quoted touch ≡ synthetic touch by construction — worked: mid 190,
+5bp → 189.9525 × 190.0475) → `QuoteCache` conflates last-value on the feed thread (quotes are
+context, not archived ticks; one writer per structure) → `MarkEvent` gained optional nullable
+`bid`/`ask` decimals (added with defaults — backward-compatible, invariant 4) → the order
+module's `LastPriceCache` stores the quote and `SimulatedExecutor` fills at the QUOTED touch
+when present (BUY crosses to the ask, SELL hits the bid; LIMIT marketability against the real
+ask/bid), keeping the synthetic mid±half-spread only as the fallback for feeds without quote
+data (Yahoo/Finnhub trades). The markets page shows bid/ask in the tile tooltip. This is the
+foundation for per-name spreads (calibrate `QuoteSpec` per instrument instead of per class)
+and TCA vs arrival (tracked).
