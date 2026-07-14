@@ -87,6 +87,13 @@
     <div class="section-h">By instrument</div>
     <div class="panel" style="padding:2px 4px"><div id="byinstr" class="muted" style="padding:12px">—</div></div>
   </div>
+
+  <div class="section-h">Walk-forward on REAL bars <span class="muted" style="text-transform:none;letter-spacing:0">— params fit per fold (grid on the fit window), then measured OOS on the unseen window; bars from scripts/fetch_bars.py (ADR-0027)</span></div>
+  <div class="panel">
+    <button class="btn" id="wfrun" type="button">Run walk-forward</button>
+    <span class="muted" id="wfmeta" style="margin-left:10px"></span>
+    <div id="wfresult" class="muted" style="margin-top:10px">—</div>
+  </div>
 </main>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
@@ -142,6 +149,29 @@
     btn.disabled = false;
   }
   document.getElementById("f").addEventListener("submit", run);
+  document.getElementById("wfrun").onclick = async () => {
+    const el = document.getElementById("wfresult");
+    el.textContent = "running…";
+    try {
+      const algo = document.getElementById("algo").value;
+      const r = await fetch("/api/backtest/walkforward" + (algo ? `?algo=${algo}` : "")).then(x => x.json());
+      if (r.note && !r.folds) { el.textContent = r.note; return; }
+      document.getElementById("wfmeta").textContent =
+        `· ${r.algo} · ${r.days} bars · fit ${r.fitDays}d / eval ${r.evalDays}d · ${r.positiveFolds}/${r.folds.length} folds positive · ` +
+        (r.supported ? "SUPPORTED out-of-sample" : "not supported");
+      el.outerHTML = '<div id="wfresult"><table>' +
+        "<tr><th>fold</th><th>fit start</th><th>eval window</th><th>lookback</th><th>threshold</th><th>fit P&L</th><th>OOS P&L</th><th>OOS trades</th></tr>" +
+        r.folds.map(f => `<tr><td class="mono">${f.fold}</td><td class="mono muted">${esc(f.fitStart)}</td>
+          <td class="mono muted">${esc(f.evalStart)} → ${esc(f.evalEnd)}</td>
+          <td class="mono">${f.chosenLookback}</td><td class="mono">${f.chosenThreshold}σ</td>
+          <td class="mono muted">${Number(f.fitPnl).toFixed(2)}</td>
+          <td class="mono ${Number(f.oosPnl)>0?'up':(Number(f.oosPnl)<0?'down':'')}">${Number(f.oosPnl).toFixed(2)}</td>
+          <td class="mono muted">${f.oosTrades}</td></tr>`).join("") +
+        `<tr><td colspan="6" style="text-align:right" class="muted">total OOS</td>
+          <td class="mono ${Number(r.totalOosPnl)>0?'up':'down'}">${Number(r.totalOosPnl).toFixed(2)}</td><td></td></tr>` +
+        '</table><div class="muted" style="font-size:11px;padding:6px 2px">Fit P&L is IN-SAMPLE (what the grid optimised — always flattering); only the OOS column is evidence.</div></div>';
+    } catch (e) { el.textContent = "walk-forward failed: " + e; }
+  };
 </script>
 </body>
 </html>

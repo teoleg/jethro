@@ -27,9 +27,25 @@ public final class BacktestController {
     }
 
     private final BacktestService service;
+    private final WalkForwardService walkForward;
 
-    public BacktestController(BacktestService service) {
+    public BacktestController(BacktestService service, WalkForwardService walkForward) {
         this.service = service;
+        this.walkForward = walkForward;
+    }
+
+    /** Walk-forward replay on REAL bars (ADR-0027): params fit per fold, measured OOS. */
+    @GetMapping("/api/backtest/walkforward")
+    public Object walkForward(@RequestParam(name = "algo", required = false) String algo,
+                              @RequestParam(name = "fitDays", required = false) Integer fitDays,
+                              @RequestParam(name = "evalDays", required = false) Integer evalDays)
+            throws java.io.IOException {
+        var result = walkForward.run(algo, fitDays, evalDays);
+        if (result.isEmpty()) {
+            return java.util.Map.of("note", "no historical bars at " + walkForward.barsPath()
+                    + " — run scripts/fetch_bars.py on a networked host first");
+        }
+        return result.get();
     }
 
     @GetMapping("/api/backtest")

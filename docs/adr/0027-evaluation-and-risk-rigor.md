@@ -147,3 +147,20 @@ persisted (`firm_equity.open_pnl`, V21) — today's P&L = overnight (open − pr
 intraday (live − open), restart-safe, on `/api/eod` and the Today's-P&L tooltip. Still
 open, stated: real closing-auction prints need a licensed feed — the boundary snapshot
 remains the close for live runs.
+
+## Implementation note — walk-forward historical replay (2026-07-14, point 2 "Next")
+
+The step past sim-seed OOS landed: `WalkForwardEngine` replays REAL daily bars
+(`scripts/fetch_bars.py` → `data/historical-bars.json`, Stooq — the same source as the sim
+calibration; ES/NQ use index proxies, stated in the script) with rolling fit/eval windows:
+parameters (lookback × threshold grid) are chosen on each fold's FIT window only, then the
+strategy is measured on the UNSEEN eval window with those frozen parameters — out-of-sample
+by construction. Accounting matches the sim backtest exactly (same average-cost ledger,
+per-fill costs from the live execution config, long-only clamp, order/position caps; windows
+start flat and include end-of-window unrealized — no fake exit fills; strategies warm up on
+the days preceding each window so short windows aren't half warm-up). "Supported" = OOS net
+positive on a strict majority of folds. Defaults: fit 252d / eval 63d. Surfaces:
+`/api/backtest/walkforward?algo=momentum|mean-reversion` + a Backtest-page panel that
+explicitly labels fit P&L as in-sample flattery and the OOS column as the only evidence.
+The sandbox cannot fetch data (no egress) — the bars file is generated on the Pi; a missing
+file reports "no historical bars", never a fabricated tape.
