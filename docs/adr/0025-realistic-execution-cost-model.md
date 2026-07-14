@@ -1,0 +1,60 @@
+# ADR-0025: Realistic simulated execution — spread/fee cost model, working-order matching, cancel/TIF
+
+- **Status:** Proposed
+- **Date:** 2026-07-14
+- **Deciders:** Oleg
+- **Tags:** order, execution, finance-math
+
+## Context
+
+Simulated execution (ADR-0019) fills MARKET orders at the last mark, full quantity, zero
+cost. Real trading crosses a bid/ask spread and pays fees. The backtest engine already
+charges `costBps` per fill, so the platform's two P&L sources disagree by construction:
+the gate that authorizes bounded autonomy ("backtest-supported", ADR-0022) is measured
+with costs, while the live sim P&L it authorizes is measured without them. The distortion
+is not small — a 131-share AAPL round-trip that lost $5.93 in the sim would lose ~$15
+with a 4bp spread — and it teaches every strategy that churn is free.
+
+Separately, the order lifecycle is incomplete: a LIMIT order that isn't marketable stays
+ROUTED forever (nothing re-checks working orders when new marks arrive), there is no
+cancel, and no time-in-force. Doing nothing means P&L stays systematically inflated and
+optimizing against the sim optimizes for overtrading.
+
+## Decision
+
+We will make simulated execution price-realistic and lifecycle-complete, in the order module:
+
+1. **Cost model at the fill boundary.** `fillPrice = mark ± halfSpread`, where the spread
+   (bps of price) and a fee (bps of notional, embedded in the fill price for v1) are
+   configured per asset class under `jethro.execution.*`. Defaults (dev estimates, stated
+   as such): EQUITY 5bp spread + 1bp fee; FUTURE 1bp + 0.2bp; FX 1bp + 0; SWAP 0.4bp
+   (rate-quote adjusted). Exact decimals end to end (invariant 1). The backtest's
+   `costBps` defaults are derived from the same config so both P&L sources agree.
+2. **Working-order matching.** On every new mark for an instrument, ROUTED LIMIT orders on
+   that instrument are re-tried through the same executor; fills flow the normal path.
+3. **Cancel + TIF.** A cancel endpoint (`CANCELLED` is terminal); TIF `GTC` (default) and
+   `IOC` (unmarketable → immediate `CANCELLED`) now; `DAY` when the session calendar
+   exists (ADR-0026 follow-up).
+
+## Alternatives considered
+
+**A full matching engine / synthetic order book.** Rejected: enormous surface, and with no
+real counterparty flow the book would be as synthetic as a spread model — cost without
+added truth for the strategies we run.
+
+**Market-impact models (e.g. Almgren–Chriss).** Deferred: impact matters when order size is
+material vs. ADV; the sim has no volume model yet. Revisit with the liquidity work
+(ADR-0026 follow-up), trigger: any strategy sized above ~1% of modeled ADV.
+
+**Costs only in post-trade analytics (TCA), fills stay free.** Rejected: leaves the
+incentive distortion in place — strategies and autonomy gates act on the inflated number.
+
+## Consequences
+
+- Positive: every P&L number means what it claims; churn shows its true cost; backtest and
+  live sim measure the same economics; the order lifecycle (working orders, cancel, TIF)
+  matches how real venues behave.
+- Negative: all sim P&L drops (dashboards look worse — that is the point); configured
+  spreads are estimates, not live quotes, and per-class constants miss per-name variation.
+- Follow-ups: bid/ask emitted by the market-data pipeline (per-name spreads); fee as a
+  separate cash line in the ledger rather than price-embedded; market impact + ADV.
