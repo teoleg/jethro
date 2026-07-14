@@ -19,11 +19,15 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
 
     public static final String NAME = "sim";
 
+    /** Close→open share of a trading day's variance (stylized US-equity overnight fraction). */
+    static final double OVERNIGHT_DAY_FRACTION = 0.3;
+
     private final CorrelatedFactorSimulator sim;
     private final CurveMarkSource curveSim;        // nullable: no curve marks when absent
     private final String[] factorIds;              // priced by the factor model
     private final String[] linkedIds;              // priced FROM the curve (Treasury futures)
     private final long tickIntervalNanos;
+    private final long ticksPerDay;                // 0 disables overnight gaps
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
 
@@ -53,6 +57,7 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
         this.linkedIds = linked.toArray(String[]::new);
         this.curveSim = curveSim;
         this.tickIntervalNanos = tickIntervalNanos;
+        this.ticksPerDay = Math.round(simSecondsPerDay / (tickIntervalNanos / 1_000_000_000.0));
         this.sim = new CorrelatedFactorSimulator(seed, config, factor,
                 factorStarts.stream().mapToLong(Long::longValue).toArray(),
                 tickIntervalNanos / 1_000_000_000.0, simSecondsPerDay);
@@ -80,8 +85,21 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
     }
 
     private void run(MarketDataListener listener) {
+        long tickCount = 0;
         while (running.get()) {
             long now = System.currentTimeMillis();
+            // Overnight gap at each simulated day boundary (ADR-0026/0027): one correlated
+            // close→open jump between consecutive ticks; the curve consumes its rates deltas
+            // so futures/swaps gap coherently too. (Tick-counted — in lockstep with the sim's
+            // own dtDays time base; the app's session calendar counts wall time, so the two
+            // drift by scheduler overhead. The gap needn't land exactly on the calendar tick.)
+            if (ticksPerDay > 0 && tickCount > 0 && tickCount % ticksPerDay == 0) {
+                sim.overnightGap(OVERNIGHT_DAY_FRACTION);
+                if (curveSim != null) {
+                    curveSim.applyExternalStep(sim.lastLevelDelta(), sim.lastSlopeDelta());
+                }
+            }
+            tickCount++;
             sim.nextTick();
             for (int i = 0; i < factorIds.length; i++) {
                 listener.onTrade(factorIds[i], sim.priceScaled(i), sim.nextQuantityScaled(), now, now);

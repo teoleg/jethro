@@ -199,11 +199,30 @@ class OrderServiceTest {
     }
 
     @Test
-    void dayTifIsRejectedUntilTheSessionCalendarExists() {
-        prices.update("AAPL", new BigDecimal("150.00"));
-        Order result = service.submit(limit("idem-day", "10", "150.00", TimeInForce.DAY));
-        assertEquals(OrderStatus.REJECTED, result.status(),
-                "DAY silently behaving as GTC would misrepresent the order — reject honestly");
+    void dayLimitWorksIntradayAndExpiresAtSessionClose() {
+        prices.update("AAPL", new BigDecimal("151.00")); // above the buy limit — not marketable
+        Order working = service.submit(limit("idem-day", "10", "150.00", TimeInForce.DAY));
+        assertEquals(OrderStatus.ROUTED, working.status(), "unmarketable DAY limit works like GTC intraday");
+
+        assertEquals(1, service.expireDayOrders(), "session close sweeps the working DAY order");
+        assertEquals(OrderStatus.CANCELLED, store.byId.get(working.orderId()).status());
+
+        service.onMark("AAPL", new BigDecimal("149.00")); // crosses — but the order is dead
+        assertTrue(store.fills.isEmpty(), "an expired DAY order must never fill");
+    }
+
+    @Test
+    void sessionCloseSweepsOnlyDayOrdersGtcSurvives() {
+        prices.update("AAPL", new BigDecimal("151.00"));
+        Order day = service.submit(limit("idem-day2", "10", "150.00", TimeInForce.DAY));
+        Order gtc = service.submit(limit("idem-gtc2", "10", "150.00", TimeInForce.GTC));
+
+        assertEquals(1, service.expireDayOrders(), "only the DAY order expires");
+        assertEquals(OrderStatus.CANCELLED, store.byId.get(day.orderId()).status());
+        assertEquals(OrderStatus.ROUTED, store.byId.get(gtc.orderId()).status(), "GTC works across sessions");
+
+        service.onMark("AAPL", new BigDecimal("149.00"));
+        assertEquals(1, store.fills.size(), "the surviving GTC still fills on a crossing mark");
     }
 
     @Test

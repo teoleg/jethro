@@ -61,6 +61,25 @@ class CorrelatedFactorSimulatorTest {
     }
 
     @Test
+    void overnightGapIsDeterministicAndCarriesAWholeGapMove() {
+        var a = sim(42, singleRegime("CALM", 0, RISK_OFF_CORR));
+        var b = sim(42, singleRegime("CALM", 0, RISK_OFF_CORR));
+        for (int t = 0; t < 100; t++) {
+            a.nextTick();
+            b.nextTick();
+        }
+        long before = a.priceScaled(0);
+        a.overnightGap(0.3);
+        b.overnightGap(0.3);
+        for (int i = 0; i < 3; i++) {
+            assertEquals(a.priceScaled(i), b.priceScaled(i), "gap must be seed-deterministic");
+        }
+        // A 0.3-day increment has √(0.3·day/tick) ≈ 60× a tick's vol — statistically it must
+        // dwarf a single tick move. Just assert it moved at all (exact-value determinism above).
+        assertTrue(a.priceScaled(0) != before, "the overnight gap must reprice the close");
+    }
+
+    @Test
     void singleNamesRideTheEquityFactor() {
         var s = sim(7, singleRegime("CALM", 0, RISK_OFF_CORR));
         double[][] r = returns(s, 20_000);

@@ -77,3 +77,29 @@ remains as advisory annotation on every thesis (and still gates nothing). This s
 ADR's thesis — autonomy is earned from measured outcomes, not proxied from a different
 strategy's backtest. Scoring uses mark-to-mark P&L at horizon expiry; probation-sized entries
 score the same way, so the record reflects what was actually traded.
+
+## Implementation note — session calendar + EOD day boundary (2026-07-14, point 4)
+
+A `TradingCalendar` now defines the trading day. Pure sim runs get the **compressed sim
+calendar** — one session per `sim-seconds-per-day` wall seconds, matching the simulator's
+time base exactly, with synthetic sequential dates anchored past any persisted history so a
+restart never rewrites a closed day. Consequence: the VaR window and daily attribution accrue
+at sim speed (60 daily observations in ~2 wall hours at the default 120s/day) instead of
+needing 60 real days. Live providers get **wall-clock dates** in `session-zone` (default
+America/New_York); v1 treats every date as a session — Friday→Monday is measured as one day's
+return and exchange holidays are not modelled yet (disclosed, not faked).
+
+At each boundary the `EodService` freezes the ended day: closing marks → `daily_close`, firm
+total → `firm_equity`, per-book cumulative P&L → `book_equity` (V18; day attribution =
+consecutive-row differences computed at read time, never stored twice), expires working DAY
+orders, and re-anchors "today's P&L" = live firm total − previous session close (restart-safe:
+the anchor reloads from `firm_equity`). `/api/eod` serves session day, today's P&L and recent
+daily history; the Overview stats row gained a "Today's P&L" tile. **DAY time-in-force is now
+accepted** (it was rejected-with-reason until this calendar existed): unmarketable DAY LIMIT
+orders work intraday exactly like GTC and are swept ROUTED→CANCELLED at the close by the same
+CAS as manual cancels, so a racing fill still wins cleanly. The correlated simulator also
+gaps close→open at each sim day boundary — one correlated Student-t draw carrying ~30% of a
+trading day's variance (the stylized US overnight share), through the same regime/Cholesky
+machinery, with the rates deltas fed to the curve so futures and swaps gap coherently.
+Follow-ups: exchange holiday calendars + a 17:00-ET futures-style roll; closing-auction marks
+for live feeds; intraday-vs-overnight P&L attribution.

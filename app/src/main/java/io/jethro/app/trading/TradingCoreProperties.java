@@ -48,12 +48,22 @@ public record TradingCoreProperties(
         Boolean realCurve,
         /** Seconds between real-curve refreshes (curves move slowly; keeps REST calls low). Default 120. */
         Long treasuryCurveRefreshSeconds,
+        /** Session-calendar zone for LIVE feeds (ADR-0027): the trading day is the calendar date
+         *  in this zone. Pure sim runs use the compressed sim calendar instead. Default
+         *  America/New_York (the universe is US-centric). */
+        String sessionZone,
         String lmdbPath,
         long lmdbMaxSizeMb,
         int bufferCapacity) {
 
     public String providerOrDefault() {
         return provider != null && !provider.isBlank() ? provider : "sim";
+    }
+
+    /** Zone for the live-feed session calendar; a bad zone id fails fast at wiring time. */
+    public java.time.ZoneId sessionZoneOrDefault() {
+        return java.time.ZoneId.of(sessionZone != null && !sessionZone.isBlank()
+                ? sessionZone : "America/New_York");
     }
 
     public long yahooRequestSpacingMillisOrDefault() {

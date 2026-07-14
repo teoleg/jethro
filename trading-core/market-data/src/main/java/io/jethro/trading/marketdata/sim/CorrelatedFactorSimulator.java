@@ -98,8 +98,28 @@ public final class CorrelatedFactorSimulator {
     public void nextTick() {
         shockSign = 0;
         maybeTransitionRegime();
+        step(dtDays, sqrtDtDays);
+    }
+
+    /**
+     * The close→open move at a simulated day boundary (ADR-0026/0027): ONE correlated draw
+     * carrying {@code overnightDayFraction} of a trading day's variance (≈0.3 is the stylized
+     * US-equity close-to-open share), applied as a single gap between consecutive ticks — news
+     * that lands while the session is closed reprices at the open, it doesn't drift in. Uses
+     * the same regime/Cholesky/Student-t machinery as {@link #nextTick}, so overnight gaps
+     * stay cross-asset coherent; the rates deltas are exported for the curve as usual.
+     */
+    public void overnightGap(double overnightDayFraction) {
+        shockSign = 0;
+        step(overnightDayFraction, Math.sqrt(overnightDayFraction));
+    }
+
+    /** One correlated increment over {@code dDays} trading days; idio vol rescales with time. */
+    private void step(double dDays, double sqrtDDays) {
         FactorModelConfig.RegimeSpec regime = cfg.regimes().get(regimeIndex);
         double volMult = regime.volMultiple();
+        // Idio per-tick vols were precomputed for dtDays; rescale to this increment's horizon.
+        double idioTimeScale = sqrtDDays / sqrtDtDays;
 
         // Correlated standard-normal vector via Cholesky, then the shared Student-t scale:
         // chi² with ν dof over all factors AND idios, so a fat-tail day is fat EVERYWHERE
@@ -111,16 +131,16 @@ public final class CorrelatedFactorSimulator {
         double[] x = multiply(cholesky[regimeIndex], z);
         double tScale = studentTScale();
 
-        double fEq = regime.equityDriftAnnual() * dtDays / TRADING_DAYS_PER_YEAR
-                + cfg.equityFactorVolAnnual() / Math.sqrt(TRADING_DAYS_PER_YEAR) * sqrtDtDays * volMult * tScale * x[F_EQ];
-        double fUsd = regime.usdDriftAnnual() * dtDays / TRADING_DAYS_PER_YEAR
-                + cfg.usdFactorVolAnnual() / Math.sqrt(TRADING_DAYS_PER_YEAR) * sqrtDtDays * volMult * tScale * x[F_USD];
-        lastLevelDelta = regime.ratesDriftBpPerDay() * 1e-4 * dtDays
-                + cfg.ratesLevelVolBpPerDay() * 1e-4 * sqrtDtDays * volMult * tScale * x[F_LVL];
-        lastSlopeDelta = cfg.ratesSlopeVolBpPerDay() * 1e-4 * sqrtDtDays * volMult * tScale * x[F_SLP];
+        double fEq = regime.equityDriftAnnual() * dDays / TRADING_DAYS_PER_YEAR
+                + cfg.equityFactorVolAnnual() / Math.sqrt(TRADING_DAYS_PER_YEAR) * sqrtDDays * volMult * tScale * x[F_EQ];
+        double fUsd = regime.usdDriftAnnual() * dDays / TRADING_DAYS_PER_YEAR
+                + cfg.usdFactorVolAnnual() / Math.sqrt(TRADING_DAYS_PER_YEAR) * sqrtDDays * volMult * tScale * x[F_USD];
+        lastLevelDelta = regime.ratesDriftBpPerDay() * 1e-4 * dDays
+                + cfg.ratesLevelVolBpPerDay() * 1e-4 * sqrtDDays * volMult * tScale * x[F_LVL];
+        lastSlopeDelta = cfg.ratesSlopeVolBpPerDay() * 1e-4 * sqrtDDays * volMult * tScale * x[F_SLP];
 
         for (int i = 0; i < ids.length; i++) {
-            double idio = idioSigmaTick[i] * volMult * tScale * random.nextGaussian();
+            double idio = idioSigmaTick[i] * idioTimeScale * volMult * tScale * random.nextGaussian();
             double r = betaEq[i] * fEq + betaUsd[i] * fUsd + idio;
             price[i] = price[i] * Math.exp(r);
         }

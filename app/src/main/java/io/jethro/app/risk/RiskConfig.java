@@ -135,15 +135,26 @@ public class RiskConfig {
         return new VarService(jdbc, projection);
     }
 
-    /** Records daily closes + firm equity — the history VaR and the breaker peak run on. */
+    /** Records daily closes + firm equity — the history VaR and the breaker peak run on.
+     *  Day labels come from the session calendar (ADR-0027); the cadence samples a compressed
+     *  sim day several times (min 5s) and stays at 60s for wall-clock days. */
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
     MarketHistoryRecorder marketHistoryRecorder(org.springframework.jdbc.core.JdbcTemplate jdbc,
                                                 ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore,
+                                                ObjectProvider<io.jethro.app.session.TradingCalendar> calendar,
+                                                ObjectProvider<io.jethro.app.trading.TradingCoreProperties> tradingProps,
                                                 RiskProjection projection) {
         var core = tradingCore.getIfAvailable();
+        var cal = calendar.getIfAvailable();
+        var props = tradingProps.getIfAvailable();
+        boolean simDays = props != null && "sim".equals(props.providerOrDefault());
+        long period = simDays
+                ? Math.max(5, Math.round(props.simSecondsPerDayOrDefault() / 10.0))
+                : 60;
         var recorder = new MarketHistoryRecorder(jdbc, core,
-                () -> projection.snapshot(System.currentTimeMillis()).total().totalPnl());
+                () -> projection.snapshot(System.currentTimeMillis()).total().totalPnl(),
+                cal != null ? cal::sessionDay : java.time.LocalDate::now, period);
         if (core != null) {
             recorder.start(); // trading off → nothing to record, never scheduled
         }

@@ -116,7 +116,7 @@
         </label>
         <label>Book<select name="bookId" id="book"></select></label>
         <label>Type<select name="type" id="type"><option>MARKET</option><option>LIMIT</option></select></label>
-        <label>TIF<select name="timeInForce" id="tif" title="GTC works until filled/cancelled; IOC cancels if not marketable on arrival"><option>GTC</option><option>IOC</option></select></label>
+        <label>TIF<select name="timeInForce" id="tif" title="GTC works until filled/cancelled; IOC cancels if not marketable on arrival; DAY expires at session close"><option>GTC</option><option>IOC</option><option>DAY</option></select></label>
         <label id="qtyLabel">Quantity<input name="quantity" id="quantity" value="100" inputmode="decimal"></label>
         <label id="limitLabel" style="display:none">Limit price<input name="limitPrice" id="limitPrice" inputmode="decimal" placeholder="(market)"></label>
       </div>

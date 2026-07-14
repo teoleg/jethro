@@ -23,8 +23,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * Order lifecycle orchestration (ADR-0008 state machine) with simulated execution and a
  * complete working-order lifecycle (ADR-0025). Flow: dedupe → persist NEW → ROUTED →
  * simulated fill (FILLED) or REJECTED (no market data) — or, for an unmarketable LIMIT:
- * IOC cancels on arrival, GTC stays working and is retried on every new mark for its
- * instrument ({@link #onMark}) until it fills or is cancelled ({@link #cancel}).
+ * IOC cancels on arrival; GTC and DAY stay working and are retried on every new mark for
+ * their instrument ({@link #onMark}) until filled or cancelled ({@link #cancel}), with DAY
+ * additionally swept at session close ({@link #expireDayOrders}, ADR-0027 calendar).
  *
  * <p><b>Exactly-once fills under racing paths:</b> submit-time execution, mark-driven
  * matching and cancel can all target the same order. Two guards: (1) the fill path is
@@ -90,13 +91,6 @@ public final class OrderService {
         }
         publisher.publishOrderEvent(order, null);
 
-        // DAY needs the session calendar (ADR-0027) to expire honestly; until it exists a DAY
-        // order would silently behave as GTC — misrepresentation, so reject with the reason.
-        if (order.timeInForce() == TimeInForce.DAY) {
-            return transition(order, OrderStatus.REJECTED,
-                    "DAY time-in-force requires the session calendar (ADR-0027) — use GTC or IOC");
-        }
-
         // Deterministic pre-trade risk gate (ADR-0018): reject before routing if the
         // order would push the book over an exposure limit.
         PreTradeCheck.Decision gate = preTradeCheck.check(
@@ -116,12 +110,40 @@ public final class OrderService {
             return transition(order, OrderStatus.REJECTED,
                     "no market data for " + order.instrumentId().value());
         }
-        // LIMIT not marketable: IOC dies on arrival; GTC goes to work and waits for marks.
+        // LIMIT not marketable: IOC dies on arrival; GTC and DAY go to work and wait for marks
+        // (DAY is swept at session close by {@link #expireDayOrders} — the ADR-0027 calendar).
         if (order.timeInForce() == TimeInForce.IOC) {
             return transition(order, OrderStatus.CANCELLED, "IOC — not marketable on arrival");
         }
         indexAdd(order);
         return order;
+    }
+
+    /**
+     * Expires every working DAY order at session close (ADR-0027): the app's EOD boundary
+     * calls this when the calendar rolls. Same CAS as {@link #cancel} — a racing fill wins
+     * cleanly. A DAY order that outlived a crashed session is swept at the NEXT boundary
+     * (late, disclosed in the reason), never silently promoted to GTC.
+     * @return how many orders were expired.
+     */
+    public int expireDayOrders() {
+        int expired = 0;
+        for (Order order : store.findAllWorkingLimitOrders()) {
+            if (order.timeInForce() != TimeInForce.DAY) {
+                continue;
+            }
+            if (store.transitionIfCurrent(order.orderId(), OrderStatus.ROUTED, OrderStatus.CANCELLED,
+                    "DAY order expired at session close", Instant.now())) {
+                indexRemove(order);
+                publisher.publishOrderEvent(order.withStatus(OrderStatus.CANCELLED),
+                        "DAY order expired at session close");
+                expired++;
+            }
+        }
+        if (expired > 0) {
+            log.info("session close: expired {} DAY order(s)", expired);
+        }
+        return expired;
     }
 
     /**

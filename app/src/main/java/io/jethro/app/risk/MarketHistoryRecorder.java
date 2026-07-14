@@ -11,22 +11,24 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Records the daily market history the measurement layer runs on (ADR-0027): every minute,
- * upserts today's {@code daily_close} row per instrument with the latest mark (at day
- * rollover yesterday's row freezes as the close) and today's {@code firm_equity} row with
- * the current total P&L. Calendar-less day boundary (server-local date) on purpose — the
- * session calendar refines "close" later without touching this. Curve pseudo-instruments
- * are recorded too: that history enables rates VaR later. Off the tick path; a failed pass
- * logs and retries next minute.
+ * Records the daily market history the measurement layer runs on (ADR-0027): on a cadence,
+ * upserts the current session day's {@code daily_close} row per instrument with the latest
+ * mark and its {@code firm_equity} row with the current total P&L. The day comes from the
+ * session calendar (compressed sim days roll in minutes — the cadence is sized to sample
+ * each day several times), and the EOD boundary writes the authoritative close at rollover;
+ * this intra-day trail is the crash-safety net under it. Curve pseudo-instruments are
+ * recorded too: that history enables rates VaR later. Off the tick path; a failed pass logs
+ * and retries next cycle.
  */
 public final class MarketHistoryRecorder implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(MarketHistoryRecorder.class);
-    private static final long PERIOD_SECONDS = 60;
 
     private final JdbcTemplate jdbc;
     private final TradingCoreLifecycle tradingCore;
     private final RiskProjectionSource risk;
+    private final java.util.function.Supplier<LocalDate> sessionDay;
+    private final long periodSeconds;
     private volatile ScheduledExecutorService scheduler;
 
     /** Narrow accessor so this class doesn't drag the whole projection surface. */
@@ -35,10 +37,13 @@ public final class MarketHistoryRecorder implements AutoCloseable {
     }
 
     public MarketHistoryRecorder(JdbcTemplate jdbc, TradingCoreLifecycle tradingCore,
-                                 RiskProjectionSource risk) {
+                                 RiskProjectionSource risk,
+                                 java.util.function.Supplier<LocalDate> sessionDay, long periodSeconds) {
         this.jdbc = jdbc;
         this.tradingCore = tradingCore;
         this.risk = risk;
+        this.sessionDay = sessionDay;
+        this.periodSeconds = Math.max(1, periodSeconds);
     }
 
     public void start() {
@@ -47,8 +52,8 @@ public final class MarketHistoryRecorder implements AutoCloseable {
             t.setDaemon(true);
             return t;
         });
-        scheduler.scheduleWithFixedDelay(this::recordOnce, PERIOD_SECONDS, PERIOD_SECONDS, TimeUnit.SECONDS);
-        log.info("market-history recorder started: daily closes + firm equity every {}s", PERIOD_SECONDS);
+        scheduler.scheduleWithFixedDelay(this::recordOnce, periodSeconds, periodSeconds, TimeUnit.SECONDS);
+        log.info("market-history recorder started: daily closes + firm equity every {}s", periodSeconds);
     }
 
     void recordOnce() {
@@ -57,7 +62,7 @@ public final class MarketHistoryRecorder implements AutoCloseable {
             if (runtime == null) {
                 return;
             }
-            LocalDate today = LocalDate.now();
+            LocalDate today = sessionDay.get();
             for (var mark : runtime.markCache().snapshot()) {
                 jdbc.update("""
                         insert into daily_close (day, instrument, close) values (?, ?, ?)
