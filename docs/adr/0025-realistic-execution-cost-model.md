@@ -75,3 +75,22 @@ ask/bid), keeping the synthetic mid±half-spread only as the fallback for feeds 
 data (Yahoo/Finnhub trades). The markets page shows bid/ask in the tile tooltip. This is the
 foundation for per-name spreads (calibrate `QuoteSpec` per instrument instead of per class)
 and TCA vs arrival (tracked).
+
+## Implementation note — ADV + square-root market impact + participation cap (2026-07-14)
+
+The third follow-up landed. Reference data now carries `adv_usd` per instrument (V15 —
+stylized but realistic liquid-market magnitudes: mega-caps $5–15B/day, ES $250B, Treasury
+futures $40–190B, FX majors deeper still). MARKET fills additionally pay the standard
+empirical **square-root impact law**: impact fraction = σ_daily × √(orderNotional / ADV),
+with σ the measured EWMA daily vol (the vol-targeting/VaR history) and coefficient Y=1
+(the conventional order-of-magnitude choice, stated not fitted). Worked: 500 shares @ 200
+against $1B ADV at σ=2%/day → participation 10⁻⁴ → impact = 0.02 × 0.01 = 2bp; 4× the size
+pays only 2× the impact — the concavity that makes slicing orders rational. Impact needs
+ADV AND measured vol AND a price quote; anything missing → spread+fee only (unmodelled,
+disclosed, never guessed — swaps are left unmodelled in v1: a $1M lot is negligible D2D
+participation). A **participation cap** (`jethro.execution.max-adv-participation`, default
+2% of ADV) REJECTS outsized orders pre-route with the reason — the square-root law is
+calibrated for small participations, and no desk slams 2% of ADV as one market order.
+Remaining, tracked: per-tick sim volume printing (nothing consumes tick volume until a
+VWAP/TCA benchmark needs it — building it now would be decoration); fee as a separate cash
+line; TCA vs arrival (#12).

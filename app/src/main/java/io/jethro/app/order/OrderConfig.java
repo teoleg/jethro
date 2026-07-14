@@ -46,25 +46,31 @@ public class OrderConfig {
     }
 
     /** Binds execution costs (ADR-0025) to reference data: instrument → asset class →
-     *  configured spread/fee. Swaps are rate-quoted (additive spread in rate bp). Without
+     *  configured spread/fee, plus the impact inputs (ADV from refdata, measured daily vol —
+     *  either missing means the impact model stays off for that name, disclosed). Without
      *  refdata an instrument gets the conservative EQUITY defaults — never free execution. */
     @Bean
     ExecutionCostSource executionCostSource(ExecutionProperties props,
-                                            ObjectProvider<InstrumentRefSource> refSource) {
+                                            ObjectProvider<InstrumentRefSource> refSource,
+                                            ObjectProvider<io.jethro.app.risk.InstrumentVolSource> volSource) {
         InstrumentRefSource refs = refSource.getIfAvailable();
+        io.jethro.app.risk.InstrumentVolSource vols =
+                volSource.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE);
         return instrumentId -> {
-            String assetClass = refs != null
-                    ? refs.find(instrumentId).map(r -> r.assetClass()).orElse(null)
-                    : null;
+            var ref = refs != null ? refs.find(instrumentId).orElse(null) : null;
+            String assetClass = ref != null ? ref.assetClass() : null;
             BigDecimal spread = props.spreadFor(assetClass);
             BigDecimal fee = props.feeFor(assetClass);
-            return new ExecutionCostSource.Cost(spread, fee, "SWAP".equals(assetClass));
+            return new ExecutionCostSource.Cost(spread, fee, "SWAP".equals(assetClass),
+                    ref != null ? ref.advUsd() : null,
+                    vols.dailyVol(instrumentId).orElse(null),
+                    ref != null ? ref.multiplier() : null);
         };
     }
 
     @Bean
-    SimulatedExecutor simulatedExecutor(ExecutionCostSource costs) {
-        return new SimulatedExecutor(costs);
+    SimulatedExecutor simulatedExecutor(ExecutionCostSource costs, ExecutionProperties props) {
+        return new SimulatedExecutor(costs, props.maxAdvParticipationOrDefault());
     }
 
     @Bean

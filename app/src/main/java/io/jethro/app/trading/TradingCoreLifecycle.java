@@ -51,7 +51,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     public TradingCoreLifecycle(TradingCoreProperties properties, RefDataRepository refData,
                                 FinnhubRateLimiter rateLimiter) {
-        this(properties, refData, rateLimiter, new io.jethro.app.order.ExecutionProperties(null, null));
+        this(properties, refData, rateLimiter, new io.jethro.app.order.ExecutionProperties(null, null, null));
     }
 
     public TradingCoreLifecycle(TradingCoreProperties properties, RefDataRepository refData,

@@ -39,9 +39,43 @@ public final class SimulatedExecutor {
     private static final RoundingMode ROUND = RoundingMode.HALF_EVEN;
 
     private final ExecutionCostSource costs;
+    private final BigDecimal maxAdvParticipation; // nullable → participation cap off
 
     public SimulatedExecutor(ExecutionCostSource costs) {
+        this(costs, null);
+    }
+
+    /** @param maxAdvParticipation reject orders whose notional exceeds this fraction of the
+     *                             instrument's ADV (e.g. 0.02 = 2%); null disables the cap. */
+    public SimulatedExecutor(ExecutionCostSource costs, BigDecimal maxAdvParticipation) {
         this.costs = costs;
+        this.maxAdvParticipation = maxAdvParticipation;
+    }
+
+    /**
+     * ADV participation gate (ADR-0025): an order that would be more than the configured
+     * fraction of the instrument's average daily volume is rejected pre-route — the impact
+     * model's square-root law is calibrated for small participations and a desk wouldn't
+     * slam 2%+ of ADV as one MARKET order anyway. Empty = fine to route. No ADV on file →
+     * no cap (unmodelled, disclosed).
+     */
+    public Optional<String> participationRejection(Order order, BigDecimal mid) {
+        if (maxAdvParticipation == null || mid == null) {
+            return Optional.empty();
+        }
+        ExecutionCostSource.Cost cost = costs.costFor(order.instrumentId().value());
+        if (cost.advUsd() == null || cost.advUsd().signum() <= 0 || cost.rateQuoted()) {
+            return Optional.empty();
+        }
+        BigDecimal multiplier = cost.multiplier() != null ? cost.multiplier() : BigDecimal.ONE;
+        BigDecimal notional = order.quantity().multiply(mid).multiply(multiplier).abs();
+        BigDecimal cap = cost.advUsd().multiply(maxAdvParticipation);
+        if (notional.compareTo(cap) > 0) {
+            return Optional.of("order notional " + notional.toPlainString() + " exceeds "
+                    + maxAdvParticipation.movePointRight(2).toPlainString() + "% of ADV ("
+                    + cost.advUsd().toPlainString() + ") — split the order or reduce size");
+        }
+        return Optional.empty();
     }
 
     /** Attempts to execute at the mid alone (no quote data — synthetic spread). */
@@ -64,7 +98,7 @@ public final class SimulatedExecutor {
         BigDecimal quoted = order.side() == Side.BUY ? ask : bid;
         BigDecimal touch = quoted != null && quoted.signum() > 0 ? quoted : touch(order.side(), mid, cost);
         BigDecimal fillPrice = switch (order.type()) {
-            case MARKET -> withFee(order.side(), touch, cost.feeBps());
+            case MARKET -> withImpact(order, mid, withFee(order.side(), touch, cost.feeBps()), cost);
             case LIMIT -> marketable(order, touch) ? order.limitPrice().orElseThrow() : null;
         };
         if (fillPrice == null) {
@@ -108,6 +142,32 @@ public final class SimulatedExecutor {
         return side == Side.BUY
                 ? touch.multiply(BigDecimal.ONE.add(factor))
                 : touch.multiply(BigDecimal.ONE.subtract(factor));
+    }
+
+    /**
+     * Square-root market impact on MARKET fills (ADR-0025 follow-up): the standard empirical
+     * law — impact fraction = σ_daily × √(orderNotional / ADV) — applied adversely to the
+     * price like the fee. Worked: SELL 200 AAPL @ ~190 → notional 38,000; ADV $12B; σ 1.8%/day
+     * → impact = 0.018 × √(38,000/12e9) = 0.018 × 0.00178 ≈ 0.32bp — small at demo sizes,
+     * grows with the square root, which is exactly the point. Needs ADV AND measured vol AND
+     * a price quote; anything missing → no impact (unmodelled, disclosed, never guessed).
+     * The coefficient (Y=1) is the conventional order-of-magnitude choice, stated not fitted.
+     */
+    private static BigDecimal withImpact(Order order, BigDecimal mid, BigDecimal price,
+                                         ExecutionCostSource.Cost cost) {
+        if (cost.advUsd() == null || cost.advUsd().signum() <= 0
+                || cost.dailyVol() == null || cost.dailyVol().signum() <= 0 || cost.rateQuoted()) {
+            return price;
+        }
+        BigDecimal multiplier = cost.multiplier() != null ? cost.multiplier() : BigDecimal.ONE;
+        double notional = order.quantity().multiply(mid).multiply(multiplier).abs().doubleValue();
+        double participation = notional / cost.advUsd().doubleValue();
+        // Impact coefficient is analytics (double); it becomes money only multiplied into the
+        // exact price below (same boundary convention as duration/vol).
+        BigDecimal impact = BigDecimal.valueOf(cost.dailyVol().doubleValue() * Math.sqrt(participation));
+        return order.side() == Side.BUY
+                ? price.multiply(BigDecimal.ONE.add(impact))
+                : price.multiply(BigDecimal.ONE.subtract(impact));
     }
 
     private static boolean marketable(Order order, BigDecimal touch) {

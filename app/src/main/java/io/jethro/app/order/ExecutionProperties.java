@@ -13,7 +13,18 @@ import java.util.Map;
  * P&L sources agree by construction.
  */
 @ConfigurationProperties(prefix = "jethro.execution")
-public record ExecutionProperties(Map<String, BigDecimal> spreadBps, Map<String, BigDecimal> feeBps) {
+public record ExecutionProperties(Map<String, BigDecimal> spreadBps, Map<String, BigDecimal> feeBps,
+                                  /** Max order notional as a fraction of the instrument's ADV
+                                   *  (participation cap, ADR-0025). Default 0.02 = 2%; 0 disables. */
+                                  BigDecimal maxAdvParticipation) {
+
+    /** The participation cap, or null (= off) when explicitly configured to 0. */
+    public BigDecimal maxAdvParticipationOrDefault() {
+        if (maxAdvParticipation == null) {
+            return new BigDecimal("0.02");
+        }
+        return maxAdvParticipation.signum() > 0 ? maxAdvParticipation : null;
+    }
 
     private static final Map<String, BigDecimal> DEFAULT_SPREAD = Map.of(
             "EQUITY", new BigDecimal("5"),

@@ -99,9 +99,17 @@ public final class OrderService {
             return transition(order, OrderStatus.REJECTED, gate.reason());
         }
 
+        // ADV participation cap (ADR-0025): a MARKET/LIMIT order that would be an outsized
+        // fraction of the day's volume is rejected with the reason, never silently worked.
+        BigDecimal preMark = prices.lastPrice(order.instrumentId()).orElse(null);
+        Optional<String> participation = executor.participationRejection(order, preMark);
+        if (participation.isPresent()) {
+            return transition(order, OrderStatus.REJECTED, participation.get());
+        }
+
         order = transition(order, OrderStatus.ROUTED, null);
 
-        BigDecimal mark = prices.lastPrice(order.instrumentId()).orElse(null);
+        BigDecimal mark = preMark;
         Order filled = tryFill(order, mark);
         if (filled != null) {
             return filled;

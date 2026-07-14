@@ -41,9 +41,11 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
         Map<String, InstrumentRef> next = new HashMap<>();
         for (Instrument i : repository.findAllInstruments()) {
             String id = i.id().value();
+            Map<String, String> attrs = attributes.getOrDefault(id, Map.of());
             next.put(id, new InstrumentRef(id, i.assetClass().name(), i.currency(),
                     i.contractMultiplier(),
-                    decimalAttribute(attributes.getOrDefault(id, Map.of()), "mod_duration")));
+                    decimalAttribute(attrs, "mod_duration"),
+                    decimalAttribute(attrs, "adv_usd")));
         }
         cache = next;
     }

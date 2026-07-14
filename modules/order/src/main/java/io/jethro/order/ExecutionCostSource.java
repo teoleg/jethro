@@ -20,7 +20,22 @@ public interface ExecutionCostSource {
 
     Cost costFor(String instrumentId);
 
-    record Cost(BigDecimal spreadBps, BigDecimal feeBps, boolean rateQuoted) {
+    /**
+     * Full cost picture; the impact inputs are nullable — null means unmodelled (no ADV on
+     * file / vol not yet measured), and the executor then charges spread+fee only, disclosed.
+     *
+     * @param advUsd     average daily volume in USD notional (impact + participation cap)
+     * @param dailyVol   measured daily vol as a fraction (e.g. 0.018) — the σ in the
+     *                   square-root impact law
+     * @param multiplier contract multiplier, to compute order notional = qty × price × mult
+     */
+    record Cost(BigDecimal spreadBps, BigDecimal feeBps, boolean rateQuoted,
+                BigDecimal advUsd, BigDecimal dailyVol, BigDecimal multiplier) {
+
+        /** Spread/fee only — no impact model (the pre-ADV shape, kept for tests/fallback). */
+        public Cost(BigDecimal spreadBps, BigDecimal feeBps, boolean rateQuoted) {
+            this(spreadBps, feeBps, rateQuoted, null, null, null);
+        }
     }
 
     /** Zero-cost execution (lifecycle tests; NOT the production default — see ADR-0025). */
