@@ -19,7 +19,7 @@ public final class TcaController {
 
     public record RowDto(String orderId, String instrument, String side, String quantity,
                          String arrivalPrice, String fillPrice, String slippageBps,
-                         boolean rateQuoted, long filledAtMillis) {
+                         boolean rateQuoted, String fee, long filledAtMillis) {
     }
 
     public record AggregateDto(String instrument, boolean rateQuoted, long fills,
@@ -48,7 +48,7 @@ public final class TcaController {
         List<RowDto> recent = repo.recent(Math.min(Math.max(1, limit), 500)).stream()
                 .map(r -> new RowDto(r.orderId(), r.instrument(), r.side(), plain(r.quantity()),
                         plain(r.arrivalPrice()), plain(r.fillPrice()), plain(r.slippageBps()),
-                        r.rateQuoted(), r.filledAt().toEpochMilli()))
+                        r.rateQuoted(), plain(r.fee()), r.filledAt().toEpochMilli()))
                 .toList();
         return new TcaDto(aggregates, recent);
     }

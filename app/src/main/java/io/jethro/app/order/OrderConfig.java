@@ -59,7 +59,10 @@ public class OrderConfig {
         return instrumentId -> {
             var ref = refs != null ? refs.find(instrumentId).orElse(null) : null;
             String assetClass = ref != null ? ref.assetClass() : null;
-            BigDecimal spread = props.spreadFor(assetClass);
+            // Per-NAME spread when refdata has one (V25 — liquid names differ 10× within a
+            // class); the class-level config is the fallback, never free execution.
+            BigDecimal spread = ref != null && ref.spreadBps() != null
+                    ? ref.spreadBps() : props.spreadFor(assetClass);
             BigDecimal fee = props.feeFor(assetClass);
             return new ExecutionCostSource.Cost(spread, fee, "SWAP".equals(assetClass),
                     ref != null ? ref.advUsd() : null,

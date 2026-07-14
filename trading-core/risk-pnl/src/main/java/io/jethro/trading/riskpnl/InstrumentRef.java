@@ -17,28 +17,36 @@ import java.math.BigDecimal;
  * @param notionalPerLot gross notional of ONE unit for notional-quoted instruments
  *               (a swap lot = $1M) — the exposure convention input; null for price-quoted
  *               instruments (their exposure is qty × price × multiplier).
+ * @param spreadBps per-NAME full bid/ask spread in bps (ADR-0025); null = fall back to the
+ *               asset-class config.
  */
 public record InstrumentRef(String instrumentId, String assetClass, String currency,
                             BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd,
-                            BigDecimal notionalPerLot) {
+                            BigDecimal notionalPerLot, BigDecimal spreadBps) {
+
+    public InstrumentRef(String instrumentId, String assetClass, String currency,
+                         BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd,
+                         BigDecimal notionalPerLot) {
+        this(instrumentId, assetClass, currency, multiplier, modDuration, advUsd, notionalPerLot, null);
+    }
 
     public InstrumentRef(String instrumentId, String assetClass, String currency,
                          BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd) {
-        this(instrumentId, assetClass, currency, multiplier, modDuration, advUsd, null);
+        this(instrumentId, assetClass, currency, multiplier, modDuration, advUsd, null, null);
     }
 
     public InstrumentRef(String instrumentId, String assetClass, String currency,
                          BigDecimal multiplier, BigDecimal modDuration) {
-        this(instrumentId, assetClass, currency, multiplier, modDuration, null, null);
+        this(instrumentId, assetClass, currency, multiplier, modDuration, null, null, null);
     }
 
     /** Instruments without a rates sensitivity (equities, FX, ...): no duration. */
     public InstrumentRef(String instrumentId, String assetClass, String currency, BigDecimal multiplier) {
-        this(instrumentId, assetClass, currency, multiplier, null, null, null);
+        this(instrumentId, assetClass, currency, multiplier, null, null, null, null);
     }
 
     /** Fallback when reference data is missing: multiplier 1, so PnL is at least well-defined. */
     public static InstrumentRef unknown(String instrumentId) {
-        return new InstrumentRef(instrumentId, "UNKNOWN", "USD", BigDecimal.ONE, null, null, null);
+        return new InstrumentRef(instrumentId, "UNKNOWN", "USD", BigDecimal.ONE, null, null, null, null);
     }
 }

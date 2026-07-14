@@ -109,3 +109,21 @@ A resting BUY LIMIT 150 submitted at arrival 151 that fills → **−66.2252 bps
 Rows persist to `execution_quality` (V20, idempotent on order_id, and a failed TCA write
 never breaks the fill path — measurement is not execution); `/api/tca` serves recent rows +
 per-instrument aggregates; the Orders page gained an Execution-quality panel.
+
+## Implementation note — per-name spreads + fee as a separate cash line (2026-07-14)
+
+The two remaining v1 conventions closed. (1) **Fee is now cash, not price**: the fill price
+is the traded price (touch or limit), and the commission rides on the fill as a separate
+`fee` field — `Fill`/`FillEvent` (optional, backward-compatible)/`fills.fee` (V24). The
+ledger books it against realized immediately (money already gone), idempotently under
+redelivery. Consequences: **LIMIT fills now carry fees** without violating their limit price
+(the very reason the v1 embedded-fee design excluded them), and TCA can finally separate
+price-based slippage (spread/delay/impact) from commission — `execution_quality.fee` (V24).
+Worked: BUY MARKET 131 @ mid 190, 5bp/1bp → fill 190.0475 + $2.489622 cash; the round trip
+still costs the same ≈7bp, now split honestly. Rate-quoted swaps charge no bps-of-notional
+fee (a per-lot ticket fee is a stated refinement). (2) **Per-name spreads** (V25): each
+instrument's `spread_bps` attribute (anchored on real tick sizes — ES 1 tick = 0.46bp, ZN
+1/64 = 1.4bp, AAPL 2bp, SAP ADR 8bp) overrides the class constant in BOTH the execution
+model and the sim's quote synthesis, so the quoted touch and the charged touch stay
+identical per name. Backtests keep the class-level aggregate cost constant (stated
+approximation).

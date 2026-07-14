@@ -315,9 +315,15 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private Quotes.QuoteSpecSource quoteSpecSource() {
         Map<String, Quotes.QuoteSpec> byId = new LinkedHashMap<>();
         if (refData != null) {
+            Map<String, Map<String, String>> attributes = refData.findAllAttributes();
             for (Instrument i : refData.findAllInstruments()) {
                 String assetClass = i.assetClass().name();
-                int centiBps = executionCosts.spreadFor(assetClass)
+                // Per-NAME spread (V25) first — the SAME number the execution model charges —
+                // else the class config: quoted touch and charged touch agree by construction.
+                String perName = attributes.getOrDefault(i.id().value(), Map.of()).get("spread_bps");
+                java.math.BigDecimal spread = perName != null
+                        ? new java.math.BigDecimal(perName) : executionCosts.spreadFor(assetClass);
+                int centiBps = spread
                         .movePointRight(2).setScale(0, java.math.RoundingMode.HALF_UP).intValueExact();
                 byId.put(i.id().value(), new Quotes.QuoteSpec(centiBps, "SWAP".equals(assetClass)));
             }

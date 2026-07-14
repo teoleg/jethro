@@ -147,6 +147,7 @@ public final class RiskDataConsumer implements AutoCloseable {
                 Side.valueOf(e.getSide().name()),
                 e.getQuantity(),
                 e.getPrice(),
+                e.getFee() != null ? e.getFee() : java.math.BigDecimal.ZERO, // pre-fee events = 0
                 e.getMeta().getIngestTimestamp());
     }
 

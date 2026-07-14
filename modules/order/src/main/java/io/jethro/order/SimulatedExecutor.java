@@ -13,25 +13,26 @@ import java.util.UUID;
 
 /**
  * Simulated execution with realistic costs (ADR-0025). The mark is treated as the mid; a
- * marketable order crosses the half-spread and a MARKET order additionally pays the fee,
- * both embedded in the fill price (exact decimals, invariant 1):
+ * marketable order crosses the half-spread (in the PRICE), and the commission is a
+ * SEPARATE cash fee on the fill — prices stay clean traded prices (exact decimals,
+ * invariant 1), so LIMIT fills carry fees too without ever violating their limit price:
  *
  * <pre>
  *   touch(BUY)  = mid × (1 + spread/2·10⁻⁴)      price-quoted (equity/future/FX)
  *   touch(SELL) = mid × (1 − spread/2·10⁻⁴)
  *   touch(SWAP) = mid ± spread/2 · 0.01           rate-quoted: additive in rate bp
- *   MARKET fill = touch × (1 ± fee·10⁻⁴)          fee only on MARKET (a LIMIT must never
- *                                                 fill beyond its limit price — fee as a
- *                                                 separate cash line is the follow-up)
+ *   fee         = qty × fillPrice × multiplier × feeBps·10⁻⁴   (cash, every fill)
  * </pre>
  *
  * Worked example (finance-math rule): BUY MARKET 131 AAPL, mid 190.00, EQUITY spread 5bp
- * fee 1bp → touch 190 × 1.00025 = 190.0475, fill 190.0475 × 1.0001 = <b>190.066505</b>;
- * the round-trip cost vs mid is ≈ 190 × (5+2)/10⁴ ≈ $0.133/share — churn is no longer free.
+ * fee 1bp → fill price = touch = 190 × 1.00025 = <b>190.0475</b>, fee = 131 × 190.0475 ×
+ * 10⁻⁴ = <b>$2.489522</b> cash — the round trip still costs ≈ (5+2)bp, now split honestly
+ * between price (spread) and cash (fee), which is what lets TCA separate them.
  *
  * <p>LIMIT fills at the limit price when the <em>touch</em> (not the mid) crosses it — you
  * cannot buy at your limit until the ask reaches it, which is how real books behave.
- * No partial fills yet (noted, not hidden).
+ * No partial fills yet (noted, not hidden). Rate-quoted swaps charge no bps-of-notional
+ * fee (their configured fee is zero; a per-lot ticket fee is a refinement, stated).
  */
 public final class SimulatedExecutor {
 
@@ -98,12 +99,13 @@ public final class SimulatedExecutor {
         BigDecimal quoted = order.side() == Side.BUY ? ask : bid;
         BigDecimal touch = quoted != null && quoted.signum() > 0 ? quoted : touch(order.side(), mid, cost);
         BigDecimal fillPrice = switch (order.type()) {
-            case MARKET -> withImpact(order, mid, withFee(order.side(), touch, cost.feeBps()), cost);
+            case MARKET -> withImpact(order, mid, touch, cost);
             case LIMIT -> marketable(order, touch) ? order.limitPrice().orElseThrow() : null;
         };
         if (fillPrice == null) {
             return Optional.empty(); // limit not marketable — stays working
         }
+        fillPrice = fillPrice.setScale(PRICE_SCALE, ROUND);
         return Optional.of(new Fill(
                 "fill-" + UUID.randomUUID(),
                 order.orderId(),
@@ -111,8 +113,20 @@ public final class SimulatedExecutor {
                 order.instrumentId(),
                 order.side(),
                 order.quantity(),
-                fillPrice.setScale(PRICE_SCALE, ROUND),
+                fillPrice,
+                fee(order.quantity(), fillPrice, cost),
                 Instant.now()));
+    }
+
+    /** Commission as cash (ADR-0025): qty × price × multiplier × feeBps·10⁻⁴. Zero for
+     *  rate-quoted instruments (bps of a par-rate "notional" would be meaningless). */
+    private static BigDecimal fee(BigDecimal qty, BigDecimal fillPrice, ExecutionCostSource.Cost cost) {
+        if (cost.feeBps().signum() == 0 || cost.rateQuoted()) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal multiplier = cost.multiplier() != null ? cost.multiplier() : BigDecimal.ONE;
+        return qty.multiply(fillPrice).multiply(multiplier)
+                .multiply(cost.feeBps()).movePointLeft(4).setScale(PRICE_SCALE, ROUND);
     }
 
     /** The side of the spread a marketable order crosses: mid ± half-spread. */
@@ -131,17 +145,6 @@ public final class SimulatedExecutor {
         return side == Side.BUY
                 ? mid.multiply(BigDecimal.ONE.add(factor))
                 : mid.multiply(BigDecimal.ONE.subtract(factor));
-    }
-
-    /** MARKET orders additionally pay the fee, embedded in the price (v1, ADR-0025). */
-    private static BigDecimal withFee(Side side, BigDecimal touch, BigDecimal feeBps) {
-        if (feeBps.signum() == 0) {
-            return touch;
-        }
-        BigDecimal factor = feeBps.movePointLeft(4);
-        return side == Side.BUY
-                ? touch.multiply(BigDecimal.ONE.add(factor))
-                : touch.multiply(BigDecimal.ONE.subtract(factor));
     }
 
     /**

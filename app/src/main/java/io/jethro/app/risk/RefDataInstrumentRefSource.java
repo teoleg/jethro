@@ -46,7 +46,8 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
                     i.contractMultiplier(),
                     decimalAttribute(attrs, "mod_duration"),
                     decimalAttribute(attrs, "adv_usd"),
-                    decimalAttribute(attrs, "notional_per_lot")));
+                    decimalAttribute(attrs, "notional_per_lot"),
+                    decimalAttribute(attrs, "spread_bps")));
         }
         cache = next;
     }

@@ -52,6 +52,7 @@ public final class KafkaOrderEventPublisher implements OrderEventPublisher {
                 // (user-entered "100" is scale 0; the schema declares scale 6).
                 .setQuantity(Decimals.atScale(fill.quantity(), Decimals.QTY_SCALE))
                 .setPrice(Decimals.atScale(fill.price(), Decimals.PRICE_SCALE))
+                .setFee(Decimals.atScale(fill.fee(), Decimals.PRICE_SCALE))
                 .build();
         publisher.publish(Topics.FILLS, fill.instrumentId().value(), event);
     }

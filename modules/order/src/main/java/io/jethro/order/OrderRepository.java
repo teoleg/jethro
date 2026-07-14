@@ -65,12 +65,12 @@ public class OrderRepository implements OrderStore {
     @Override
     public void insertFill(Fill fill) {
         jdbc.update("""
-                insert into fills (fill_id, order_id, book_id, instrument_id, side, quantity, price, executed_at)
-                values (?, ?, ?, ?, ?, ?, ?, ?)
+                insert into fills (fill_id, order_id, book_id, instrument_id, side, quantity, price, fee, executed_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict (fill_id) do nothing
                 """,
                 fill.fillId(), fill.orderId(), fill.bookId().value(), fill.instrumentId().value(),
-                fill.side().name(), fill.quantity(), fill.price(), ts(fill.executedAt()));
+                fill.side().name(), fill.quantity(), fill.price(), fill.fee(), ts(fill.executedAt()));
     }
 
     /**

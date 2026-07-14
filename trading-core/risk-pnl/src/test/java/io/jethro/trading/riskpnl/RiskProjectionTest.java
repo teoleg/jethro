@@ -82,6 +82,22 @@ class RiskProjectionTest {
     }
 
     @Test
+    void feeBooksAsRealizedCashCostExactlyOnce() {
+        var p = new RiskProjection(refs);
+        Fill withFee = new Fill("f1", "ord-f1", new BookId("ALPHA"), new InstrumentId("AAPL"),
+                Side.BUY, new BigDecimal("100"), new BigDecimal("10"), new BigDecimal("2.50"),
+                Instant.EPOCH);
+        p.applyFill(withFee);
+        p.applyFill(withFee); // redelivery must not double the fee (invariant 6)
+        p.applyMark("AAPL", new BigDecimal("10"), 1_000);
+
+        PositionRisk r = only(p.snapshot(1_000));
+        eq("-2.50", r.realizedPnl());   // commission is cash already gone
+        eq("0", r.unrealizedPnl());     // flat mark — the fee never contaminated the price
+        eq("-2.50", r.totalPnl());
+    }
+
+    @Test
     void duplicateFillDeliveryLeavesStateUnchanged() {
         var p = new RiskProjection(refs);
         Fill f = fill("f1", "AAPL", Side.BUY, "100", "10");

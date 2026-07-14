@@ -36,22 +36,23 @@ public final class ExecutionQualityRepository implements TcaRecorder {
             jdbc.update("""
                     insert into execution_quality
                         (order_id, instrument, side, quantity, arrival_price, fill_price,
-                         slippage_bps, rate_quoted, filled_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         slippage_bps, rate_quoted, fee, filled_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     on conflict (order_id) do nothing
                     """,
                     fill.orderId(), fill.instrumentId().value(), fill.side().name(), fill.quantity(),
-                    arrivalPrice, fill.price(), slippage, rateQuoted,
+                    arrivalPrice, fill.price(), slippage, rateQuoted, fill.fee(),
                     java.sql.Timestamp.from(fill.executedAt() != null ? fill.executedAt() : Instant.now()));
         } catch (Exception e) {
             log.warn("TCA record failed for {} (fill stands, TCA row lost): {}", fill.orderId(), e.toString());
         }
     }
 
-    /** One fill's quality row. */
+    /** One fill's quality row. {@code slippageBps} is price-based (spread + delay + impact);
+     *  {@code fee} is the separate cash commission — the two never mix. */
     public record Row(String orderId, String instrument, String side, BigDecimal quantity,
                       BigDecimal arrivalPrice, BigDecimal fillPrice, BigDecimal slippageBps,
-                      boolean rateQuoted, Instant filledAt) {
+                      boolean rateQuoted, BigDecimal fee, Instant filledAt) {
     }
 
     /** Per-instrument aggregate: fills, average and worst slippage (same-unit rows only). */
@@ -62,13 +63,14 @@ public final class ExecutionQualityRepository implements TcaRecorder {
     public List<Row> recent(int limit) {
         return jdbc.query("""
                 select order_id, instrument, side, quantity, arrival_price, fill_price,
-                       slippage_bps, rate_quoted, filled_at
+                       slippage_bps, rate_quoted, fee, filled_at
                 from execution_quality order by filled_at desc limit ?
                 """, (rs, i) -> new Row(
                 rs.getString("order_id"), rs.getString("instrument"), rs.getString("side"),
                 rs.getBigDecimal("quantity"), rs.getBigDecimal("arrival_price"),
                 rs.getBigDecimal("fill_price"), rs.getBigDecimal("slippage_bps"),
-                rs.getBoolean("rate_quoted"), rs.getTimestamp("filled_at").toInstant()), limit);
+                rs.getBoolean("rate_quoted"), rs.getBigDecimal("fee"),
+                rs.getTimestamp("filled_at").toInstant()), limit);
     }
 
     public List<Aggregate> aggregates() {

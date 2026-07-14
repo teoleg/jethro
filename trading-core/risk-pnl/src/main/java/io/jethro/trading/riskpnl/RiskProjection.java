@@ -73,7 +73,9 @@ public final class RiskProjection {
         Positions.FillApplication applied =
                 Positions.applyFill(pos, fill, effectiveMultiplier(fill.instrumentId().value(), ref));
         positions.put(key, applied.position());
-        realized.merge(key, applied.realizedPnl(), BigDecimal::add);
+        // The fee is a SEPARATE cash cost (ADR-0025): booked against realized immediately —
+        // it is money already gone, whatever the position later does.
+        realized.merge(key, applied.realizedPnl().subtract(fill.fee()), BigDecimal::add);
     }
 
     /** Records the latest mark for an instrument (drives unrealized PnL and exposure). */

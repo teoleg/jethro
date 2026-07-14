@@ -81,15 +81,17 @@ class ExecutionCostTest {
     @Test
     void quotedTouchOverridesTheSyntheticSpread() {
         // A REAL quote rides with the mark (ADR-0025): BUY crosses to the ASK as quoted —
-        // 190.05 ask + 1bp fee = 190.05 × 1.0001 = 190.069005 — not mid × (1 + spread/2).
+        // fill price IS the ask (fees are cash now, never in the price).
         var exec = new SimulatedExecutor(EQUITY_COSTS);
         var buy = exec.tryExecute(order(Side.BUY, OrderType.MARKET, null),
                 new BigDecimal("190.00"), new BigDecimal("189.95"), new BigDecimal("190.05")).orElseThrow();
-        assertEquals(new BigDecimal("190.069005"), buy.price());
-        // SELL hits the BID: 189.95 × (1 − 0.0001) = 189.931005.
+        assertEquals(0, new BigDecimal("190.05").compareTo(buy.price()));
+        // fee = 131 × 190.05 × 1bp = 2.489655 cash.
+        assertEquals(0, new BigDecimal("2.489655").compareTo(buy.fee()));
+        // SELL hits the BID at the quoted 189.95.
         var sell = exec.tryExecute(order(Side.SELL, OrderType.MARKET, null),
                 new BigDecimal("190.00"), new BigDecimal("189.95"), new BigDecimal("190.05")).orElseThrow();
-        assertEquals(new BigDecimal("189.931005"), sell.price());
+        assertEquals(0, new BigDecimal("189.95").compareTo(sell.price()));
     }
 
     @Test
@@ -106,31 +108,47 @@ class ExecutionCostTest {
     }
 
     @Test
-    void buyMarketCrossesHalfSpreadAndPaysFee() {
-        // mid 190.00, spread 5bp, fee 1bp:
-        // touch = 190 × 1.00025 = 190.0475; fill = 190.0475 × 1.0001 = 190.06650475 → 190.066505
+    void buyMarketCrossesHalfSpreadAndPaysFeeAsCash() {
+        // mid 190.00, spread 5bp, fee 1bp: fill price = touch = 190 × 1.00025 = 190.0475
+        // (the price carries ONLY the spread); fee = 131 × 190.0475 × 1bp = 2.489622 cash.
         var fill = new SimulatedExecutor(EQUITY_COSTS)
                 .tryExecute(order(Side.BUY, OrderType.MARKET, null), new BigDecimal("190.00")).orElseThrow();
-        assertEquals(new BigDecimal("190.066505"), fill.price());
+        assertEquals(new BigDecimal("190.047500"), fill.price());
+        assertEquals(0, new BigDecimal("2.489622").compareTo(fill.fee()));
     }
 
     @Test
-    void sellMarketGetsHitOnTheBidMinusFee() {
-        // touch = 190 × 0.99975 = 189.9525; fill = 189.9525 × 0.9999 = 189.93350475 → 189.933505
+    void sellMarketGetsHitOnTheBidWithItsOwnCashFee() {
+        // fill price = touch = 190 × 0.99975 = 189.9525; fee = 131 × 189.9525 × 1bp = 2.488378.
         var fill = new SimulatedExecutor(EQUITY_COSTS)
                 .tryExecute(order(Side.SELL, OrderType.MARKET, null), new BigDecimal("190.00")).orElseThrow();
-        assertEquals(new BigDecimal("189.933505"), fill.price());
+        assertEquals(new BigDecimal("189.952500"), fill.price());
+        assertEquals(0, new BigDecimal("2.488378").compareTo(fill.fee()));
     }
 
     @Test
-    void roundTripCostIsSpreadPlusTwoFees() {
-        // Round trip at an unmoved mid loses spread + 2·fee = (5 + 2)bp of notional:
-        // 131 × (190.066505 − 189.933505) = 131 × 0.133 = $17.42 — churn is no longer free.
+    void roundTripStillCostsSpreadPlusTwoFeesNowSplitHonestly() {
+        // PRICE round trip at an unmoved mid = the spread: 131 × (190.0475 − 189.9525) =
+        // 131 × 0.095 = $12.445; CASH fees add 2.489622 + 2.488378 = $4.978 — total ≈ 7bp
+        // of notional, identical economics to before, now separable for TCA.
         var exec = new SimulatedExecutor(EQUITY_COSTS);
         var buy = exec.tryExecute(order(Side.BUY, OrderType.MARKET, null), new BigDecimal("190.00")).orElseThrow();
         var sell = exec.tryExecute(order(Side.SELL, OrderType.MARKET, null), new BigDecimal("190.00")).orElseThrow();
-        BigDecimal roundTrip = buy.price().subtract(sell.price()).multiply(new BigDecimal("131"));
-        assertEquals(new BigDecimal("17.423000"), roundTrip.setScale(6));
+        BigDecimal priceRoundTrip = buy.price().subtract(sell.price()).multiply(new BigDecimal("131"));
+        assertEquals(new BigDecimal("12.445000"), priceRoundTrip.setScale(6));
+        assertEquals(0, new BigDecimal("4.978000").compareTo(buy.fee().add(sell.fee())));
+    }
+
+    @Test
+    void limitFillsNowCarryTheirFeeWithoutTouchingTheLimitPrice() {
+        // The whole point of fee-as-cash: a LIMIT fill pays commission WITHOUT its price
+        // moving past the limit. BUY LIMIT 190.02, real ask 190.01 → fills AT 190.02 with
+        // fee = 131 × 190.02 × 1bp = 2.489262 cash.
+        var fill = new SimulatedExecutor(EQUITY_COSTS)
+                .tryExecute(order(Side.BUY, OrderType.LIMIT, "190.02"),
+                        new BigDecimal("190.00"), new BigDecimal("189.99"), new BigDecimal("190.01")).orElseThrow();
+        assertEquals(0, new BigDecimal("190.02").compareTo(fill.price()));
+        assertEquals(0, new BigDecimal("2.489262").compareTo(fill.fee()));
     }
 
     @Test
