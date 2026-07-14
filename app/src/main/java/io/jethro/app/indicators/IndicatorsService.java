@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
  * can't affect the market path (invariant 7). Delayed/unofficial and dev-only, like the feed.
  * Fetches fail gracefully to empty (e.g. offline sim) — the strip just shows what it has.
  */
-public final class IndicatorsService implements SmartLifecycle {
+public final class IndicatorsService implements SmartLifecycle, IndicatorsSource {
 
     private static final Logger log = LoggerFactory.getLogger(IndicatorsService.class);
     private static final String BASE = "https://query1.finance.yahoo.com/v8/finance/chart/";
@@ -73,6 +73,7 @@ public final class IndicatorsService implements SmartLifecycle {
         return out;
     }
 
+    @Override
     public List<Indicator> latest() {
         return latest;
     }

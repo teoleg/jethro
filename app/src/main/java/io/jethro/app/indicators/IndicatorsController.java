@@ -7,8 +7,10 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Market-indicators strip (ADR-0023): major indices/ETFs (US + international) for context on
- * the top bar. Display only — never positions or PnL. Empty when disabled or offline.
+ * Market-indicators strip: major index/market context on the top bar. Sim runs serve the
+ * strip from the sim tape (regime + marks + day-over-day, {@link SimIndicatorsSource});
+ * live runs from delayed Yahoo levels ({@link IndicatorsService}). Display only — never
+ * positions or PnL. Empty when disabled or offline.
  */
 @RestController
 public final class IndicatorsController {
@@ -16,15 +18,15 @@ public final class IndicatorsController {
     public record IndicatorDto(String symbol, String label, String price, Double changePercent) {
     }
 
-    private final ObjectProvider<IndicatorsService> service;
+    private final ObjectProvider<IndicatorsSource> source;
 
-    public IndicatorsController(ObjectProvider<IndicatorsService> service) {
-        this.service = service;
+    public IndicatorsController(ObjectProvider<IndicatorsSource> source) {
+        this.source = source;
     }
 
     @GetMapping("/api/indicators")
     public List<IndicatorDto> indicators() {
-        IndicatorsService live = service.getIfAvailable();
+        IndicatorsSource live = source.getIfAvailable();
         if (live == null) {
             return List.of();
         }
@@ -33,14 +35,15 @@ public final class IndicatorsController {
                 .toList();
     }
 
-    /** Diagnostics: raw Yahoo response for one symbol (default ^GSPC) — status + first bytes. */
+    /** Diagnostics: raw Yahoo response for one symbol (default ^GSPC) — status + first bytes.
+     *  Only meaningful on the Yahoo source; the sim strip has nothing to probe. */
     @GetMapping("/api/indicators/probe")
     public IndicatorsService.ProbeResult probe(
             @org.springframework.web.bind.annotation.RequestParam(name = "symbol", defaultValue = "^GSPC") String symbol) {
-        IndicatorsService live = service.getIfAvailable();
-        if (live == null) {
-            return new IndicatorsService.ProbeResult("(indicators disabled)", -1, null, "service not available");
+        if (source.getIfAvailable() instanceof IndicatorsService yahoo) {
+            return yahoo.probe(symbol);
         }
-        return live.probe(symbol);
+        return new IndicatorsService.ProbeResult("(sim indicators — nothing to probe)", -1, null,
+                "the strip is derived from the sim tape, not a remote fetch");
     }
 }

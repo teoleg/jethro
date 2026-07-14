@@ -272,13 +272,17 @@
       const el = document.getElementById("indices");
       if (!ix.length) { el.innerHTML = ""; return; }
       const inner = i => {
-        const hasData = i.price != null && i.changePercent != null;
-        if (!hasData) return `<span class="l">${esc(i.label)}</span><span class="v mono muted">N/A</span>`;
-        const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
-        const sign = i.changePercent > 0 ? "+" : "";
-        const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:2});
-        return `<span class="l">${esc(i.label)}</span><span class="v mono">${v}</span>`
-             + `<span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span>`;
+        if (i.price == null) return `<span class="l">${esc(i.label)}</span><span class="v mono muted">N/A</span>`;
+        // Text tile (e.g. the sim regime): show the string as-is, no change chip.
+        if (isNaN(Number(i.price))) return `<span class="l">${esc(i.label)}</span><span class="v mono">${esc(i.price)}</span>`;
+        const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:3});
+        let chip = "";
+        if (i.changePercent != null) {
+          const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
+          const sign = i.changePercent > 0 ? "+" : "";
+          chip = `<span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span>`;
+        }
+        return `<span class="l">${esc(i.label)}</span><span class="v mono">${v}</span>` + chip;
       };
       let track = el.querySelector(".marquee");
       if (!track) {
