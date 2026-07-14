@@ -11,5 +11,5 @@ package io.jethro.app.hypothesis;
 public record HypothesisEvent(long timestampMillis, String instrumentId, String direction,
                               String conviction, String thesis, String verdict, boolean autoTraded,
                               Boolean backtestSupports, String backtestPnl, Integer backtestTrades,
-                              String note) {
+                              String note, String autonomyReason) {
 }

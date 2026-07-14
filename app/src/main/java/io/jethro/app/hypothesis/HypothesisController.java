@@ -19,7 +19,8 @@ public final class HypothesisController {
     /** One ledger event: a distinct thesis, retained (not just the current cycle). Newest first. */
     public record HypothesisDto(long timestampMillis, String instrumentId, String direction, String conviction,
                                 String thesis, String verdict, boolean autonomous,
-                                Boolean backtestSupports, String backtestPnl, Integer backtestTrades, String note) {
+                                Boolean backtestSupports, String backtestPnl, Integer backtestTrades,
+                                String note, String autonomyReason) {
     }
 
     /** A persisted, executed hypothesis (led to an order) — sticky across cycles and restarts. */
@@ -56,6 +57,6 @@ public final class HypothesisController {
         return live.ledger().stream().map(e -> new HypothesisDto(
                 e.timestampMillis(), e.instrumentId(), e.direction(), e.conviction(), e.thesis(),
                 e.verdict(), e.autoTraded(), e.backtestSupports(), e.backtestPnl(), e.backtestTrades(),
-                e.note())).toList();
+                e.note(), e.autonomyReason())).toList();
     }
 }

@@ -82,6 +82,7 @@
   .feed { display:flex; flex-direction:column; gap:8px; height:clamp(180px, 24vh, 320px); overflow-y:auto; padding-right:2px; }
   .hypo-panel { height:clamp(200px, 28vh, 360px); overflow-y:auto; }
   tr.hypo-exec td:first-child { border-left:2px solid var(--up); }
+  .whyno { color:var(--dim); font-size:10px; }
   .empty { color:var(--dim); text-align:center; padding:24px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
   .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:12px; padding:11px 14px; }
   .card.WARN { border-left-color:var(--warn); } .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
@@ -319,7 +320,8 @@
         const dir = r.dir === "BUY" ? "LONG" : "SHORT";
         const v = r.auto
           ? '<span class="up" title="auto-executed on the AI sleeve — the order is on the blotter">AUTO ✓</span>'
-          : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</span>`;
+          : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}" title="${esc(r.reason||'')}">${esc(r.verdict)}</span>`
+            + (r.reason ? ` <span class="whyno" title="${esc(r.reason)}">· ${esc(r.reason)}</span>` : '');
         return `<tr class="${r.executed?'hypo-exec':''}"><td class="muted mono">${new Date(r.ts).toLocaleTimeString()}</td>
           <td title="${esc(r.note||'')}">${esc(r.instr)} — ${esc(r.thesis)}</td>
           <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conv||'')}</td>
@@ -334,7 +336,8 @@
       const led = await (await fetch("/api/hypotheses")).json();
       renderHypotheses(led.map(r => ({ ts:r.timestampMillis, instr:r.instrumentId, thesis:r.thesis,
         dir:r.direction, conv:r.conviction, verdict:r.verdict, auto:r.autonomous, executed:r.autonomous,
-        btSupports:r.backtestSupports, btPnl:r.backtestPnl, btTrades:r.backtestTrades, note:r.note })));
+        btSupports:r.backtestSupports, btPnl:r.backtestPnl, btTrades:r.backtestTrades, note:r.note,
+        reason:r.autonomyReason })));
     } catch (e) {}
   }
 

@@ -118,11 +118,23 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 long ts = prev != null ? prev.timestampMillis() : now;
                 boolean auto = autoTraded.contains(h.instrumentId()) || (prev != null && prev.autoTraded());
                 var bt = e.backtest();
+                // Why this thesis did NOT auto-execute (the gate it missed), so "only one order"
+                // is self-explanatory. Null when it auto-traded or autonomy is off.
+                String autonomyReason = null;
+                if (!auto) {
+                    if (!props.autonomyOrDefault().enabledOrDefault() || orderService == null) {
+                        autonomyReason = "autonomy off — human review";
+                    } else {
+                        BigDecimal mult = refs.find(h.instrumentId())
+                                .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
+                        autonomyReason = envelope.rejectionReason(e, mult).orElse("cooldown or already open");
+                    }
+                }
                 ledger.put(key, new HypothesisEvent(ts, h.instrumentId(), h.direction().name(),
                         h.conviction().name(), h.thesis(), e.verdict().name(), auto,
                         bt != null ? bt.supports() : null,
                         bt != null ? bt.pnl().toPlainString() : null,
-                        bt != null ? bt.trades() : null, e.note()));
+                        bt != null ? bt.trades() : null, e.note(), autonomyReason));
             }
             while (ledger.size() > LEDGER_CAP) {
                 var it = ledger.keySet().iterator();
@@ -148,7 +160,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 ledger.putIfAbsent(r.instrumentId() + "|" + r.thesis(), new HypothesisEvent(
                         r.timestampMillis(), r.instrumentId(), r.direction(), r.conviction(), r.thesis(),
                         "ADMISSIBLE", true, r.backtestSupported(), null, null,
-                        "auto-executed on the AI sleeve — order " + (r.orderStatus() == null ? "" : r.orderStatus())));
+                        "auto-executed on the AI sleeve — order " + (r.orderStatus() == null ? "" : r.orderStatus()), null));
             }
         }
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {

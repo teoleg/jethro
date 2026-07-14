@@ -76,7 +76,7 @@ class AiCommentarySmokeTest {
         }
 
         var decision = sink.recent().get(0);
-        assertEquals("qwen2.5:3b", decision.getModelId()); // configured model id travels through
+        assertEquals("qwen2.5:1.5b", decision.getModelId()); // configured model id travels through
         assertTrue(decision.getContextSnapshotJson().contains("\"marks\""),
                 "decision must embed the computed market context");
         assertFalse(decision.getContextHash().isBlank());
