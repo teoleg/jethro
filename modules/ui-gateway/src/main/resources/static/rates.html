@@ -81,7 +81,7 @@
     <div class="panel"><div id="swaps" class="muted">waiting for the curve…</div></div>
   </div>
   <div style="grid-column:1 / -1">
-    <div class="section-h">Rates risk — DV01 by tenor <span class="muted">— signed P&amp;L per +1bp parallel move, by book</span></div>
+    <div class="section-h">Rates risk — key-rate DV01 <span class="muted">— signed P&amp;L per +1bp move of each curve node, by book (Strata sensitivities)</span></div>
     <div class="panel"><div id="dv01" class="muted">no rates positions yet — trade a Treasury future or a swap to build rates risk.</div></div>
   </div>
   <div style="grid-column:1 / -1">
@@ -157,18 +157,22 @@
           'swaps are tradeable from the Orders ticket (1 lot = $1M notional, BUY = pay fixed).</div></div>';
       }
       const dv01 = await (await fetch("/api/dv01")).json();
-      if (dv01.length) {
-        const cols = ["2Y","5Y","10Y","30Y","other"];
-        const cell = m => c => { const v = m[c]; return `<td class="mono ${v!=null?cls(v):''}">${v!=null?money(v):'·'}</td>`; };
+      if (dv01.books && dv01.books.length) {
+        const cols = dv01.tenors;
+        const row = b => { const firm = b.book === "FIRM";
+          return `<tr${firm?' style="border-top:2px solid var(--line-2);font-weight:600"':''}><td><b>${esc(b.book)}</b></td>` +
+            cols.map(c => { const v = b.buckets[c];
+              return `<td class="mono ${Number(v)?cls(v):''}">${Number(v)?money(v):'·'}</td>`; }).join("") +
+            `<td class="mono ${cls(b.total)}"><b>${money(b.total)}</b></td></tr>`; };
         document.getElementById("dv01").outerHTML = '<div id="dv01"><table>' +
           "<tr><th>book</th>" + cols.map(c=>`<th>${c}</th>`).join("") + "<th>total /bp</th></tr>" +
-          dv01.map(b => { const m={}; b.buckets.forEach(x=>m[x.tenor]=x.dv01); const firm=b.book==="FIRM";
-            return `<tr${firm?' style="border-top:2px solid var(--line-2);font-weight:600"':''}><td><b>${esc(b.book)}</b></td>` +
-              cols.map(cell(m)).join("") +
-              `<td class="mono ${cls(b.totalDv01)}"><b>${money(b.totalDv01)}</b></td></tr>`; }).join("") + "</table>" +
-          '<div class="muted" style="font-size:11px;margin-top:8px">DV01 = P&L for a +1bp parallel rise in yields. ' +
-          'Negative = the book loses as rates rise (long bond futures); positive = gains (pay-fixed swaps). ' +
-          'Bond DV01 = net exposure × (−mod duration) × 10⁻⁴; swap DV01 = lots × the Strata per-$1M number above.</div></div>';
+          dv01.books.map(row).join("") + row(dv01.firm) + "</table>" +
+          '<div class="muted" style="font-size:11px;margin-top:8px">Key-rate DV01 = P&L for a +1bp rise of THAT curve node ' +
+          '(a steepener shows offsetting legs a single total nets away). Negative = loses as rates rise (long bond futures); ' +
+          'positive = gains (pay-fixed swaps). Swap rows are the trade-dated book’s Strata node sensitivities (roll-down included); ' +
+          'futures split −D × exposure × 10⁻⁴ across the nodes bracketing the CTD maturity.' +
+          (dv01.curveLive ? '' : ' <b>Curve not live — swap legs unvalued this cycle.</b>') +
+          (dv01.skipped ? ` <b>${dv01.skipped} rates position(s) skipped (missing data).</b>` : '') + '</div></div>';
       } else {
         document.getElementById("dv01").outerHTML = '<div id="dv01" class="muted">no rates positions yet — ' +
           'trade a Treasury future or a swap to build rates risk.</div>';

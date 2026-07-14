@@ -118,13 +118,22 @@ Built (overview steps 1–8 partial):
   Named limitation: linear/duration/DV01 sensitivities and no cross-terms — full
   revaluation via Strata `ScenarioMarketData` is the deferred second slice.
 
+- shipped since this gap list was first written (kept here so the doc stays honest):
+  **portfolio VaR** — historical (`VarMath`) AND parametric with an EWMA covariance
+  matrix + per-position correlation-to-portfolio (`CovMath`, `/api/var`), feeding
+  covariance-aware sizing; the **trade-dated swap book** (`swap_trades`, seasoned Strata
+  revaluation with roll-down, live DV01 refresh, `/api/swaps/book`); and **key-rate
+  DV01 as risk state** — per-book bucketed sensitivities on the CURVE NODES
+  (`SwapPricingService.bucketedDv01Seasoned` + CTD key-rate splits for Treasury futures,
+  `Dv01Service`, `/api/dv01`), superseding the static key-tenor `RatesRiskService`.
+
 Not built (the gap this doc frames):
 - Strata measures: real (measure-based) VaR and **full-revaluation scenarios** through
-  `ScenarioMarketData` (subsumes the first-order engine above) — sequencing step 2's
-  remainder;
-- curve *sensitivities as risk state* (bucketed DV01 per book), Greeks/options, credit;
-- portfolio (correlation-aware) VaR; regime-aware strategy behaviour (step 5 remainder);
-- swap lifecycle beyond first-order: accrual/roll-down, DV01 refresh, per-trade economics.
+  `ScenarioMarketData` (subsumes the first-order engine above; the swap leg already
+  full-revalues via `swapPnlPerLotUnderShock`) — sequencing step 2's remainder;
+- Greeks/options, credit (CS01) — no options or credit products exist yet;
+- regime-aware strategy behaviour beyond the volatile-regime sizing scale
+  (step 5 remainder).
 
 ## Sequencing (every future task has a home here)
 

@@ -98,23 +98,13 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations);
     }
 
-    /** Per-book bucketed DV01 (rates risk beyond notional, quant-engine step 5). Reuses the
-     *  Strata swap pricer for per-$1M swap DV01; bond DV01 from reference-data mod duration. */
-    @Bean
-    io.jethro.trading.riskpnl.RatesRiskService ratesRiskService(InstrumentRefSource refs,
-                                                               io.jethro.trading.riskpnl.SwapPricingService swapPricing,
-                                                               io.jethro.trading.riskpnl.BondFutureDurations durations) {
-        return new io.jethro.trading.riskpnl.RatesRiskService(refs, swapPricing, durations);
-    }
-
     @Bean
     RiskController riskController(RiskProjection projection, CurveService curveService,
                                   io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView,
                                   io.jethro.trading.riskpnl.SwapPricingService swapPricing,
-                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine,
-                                  io.jethro.trading.riskpnl.RatesRiskService ratesRiskService) {
+                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine) {
         return new RiskController(projection, curveService, treasuryCurveView, swapPricing,
-                scenarioEngine, ratesRiskService);
+                scenarioEngine);
     }
 
     @Bean(destroyMethod = "close")
@@ -150,6 +140,40 @@ public class RiskConfig {
         var cal = calendar.getIfAvailable();
         return new SwapBookService(jdbc, swapPricing,
                 cal != null ? cal::sessionDay : java.time.LocalDate::now);
+    }
+
+    /** swap_trades read side for the DV01 view; NONE (swap legs absent, disclosed) without
+     *  persistence — the futures legs still report off the projection. */
+    @Bean
+    Dv01Service.SwapTradeSource swapTradeSource(
+            ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbc) {
+        var template = jdbc.getIfAvailable();
+        if (template == null) {
+            return Dv01Service.SwapTradeSource.NONE;
+        }
+        return () -> template.query("""
+                select book, instrument, side, lots, entry_par, trade_day from swap_trades
+                """, (rs, i) -> new Dv01Service.SwapTradeSource.Trade(
+                rs.getString("book"), rs.getString("instrument"), rs.getString("side"),
+                rs.getBigDecimal("lots"), rs.getBigDecimal("entry_par"),
+                rs.getObject("trade_day", java.time.LocalDate.class)));
+    }
+
+    /** Bucketed key-rate DV01 per book (quant-engine step 4). */
+    @Bean
+    Dv01Service dv01Service(RiskProjection projection,
+                            io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                            io.jethro.trading.riskpnl.BondFutureDurations durations,
+                            Dv01Service.SwapTradeSource swapTrades,
+                            ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
+        return new Dv01Service(projection, swapPricing, durations, swapTrades,
+                cal != null ? cal::sessionDay : java.time.LocalDate::now);
+    }
+
+    @Bean
+    Dv01Controller dv01Controller(Dv01Service service) {
+        return new Dv01Controller(service);
     }
 
     @Bean

@@ -76,6 +76,32 @@ public final class BondFutureDurations {
                 ? "live par-bond duration @ Treasury curve" : "refdata static duration";
     }
 
+    /**
+     * The maturity (years) where this bond future's rate risk actually sits — the CTD
+     * maturity under the same 6% conversion-factor rule as {@link #modifiedDuration}
+     * (live yield decides the window end; without a live curve, the SHORT end — the
+     * below-6% world every current market is in — disclosed, not guessed silently).
+     * Empty for instruments that aren't known bond futures. Used to allocate a future's
+     * DV01 onto the curve's tenor buckets (quant-engine step 4).
+     */
+    public Optional<Double> keyTenorYears(String instrumentId) {
+        DeliverableWindow window = DELIVERABLE.get(instrumentId);
+        if (window == null) {
+            return Optional.empty();
+        }
+        if (curve != null) {
+            var points = curve.snapshot();
+            if (!points.isEmpty()) {
+                double longEndYield = interpolatedYield(points, window.longYears());
+                if (longEndYield > 1e-4) {
+                    return Optional.of(longEndYield < CF_PIVOT_YIELD
+                            ? window.shortYears() : window.longYears());
+                }
+            }
+        }
+        return Optional.of(window.shortYears());
+    }
+
     private Optional<BigDecimal> liveDuration(String instrumentId) {
         DeliverableWindow window = DELIVERABLE.get(instrumentId);
         if (window == null || curve == null) {

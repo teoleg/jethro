@@ -107,3 +107,20 @@ swap ≲ 2/5 of the annuity remains). Elapsed SOFR fixings are approximated flat
 short rate (no fixing archive; touches only the in-progress accrual period — stated). The
 fills-projected ledger remains the P&L source of truth (invariant 3); `/api/swaps/book` and
 the Rates page's "Swap book — trade-dated" panel expose the precise view beside it.
+
+## Implementation note — key-rate DV01 as risk state (2026-07-14, task #22)
+
+Curve sensitivities are now first-class risk state (quant-engine step 4): `/api/dv01`
+reports each book's DV01 PER CURVE NODE (1Y/2Y/5Y/10Y/30Y), so a 2s10s steepener shows its
+offsetting legs where a single total nets to nearly nothing. Swap legs are the trade-dated
+book's **Strata parameter sensitivities** partitioned per node
+(`SwapPricingService.bucketedDv01Seasoned`) — the buckets are the same vector the total
+DV01 sums, so they add back to it exactly, and an aged trade's risk visibly rolls down the
+curve (a 10Y traded 6y ago buckets at ~4y, nothing left at the 10Y node). Treasury futures
+book DV01 = netExposure × (−D) × 10⁻⁴ (the ScenarioEngine sign convention), allocated
+across the two curve nodes bracketing the CTD maturity by linear key-rate weights — worked:
+long 2 ZN @ 110.50 × $1000, D 6.3 → DV01 −139.23; CTD 6.5y ⇒ w(10Y) = (6.5−5)/(10−5) = 0.3
+→ 10Y −41.769, 5Y −97.461 (remainder, so the split sums exactly). This SUPERSEDES the
+static key-tenor `RatesRiskService` (fresh-tenor swap DV01, fixed instrument→bucket map),
+which is deleted. Positions with missing data are skipped AND counted; a dead curve is
+disclosed (`curveLive=false`), never zeroed silently.

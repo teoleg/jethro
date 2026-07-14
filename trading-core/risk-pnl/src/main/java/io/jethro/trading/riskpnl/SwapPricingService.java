@@ -100,6 +100,66 @@ public final class SwapPricingService {
         });
     }
 
+    /** One curve node's share of a swap's DV01: P&amp;L per +1bp move of THAT node only. */
+    public record TenorDv01(String tenor, double tenorYears, BigDecimal dv01) {
+    }
+
+    /**
+     * Bucketed (key-rate) DV01 of a trade-dated swap (quant-engine step 4: curve
+     * sensitivities as risk state): the Strata parameter sensitivity of the seasoned trade,
+     * reported PER CURVE NODE instead of summed — the nodes of the live SOFR curve
+     * (1Y/2Y/5Y/10Y/30Y) are the buckets, so the buckets add up to the total DV01 exactly
+     * (same sensitivity vector, partitioned not re-derived). Sign matches
+     * {@link #valueSeasoned}: P&amp;L per +1bp (pay-fixed positive). Empty when the curve
+     * isn't live; a matured trade reports zero in every bucket.
+     */
+    public java.util.Optional<List<TenorDv01>> bucketedDv01Seasoned(LocalDate tradeDate, int tenorYears,
+                                                                    boolean payFixed, double fixedRate,
+                                                                    double notional, LocalDate valuationDate) {
+        return curves.curve().map(curve -> {
+            double[] nodeTenors = nodeTenors(curve);
+            LocalDate endDate = tradeDate.plusYears(tenorYears);
+            if (!endDate.isAfter(valuationDate)) {
+                List<TenorDv01> zeros = new ArrayList<>();
+                for (double t : nodeTenors) {
+                    zeros.add(new TenorDv01(tenorLabel(t), t, money(0)));
+                }
+                return zeros;
+            }
+            ImmutableRatesProvider provider = seasonedProvider(curve, valuationDate, tradeDate);
+            ResolvedSwapTrade trade = FixedOvernightSwapConventions.USD_FIXED_1Y_SOFR_OIS
+                    .toTrade(tradeDate, tradeDate, endDate,
+                            payFixed ? BuySell.BUY : BuySell.SELL, notional, fixedRate)
+                    .resolve(REF_DATA);
+            double[] perNode = new double[nodeTenors.length];
+            var paramSens = provider.parameterSensitivity(
+                    DiscountingSwapTradePricer.DEFAULT.presentValueSensitivity(trade, provider));
+            for (var sens : paramSens.getSensitivities()) {
+                var values = sens.getSensitivity();
+                for (int i = 0; i < values.size() && i < perNode.length; i++) {
+                    perNode[i] += values.get(i) * 1e-4; // per-node zero-rate sensitivity → per 1bp
+                }
+            }
+            List<TenorDv01> out = new ArrayList<>(nodeTenors.length);
+            for (int i = 0; i < nodeTenors.length; i++) {
+                out.add(new TenorDv01(tenorLabel(nodeTenors[i]), nodeTenors[i], money(perNode[i])));
+            }
+            return out;
+        });
+    }
+
+    private static double[] nodeTenors(Curve curve) {
+        if (curve instanceof com.opengamma.strata.market.curve.NodalCurve nodal) {
+            return nodal.getXValues().toArray();
+        }
+        // The CurveService always builds a nodal curve; anything else is a wiring bug.
+        throw new IllegalStateException("SOFR curve is not nodal — cannot bucket sensitivities");
+    }
+
+    private static String tenorLabel(double tenorYears) {
+        return tenorYears == Math.rint(tenorYears) ? (int) tenorYears + "Y" : tenorYears + "Y";
+    }
+
     /**
      * Full-revaluation swap P&amp;L per $1M lot under a parallel curve shock (quant-engine step 2,
      * second slice): {@code ΔPV = PV(shocked curve) − PV(base curve)} for each reference swap,
