@@ -27,4 +27,15 @@ public class TradingCoreConfig {
         // RefData present only when persistence is on; needed to map yahoo symbols (ADR-0023).
         return new TradingCoreLifecycle(properties, refData.getIfAvailable(), rateLimiter);
     }
+
+    /** Quarantined-mark ALERT cards (corporate action / bad print) — deterministic floor. */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.trading", name = "enabled", havingValue = "true", matchIfMissing = true)
+    MarkQuarantineMonitor markQuarantineMonitor(TradingCoreLifecycle tradingCore,
+                                                io.jethro.uigateway.AttentionFeed feed,
+                                                io.jethro.uigateway.SseBroadcaster sse) {
+        var monitor = new MarkQuarantineMonitor(tradingCore, feed, sse);
+        monitor.start();
+        return monitor;
+    }
 }

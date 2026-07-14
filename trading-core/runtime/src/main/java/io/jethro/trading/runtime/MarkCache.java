@@ -13,8 +13,27 @@ import java.util.concurrent.ConcurrentHashMap;
  * (ADR-0014). Hot-path updates are scaled-long writes into a pre-existing holder;
  * one allocation per instrument lifetime, none per tick. Marks loaded from the warm
  * cache are stale until the live feed refreshes them (invariant 4).
+ *
+ * <p><b>Corporate-action / bad-print guard:</b> a single update that jumps more than the
+ * instrument's configured threshold (bps of the previous mark) QUARANTINES the instrument:
+ * the suspect price never enters the cache (so it never reaches risk, orders, sizing, the
+ * broker or the daily history), further updates are rejected-and-counted, and an operator
+ * must clear the quarantine to accept the new level — a 2:1 split (−50%) must not be read
+ * as a crash. Counted and logged, never silently dropped (error-path rule). The first live
+ * update after a warm/stale load is exempt (the market legitimately moved while we were
+ * down). Ordinary dividends (~0.5–2%) are BELOW any sane threshold and are not detected —
+ * that needs a real corporate-action data source, tracked, not faked.
  */
 public final class MarkCache {
+
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(MarkCache.class);
+
+    /** Max single-update move in bps of the previous mark for one instrument; <=0 disables. */
+    public interface JumpThresholds {
+        int maxJumpBps(String instrumentId);
+
+        JumpThresholds DISABLED = instrumentId -> 0;
+    }
 
     /** Mutable per-instrument holder. Fields volatile: written by core loop, read anywhere. */
     public static final class MarkHolder {
@@ -23,6 +42,8 @@ public final class MarkCache {
         private volatile long ingestTimestampMillis;
         private volatile String source;
         private volatile boolean stale;
+        private volatile boolean quarantined;
+        private volatile long suspectPriceScaled; // last rejected level (operator card shows it)
 
         public long priceScaled() {
             return priceScaled;
@@ -39,6 +60,10 @@ public final class MarkCache {
         public String source() {
             return source;
         }
+
+        public boolean quarantined() {
+            return quarantined;
+        }
     }
 
     /** Immutable boundary view (BigDecimal per invariant 1 at boundaries). */
@@ -47,16 +72,81 @@ public final class MarkCache {
     }
 
     private final ConcurrentHashMap<String, MarkHolder> marks = new ConcurrentHashMap<>();
+    private final JumpThresholds thresholds;
+    private final java.util.concurrent.atomic.LongAdder rejectedTicks = new java.util.concurrent.atomic.LongAdder();
 
-    /** Hot path: live update from the core loop. */
+    public MarkCache() {
+        this(JumpThresholds.DISABLED);
+    }
+
+    public MarkCache(JumpThresholds thresholds) {
+        this.thresholds = thresholds;
+    }
+
+    /** Hot path: live update from the core loop. Scaled-long arithmetic only. */
     public void update(String instrumentId, long priceScaled,
                        long providerTimestampMillis, long ingestTimestampMillis, String source) {
         MarkHolder holder = marks.computeIfAbsent(instrumentId, k -> new MarkHolder());
+        if (holder.quarantined) {
+            holder.suspectPriceScaled = priceScaled; // keep the freshest suspect level visible
+            rejectedTicks.increment();
+            return;
+        }
+        long prev = holder.priceScaled;
+        if (!holder.stale && prev > 0) {
+            int maxBps = thresholds.maxJumpBps(instrumentId);
+            // |new − prev| / prev > maxBps/10^4, cross-multiplied (no division, no floats).
+            if (maxBps > 0 && Math.abs(priceScaled - prev) * 10_000L > prev * (long) maxBps) {
+                holder.quarantined = true;
+                holder.suspectPriceScaled = priceScaled;
+                rejectedTicks.increment();
+                log.warn("QUARANTINE {}: mark jumped past {}bps (last good {}, suspect {}) — possible "
+                                + "corporate action or bad print; trading data frozen until an operator "
+                                + "clears it (POST /api/marks/{}/clear-quarantine)",
+                        instrumentId, maxBps, prev, priceScaled, instrumentId);
+                return;
+            }
+        }
         holder.priceScaled = priceScaled;
         holder.providerTimestampMillis = providerTimestampMillis;
         holder.ingestTimestampMillis = ingestTimestampMillis;
         holder.source = source;
         holder.stale = false;
+    }
+
+    /** Operator accepts the new price level (a real split/reprice): the NEXT update becomes
+     *  the new baseline unconditionally. @return true if the instrument was quarantined. */
+    public boolean clearQuarantine(String instrumentId) {
+        MarkHolder holder = marks.get(instrumentId);
+        if (holder == null || !holder.quarantined) {
+            return false;
+        }
+        holder.quarantined = false;
+        holder.stale = true; // stale ⇒ the next live update is exempt from the jump guard
+        log.warn("quarantine CLEARED for {} — next mark accepted as the new baseline", instrumentId);
+        return true;
+    }
+
+    /** One quarantined instrument: the frozen last-good mark and the rejected suspect level. */
+    public record Quarantined(String instrumentId, BigDecimal lastGoodPrice, BigDecimal suspectPrice) {
+    }
+
+    /** Currently quarantined instruments (for the operator surface). Allocates; not per tick. */
+    public List<Quarantined> quarantined() {
+        List<Quarantined> out = new ArrayList<>();
+        marks.forEach((id, h) -> {
+            if (h.quarantined) {
+                out.add(new Quarantined(id,
+                        Decimals.fromScaledLong(h.priceScaled, Decimals.PRICE_SCALE),
+                        Decimals.fromScaledLong(h.suspectPriceScaled, Decimals.PRICE_SCALE)));
+            }
+        });
+        return out;
+    }
+
+    /** Total ticks rejected by the guard — the "never silently drop" counter. */
+    public long rejectedTicks() {
+        return rejectedTicks.sum();
     }
 
     /** Warm-restart load (LMDB): flagged stale until the feed refreshes (invariant 4). */

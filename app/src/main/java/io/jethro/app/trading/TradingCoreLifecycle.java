@@ -61,7 +61,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         var store = LmdbStateStore.open(
                 Path.of(properties.lmdbPath()),
                 properties.lmdbMaxSizeMb() * 1024 * 1024);
-        var rt = new TradingCoreRuntime(adapter, properties.bufferCapacity(), store);
+        var rt = new TradingCoreRuntime(adapter, properties.bufferCapacity(), store, jumpThresholds());
         rt.start();
         runtime = rt;
 
@@ -275,6 +275,24 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
         this.regimeSource = () -> sim.regime().name();
         return sim;
+    }
+
+    /**
+     * The corporate-action / bad-print jump guard's per-instrument thresholds (bps of the
+     * previous mark), from the instrument's asset class via reference data — configured under
+     * {@code jethro.trading.mark-jump-bps.<CLASS>}. Instruments outside the master (curve
+     * pseudo-quotes) get the default. Thresholds sit far above any legitimate one-tick move
+     * (incl. the sim's shock/overnight gaps) and far below a split (2:1 = −50%).
+     */
+    private io.jethro.trading.runtime.MarkCache.JumpThresholds jumpThresholds() {
+        Map<String, Integer> byInstrument = new LinkedHashMap<>();
+        if (refData != null) {
+            for (Instrument i : refData.findAllInstruments()) {
+                byInstrument.put(i.id().value(), properties.markJumpBpsFor(i.assetClass().name()));
+            }
+        }
+        int fallback = properties.markJumpBpsFor(null);
+        return id -> byInstrument.getOrDefault(id, fallback);
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'

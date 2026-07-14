@@ -52,12 +52,33 @@ public record TradingCoreProperties(
          *  in this zone. Pure sim runs use the compressed sim calendar instead. Default
          *  America/New_York (the universe is US-centric). */
         String sessionZone,
+        /** Corporate-action / bad-print guard: max single-update mark move in bps of the
+         *  previous mark, per asset class (key = EQUITY/FUTURE/FX/BOND/SWAP, or DEFAULT).
+         *  A bigger jump QUARANTINES the instrument until an operator clears it. 0 disables
+         *  a class. Defaults: EQUITY/DEFAULT 2000 (20%), FUTURE/SWAP 1000, FX/BOND 800. */
+        Map<String, Integer> markJumpBps,
         String lmdbPath,
         long lmdbMaxSizeMb,
         int bufferCapacity) {
 
     public String providerOrDefault() {
         return provider != null && !provider.isBlank() ? provider : "sim";
+    }
+
+    private static final Map<String, Integer> DEFAULT_MARK_JUMP_BPS = Map.of(
+            "EQUITY", 2000, "FUTURE", 1000, "FX", 800, "BOND", 800, "SWAP", 1000, "DEFAULT", 2000);
+
+    /** Jump-guard threshold (bps) for an asset class; null class → DEFAULT. Explicit config
+     *  overrides per key; unlisted classes use the built-in defaults above. */
+    public int markJumpBpsFor(String assetClass) {
+        String key = assetClass != null ? assetClass : "DEFAULT";
+        if (markJumpBps != null && markJumpBps.containsKey(key)) {
+            return markJumpBps.get(key);
+        }
+        if (markJumpBps != null && assetClass == null && markJumpBps.containsKey("DEFAULT")) {
+            return markJumpBps.get("DEFAULT");
+        }
+        return DEFAULT_MARK_JUMP_BPS.getOrDefault(key, DEFAULT_MARK_JUMP_BPS.get("DEFAULT"));
     }
 
     /** Zone for the live-feed session calendar; a bad zone id fails fast at wiring time. */

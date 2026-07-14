@@ -26,9 +26,16 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private volatile Thread consumerThread;
 
     public TradingCoreRuntime(MarketDataAdapter adapter, int bufferCapacity, LmdbStateStore stateStore) {
+        this(adapter, bufferCapacity, stateStore, MarkCache.JumpThresholds.DISABLED);
+    }
+
+    /** With a mark-jump guard: implausible single-update moves quarantine the instrument
+     *  (corporate action / bad print — see {@link MarkCache}). */
+    public TradingCoreRuntime(MarketDataAdapter adapter, int bufferCapacity, LmdbStateStore stateStore,
+                              MarkCache.JumpThresholds thresholds) {
         this.adapter = adapter;
         this.buffer = new TickRingBuffer(bufferCapacity);
-        this.markCache = new MarkCache();
+        this.markCache = new MarkCache(thresholds);
         this.stateStore = stateStore;
         this.stats = new TradingCoreStats(buffer);
     }
