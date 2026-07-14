@@ -103,7 +103,7 @@ public class RiskConfig {
         java.util.function.Supplier<java.time.LocalDate> sessionDay =
                 cal != null ? cal::sessionDay : java.time.LocalDate::now;
         io.jethro.trading.riskpnl.ScenarioEngine.SeasonedSwapReval seasoned = (book, instrument, shiftBps) -> {
-            var tenor = SWAP_TENOR_YEARS.get(instrument);
+            var tenor = Dv01Service.SWAP_TENOR_YEARS.get(instrument);
             if (tenor == null) {
                 return Optional.empty(); // unknown product — engine falls back, never guesses
             }
@@ -129,9 +129,6 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations, seasoned);
     }
 
-    /** Tenor per tradeable swap (V7/V9), shared by the scenario and DV01 wiring. */
-    private static final Map<String, Integer> SWAP_TENOR_YEARS =
-            Map.of("USD_IRS_5Y", 5, "USD_IRS_10Y", 10);
 
     @Bean
     RiskController riskController(RiskProjection projection, CurveService curveService,
@@ -258,11 +255,18 @@ public class RiskConfig {
         };
     }
 
-    /** Historical-simulation VaR over recorded daily closes (ADR-0027); needs the DB. */
+    /** Historical-simulation VaR over recorded daily closes (ADR-0027); needs the DB.
+     *  Swap positions enter as seasoned-DV01 × Δbp synthetic legs (rates VaR). */
     @Bean
     @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
-    VarService varService(org.springframework.jdbc.core.JdbcTemplate jdbc, RiskProjection projection) {
-        return new VarService(jdbc, projection);
+    VarService varService(org.springframework.jdbc.core.JdbcTemplate jdbc, RiskProjection projection,
+                          InstrumentRefSource refs,
+                          io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                          Dv01Service.SwapTradeSource swapTrades,
+                          ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
+        return new VarService(jdbc, projection, refs, swapPricing, swapTrades,
+                cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
     /** Records daily closes + firm equity — the history VaR and the breaker peak run on.

@@ -127,7 +127,8 @@ Built (overview steps 1–8 partial):
 - shipped since this gap list was first written (kept here so the doc stays honest):
   **portfolio VaR** — historical (`VarMath`) AND parametric with an EWMA covariance
   matrix + per-position correlation-to-portfolio (`CovMath`, `/api/var`), feeding
-  covariance-aware sizing; the **trade-dated swap book** (`swap_trades`, seasoned Strata
+  covariance-aware sizing, with swaps included as seasoned-DV01 × Δbp sensitivity legs
+  (rates VaR — no swap blind spot); the **trade-dated swap book** (`swap_trades`, seasoned Strata
   revaluation with roll-down, live DV01 refresh, `/api/swaps/book`); and **key-rate
   DV01 as risk state** — per-book bucketed sensitivities on the CURVE NODES
   (`SwapPricingService.bucketedDv01Seasoned` + CTD key-rate splits for Treasury futures,

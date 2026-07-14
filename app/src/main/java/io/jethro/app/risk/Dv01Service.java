@@ -59,10 +59,12 @@ public final class Dv01Service {
                            String valuationDay, boolean curveLive, int skipped) {
     }
 
-    /** Tenor in years per tradeable swap (V7/V9 defined products, as in SwapBookService). */
-    private static final Map<String, Integer> SWAP_TENOR_YEARS =
+    /** Tenor in years per tradeable swap (V7/V9 defined products) — shared by every
+     *  consumer that rebuilds a trade's schedule (DV01, scenarios, VaR). */
+    public static final Map<String, Integer> SWAP_TENOR_YEARS =
             Map.of("USD_IRS_5Y", 5, "USD_IRS_10Y", 10);
-    private static final double NOTIONAL_PER_LOT = 1_000_000.0;
+    /** V9 quoting convention: 1 lot = $1M notional. */
+    public static final double NOTIONAL_PER_LOT = 1_000_000.0;
     private static final int SCALE = io.jethro.domain.Decimals.PNL_SCALE;
 
     private final RiskProjection projection;

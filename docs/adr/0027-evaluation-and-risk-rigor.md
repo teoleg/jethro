@@ -181,3 +181,23 @@ a genuine diversifier earns up to 4× (the ρ floor — a hedge or near-zero ρ 
 super-sized on a correlation estimate), per-class caps still bound everything, and warm-up
 falls back to standalone vol-targeting, disclosed. Worked: $250 budget, σ=2%/day, ρ=0.5 →
 $25,000 (twice standalone — only half its vol adds to the book).
+
+## Implementation note — rates VaR: swap legs (2026-07-14, task #25)
+
+Swaps stop being a VaR blind spot. Previously a swap position entered `/api/var` only as
+disclosed `skippedExposure`; now each swap instrument enters BOTH engines as a synthetic
+sensitivity leg: exposure = the trade-dated book's total SEASONED DV01 (Strata, each
+trade's remaining schedule, USD per +1bp) under the `dv01:<instrument>` key, and its
+return series = the day-over-day PAR-RATE change in bp from the same recorded daily
+closes (marks are par rates in percent → Δbp = Δclose × 100). So pnl_d = DV01 × Δbp_d is
+in dollars, historical VaR takes real quantiles over it, and the same series is a
+first-class axis of the EWMA covariance — parametric VaR and correlation-to-portfolio
+price rates risk too. Worked (pinned in `SwapVarLegTest`): DV01 $880/bp over 25 days
+whose two worst are −12bp and −8bp → VaR₉₅ $7,040 / ES₉₅ $8,800 / VaR₉₉ $10,560.
+
+Conventions, stated: delta-only (daily Δy is single-digit bp — convexity at this horizon
+is noise; the ±100bp stress panel full-revalues it); the covered/skipped disclosure counts
+a swap leg at |DV01|, not gross notional (notional would overstate a swap's dollars-at-
+risk ~1000×); Treasury futures need no such leg — their recorded PRICE returns already
+ARE realized revaluations. No live curve or no persistence → swaps fall back to
+skippedExposure at notional, unmeasured risk disclosed, never dropped.
