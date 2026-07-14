@@ -50,6 +50,12 @@ public class RiskConfig {
         return new CurveService();
     }
 
+    /** The DISTINCT US Treasury par curve (USD.TSY.* marks) — swap spread visible vs SOFR. */
+    @Bean
+    io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView() {
+        return new io.jethro.trading.riskpnl.TreasuryCurveView();
+    }
+
     /** Strata swap valuation (PV/DV01/par) on the live curve. */
     @Bean
     io.jethro.trading.riskpnl.SwapPricingService swapPricingService(CurveService curveService) {
@@ -74,17 +80,21 @@ public class RiskConfig {
 
     @Bean
     RiskController riskController(RiskProjection projection, CurveService curveService,
+                                  io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView,
                                   io.jethro.trading.riskpnl.SwapPricingService swapPricing,
                                   io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine,
                                   io.jethro.trading.riskpnl.RatesRiskService ratesRiskService) {
-        return new RiskController(projection, curveService, swapPricing, scenarioEngine, ratesRiskService);
+        return new RiskController(projection, curveService, treasuryCurveView, swapPricing,
+                scenarioEngine, ratesRiskService);
     }
 
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
     RiskDataConsumer riskDataConsumer(KafkaConfig.JethroKafkaProperties properties, RiskProjection projection,
-                                      CurveService curveService) {
-        var consumer = new RiskDataConsumer(properties.bootstrapServers(), projection, curveService);
+                                      CurveService curveService,
+                                      io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView) {
+        var consumer = new RiskDataConsumer(properties.bootstrapServers(), projection, curveService,
+                treasuryCurveView);
         consumer.start();
         return consumer;
     }

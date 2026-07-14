@@ -121,6 +121,11 @@ public final class SimMarketDataAdapter implements MarketDataAdapter {
                     listener.onTrade(CurveMarkSource.TENOR_IDS[t],
                             curveSim.rateScaledPercent(t), 1_000_000L, now, now);
                 }
+                // The DISTINCT US Treasury par curve (TSY = SOFR + swap spread; futures key off it).
+                for (int t = 0; t < CurveMarkSource.TSY_TENOR_IDS.length; t++) {
+                    listener.onTrade(CurveMarkSource.TSY_TENOR_IDS[t],
+                            curveSim.tsyRateScaledPercent(t), 1_000_000L, now, now);
+                }
                 // Swap par rates are REAL instrument marks (USD_IRS_*): they land in the
                 // mark cache, tick on the Markets → Swaps tab, and are tradeable (V9).
                 for (int s = 0; s < CurveMarkSource.SWAP_IDS.length; s++) {

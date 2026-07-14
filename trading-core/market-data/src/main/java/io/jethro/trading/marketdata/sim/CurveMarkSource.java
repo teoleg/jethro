@@ -14,12 +14,24 @@ package io.jethro.trading.marketdata.sim;
  */
 public interface CurveMarkSource {
 
-    /** Pseudo-instrument ids the tenor zero rates are published under (risk-pnl routes these
-     *  to curve calibration, never to positions). */
+    /** Pseudo-instrument ids the SOFR tenor zero rates are published under (risk-pnl routes
+     *  these to curve calibration, never to positions). */
     String[] TENOR_IDS = {"USD.SOFR.1Y", "USD.SOFR.2Y", "USD.SOFR.5Y", "USD.SOFR.10Y", "USD.SOFR.30Y"};
 
-    /** Tenor grid in years, aligned to {@link #TENOR_IDS}. */
+    /** Pseudo-instrument ids of the US TREASURY par-yield curve — a DISTINCT curve from SOFR
+     *  (the difference is the swap spread; Treasury futures key off THIS one). */
+    String[] TSY_TENOR_IDS = {"USD.TSY.1Y", "USD.TSY.2Y", "USD.TSY.5Y", "USD.TSY.10Y", "USD.TSY.30Y"};
+
+    /** Tenor grid in years, aligned to {@link #TENOR_IDS} / {@link #TSY_TENOR_IDS}. */
     double[] TENORS = {1, 2, 5, 10, 30};
+
+    /**
+     * Stylized TSY−SOFR spread per node, in basis points (Treasury par yield ABOVE the SOFR
+     * swap rate — the negative-swap-spread era, 2024-26 magnitudes: ~−8bp at 1Y widening to
+     * ~−65bp at 30Y quoted as swap−TSY). CONVENTION, stated per the finance-math rule: a
+     * demo constant, refined by live data when a real source carries both curves.
+     */
+    double[] TSY_SPREAD_BP = {8, 15, 25, 38, 65};
 
     /** Tradeable swaps quoted off the curve (par rate in percent, 1 lot = $1M, BUY = pay fixed). */
     String[] SWAP_IDS = {"USD_IRS_5Y", "USD_IRS_10Y"};
@@ -51,6 +63,13 @@ public interface CurveMarkSource {
 
     /** Par swap rate for {@link #SWAP_IDS}[i], in percent as a scaled long (1e-6 units). */
     long swapParScaledPercent(int swapIndex);
+
+    /** US Treasury par yield for {@link #TSY_TENOR_IDS}[i], in percent as a scaled long.
+     *  Default: the SOFR node plus the stylized swap spread; sources with their own Treasury
+     *  data (the real feed) or a stochastic basis (the factor sim) override. */
+    default long tsyRateScaledPercent(int tenorIndex) {
+        return rateScaledPercent(tenorIndex) + Math.round(TSY_SPREAD_BP[tenorIndex] * 0.01 * 1_000_000);
+    }
 
     /** True if this instrument's price derives from the curve (sim-only Treasury futures);
      *  real feeds price futures from the market, so the default is false. */

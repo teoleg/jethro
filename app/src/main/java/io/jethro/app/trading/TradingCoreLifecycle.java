@@ -22,6 +22,7 @@ import org.springframework.context.SmartLifecycle;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -128,22 +129,34 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         if (!properties.simCurveOrDefault()) {
             return null; // curve disabled — no rates marks at all
         }
-        if (properties.realCurveOrDefault() && !properties.finnhubTokenOrEmpty().isEmpty()) {
-            TreasuryCurveFetcher fetcher = new FinnhubYieldCurveClient(
-                    properties.finnhubTokenOrEmpty(), Duration.ofSeconds(10), rateLimiter);
-            double[] probe = fetcher.fetchNodeZeros();
-            if (probe != null) {
-                RealTreasuryCurve curve = new RealTreasuryCurve(probe);
-                this.realCurve = curve;
-                this.curveFetcher = fetcher;
-                this.curveSource = "treasury-live";
-                log.warn("RATES CURVE: LIVE US Treasury curve via Finnhub — {} (refresh {}s). "
-                                + "DV01, swap PV and rate scenarios now reprice on real levels (ADR-0024).",
-                        describeCurve(probe), properties.treasuryCurveRefreshSecondsOrDefault());
-                return curve;
+        if (properties.realCurveOrDefault()) {
+            // Source chain, most-preferred first: Finnhub only when a token exists (its bond
+            // endpoints are premium-gated on free keys — expected to fail there), then the
+            // OFFICIAL treasury.gov daily par-yield feed (free, keyless). First probe that
+            // returns data wins and stays the refresh source; all fail → the sim curve, logged.
+            List<TreasuryCurveFetcher> chain = new ArrayList<>();
+            if (!properties.finnhubTokenOrEmpty().isEmpty()) {
+                chain.add(new FinnhubYieldCurveClient(
+                        properties.finnhubTokenOrEmpty(), Duration.ofSeconds(10), rateLimiter));
             }
-            log.warn("RATES CURVE: real Treasury curve requested but the Finnhub probe returned no "
-                    + "data (endpoint gated/unavailable on this key) — using the SOFR factor sim curve.");
+            chain.add(new TreasuryDirectYieldCurveClient(Duration.ofSeconds(15)));
+            for (TreasuryCurveFetcher fetcher : chain) {
+                double[] probe = fetcher.fetchNodeZeros();
+                if (probe != null) {
+                    RealTreasuryCurve curve = new RealTreasuryCurve(probe);
+                    this.realCurve = curve;
+                    this.curveFetcher = fetcher;
+                    this.curveSource = "treasury-live";
+                    log.warn("RATES CURVE: LIVE US Treasury curve via {} — {} (refresh {}s). "
+                                    + "DV01, swap PV and rate scenarios reprice on real levels (ADR-0024).",
+                            fetcher.source(), describeCurve(probe),
+                            properties.treasuryCurveRefreshSecondsOrDefault());
+                    return curve;
+                }
+                log.warn("RATES CURVE: {} returned no data — trying the next source", fetcher.source());
+            }
+            log.warn("RATES CURVE: no live source reachable — using the SOFR factor sim curve. "
+                    + "(treasury.gov needs outbound internet; check connectivity.)");
         }
         this.curveSource = "sim";
         return new CurveFactorSimulator(properties.simSeed() + 1, 0.038, 0.009); // 3.8% level, +90bp slope

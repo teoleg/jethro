@@ -9,6 +9,7 @@ import io.jethro.messaging.FillEvent;
 import io.jethro.messaging.MarkEvent;
 import io.jethro.messaging.Topics;
 import io.jethro.trading.riskpnl.CurveService;
+import io.jethro.trading.riskpnl.TreasuryCurveView;
 import io.jethro.trading.riskpnl.RiskProjection;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
@@ -44,10 +45,14 @@ public final class RiskDataConsumer implements AutoCloseable {
     private final AtomicLong skipped = new AtomicLong();
     private volatile Thread thread;
 
-    public RiskDataConsumer(String bootstrapServers, RiskProjection projection, CurveService curveService) {
+    private final TreasuryCurveView treasuryCurve;
+
+    public RiskDataConsumer(String bootstrapServers, RiskProjection projection,
+                            CurveService curveService, TreasuryCurveView treasuryCurve) {
         this.bootstrapServers = bootstrapServers;
         this.projection = projection;
         this.curveService = curveService;
+        this.treasuryCurve = treasuryCurve;
     }
 
     public void start() {
@@ -99,6 +104,8 @@ public final class RiskDataConsumer implements AutoCloseable {
                             String id = mark.getInstrumentId().toString();
                             if (CurveService.isCurveQuote(id)) {
                                 curveService.onRate(id, mark.getPrice()); // curve, not a position mark
+                            } else if (TreasuryCurveView.isTsyQuote(id)) {
+                                treasuryCurve.onRate(id, mark.getPrice()); // TSY par curve (distinct)
                             } else {
                                 projection.applyMark(id, mark.getPrice(),
                                         mark.getMeta().getIngestTimestamp().toEpochMilli());

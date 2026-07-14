@@ -34,6 +34,10 @@
   #curveChart svg .grid { stroke:var(--line); stroke-width:1; }
   #curveChart svg .line { fill:none; stroke:var(--brand); stroke-width:2; }
   #curveChart svg .node { fill:var(--brand); }
+  #curveChart svg .line2 { fill:none; stroke:#e0a83d; stroke-width:2; stroke-dasharray:5 3; }
+  #curveChart svg .node2 { fill:#e0a83d; }
+  .lg { display:inline-flex; align-items:center; gap:5px; margin-right:14px; font-size:11px; color:var(--dim); }
+  .lg .sw { width:16px; height:3px; border-radius:2px; display:inline-block; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:right; padding:3px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
   th:first-child, td:first-child { text-align:left; }
@@ -87,18 +91,27 @@
   const money = s => { const n=Number(s); return (n<0?"−$":"$") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
   const cls = s => Number(s) > 0 ? "up" : (Number(s) < 0 ? "down" : "");
 
-  function curveSvg(points) {
+  // Two curves on one chart: SOFR zeros (solid, brand) and US Treasury pars (dashed, amber) —
+  // the vertical gap between them IS the swap spread, real information a desk watches.
+  function curveSvg(points, tsy) {
     const W=760, H=280, pl=64, pr=16, pt=16, pb=30;
-    const xs = points.map(p=>p.tenorYears), ys = points.map(p=>p.zeroRate);
-    const mn = Math.min(...ys), mx = Math.max(...ys), span = (mx-mn) || 0.0001;
+    const xs = points.map(p=>p.tenorYears);
+    const all = points.map(p=>p.zeroRate).concat((tsy||[]).map(p=>p.parYield));
+    const mn = Math.min(...all), mx = Math.max(...all), span = (mx-mn) || 0.0001;
     const X = t => pl + (Math.log(t)-Math.log(xs[0]))/(Math.log(xs[xs.length-1])-Math.log(xs[0]))*(W-pl-pr);
     const Y = v => H-pb - ((v-mn)/span)*(H-pt-pb);
-    const line = points.map((p,i)=>`${i?'L':'M'}${X(p.tenorYears).toFixed(1)},${Y(p.zeroRate).toFixed(1)}`).join(" ");
+    const path = (pts, get) => pts.map((p,i)=>`${i?'L':'M'}${X(p.tenorYears).toFixed(1)},${Y(get(p)).toFixed(1)}`).join(" ");
     const grid = [mx,(mx+mn)/2,mn].map(v=>`<line class="grid" x1="${pl}" y1="${Y(v).toFixed(1)}" x2="${W-pr}" y2="${Y(v).toFixed(1)}"/>
       <text x="${pl-8}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end">${pct(v)}</text>`).join("");
     const nodes = points.map(p=>`<circle class="node" cx="${X(p.tenorYears).toFixed(1)}" cy="${Y(p.zeroRate).toFixed(1)}" r="3.5"/>
       <text x="${X(p.tenorYears).toFixed(1)}" y="${H-8}" text-anchor="middle">${p.tenorYears}Y</text>`).join("");
-    return `<svg viewBox="0 0 ${W} ${H}">${grid}<path class="line" d="${line}"/>${nodes}</svg>`;
+    const tsyLine = (tsy && tsy.length)
+      ? `<path class="line2" d="${path(tsy, p=>p.parYield)}"/>` +
+        tsy.map(p=>`<circle class="node2" cx="${X(p.tenorYears).toFixed(1)}" cy="${Y(p.parYield).toFixed(1)}" r="3"/>`).join("")
+      : "";
+    return `<svg viewBox="0 0 ${W} ${H}">${grid}<path class="line" d="${path(points, p=>p.zeroRate)}"/>${nodes}${tsyLine}</svg>` +
+      `<div style="margin-top:6px"><span class="lg"><span class="sw" style="background:var(--brand)"></span>SOFR zero (swaps discount here)</span>` +
+      `<span class="lg"><span class="sw" style="background:#e0a83d"></span>US Treasury par (futures key here)</span></div>`;
   }
 
   async function refresh() {
@@ -110,13 +123,20 @@
         document.getElementById("curveTitle").textContent = src.live ? "US Treasury zero curve" : "USD SOFR zero curve";
       } catch (e) {}
       const curve = await (await fetch("/api/curve")).json();
+      const tsy = await fetch("/api/curve/tsy").then(r => r.json()).catch(() => []);
       if (curve.length) {
         document.getElementById("asof").textContent = "· " + new Date().toLocaleTimeString();
-        document.getElementById("curveChart").innerHTML = curveSvg(curve);
+        document.getElementById("curveChart").innerHTML = curveSvg(curve, tsy);
+        const tsyBy = {}; (tsy||[]).forEach(p => tsyBy[p.tenorYears] = p.parYield);
         document.getElementById("curveTable").outerHTML = '<div id="curveTable"><table>' +
-          "<tr><th>tenor</th><th>zero rate</th><th>discount factor</th></tr>" +
-          curve.map(p=>`<tr><td>${p.tenorYears}Y</td><td class="mono">${pct(p.zeroRate)}</td>
-            <td class="mono">${p.discountFactor.toFixed(6)}</td></tr>`).join("") + "</table></div>";
+          "<tr><th>tenor</th><th>TSY par</th><th>SOFR zero</th><th>swap spread</th><th>discount factor</th></tr>" +
+          curve.map(p => { const t = tsyBy[p.tenorYears];
+            const spreadBp = t != null ? ((p.zeroRate - t) * 10000).toFixed(1) : null;
+            return `<tr><td>${p.tenorYears}Y</td>
+            <td class="mono">${t != null ? pct(t) : '—'}</td>
+            <td class="mono">${pct(p.zeroRate)}</td>
+            <td class="mono ${spreadBp != null && spreadBp < 0 ? 'down' : ''}" title="SOFR − TSY, bp (negative = swaps below Treasuries)">${spreadBp != null ? spreadBp + 'bp' : '—'}</td>
+            <td class="mono">${p.discountFactor.toFixed(6)}</td></tr>`; }).join("") + "</table></div>";
       }
       const swaps = await (await fetch("/api/swaps")).json();
       if (swaps.length) {

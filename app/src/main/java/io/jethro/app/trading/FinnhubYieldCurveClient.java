@@ -50,6 +50,11 @@ public final class FinnhubYieldCurveClient implements TreasuryCurveFetcher {
     }
 
     @Override
+    public String source() {
+        return "Finnhub /bond/yield-curve";
+    }
+
+    @Override
     public double[] fetchNodeZeros() {
         if (!limiter.tryAcquire()) {
             log.debug("finnhub yield-curve fetch skipped — REST budget spent this minute");

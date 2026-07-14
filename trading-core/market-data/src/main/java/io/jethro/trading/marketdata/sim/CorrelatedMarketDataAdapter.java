@@ -96,6 +96,11 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
                     listener.onTrade(CurveMarkSource.TENOR_IDS[t],
                             curveSim.rateScaledPercent(t), 1_000_000L, now, now);
                 }
+                // The DISTINCT US Treasury par curve (TSY = SOFR + swap spread; futures key off it).
+                for (int t = 0; t < CurveMarkSource.TSY_TENOR_IDS.length; t++) {
+                    listener.onTrade(CurveMarkSource.TSY_TENOR_IDS[t],
+                            curveSim.tsyRateScaledPercent(t), 1_000_000L, now, now);
+                }
                 for (int s = 0; s < CurveMarkSource.SWAP_IDS.length; s++) {
                     listener.onTrade(CurveMarkSource.SWAP_IDS[s],
                             curveSim.swapParScaledPercent(s), 1_000_000L, now, now);

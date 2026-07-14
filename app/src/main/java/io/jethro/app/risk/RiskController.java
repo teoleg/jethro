@@ -40,16 +40,19 @@ public final class RiskController {
 
     private final RiskProjection projection;
     private final CurveService curveService;
+    private final io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurve;
     private final SwapPricingService swapPricing;
     private final io.jethro.trading.riskpnl.ScenarioEngine scenarios;
     private final RatesRiskService ratesRisk;
 
     public RiskController(RiskProjection projection, CurveService curveService,
+                          io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurve,
                           SwapPricingService swapPricing,
                           io.jethro.trading.riskpnl.ScenarioEngine scenarios,
                           RatesRiskService ratesRisk) {
         this.projection = projection;
         this.curveService = curveService;
+        this.treasuryCurve = treasuryCurve;
         this.swapPricing = swapPricing;
         this.scenarios = scenarios;
         this.ratesRisk = ratesRisk;
@@ -94,6 +97,12 @@ public final class RiskController {
     @GetMapping("/api/curve")
     public java.util.List<CurveService.CurvePoint> curve() {
         return curveService.snapshot();
+    }
+
+    /** The DISTINCT US Treasury par curve — the swap spread vs SOFR is real information. */
+    @GetMapping("/api/curve/tsy")
+    public java.util.List<io.jethro.trading.riskpnl.TreasuryCurveView.TsyPoint> tsyCurve() {
+        return treasuryCurve.snapshot();
     }
 
     /** DV01 in one tenor bucket, signed P&L per +1bp (string, money boundary — invariant 1). */
