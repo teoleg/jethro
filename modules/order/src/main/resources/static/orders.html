@@ -97,6 +97,10 @@
       <button type="button" class="pgbtn" id="obnext">›</button>
     </span></div>
   <div class="panel"><div id="blotter" class="muted" style="padding:16px">loading…</div></div>
+
+  <div class="section-h" style="margin-top:18px">Execution quality (TCA)
+    <span class="muted">slippage vs arrival price — positive bps = cost, negative = improvement; swaps in bp of rate (ADR-0025)</span></div>
+  <div class="panel"><div id="tca" class="muted" style="padding:16px">loading…</div></div>
 </main>
 
 <div class="overlay" id="overlay">
@@ -236,9 +240,30 @@
   document.getElementById("obprev").onclick = () => { if (obPage > 0) { obPage--; refresh(); } };
   document.getElementById("obnext").onclick = () => { if (obPage < obTotalPages - 1) { obPage++; refresh(); } };
 
+  // TCA panel: per-instrument aggregates (avg/worst slippage vs arrival) + fill count.
+  async function loadTca() {
+    try {
+      const t = await fetch("/api/tca").then(r => r.json());
+      const rows = t.byInstrument || [];
+      document.getElementById("tca").outerHTML = '<div id="tca">' + (rows.length
+        ? "<table><tr><th>instrument</th><th>fills</th><th>avg slippage</th><th>worst</th><th>unit</th></tr>"
+          + rows.map(a => {
+              const avg = Number(a.avgSlippageBps), worst = Number(a.worstSlippageBps);
+              const c = v => v > 0.01 ? "down" : (v < -0.01 ? "up" : "muted");
+              return `<tr><td>${esc(a.instrument)}</td><td class="muted mono">${a.fills}</td>
+                <td class="mono ${c(avg)}">${avg.toFixed(2)}</td>
+                <td class="mono ${c(worst)}">${worst.toFixed(2)}</td>
+                <td class="muted">${a.rateQuoted ? "bp of rate" : "bps of price"}</td></tr>`;
+            }).join("") + "</table>"
+        : '<div class="muted" style="padding:16px">no fills measured yet — TCA rows appear as orders execute</div>') + '</div>';
+    } catch (e) {}
+  }
+
   populate();
   refresh();
+  loadTca();
   setInterval(refresh, 2500);
+  setInterval(loadTca, 10000);
 </script>
 </body>
 </html>

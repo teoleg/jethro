@@ -35,6 +35,17 @@ class OrderServiceTest {
         final Map<String, Order> byKey = new HashMap<>();
         final Map<String, Order> byId = new HashMap<>();
         final List<Fill> fills = new ArrayList<>();
+        final Map<String, BigDecimal> arrivals = new HashMap<>();
+
+        @Override
+        public void recordArrivalPrice(String orderId, BigDecimal price) {
+            arrivals.put(orderId, price);
+        }
+
+        @Override
+        public Optional<BigDecimal> arrivalPrice(String orderId) {
+            return Optional.ofNullable(arrivals.get(orderId));
+        }
 
         @Override
         public boolean insertIfAbsent(Order order, Instant now) {
@@ -124,6 +135,24 @@ class OrderServiceTest {
     private NewOrder limit(String key, String qty, String limitPrice, TimeInForce tif) {
         return new NewOrder(key, "ALPHA", "AAPL", Side.BUY, OrderType.LIMIT,
                 new BigDecimal(qty), new BigDecimal(limitPrice), tif);
+    }
+
+    @Test
+    void fillRecordsTcaAgainstTheArrivalPriceCapturedAtSubmit() {
+        var recorded = new ArrayList<BigDecimal>();
+        TcaRecorder recorder = (fill, arrival) -> recorded.add(arrival);
+        var withTca = new OrderService(store, new SimulatedExecutor(ExecutionCostSource.FREE),
+                prices, publisher, PreTradeCheck.APPROVE_ALL, recorder);
+
+        prices.update("AAPL", new BigDecimal("151.00")); // arrival: what the desk saw at submit
+        Order working = withTca.submit(limit("idem-tca", "10", "150.00", TimeInForce.GTC));
+        assertEquals(OrderStatus.ROUTED, working.status());
+
+        prices.update("AAPL", new BigDecimal("149.50"));
+        withTca.onMark("AAPL", new BigDecimal("149.50")); // crosses much later
+        assertEquals(1, recorded.size(), "the fill records TCA");
+        assertEquals(0, new BigDecimal("151.00").compareTo(recorded.get(0)),
+                "slippage measures against the SUBMIT-time mark, not the fill-time mark");
     }
 
     @Test

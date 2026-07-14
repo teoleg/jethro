@@ -40,4 +40,10 @@ public interface OrderStore {
 
     /** Every working LIMIT order — loaded once at startup to seed the in-memory index. */
     List<Order> findAllWorkingLimitOrders();
+
+    /** Records the mid at order submission (the TCA arrival/decision price, ADR-0025). */
+    void recordArrivalPrice(String orderId, java.math.BigDecimal price);
+
+    /** The arrival price captured at submit; empty when no mark existed then. */
+    Optional<java.math.BigDecimal> arrivalPrice(String orderId);
 }

@@ -47,17 +47,25 @@ public final class OrderService {
     private final LastPriceCache prices;
     private final OrderEventPublisher publisher;
     private final PreTradeCheck preTradeCheck;
+    private final TcaRecorder tca;
 
     /** instrumentId → working (ROUTED LIMIT) order ids — the mark path's cheap gate. */
     private final Map<String, Set<String>> workingByInstrument = new ConcurrentHashMap<>();
 
     public OrderService(OrderStore store, SimulatedExecutor executor, LastPriceCache prices,
                         OrderEventPublisher publisher, PreTradeCheck preTradeCheck) {
+        this(store, executor, prices, publisher, preTradeCheck, TcaRecorder.NONE);
+    }
+
+    /** With TCA (ADR-0025): every fill's slippage vs its arrival price is recorded. */
+    public OrderService(OrderStore store, SimulatedExecutor executor, LastPriceCache prices,
+                        OrderEventPublisher publisher, PreTradeCheck preTradeCheck, TcaRecorder tca) {
         this.store = store;
         this.executor = executor;
         this.prices = prices;
         this.publisher = publisher;
         this.preTradeCheck = preTradeCheck;
+        this.tca = tca;
         // Working orders survive a restart (they're rows, not memory) — reseed the index.
         for (Order working : store.findAllWorkingLimitOrders()) {
             indexAdd(working);
@@ -108,6 +116,11 @@ public final class OrderService {
         }
 
         order = transition(order, OrderStatus.ROUTED, null);
+        if (preMark != null) {
+            // TCA arrival/decision price (ADR-0025): captured BEFORE any fill, so a worked
+            // LIMIT that fills much later still measures against what the desk saw at submit.
+            store.recordArrivalPrice(order.orderId(), preMark);
+        }
 
         BigDecimal mark = preMark;
         Order filled = tryFill(order, mark);
@@ -215,6 +228,9 @@ public final class OrderService {
         }
         indexRemove(order);
         store.insertFill(fill.get());
+        // TCA (ADR-0025): slippage vs the arrival price captured at submit. Measurement only —
+        // a missing arrival (no mark at submit) records nothing, never blocks the fill.
+        store.arrivalPrice(order.orderId()).ifPresent(arrival -> tca.record(fill.get(), arrival));
         publisher.publishFill(fill.get());
         Order filled = order.withStatus(OrderStatus.FILLED);
         publisher.publishOrderEvent(filled, null);

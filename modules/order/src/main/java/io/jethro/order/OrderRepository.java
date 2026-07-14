@@ -103,6 +103,18 @@ public class OrderRepository implements OrderStore {
     }
 
     @Override
+    public void recordArrivalPrice(String orderId, java.math.BigDecimal price) {
+        jdbc.update("update orders set arrival_price = ? where order_id = ?", price, orderId);
+    }
+
+    @Override
+    public Optional<java.math.BigDecimal> arrivalPrice(String orderId) {
+        var rows = jdbc.query("select arrival_price from orders where order_id = ?",
+                (rs, i) -> rs.getBigDecimal("arrival_price"), orderId);
+        return rows.isEmpty() ? Optional.empty() : Optional.ofNullable(rows.get(0));
+    }
+
+    @Override
     public List<Order> findAllWorkingLimitOrders() {
         return jdbc.query(
                 "select * from orders where status = 'ROUTED' and order_type = 'LIMIT' order by created_at",

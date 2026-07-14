@@ -94,3 +94,18 @@ calibrated for small participations, and no desk slams 2% of ADV as one market o
 Remaining, tracked: per-tick sim volume printing (nothing consumes tick volume until a
 VWAP/TCA benchmark needs it — building it now would be decoration); fee as a separate cash
 line; TCA vs arrival (#12).
+
+## Implementation note — TCA vs arrival price (2026-07-14)
+
+The measurement loop closes: every fill now records its **implementation shortfall** against
+the ARRIVAL price (the mid when the order was submitted — the decision price, persisted on
+the order row so a worked LIMIT filling minutes later still measures against what the desk
+saw at submit). `Tca.slippageBps`: price-quoted = dir × (fill−arrival)/arrival × 10⁴;
+rate-quoted swaps = dir × Δrate × 100 (bp of rate — different unit, kept apart in
+aggregates). Sign: positive = cost, negative = improvement. Worked: BUY MARKET arrival 190,
+fill 190.066505 → **3.5003 bps** — an immediate fill measures back exactly the modelled
+half-spread+fee, and anything beyond that is delay/impact cost, which is the point of TCA.
+A resting BUY LIMIT 150 submitted at arrival 151 that fills → **−66.2252 bps** (improvement).
+Rows persist to `execution_quality` (V20, idempotent on order_id, and a failed TCA write
+never breaks the fill path — measurement is not execution); `/api/tca` serves recent rows +
+per-instrument aggregates; the Orders page gained an Execution-quality panel.

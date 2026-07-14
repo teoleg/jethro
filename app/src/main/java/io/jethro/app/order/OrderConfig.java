@@ -97,15 +97,29 @@ public class OrderConfig {
         return g != null ? new RiskPreTradeCheck(g) : PreTradeCheck.APPROVE_ALL;
     }
 
+    /** TCA store (ADR-0025): every fill's slippage vs its arrival price. */
+    @Bean
+    io.jethro.order.ExecutionQualityRepository executionQualityRepository(JdbcTemplate jdbcTemplate,
+                                                                          ExecutionCostSource costs) {
+        return new io.jethro.order.ExecutionQualityRepository(jdbcTemplate, costs);
+    }
+
     @Bean
     OrderService orderService(OrderRepository repository, SimulatedExecutor executor,
-                              LastPriceCache prices, OrderEventPublisher publisher, PreTradeCheck preTradeCheck) {
-        return new OrderService(repository, executor, prices, publisher, preTradeCheck);
+                              LastPriceCache prices, OrderEventPublisher publisher, PreTradeCheck preTradeCheck,
+                              io.jethro.order.ExecutionQualityRepository tca) {
+        return new OrderService(repository, executor, prices, publisher, preTradeCheck, tca);
     }
 
     @Bean
     OrderController orderController(OrderService orderService, OrderRepository repository) {
         return new OrderController(orderService, repository);
+    }
+
+    @Bean
+    io.jethro.order.TcaController tcaController(
+            ObjectProvider<io.jethro.order.ExecutionQualityRepository> repository) {
+        return new io.jethro.order.TcaController(repository);
     }
 
     @Bean(destroyMethod = "close")
