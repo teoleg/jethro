@@ -78,7 +78,7 @@ and TCA vs arrival (tracked).
 
 ## Implementation note — ADV + square-root market impact + participation cap (2026-07-14)
 
-The third follow-up landed. Reference data now carries `adv_usd` per instrument (V15 —
+The third follow-up landed. Reference data now carries `adv_usd` per instrument (V19 —
 stylized but realistic liquid-market magnitudes: mega-caps $5–15B/day, ES $250B, Treasury
 futures $40–190B, FX majors deeper still). MARKET fills additionally pay the standard
 empirical **square-root impact law**: impact fraction = σ_daily × √(orderNotional / ADV),
