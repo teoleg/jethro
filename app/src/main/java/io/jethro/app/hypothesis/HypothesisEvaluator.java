@@ -18,22 +18,27 @@ import java.util.Optional;
  * direction; this code owns every number. It validates the instrument, sizes to the
  * configured target notional (never using the model's ordinal conviction as a multiplier),
  * routes to the book that fits the asset class, and runs the read-only pre-trade guardrail.
- * The result is a candidate a human executes from the ticket (ADR-0018) — this slice never
- * auto-submits; bounded autonomy (ADR-0022) switches on once the backtest bridge (step 8)
- * can validate a thesis's edge.
+ * The result is a candidate a human executes from the ticket (ADR-0018), or — when the
+ * bounded-autonomy envelope (ADR-0022, default OFF) admits it under its track-record gate
+ * (ADR-0027 correction: probation → earned, with the sim-tape OOS backtest advisory-only)
+ * — an auto-submitted simulated order.
  *
- * <p>Sizing mirrors the strategy's notional sizing (target / (price × multiplier), rounded
- * down, per-class cap) but without vol-scaling — a hypothesis carries no signal vol.
- * A full historical backtest of the thesis is deferred to step 8 (replay); noted, not faked.
+ * <p>Sizing is vol-targeted when a measured daily vol exists (ADR-0027: notional =
+ * risk budget / σ, correlation-adjusted via {@code marginalNotionalFor} when the
+ * portfolio correlation is known), else the flat configured target notional; always
+ * price × multiplier rounded down, per-class capped. A full HISTORICAL replay of a
+ * thesis (as opposed to the sim-tape backtest) remains deferred — see
+ * docs/deferred-register.md.
  */
 public final class HypothesisEvaluator {
 
     /** Why a hypothesis did or didn't become an actionable candidate. */
     public enum Verdict { ADMISSIBLE, UNKNOWN_INSTRUMENT, NO_MARK, UNSIZEABLE, BLOCKED }
 
-    /** Backtest support for the thesis's instrument (the future bounded-autonomy gate,
-     *  ADR-0022): the strategy's measured PnL on this name over the sim tape. {@code supports}
-     *  = net-positive on some trades. Null when no backtest was supplied. */
+    /** Backtest support for the thesis's instrument: the strategy's measured PnL on this
+     *  name over the sim tape. ADVISORY ONLY since the ADR-0027 autonomy correction — the
+     *  autonomy gate is the live track record, not this. {@code supports} = net-positive
+     *  on some trades. Null when no backtest was supplied. */
     public record Backtest(BigDecimal pnl, int trades, boolean supports) {
     }
 

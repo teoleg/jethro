@@ -91,8 +91,8 @@ re-pricing or O(n²) grouping.
 - **Ollama/AI throughput** is model- and host-bound and explicitly off the tick path
   (invariant 7); the IT asserts real generation happens, nothing asserts how fast.
 - **Postgres/Kafka round trips** are environment-bound; the compose stack and CI cover
-  them functionally. If they need budgets later, that is a soak test on the Pi, tracked
-  separately.
+  them functionally. If they need budgets later, that is a soak test on the Pi — tracked
+  in [`docs/deferred-register.md`](../deferred-register.md).
 
 ## Updating budgets
 

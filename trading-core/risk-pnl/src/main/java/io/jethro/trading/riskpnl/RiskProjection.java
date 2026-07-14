@@ -25,9 +25,11 @@ import java.util.function.Function;
  * <p>Idempotent under at-least-once redelivery (invariant 6): a fill whose {@code fillId}
  * has been seen is ignored, so applying the same fill twice leaves state unchanged.
  *
- * <p>Currency: figures are in each instrument's currency; cross-currency conversion to a
- * book base currency is deferred (all dev instruments are USD) — a rollup spanning
- * currencies is reported as {@code MIXED} rather than silently summed as one number.
+ * <p>Currency: position rows stay in each instrument's currency; rollups convert to USD
+ * at the live FX mark ({@link FxConversion}). A rollup containing a currency that cannot
+ * be converted (no spot-vs-USD mark yet) is reported as {@code MIXED} rather than
+ * silently summed as one number. A configurable per-book base currency (non-USD
+ * reporting) is deferred — see docs/deferred-register.md.
  *
  * <p>Thread-safety: all mutation and reads are synchronized. Volume is low (fills are
  * rare, marks and snapshots ~1Hz), so a single monitor is simpler than finer locking and
