@@ -62,3 +62,18 @@ measurement is exactly how AI trading goes wrong.
   drags in the calendar dependency.
 - Follow-ups: TCA vs. arrival price (needs ADR-0025 spreads); conviction-calibrated
   autonomy limits; parametric VaR + covariance-aware sizing.
+
+## Implementation note — autonomy gate correction (2026-07-14)
+
+Point 2's OOS backtest is built and shipped, but as the **autonomy gate** it proved to be a
+category error in practice: it measures the *momentum strategy's* edge on the thesis's
+instrument, not the thesis's edge — and net of ADR-0025's honest costs it was rarely
+median-positive, which silently revoked all autonomy (no AI trade ever fired). The gate is now
+**point 1's own data**: the AI sleeve's measured track record. Below `min-track-record` scored
+outcomes the envelope trades **probation size** (`probation-order-notional`, default cap/4) to
+build the record; with a full record it trades full size **only while summed outcome P&L is
+positive**; a non-positive record revokes autonomy until humans intervene. The OOS backtest
+remains as advisory annotation on every thesis (and still gates nothing). This strengthens the
+ADR's thesis — autonomy is earned from measured outcomes, not proxied from a different
+strategy's backtest. Scoring uses mark-to-mark P&L at horizon expiry; probation-sized entries
+score the same way, so the record reflects what was actually traded.

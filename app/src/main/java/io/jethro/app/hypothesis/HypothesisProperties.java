@@ -37,14 +37,17 @@ public record HypothesisProperties(
         Autonomy autonomy) {
 
     /**
-     * The deterministic risk envelope for bounded autonomy (ADR-0022): a thesis auto-executes
-     * (simulated, ADR-0019) only if ALL hold — autonomy on, the backtest supports it, conviction
-     * ≥ min, order notional ≤ the (tight) autonomy cap, and the instrument is whitelisted (empty
-     * = all). Outside the envelope it stays a human-review card. The model never widens this —
-     * it's operator config, evaluated in code. Default OFF; must never front a real broker.
+     * The deterministic risk envelope for bounded autonomy (ADR-0022, amended by ADR-0027):
+     * a thesis auto-executes (simulated, ADR-0019) only if admissible, conviction ≥ min, and
+     * whitelisted — SIZED by the AI's own MEASURED track record: below {@code minTrackRecord}
+     * scored outcomes it trades PROBATION size ({@code probationOrderNotional}) to build the
+     * record; with a record, full size ({@code maxOrderNotional}) only while measured outcome
+     * P&L is positive — a negative record REVOKES autonomy (human review only). The model
+     * never widens this — operator config, evaluated in code. Must never front a real broker.
      */
     public record Autonomy(Boolean enabled, String minConviction, BigDecimal maxOrderNotional,
-                           Long cooldownSeconds, List<String> whitelist) {
+                           Long cooldownSeconds, List<String> whitelist,
+                           BigDecimal probationOrderNotional, Integer minTrackRecord) {
 
         public boolean enabledOrDefault() {
             return enabled != null && enabled;
@@ -65,11 +68,22 @@ public record HypothesisProperties(
         public List<String> whitelistOrEmpty() {
             return whitelist != null ? whitelist : List.of();
         }
+
+        /** Probation size while the track record builds — small on purpose. */
+        public BigDecimal probationOrderNotionalOrDefault() {
+            return probationOrderNotional != null ? probationOrderNotional
+                    : maxOrderNotionalOrDefault().divide(new BigDecimal("4"), 2, java.math.RoundingMode.DOWN);
+        }
+
+        /** Scored outcomes needed before autonomy is judged on its record. */
+        public int minTrackRecordOrDefault() {
+            return minTrackRecord != null && minTrackRecord > 0 ? minTrackRecord : 10;
+        }
     }
 
     /** Never-null autonomy view (all-default when the block is absent). */
     public Autonomy autonomyOrDefault() {
-        return autonomy != null ? autonomy : new Autonomy(null, null, null, null, null);
+        return autonomy != null ? autonomy : new Autonomy(null, null, null, null, null, null, null);
     }
 
     public int backtestTicksOrDefault() {

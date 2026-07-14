@@ -40,6 +40,11 @@ public final class HypothesisEvaluator {
     /** A hypothesis after the quant layer: the deterministic sizing/verdict the model never saw. */
     public record Evaluated(Hypothesis hypothesis, Verdict verdict, String book,
                             BigDecimal quantity, BigDecimal price, String note, Backtest backtest) {
+
+        /** Same evaluation at a different quantity (probation resizing, ADR-0027). */
+        public Evaluated withQuantity(BigDecimal newQuantity) {
+            return new Evaluated(hypothesis, verdict, book, newQuantity, price, note, backtest);
+        }
     }
 
     private final InstrumentRefSource refs;

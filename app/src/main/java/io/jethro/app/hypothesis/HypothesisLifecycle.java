@@ -130,7 +130,8 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                     } else {
                         BigDecimal mult = refs.find(h.instrumentId())
                                 .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
-                        autonomyReason = envelope.rejectionReason(e, mult).orElse("cooldown or already open");
+                        AutonomyEnvelope.Decision d = envelope.decide(e, mult, trackRecord());
+                        autonomyReason = d.allowed() ? "cooldown or already open" : d.reason();
                     }
                 }
                 ledger.put(key, new HypothesisEvent(ts, h.instrumentId(), h.direction().name(),
@@ -310,35 +311,54 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             return traded; // firm breaker (ADR-0027): no NEW autonomy entries while halted
         }
         long cooldownMillis = auto.cooldownSecondsOrDefault() * 1_000;
+        AutonomyEnvelope.TrackRecord track = trackRecord();
         for (HypothesisEvaluator.Evaluated e : evaluated) {
             BigDecimal multiplier = refs.find(e.hypothesis().instrumentId())
                     .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
-            if (envelope.rejectionReason(e, multiplier).isPresent()) {
-                continue; // outside the envelope — stays a human-review card
+            AutonomyEnvelope.Decision decision = envelope.decide(e, multiplier, track);
+            if (!decision.allowed()) {
+                continue; // outside the envelope — stays a human-review card (reason on the ledger)
             }
             String instrument = e.hypothesis().instrumentId();
             Long last = lastAutoExec.get(instrument);
             if (last != null && now - last < cooldownMillis) {
                 continue;
             }
-            if (submitAuto(e, now)) {
+            if (submitAuto(e, decision.quantity(), decision.probation(), now)) {
                 traded.add(instrument);
             }
         }
         return traded;
     }
 
-    private boolean submitAuto(HypothesisEvaluator.Evaluated e, long now) {
+    /** The AI sleeve's measured record: scored outcomes + summed mark-to-mark P&L (ADR-0027). */
+    AutonomyEnvelope.TrackRecord trackRecord() {
+        int scored = 0;
+        BigDecimal pnl = BigDecimal.ZERO;
+        synchronized (executed) {
+            for (HypothesisRecord r : executed) {
+                if (!r.isOpen()) {
+                    scored++;
+                    pnl = pnl.add(r.outcomePnl() != null ? r.outcomePnl() : BigDecimal.ZERO);
+                }
+            }
+        }
+        return new AutonomyEnvelope.TrackRecord(scored, pnl);
+    }
+
+    private boolean submitAuto(HypothesisEvaluator.Evaluated e, BigDecimal quantity,
+                               boolean probation, long now) {
         Hypothesis h = e.hypothesis();
         try {
             var command = new NewOrder("hypo:" + h.instrumentId() + ":" + UUID.randomUUID(),
-                    e.book(), h.instrumentId(), h.direction(), OrderType.MARKET, e.quantity(), null);
+                    e.book(), h.instrumentId(), h.direction(), OrderType.MARKET, quantity, null);
             var order = orderService.submit(command);
             lastAutoExec.put(h.instrumentId(), now);
-            recordExecuted(e, now, order.orderId(), String.valueOf(order.status()));
-            log.warn("AUTONOMY auto-executed {} {} {} → {} on {} ({}) — thesis: {}",
-                    h.direction(), e.quantity().toPlainString(), h.instrumentId(), order.status(),
-                    e.book(), order.orderId(), h.thesis());
+            recordExecuted(e.withQuantity(quantity), now, order.orderId(), String.valueOf(order.status()));
+            log.warn("AUTONOMY auto-executed {} {} {} → {} on {} ({}){} — thesis: {}",
+                    h.direction(), quantity.toPlainString(), h.instrumentId(), order.status(),
+                    e.book(), order.orderId(),
+                    probation ? " [PROBATION size — building the track record]" : "", h.thesis());
             return true;
         } catch (Exception ex) {
             log.warn("autonomy auto-execute of {} failed: {}", h.instrumentId(), ex.getMessage());

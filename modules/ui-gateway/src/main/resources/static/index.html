@@ -314,9 +314,9 @@
   const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
   function btCell(s, pnl, trades) {
     if (s == null) return '<span class="muted">—</span>';
-    if (s) return `<span class="up" title="out-of-sample: strategy net-positive on a MAJORITY of independent sim paths${pnl?` (median ${esc(pnl)}, ${trades} trades)`:''}">supported</span>`;
-    if (trades === 0) return '<span class="muted" title="strategy fired no signals on the majority of out-of-sample paths — not tested, not a loss">no trades</span>';
-    return `<span class="down" title="out-of-sample: strategy net-negative on the majority of independent sim paths">unsupported</span>`;
+    if (s) return `<span class="up" title="ADVISORY out-of-sample: momentum strategy net-positive on a MAJORITY of independent sim paths${pnl?` (median ${esc(pnl)}, ${trades} trades)`:''} — context only, does not gate autonomy">supported</span>`;
+    if (trades === 0) return '<span class="muted" title="momentum strategy fired no signals on the majority of out-of-sample paths — not tested, not a loss (advisory only)">no trades</span>';
+    return `<span class="down" title="ADVISORY out-of-sample: momentum strategy net-negative on the majority of independent sim paths — context only, does not gate autonomy">unsupported</span>`;
   }
   function renderHypotheses(rows) {
     document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
@@ -335,7 +335,8 @@
           <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conv||'')}</td>
           <td>${v}</td><td>${btCell(r.btSupports, r.btPnl, r.btTrades)}</td></tr>`;
       }).join("") + "</table>" +
-      '<div class="muted" style="font-size:11px;padding:6px 12px">AUTO ✓ = auto-executed on the AI sleeve (persisted — stays across cycles; order on the blotter). Others are live proposals for review.</div>'
+      '<div class="muted" style="font-size:11px;padding:6px 12px">AUTO ✓ = auto-executed on the AI sleeve (persisted — stays across cycles; order on the blotter). Others are live proposals for review. Autonomy is sized by the AI\'s measured track record: probation size until ' +
+      'enough outcomes are scored, full size only while the record is positive (backtest column is advisory).</div>'
       : '<div class="muted" style="padding:14px">no hypotheses yet — the model runs on a cadence; a small model often returns none until a directional headline appears (see the app log "hypotheses: model proposed N")</div>') + '</div>';
   }
   async function loadHypotheses() {

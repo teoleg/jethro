@@ -3,20 +3,45 @@ package io.jethro.app.hypothesis;
 import io.jethro.trading.algo.hypothesis.Hypothesis;
 
 import java.math.BigDecimal;
-import java.util.Optional;
+import java.math.RoundingMode;
 
 /**
- * The deterministic risk envelope for bounded autonomy (ADR-0022): decides whether an
- * already-admissible, quant-sized hypothesis may auto-execute (simulated, ADR-0019) or must
- * stay a human-review card. Pure and code-only — the model never influences this, and it can
- * only ever be MORE restrictive than the pre-trade guardrail that already passed. Cooldown and
- * the enabled/sim-broker gates are handled by the lifecycle; this checks the static envelope.
+ * The deterministic risk envelope for bounded autonomy (ADR-0022, amended by ADR-0027):
+ * decides whether an already-admissible, quant-sized hypothesis may auto-execute (simulated,
+ * ADR-0019), and AT WHAT SIZE. Pure and code-only — the model never influences this.
  *
- * <p>Admits only if ALL hold: verdict ADMISSIBLE, the backtest supports the instrument,
- * conviction ≥ the configured minimum, order notional ≤ the (tight) autonomy cap, and the
- * instrument is whitelisted (empty whitelist = all). Any miss returns a reason (not admitted).
+ * <p>The gate is the AI's own <b>measured track record</b> (ADR-0027 outcome scoring), not the
+ * momentum strategy's backtest (which measured a different strategy's edge — a category error
+ * that, combined with honest costs, silently revoked all autonomy):
+ * <ul>
+ *   <li><b>Probation</b> — fewer than {@code minTrackRecord} scored outcomes: trade SMALL
+ *       (the probation notional; the order is resized down to it) to build the record. This is
+ *       how a desk seeds a new strategy: earn size with measured results.</li>
+ *   <li><b>Earned</b> — with a full record and measured outcome P&L &gt; 0: full autonomy cap
+ *       (an over-cap order is rejected, not resized — full size must be deliberate).</li>
+ *   <li><b>Revoked</b> — a full record with non-positive P&L: no auto-execution; every thesis
+ *       stays a human-review card until the humans decide otherwise.</li>
+ * </ul>
+ * Admissibility, minimum conviction and the whitelist still apply in all phases. The OOS
+ * momentum backtest remains on the panel as advisory information only.
  */
 public final class AutonomyEnvelope {
+
+    /** The AI sleeve's measured record: scored outcomes and their summed mark-to-mark P&L. */
+    public record TrackRecord(int scoredOutcomes, BigDecimal outcomePnl) {
+        public static final TrackRecord EMPTY = new TrackRecord(0, BigDecimal.ZERO);
+    }
+
+    /** The envelope's ruling: allowed (at {@code quantity}, possibly probation-resized) or not. */
+    public record Decision(boolean allowed, String reason, BigDecimal quantity, boolean probation) {
+        static Decision no(String reason) {
+            return new Decision(false, reason, null, false);
+        }
+
+        static Decision yes(BigDecimal quantity, boolean probation) {
+            return new Decision(true, null, quantity, probation);
+        }
+    }
 
     private final HypothesisProperties.Autonomy cfg;
 
@@ -24,27 +49,41 @@ public final class AutonomyEnvelope {
         this.cfg = cfg;
     }
 
-    /** @return empty if the order may auto-execute, else the reason it stays human-in-loop. */
-    public Optional<String> rejectionReason(HypothesisEvaluator.Evaluated e, BigDecimal multiplier) {
+    public Decision decide(HypothesisEvaluator.Evaluated e, BigDecimal multiplier, TrackRecord track) {
         if (e.verdict() != HypothesisEvaluator.Verdict.ADMISSIBLE) {
-            return Optional.of("not admissible");
-        }
-        if (e.backtest() == null || !e.backtest().supports()) {
-            return Optional.of("backtest does not support the thesis");
+            return Decision.no("not admissible");
         }
         if (!convictionMeetsMin(e.hypothesis().conviction())) {
-            return Optional.of("conviction " + e.hypothesis().conviction() + " below minimum " + minConviction());
-        }
-        BigDecimal notional = e.quantity().multiply(e.price()).multiply(multiplier);
-        if (notional.compareTo(cfg.maxOrderNotionalOrDefault()) > 0) {
-            return Optional.of("order notional " + notional.toPlainString()
-                    + " exceeds autonomy cap " + cfg.maxOrderNotionalOrDefault().toPlainString());
+            return Decision.no("conviction " + e.hypothesis().conviction()
+                    + " below minimum " + minConviction());
         }
         var whitelist = cfg.whitelistOrEmpty();
         if (!whitelist.isEmpty() && !whitelist.contains(e.hypothesis().instrumentId())) {
-            return Optional.of(e.hypothesis().instrumentId() + " not on the autonomy whitelist");
+            return Decision.no(e.hypothesis().instrumentId() + " not on the autonomy whitelist");
         }
-        return Optional.empty();
+
+        BigDecimal notionalPerUnit = e.price().multiply(multiplier);
+        if (track.scoredOutcomes() < cfg.minTrackRecordOrDefault()) {
+            // PROBATION: resize down to the probation notional so the record can build.
+            BigDecimal qty = e.quantity().min(
+                    cfg.probationOrderNotionalOrDefault().divide(notionalPerUnit, 0, RoundingMode.DOWN));
+            if (qty.signum() <= 0) {
+                return Decision.no("probation size " + cfg.probationOrderNotionalOrDefault().toPlainString()
+                        + " cannot buy one unit of " + e.hypothesis().instrumentId());
+            }
+            return Decision.yes(qty, true);
+        }
+        if (track.outcomePnl().signum() <= 0) {
+            return Decision.no("autonomy revoked — measured track record non-positive ("
+                    + track.outcomePnl().toPlainString() + " over " + track.scoredOutcomes()
+                    + " scored theses); human review only");
+        }
+        BigDecimal notional = e.quantity().multiply(notionalPerUnit);
+        if (notional.compareTo(cfg.maxOrderNotionalOrDefault()) > 0) {
+            return Decision.no("order notional " + notional.toPlainString()
+                    + " exceeds autonomy cap " + cfg.maxOrderNotionalOrDefault().toPlainString());
+        }
+        return Decision.yes(e.quantity(), false);
     }
 
     private boolean convictionMeetsMin(Hypothesis.Conviction conviction) {

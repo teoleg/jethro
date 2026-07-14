@@ -101,3 +101,17 @@ event. `/api/hypotheses/executed` serves the sticky list; the Overview page's ri
 three fixed panels — attention, AI hypotheses (executed-sticky + live proposals), and a smaller
 chat — and the first-order **stress table moved off the landing to the Books page** (drill-down
 evidence, per ADR-0017's attention-first landing). The real narrative feed also landed (ADR-0024).
+
+**Autonomy gate re-based on the AI's measured track record (2026-07-14).** The
+"backtest-supported" condition above is **removed from the gate**. It was a category error: the
+annotation backtests the *momentum strategy* on the thesis's instrument, not the thesis itself —
+and once honest execution costs (ADR-0025) and the multi-seed OOS harness (ADR-0027) landed, the
+momentum edge net of ~3.5 bp per fill was rarely median-positive, so the condition silently
+revoked **all** autonomy (observed: only the deterministic strategy ever traded). The envelope
+now gates on the AI sleeve's **own measured outcomes** (ADR-0027 horizon scoring), in three
+phases: **probation** (fewer than `min-track-record` scored outcomes — orders resized down to
+`probation-order-notional`, default cap/4, so the record builds at small size), **earned** (full
+record and summed outcome P&L > 0 — full size up to the cap; over-cap rejected, never resized),
+**revoked** (full record, non-positive P&L — human review only). Admissibility, min-conviction,
+whitelist and cooldown apply in every phase; the OOS momentum backtest stays on the panel as
+**advisory** context only. This is how a desk actually grants size: earn it with measured results.
