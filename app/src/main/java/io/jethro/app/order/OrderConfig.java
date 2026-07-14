@@ -105,8 +105,11 @@ public class OrderConfig {
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
     OrderMarketDataConsumer orderMarketDataConsumer(KafkaConfig.JethroKafkaProperties properties,
-                                                    LastPriceCache prices) {
-        var consumer = new OrderMarketDataConsumer(properties.bootstrapServers(), prices);
+                                                    LastPriceCache prices, OrderService orderService) {
+        // onMark drives working-order matching (ADR-0025): unmarketable GTC LIMIT orders are
+        // retried on every new mark for their instrument until they fill or are cancelled.
+        var consumer = new OrderMarketDataConsumer(properties.bootstrapServers(), prices,
+                orderService::onMark);
         consumer.start();
         return consumer;
     }

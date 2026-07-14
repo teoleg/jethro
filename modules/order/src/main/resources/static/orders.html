@@ -46,7 +46,7 @@
   .pgbtn:hover { color:var(--txt); border-color:var(--brand); }
   .st { font-size:10px; letter-spacing:.05em; padding:2px 8px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
   .st.FILLED { color:var(--buy); border-color:var(--buy); }
-  .st.PARTIALLY_FILLED { color:#e0a83d; border-color:#e0a83d; }
+  .st.PARTIALLY_FILLED, .st.ROUTED { color:#e0a83d; border-color:#e0a83d; }
   .st.REJECTED, .st.CANCELLED { color:var(--sell); border-color:var(--sell); }
 
   /* modal */
@@ -116,6 +116,7 @@
         </label>
         <label>Book<select name="bookId" id="book"></select></label>
         <label>Type<select name="type" id="type"><option>MARKET</option><option>LIMIT</option></select></label>
+        <label>TIF<select name="timeInForce" id="tif" title="GTC works until filled/cancelled; IOC cancels if not marketable on arrival"><option>GTC</option><option>IOC</option></select></label>
         <label id="qtyLabel">Quantity<input name="quantity" id="quantity" value="100" inputmode="decimal"></label>
         <label id="limitLabel" style="display:none">Limit price<input name="limitPrice" id="limitPrice" inputmode="decimal" placeholder="(market)"></label>
       </div>
@@ -211,15 +212,25 @@
     fills.forEach(f => fillByOrder[f.orderId] = f); // best-effort: recent fills only
     document.getElementById("count").textContent = page.total + " orders on " + date;
     document.getElementById("blotter").outerHTML = '<div id="blotter">' + (orders.length ?
-      "<table><tr><th>time</th><th>instr</th><th>CUSIP / ID</th><th>book</th><th>side</th><th>type</th><th>qty</th><th>limit</th><th>status</th><th>fill</th></tr>" +
-      orders.map(o => { const f = fillByOrder[o.orderId]; return `<tr>
+      "<table><tr><th>time</th><th>instr</th><th>CUSIP / ID</th><th>book</th><th>side</th><th>type</th><th>TIF</th><th>qty</th><th>limit</th><th>status</th><th>fill</th></tr>" +
+      orders.map(o => { const f = fillByOrder[o.orderId]; const working = o.status === 'ROUTED';
+        return `<tr>
         <td class="muted mono">${t(o.createdAtMillis)}</td><td>${esc(o.instrumentId)}</td><td class="muted mono">${esc(cusipOf[o.instrumentId]||'—')}</td><td class="muted">${esc(o.bookId)}</td>
         <td class="${esc(o.side)}">${esc(o.side)}</td><td class="muted">${esc(o.orderType)}</td>
+        <td class="muted">${esc(o.timeInForce||'GTC')}</td>
         <td class="mono">${esc(o.quantity)}</td><td class="mono muted">${esc(o.limitPrice||"—")}</td>
-        <td><span class="st ${esc(o.status)}" title="${esc(o.reason||'')}">${esc(o.status)}</span>${o.status==='REJECTED'&&o.reason?`<div class="muted" style="font-size:10px">${esc(o.reason)}</div>`:''}</td>
-        <td class="mono">${f ? esc(f.price) : '<span class="muted">—</span>'}</td></tr>`; }).join("") + "</table>"
+        <td><span class="st ${esc(o.status)}" title="${esc(o.reason||'')}">${working?'WORKING':esc(o.status)}</span>${(o.status==='REJECTED'||o.status==='CANCELLED')&&o.reason?`<div class="muted" style="font-size:10px">${esc(o.reason)}</div>`:''}</td>
+        <td class="mono">${f ? esc(f.price) : (working
+            ? `<button type="button" class="pgbtn" style="font-size:11px;padding:2px 8px" onclick="cancelOrder('${esc(o.orderId)}')">cancel</button>`
+            : '<span class="muted">—</span>')}</td></tr>`; }).join("") + "</table>"
       : '<div class="muted" style="padding:16px">no orders on this date</div>') + '</div>';
   }
+  // Cancel a working order (ADR-0025); the blotter refreshes with the outcome (a fill that
+  // won the race shows FILLED — you cannot cancel what already executed).
+  window.cancelOrder = async id => {
+    try { await fetch(`/api/orders/${id}/cancel`, {method:"POST"}); } catch (e) {}
+    refresh();
+  };
   document.getElementById("obdate").value = today();
   document.getElementById("obdate").onchange = () => { obPage = 0; refresh(); };
   document.getElementById("obprev").onclick = () => { if (obPage > 0) { obPage--; refresh(); } };

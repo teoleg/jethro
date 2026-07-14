@@ -6,6 +6,7 @@ import io.jethro.domain.Order;
 import io.jethro.domain.OrderStatus;
 import io.jethro.domain.OrderType;
 import io.jethro.domain.Side;
+import io.jethro.domain.TimeInForce;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -29,7 +30,7 @@ class ExecutionCostTest {
     private static Order order(Side side, OrderType type, String limit) {
         return new Order("ord-1", "key-1", new BookId("ALPHA"), new InstrumentId("AAPL"),
                 side, type, new BigDecimal("131"),
-                Optional.ofNullable(limit).map(BigDecimal::new), OrderStatus.ROUTED, Instant.EPOCH);
+                Optional.ofNullable(limit).map(BigDecimal::new), TimeInForce.GTC, OrderStatus.ROUTED, Instant.EPOCH);
     }
 
     @Test

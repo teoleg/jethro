@@ -6,6 +6,7 @@ import io.jethro.domain.Order;
 import io.jethro.domain.OrderStatus;
 import io.jethro.domain.OrderType;
 import io.jethro.domain.Side;
+import io.jethro.domain.TimeInForce;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -22,12 +23,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Order lifecycle orchestration, DB-free via an in-memory {@link OrderStore}. Covers the
- * state machine (NEW → ROUTED → FILLED/REJECTED), idempotency (invariant 6), and that
- * every fill both persists and publishes (fills are the source of truth, invariant 3).
+ * state machine (NEW → ROUTED → FILLED/REJECTED/CANCELLED), idempotency (invariant 6),
+ * that every fill both persists and publishes (invariant 3), and the ADR-0025 lifecycle:
+ * IOC cancel-on-arrival, GTC working orders filling on later marks, user cancel, and the
+ * CAS guard that makes a working order fill exactly once.
  */
 class OrderServiceTest {
 
-    /** In-memory OrderStore: honours the idempotency-key uniqueness the JDBC store enforces. */
+    /** In-memory OrderStore honouring the JDBC store's semantics, incl. the CAS transition. */
     private static final class InMemoryStore implements OrderStore {
         final Map<String, Order> byKey = new HashMap<>();
         final Map<String, Order> byId = new HashMap<>();
@@ -51,6 +54,17 @@ class OrderServiceTest {
         }
 
         @Override
+        public boolean transitionIfCurrent(String orderId, OrderStatus expected, OrderStatus next,
+                                           String reason, Instant now) {
+            Order current = byId.get(orderId);
+            if (current == null || current.status() != expected) {
+                return false;
+            }
+            updateStatus(orderId, next, reason, now);
+            return true;
+        }
+
+        @Override
         public void insertFill(Fill fill) {
             fills.add(fill);
         }
@@ -58,6 +72,26 @@ class OrderServiceTest {
         @Override
         public Optional<Order> findByIdempotencyKey(String idempotencyKey) {
             return Optional.ofNullable(byKey.get(idempotencyKey));
+        }
+
+        @Override
+        public Optional<Order> findById(String orderId) {
+            return Optional.ofNullable(byId.get(orderId));
+        }
+
+        @Override
+        public List<Order> findWorkingLimitOrders(String instrumentId) {
+            return byId.values().stream()
+                    .filter(o -> o.instrumentId().value().equals(instrumentId)
+                            && o.status() == OrderStatus.ROUTED && o.type() == OrderType.LIMIT)
+                    .toList();
+        }
+
+        @Override
+        public List<Order> findAllWorkingLimitOrders() {
+            return byId.values().stream()
+                    .filter(o -> o.status() == OrderStatus.ROUTED && o.type() == OrderType.LIMIT)
+                    .toList();
         }
     }
 
@@ -85,6 +119,11 @@ class OrderServiceTest {
 
     private NewOrder market(String key, Side side, String qty) {
         return new NewOrder(key, "ALPHA", "AAPL", side, OrderType.MARKET, new BigDecimal(qty), null);
+    }
+
+    private NewOrder limit(String key, String qty, String limitPrice, TimeInForce tif) {
+        return new NewOrder(key, "ALPHA", "AAPL", Side.BUY, OrderType.LIMIT,
+                new BigDecimal(qty), new BigDecimal(limitPrice), tif);
     }
 
     @Test
@@ -141,15 +180,77 @@ class OrderServiceTest {
     @Test
     void limitOrderThatIsNotMarketableStaysWorking() {
         prices.update("AAPL", new BigDecimal("151.00")); // above the buy limit
-        NewOrder limit =
-                new NewOrder("idem-lim", "ALPHA", "AAPL", Side.BUY, OrderType.LIMIT,
-                        new BigDecimal("10"), new BigDecimal("150.00"));
 
-        Order result = service.submit(limit);
+        Order result = service.submit(limit("idem-lim", "10", "150.00", TimeInForce.GTC));
 
-        assertEquals(OrderStatus.ROUTED, result.status(), "unmarketable limit stays working");
+        assertEquals(OrderStatus.ROUTED, result.status(), "unmarketable GTC limit stays working");
         assertTrue(store.fills.isEmpty());
         assertEquals(List.of(OrderStatus.NEW, OrderStatus.ROUTED), publisher.orderEvents);
+    }
+
+    @Test
+    void iocLimitCancelsOnArrivalWhenNotMarketable() {
+        prices.update("AAPL", new BigDecimal("151.00"));
+
+        Order result = service.submit(limit("idem-ioc", "10", "150.00", TimeInForce.IOC));
+
+        assertEquals(OrderStatus.CANCELLED, result.status(), "IOC dies instead of working");
+        assertTrue(store.fills.isEmpty());
+    }
+
+    @Test
+    void dayTifIsRejectedUntilTheSessionCalendarExists() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        Order result = service.submit(limit("idem-day", "10", "150.00", TimeInForce.DAY));
+        assertEquals(OrderStatus.REJECTED, result.status(),
+                "DAY silently behaving as GTC would misrepresent the order — reject honestly");
+    }
+
+    @Test
+    void workingLimitFillsWhenALaterMarkCrossesIt() {
+        prices.update("AAPL", new BigDecimal("151.00"));
+        Order working = service.submit(limit("idem-work", "10", "150.00", TimeInForce.GTC));
+        assertEquals(OrderStatus.ROUTED, working.status());
+
+        service.onMark("AAPL", new BigDecimal("149.90")); // mark crosses the buy limit
+
+        assertEquals(OrderStatus.FILLED, store.byId.get(working.orderId()).status(),
+                "mark-driven matching fills the working order (ADR-0025)");
+        assertEquals(1, store.fills.size());
+        assertEquals(0, new BigDecimal("150.00").compareTo(store.fills.get(0).price()),
+                "limit fills AT the limit price");
+    }
+
+    @Test
+    void repeatedCrossingMarksFillTheWorkingOrderExactlyOnce() {
+        prices.update("AAPL", new BigDecimal("151.00"));
+        service.submit(limit("idem-once", "10", "150.00", TimeInForce.GTC));
+
+        service.onMark("AAPL", new BigDecimal("149.90"));
+        service.onMark("AAPL", new BigDecimal("149.80")); // already filled — CAS must block
+
+        assertEquals(1, store.fills.size(), "the CAS guard makes the fill exactly-once");
+    }
+
+    @Test
+    void cancelStopsAWorkingOrderAndLaterMarksCannotFillIt() {
+        prices.update("AAPL", new BigDecimal("151.00"));
+        Order working = service.submit(limit("idem-cxl", "10", "150.00", TimeInForce.GTC));
+
+        Order cancelled = service.cancel(working.orderId()).orElseThrow();
+        assertEquals(OrderStatus.CANCELLED, cancelled.status());
+
+        service.onMark("AAPL", new BigDecimal("149.90"));
+        assertTrue(store.fills.isEmpty(), "a cancelled order must never fill");
+    }
+
+    @Test
+    void cancellingAFilledOrderReportsFilledNotAnError() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        Order filled = service.submit(market("idem-fill", Side.BUY, "10"));
+
+        Order result = service.cancel(filled.orderId()).orElseThrow();
+        assertEquals(OrderStatus.FILLED, result.status(), "the fill won — report it, don't error");
     }
 
     @Test
