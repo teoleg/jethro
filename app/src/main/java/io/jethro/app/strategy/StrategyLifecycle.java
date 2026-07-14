@@ -55,6 +55,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final SseBroadcaster sse;
     private final StrategyProperties props;
     private final OrderService orderService; // nullable: null → suggestions only
+    private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
 
     private static final int ACTIVITY_CAP = 50;
     private final java.util.Deque<StrategyActivity> activity = new java.util.ArrayDeque<>(); // newest first
@@ -76,7 +77,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
     public StrategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
                              InstrumentRefSource refs, PreTradeGuardrail guardrail, RiskProjection risk,
                              RiskLimitSource limits, AttentionFeed feed, SseBroadcaster sse,
-                             StrategyProperties props, OrderService orderService) {
+                             StrategyProperties props, OrderService orderService,
+                             io.jethro.app.risk.TradingHaltSwitch halt) {
         this.strategy = strategy;
         this.tradingCore = tradingCore;
         this.refs = refs;
@@ -87,6 +89,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.sse = sse;
         this.props = props;
         this.orderService = orderService;
+        this.halt = halt;
     }
 
     private boolean autoExecuting() {
@@ -185,7 +188,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     sampleReason = rejection.get();
                     continue; // not admissible under the book's limits — don't suggest it
                 }
-                boolean traded = autoExecuting() && maybeAutoExecute(signal, book, quantity, now);
+                // Firm breaker (ADR-0027): a halt stops NEW entries; the exit pass above is
+                // risk-REDUCING and keeps running — a breaker must never trap an open book.
+                boolean traded = autoExecuting() && !halt.isHalted()
+                        && maybeAutoExecute(signal, book, quantity, now);
                 if (traded) {
                     executed++;
                 }

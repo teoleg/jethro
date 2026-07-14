@@ -36,10 +36,11 @@ public class StrategyConfig {
                                         InstrumentRefSource refs, PreTradeGuardrail guardrail,
                                         RiskProjection risk, RiskLimitSource limits,
                                         AttentionFeed feed, SseBroadcaster sse, StrategyProperties props,
-                                        ObjectProvider<OrderService> orderService) {
+                                        ObjectProvider<OrderService> orderService,
+                                        io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch) {
         // OrderService present only when persistence is on; without it the strategy is
         // suggestion-only even if auto-execute is set.
         return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, risk, limits, feed, sse, props,
-                orderService.getIfAvailable());
+                orderService.getIfAvailable(), tradingHaltSwitch);
     }
 }

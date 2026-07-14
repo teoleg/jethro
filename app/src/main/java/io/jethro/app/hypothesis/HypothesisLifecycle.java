@@ -61,6 +61,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private final AutonomyEnvelope envelope;
     private final OrderService orderService; // nullable: null → human-in-loop only
     private final HypothesisRecordStore recordStore;
+    private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
 
     private static final int EXECUTED_CAP = 50;
     private static final int LEDGER_CAP = 60;
@@ -81,7 +82,8 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                                BacktestService backtest, TradingCoreLifecycle tradingCore, RiskProjection risk,
                                InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
                                HypothesisProperties props, OrderService orderService,
-                               HypothesisRecordStore recordStore) {
+                               HypothesisRecordStore recordStore,
+                               io.jethro.app.risk.TradingHaltSwitch halt) {
         this.generator = generator;
         this.evaluator = evaluator;
         this.narrativeFeed = narrativeFeed;
@@ -89,6 +91,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         this.envelope = new AutonomyEnvelope(props.autonomyOrDefault());
         this.orderService = orderService;
         this.recordStore = recordStore;
+        this.halt = halt;
         this.tradingCore = tradingCore;
         this.risk = risk;
         this.refs = refs;
@@ -302,6 +305,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         var auto = props.autonomyOrDefault();
         if (!auto.enabledOrDefault() || orderService == null) {
             return traded;
+        }
+        if (halt.isHalted()) {
+            return traded; // firm breaker (ADR-0027): no NEW autonomy entries while halted
         }
         long cooldownMillis = auto.cooldownSecondsOrDefault() * 1_000;
         for (HypothesisEvaluator.Evaluated e : evaluated) {

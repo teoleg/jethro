@@ -121,6 +121,46 @@ public class RiskConfig {
         return new PreTradeGuardrail(projection, limits);
     }
 
+    /** The firm circuit breaker's switch (ADR-0027) — always present so the strategy and
+     *  autonomy can consult it even when the monitor is disabled. */
+    @Bean
+    TradingHaltSwitch tradingHaltSwitch() {
+        return new TradingHaltSwitch();
+    }
+
+    /** Historical-simulation VaR over recorded daily closes (ADR-0027); needs the DB. */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
+    VarService varService(org.springframework.jdbc.core.JdbcTemplate jdbc, RiskProjection projection) {
+        return new VarService(jdbc, projection);
+    }
+
+    /** Records daily closes + firm equity — the history VaR and the breaker peak run on. */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
+    MarketHistoryRecorder marketHistoryRecorder(org.springframework.jdbc.core.JdbcTemplate jdbc,
+                                                ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore,
+                                                RiskProjection projection) {
+        var core = tradingCore.getIfAvailable();
+        var recorder = new MarketHistoryRecorder(jdbc, core,
+                () -> projection.snapshot(System.currentTimeMillis()).total().totalPnl());
+        if (core != null) {
+            recorder.start(); // trading off → nothing to record, never scheduled
+        }
+        return recorder;
+    }
+
+    /** Firm max-drawdown breaker (ADR-0027): halts all auto-execution, operator reset only. */
+    @Bean(destroyMethod = "close")
+    FirmBreakerMonitor firmBreakerMonitor(RiskProjection projection, RiskLimitProperties limits,
+                                          TradingHaltSwitch haltSwitch, AttentionFeed feed, SseBroadcaster sse,
+                                          ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbc) {
+        var monitor = new FirmBreakerMonitor(projection, limits.maxFirmDrawdown(), haltSwitch,
+                feed, sse, jdbc.getIfAvailable());
+        monitor.start();
+        return monitor;
+    }
+
     /** Risk-limit breaches feed the attention floor; needs live fills, so gated on the broker. */
     @Bean
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)

@@ -189,13 +189,17 @@
 
   function stat(k, v, big) { return `<div class="stat"><div class="k">${k}</div><div class="v ${big?'big ':''}${cls(v)}">${money(v)}</div></div>`; }
 
+  let lastVar = null; // /api/var refreshes slower than /api/risk; cache for the tile
   function renderRisk(r) {
     document.getElementById("asof").textContent = "· " + new Date(r.asOfMillis).toLocaleTimeString();
     const t = r.total;
+    const varTile = lastVar == null ? "" : (lastVar.note
+      ? `<div class="stat"><div class="k">VaR 95 (1d)</div><div class="v mono muted" style="font-size:12px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</div></div>`
+      : `<div class="stat"><div class="k" title="historical simulation, ${lastVar.observations} days; ES95 ${lastVar.es95}${Number(lastVar.skippedExposure)>0?'; unmeasured exposure '+lastVar.skippedExposure:''}">VaR 95 (1d)</div><div class="v mono down">${money(lastVar.var95)}</div></div>`);
     document.getElementById("stats").innerHTML =
       stat("Total P&L", t.totalPnl, true) + stat("Realized", t.realizedPnl) + stat("Unrealized", t.unrealizedPnl) +
       `<div class="stat"><div class="k">Net exposure</div><div class="v mono">${money(t.netExposure)}</div></div>` +
-      `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>`;
+      `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>` + varTile;
     const g = r.byAssetClass || [];
     document.getElementById("byclass").outerHTML = '<div id="byclass">' + (g.length ?
       "<table><tr><th>market</th><th>pos</th><th>realized</th><th>unrealized</th><th>total P&L</th><th>gross exp</th></tr>" +
@@ -416,6 +420,9 @@
   setInterval(loadIndicators, 30000);
   setInterval(loadHypotheses, 15000);
   setInterval(loadQuant, 5000);
+  const loadVar = () => fetch("/api/var").then(r => r.json()).then(v => { lastVar = v; }).catch(() => {});
+  loadVar();
+  setInterval(loadVar, 15000);
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
 </script>
 </body>
