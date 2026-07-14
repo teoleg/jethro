@@ -36,6 +36,16 @@ public interface CurveMarkSource {
         step(MarketRegime.CALM, 0);
     }
 
+    /**
+     * Advances the curve by externally supplied level/slope deltas (fractions) — how the
+     * correlated factor simulator (ADR-0026) keeps rates in concert with equities/FX. A REAL
+     * curve ignores the deltas (its levels come from the provider, never from sim factors);
+     * the factor-sim curve applies them.
+     */
+    default void applyExternalStep(double dLevel, double dSlope) {
+        step();
+    }
+
     /** Zero rate for {@link #TENOR_IDS}[i], in percent as a scaled long (1e-6 units). */
     long rateScaledPercent(int tenorIndex);
 

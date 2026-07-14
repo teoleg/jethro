@@ -97,6 +97,23 @@ public final class CurveFactorSimulator implements CurveMarkSource {
     }
 
     /**
+     * Advances the curve by EXTERNALLY supplied factor deltas (ADR-0026): the correlated
+     * cross-asset simulator owns the RATES level/slope innovations so the curve — and the
+     * Treasury futures and swaps priced from it — moves in concert with equities and FX.
+     * Only the small mean-reverting per-future basis still evolves from this class's own
+     * seeded rng (idiosyncratic by design).
+     */
+    @Override
+    public void applyExternalStep(double dLevel, double dSlope) {
+        level = Math.max(MIN_RATE, level + dLevel);
+        slope += dSlope;
+        for (String id : LINKED_IDS) {
+            double b = basis.get(id);
+            basis.put(id, b * (1.0 - BASIS_KAPPA) + (random.nextDouble() * 2 - 1) * BASIS_STEP);
+        }
+    }
+
+    /**
      * Advances both factors one tick under the given market regime: the regime's vol
      * multiple scales both factor steps, its drift moves the level (rates trend), and a
      * non-zero {@code shockSign} adds a one-tick 2–6bp level jump in that direction.

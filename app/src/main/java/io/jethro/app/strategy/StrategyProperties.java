@@ -66,9 +66,13 @@ public record StrategyProperties(
                 ? regimeVolatileScale : new BigDecimal("0.5");
     }
 
-    /** The new-entry sizing scale for a market regime — reduced in VOLATILE, 1 otherwise. */
+    /** The new-entry sizing scale for a market regime — reduced in the high-vol regimes
+     *  (VOLATILE, and ADR-0026's RISK_OFF / INFLATION_SHOCK), 1 otherwise. */
     public BigDecimal regimeScaleFor(String regime) {
-        return "VOLATILE".equals(regime) ? regimeVolatileScaleOrDefault() : BigDecimal.ONE;
+        return switch (regime) {
+            case "VOLATILE", "RISK_OFF", "INFLATION_SHOCK" -> regimeVolatileScaleOrDefault();
+            default -> BigDecimal.ONE;
+        };
     }
 
     public boolean allowShortOrDefault() {

@@ -15,7 +15,11 @@ public enum MarketRegime {
     CALM(0, 1),
     TREND_UP(30, 1),
     TREND_DOWN(-30, 1),
-    VOLATILE(0, 3);
+    VOLATILE(0, 3),
+    /** Flight to quality (ADR-0026): equities down, yields down (bond futures up), USD bid. */
+    RISK_OFF(-60, 3),
+    /** 2022-style shock (ADR-0026): equities down WHILE yields up — stock-bond corr flips. */
+    INFLATION_SHOCK(-40, 2);
 
     private final int driftPerMille;
     private final int volMultiple;

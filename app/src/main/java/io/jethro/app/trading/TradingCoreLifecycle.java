@@ -6,8 +6,10 @@ import io.jethro.refdata.RefDataRepository;
 import io.jethro.trading.marketdata.FeedStatus;
 import io.jethro.trading.marketdata.MarketDataAdapter;
 import io.jethro.trading.marketdata.finnhub.FinnhubMarketDataAdapter;
+import io.jethro.trading.marketdata.sim.CorrelatedMarketDataAdapter;
 import io.jethro.trading.marketdata.sim.CurveFactorSimulator;
 import io.jethro.trading.marketdata.sim.CurveMarkSource;
+import io.jethro.trading.marketdata.sim.FactorModelConfig;
 import io.jethro.trading.marketdata.sim.RealTreasuryCurve;
 import io.jethro.trading.marketdata.sim.SimMarketDataAdapter;
 import io.jethro.trading.marketdata.yahoo.YahooMarketDataAdapter;
@@ -37,7 +39,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private final FinnhubRateLimiter rateLimiter; // shared Finnhub REST budget (news + curve)
     private volatile TradingCoreRuntime runtime;
     private volatile MarketDataAdapter adapter;
-    private volatile SimMarketDataAdapter simAdapter; // non-null only in sim mode (for regime)
+    private volatile java.util.function.Supplier<String> regimeSource; // non-null only in sim mode
     private volatile RealTreasuryCurve realCurve;     // non-null only when the live curve is active
     private volatile TreasuryCurveFetcher curveFetcher;
     private volatile String curveSource = "sim";      // "treasury-live" or "sim" (for the UI)
@@ -116,7 +118,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                         new YahooQuoteClient(Duration.ofSeconds(10)), map, curveSim, spacing);
             }
         }
-        return simAdapter = buildSimAdapter(curveSim, properties.simInstruments());
+        return buildSimAdapter(curveSim, properties.simInstruments());
     }
 
     /** The curve source: a live US Treasury curve via Finnhub when enabled and a token is set
@@ -208,16 +210,17 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         } else {
             List<String> uncovered = properties.simInstruments().stream()
                     .filter(id -> !covered.containsKey(id)).toList();
-            SimMarketDataAdapter sim = buildSimAdapter(curveSim, uncovered);
-            this.simAdapter = sim; // regime() reads the sim
-            background = sim;
+            background = buildSimAdapter(curveSim, uncovered);
             log.warn("MARKET DATA: Finnhub real-time WS for {} equities + sim for {} others. "
                     + "Dev/demo only (ADR-0024).", covered.size(), uncovered.size());
         }
         return new FinnhubMarketDataAdapter(token, covered, background);
     }
 
-    private SimMarketDataAdapter buildSimAdapter(CurveMarkSource curveSim, List<String> instruments) {
+    /** The sim feed: the correlated cross-asset factor engine (ADR-0026) by default —
+     *  one joint draw per tick moves equities, FX and the curve in concert — or the legacy
+     *  independent-walk engine when {@code sim-engine=legacy} or the calibration won't load. */
+    private MarketDataAdapter buildSimAdapter(CurveMarkSource curveSim, List<String> instruments) {
         if (instruments.isEmpty()) {
             // Nothing left for the sim (all covered by the real feed): a 1-instrument idle sim keeps
             // the curve alive if configured; otherwise the market path just carries the real feed.
@@ -227,7 +230,25 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         long[] startPricesScaled = ids.stream()
                 .mapToLong(id -> Decimals.toScaledLong(properties.startPriceFor(id), Decimals.PRICE_SCALE))
                 .toArray();
-        // Per-tick step calibrated from annualized vol: maxStep(1e-6 of price) =
+        if (properties.correlatedSimOrDefault()) {
+            try {
+                FactorModelConfig calibration = SimCalibrationLoader.load(properties.simCalibrationPathOrNull());
+                var sim = new CorrelatedMarketDataAdapter(
+                        properties.simSeed(), calibration, ids, startPricesScaled, curveSim,
+                        TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()),
+                        properties.simSecondsPerDayOrDefault());
+                this.regimeSource = () -> sim.regime().name();
+                log.info("SIM ENGINE: correlated factor model (ADR-0026) — {} instruments, {} regimes, "
+                                + "t(ν={}) tails, {}s per simulated trading day",
+                        calibration.instruments().size(), calibration.regimes().size(),
+                        (int) calibration.tDegreesOfFreedom(), properties.simSecondsPerDayOrDefault());
+                return sim;
+            } catch (Exception e) {
+                log.error("sim calibration failed to load — falling back to the LEGACY independent-walk "
+                        + "engine (uncorrelated!): {}", e.toString());
+            }
+        }
+        // Legacy engine: per-tick step calibrated from annualized vol: maxStep(1e-6 of price) =
         // σ_annual · √(Δt / trading-year) · √3 (uniform→σ match).
         double tickSeconds = properties.simTickIntervalMillis() / 1_000.0;
         double tradingYearSeconds = 252 * 6.5 * 3_600;
@@ -235,10 +256,12 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 .mapToLong(id -> Math.max(1, Math.round(properties.annualVolFor(id)
                         * Math.sqrt(tickSeconds / tradingYearSeconds) * Math.sqrt(3.0) * 1_000_000)))
                 .toArray();
-        return new SimMarketDataAdapter(
+        var sim = new SimMarketDataAdapter(
                 properties.simSeed(), ids, startPricesScaled, maxStepMicros,
                 properties.simRegimesOrDefault(), curveSim,
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
+        this.regimeSource = () -> sim.regime().name();
+        return sim;
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'
@@ -315,8 +338,8 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     /** Current sim market regime name (CALM when not in sim mode) — for the narrative feed. */
     public String regime() {
-        var sim = simAdapter;
-        return sim != null ? sim.regime().name() : "CALM";
+        var source = regimeSource;
+        return source != null ? source.get() : "CALM";
     }
 
     /** Market-data feed status(es) for the UI's connection indicators — one per source, so a

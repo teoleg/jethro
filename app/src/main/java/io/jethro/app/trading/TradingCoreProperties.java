@@ -23,6 +23,14 @@ public record TradingCoreProperties(
         Boolean simRegimes,
         /** Factor-based SOFR curve sim publishing USD.SOFR.* tenor marks; default true. */
         Boolean simCurve,
+        /** Sim engine (ADR-0026): "correlated" (cross-asset factor model, default) or "legacy"
+         *  (independent per-instrument walks — kept for A/B and old-tape tests). */
+        String simEngine,
+        /** Optional path to a sim-calibration.json overriding the checked-in default. */
+        String simCalibrationPath,
+        /** Time compression: wall seconds per simulated trading day (default 120 — multi-day
+         *  regimes play out in minutes). */
+        Double simSecondsPerDay,
         long simTickIntervalMillis,
         /** Market-data provider: "sim" (default), "yahoo" (ADR-0023), or "finnhub" (ADR-0024,
          *  real-time equities over WebSocket — needs finnhub-token). Dev/demo only. */
@@ -82,6 +90,18 @@ public record TradingCoreProperties(
 
     public boolean simCurveOrDefault() {
         return simCurve == null || simCurve;
+    }
+
+    public boolean correlatedSimOrDefault() {
+        return simEngine == null || simEngine.isBlank() || "correlated".equalsIgnoreCase(simEngine);
+    }
+
+    public String simCalibrationPathOrNull() {
+        return simCalibrationPath != null && !simCalibrationPath.isBlank() ? simCalibrationPath : null;
+    }
+
+    public double simSecondsPerDayOrDefault() {
+        return simSecondsPerDay != null && simSecondsPerDay > 0 ? simSecondsPerDay : 120.0;
     }
 
     /** Annualized vol for one instrument: override, else default, else 20%. */
