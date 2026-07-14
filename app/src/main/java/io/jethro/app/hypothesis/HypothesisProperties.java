@@ -22,6 +22,10 @@ public record HypothesisProperties(
          *  hypothesis cadence. Ignored by the sim feed. Default 60. */
         Long narrativeRefreshSeconds,
         Integer backtestTicks,
+        /** Out-of-sample seeds for the autonomy backtest gate (ADR-0027): the strategy must be
+         *  net-positive on a MAJORITY of these independent paths (seeds disjoint from the live
+         *  sim seed). Odd numbers make the median-majority exact. Default 5. */
+        Integer oosSeeds,
         /** Book the AI hypothesis sleeve trades — kept separate from the momentum strategy's
          *  books so the two engines don't flatten each other's positions. Default "AI". */
         String book,
@@ -65,6 +69,10 @@ public record HypothesisProperties(
 
     public int backtestTicksOrDefault() {
         return backtestTicks != null && backtestTicks > 0 ? backtestTicks : 15_000;
+    }
+
+    public int oosSeedsOrDefault() {
+        return oosSeeds != null && oosSeeds > 0 ? oosSeeds : 5;
     }
 
     public int maxPerCycleOrDefault() {

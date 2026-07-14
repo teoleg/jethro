@@ -309,9 +309,9 @@
   const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
   function btCell(s, pnl, trades) {
     if (s == null) return '<span class="muted">—</span>';
-    if (s) return `<span class="up" title="strategy net-positive on this name${pnl?` (${esc(pnl)}, ${trades} trades)`:''}">supported</span>`;
-    if (trades === 0) return '<span class="muted" title="strategy fired no signals in the backtest window — not tested, not a loss">no trades</span>';
-    return `<span class="down" title="strategy traded but was net-negative on this name">unsupported</span>`;
+    if (s) return `<span class="up" title="out-of-sample: strategy net-positive on a MAJORITY of independent sim paths${pnl?` (median ${esc(pnl)}, ${trades} trades)`:''}">supported</span>`;
+    if (trades === 0) return '<span class="muted" title="strategy fired no signals on the majority of out-of-sample paths — not tested, not a loss">no trades</span>';
+    return `<span class="down" title="out-of-sample: strategy net-negative on the majority of independent sim paths">unsupported</span>`;
   }
   function renderHypotheses(rows) {
     document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?

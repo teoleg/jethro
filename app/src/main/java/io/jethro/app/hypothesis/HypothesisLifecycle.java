@@ -247,15 +247,15 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 return;
             }
 
-            // Backtest the strategy on the current universe once per cycle, so each thesis
-            // carries the measured edge on its instrument (the bounded-autonomy gate, ADR-0022).
-            // Cheap and only when there's something to evaluate; a failure just omits the annotation.
+            // OUT-OF-SAMPLE edge gate (ADR-0027): the strategy is backtested on K seeds disjoint
+            // from the live tape and aggregated by median — "supported" now means net-positive
+            // on a majority of independent paths, not on the very tape the sim replays (which
+            // was in-sample self-confirmation). A failure just omits the annotation.
             Map<String, BacktestResult.InstrumentResult> backtestByInstrument = new HashMap<>();
             if (!hypotheses.isEmpty()) {
                 try {
-                    for (var ir : backtest.run(null, props.backtestTicksOrDefault(), null, null).byInstrument()) {
-                        backtestByInstrument.put(ir.instrumentId(), ir);
-                    }
+                    backtestByInstrument.putAll(backtest.oosByInstrument(
+                            props.backtestTicksOrDefault(), props.oosSeedsOrDefault()));
                 } catch (Exception e) {
                     log.debug("hypothesis backtest annotation skipped: {}", e.toString());
                 }
