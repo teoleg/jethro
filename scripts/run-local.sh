@@ -10,12 +10,12 @@
 # Usage:
 #   ./scripts/run-local.sh                       # everything on (AI + auto-execute)
 #   AI=off AUTOEXEC=off ./scripts/run-local.sh   # market path + UI only, no AI, no trading
-#   MODEL=qwen2.5:0.5b ./scripts/run-local.sh    # lighter model for tight RAM (weaker text)
+#   MODEL=qwen2.5:3b ./scripts/run-local.sh      # stronger text (needs 8GB+ headroom)
 #   PROVIDER=yahoo ./scripts/run-local.sh        # real (delayed) prices from Yahoo (ADR-0023)
 #   PROFILE=default HEAP=1g ./scripts/run-local.sh
 #
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
-#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b),
+#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:1.5b),
 #            PROVIDER (sim|yahoo, default: yahoo), AUTONOMY (off|on, default: off)
 #
 # AUTOEXEC  = the momentum STRATEGY auto-submits simulated orders (ADR-0019).
@@ -29,7 +29,8 @@ cd "$(dirname "$0")/.."
 PROFILE="${PROFILE:-pi}"
 HEAP="${HEAP:-512m}"
 AI="${AI:-on}"
-MODEL="${MODEL:-qwen2.5:3b}"   # 3b = usable commentary; MODEL=qwen2.5:0.5b for tight RAM
+MODEL="${MODEL:-qwen2.5:1.5b}" # 1.5b fits a Pi (frees ~1.5GB + CPU vs 3b, so you stay out of swap).
+                               # MODEL=qwen2.5:3b for better text on an 8GB+ box; :0.5b for very tight RAM.
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
 PROVIDER="${PROVIDER:-yahoo}"  # sim | yahoo (delayed, ADR-0023) | finnhub (real-time WS, ADR-0024)
