@@ -330,21 +330,11 @@
   }
   async function loadHypotheses() {
     try {
-      const [execs, proposals] = await Promise.all([
-        fetch("/api/hypotheses/executed").then(r => r.json()),
-        fetch("/api/hypotheses").then(r => r.json())]);
-      const execInstr = new Set(execs.map(e => e.instrumentId));
-      const rows = [];
-      execs.forEach(e => rows.push({ ts:e.timestampMillis, instr:e.instrumentId, thesis:e.thesis, dir:e.direction,
-        conv:e.conviction, verdict:"AUTO ✓", auto:true, executed:true, btSupports:e.backtestSupported,
-        note:"auto-executed on the AI sleeve — order "+(e.orderStatus||"") }));
-      // Live proposals not already shown as an executed decision (avoid duplicating the same name).
-      proposals.filter(p => !execInstr.has(p.instrumentId)).forEach(p => rows.push({ ts:Date.now(),
-        instr:p.instrumentId, thesis:p.thesis, dir:p.direction, conv:p.conviction, verdict:p.verdict,
-        auto:p.autonomous, executed:false, btSupports:p.backtestSupports, btPnl:p.backtestPnl,
-        btTrades:p.backtestTrades, note:p.note }));
-      rows.sort((a, b) => b.ts - a.ts);
-      renderHypotheses(rows);
+      // /api/hypotheses is now the event ledger (each distinct thesis retained, newest first).
+      const led = await (await fetch("/api/hypotheses")).json();
+      renderHypotheses(led.map(r => ({ ts:r.timestampMillis, instr:r.instrumentId, thesis:r.thesis,
+        dir:r.direction, conv:r.conviction, verdict:r.verdict, auto:r.autonomous, executed:r.autonomous,
+        btSupports:r.backtestSupports, btPnl:r.backtestPnl, btTrades:r.backtestTrades, note:r.note })));
     } catch (e) {}
   }
 

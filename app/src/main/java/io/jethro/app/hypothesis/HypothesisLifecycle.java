@@ -63,11 +63,16 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private final HypothesisRecordStore recordStore;
 
     private static final int EXECUTED_CAP = 50;
+    private static final int LEDGER_CAP = 60;
+    private static final int MAX_NARRATIVE_TO_MODEL = 6; // cap prompt size (slow-box inference)
     private final Deque<HypothesisRecord> executed = new ArrayDeque<>(); // sticky, newest first
+    // The event ledger: (instrument|thesis) → event, insertion-ordered (chronological). A new
+    // narrative for the same security is a new event; a repeat updates in place. Never overwritten
+    // by the next cycle the way a "current proposals" view was — so it matches the attention feed.
+    private final java.util.LinkedHashMap<String, HypothesisEvent> ledger = new java.util.LinkedHashMap<>();
     private final Set<String> active = new HashSet<>();
     private final Map<String, Long> lastAutoExec = new java.util.concurrent.ConcurrentHashMap<>();
     private final AtomicLong consecutiveFailures = new AtomicLong();
-    private volatile List<HypothesisEvaluator.Evaluated> latest = List.of();
     private volatile Set<String> autoTradedIds = Set.of();
     private volatile ScheduledExecutorService scheduler;
 
@@ -92,17 +97,58 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         this.props = props;
     }
 
-    /** The latest evaluated hypotheses (all verdicts), for the /api/hypotheses surface. */
-    public List<HypothesisEvaluator.Evaluated> latest() {
-        return latest;
+    /** The hypothesis event ledger, newest first — every distinct thesis the model proposed,
+     *  retained (not just the current cycle), for the /api/hypotheses surface. */
+    public List<HypothesisEvent> ledger() {
+        synchronized (ledger) {
+            List<HypothesisEvent> out = new ArrayList<>(ledger.values());
+            java.util.Collections.reverse(out); // insertion order is oldest→newest
+            return out;
+        }
+    }
+
+    /** Records/updates a hypothesis in the ledger: same (instrument, thesis) updates in place
+     *  (keeping its first-seen time); a new thesis is a new event; identical repeats don't pile up. */
+    private void updateLedger(List<HypothesisEvaluator.Evaluated> evaluated, Set<String> autoTraded, long now) {
+        synchronized (ledger) {
+            for (HypothesisEvaluator.Evaluated e : evaluated) {
+                Hypothesis h = e.hypothesis();
+                String key = h.instrumentId() + "|" + h.thesis();
+                HypothesisEvent prev = ledger.get(key);
+                long ts = prev != null ? prev.timestampMillis() : now;
+                boolean auto = autoTraded.contains(h.instrumentId()) || (prev != null && prev.autoTraded());
+                var bt = e.backtest();
+                ledger.put(key, new HypothesisEvent(ts, h.instrumentId(), h.direction().name(),
+                        h.conviction().name(), h.thesis(), e.verdict().name(), auto,
+                        bt != null ? bt.supports() : null,
+                        bt != null ? bt.pnl().toPlainString() : null,
+                        bt != null ? bt.trades() : null, e.note()));
+            }
+            while (ledger.size() > LEDGER_CAP) {
+                var it = ledger.keySet().iterator();
+                it.next();
+                it.remove(); // evict the eldest event
+            }
+        }
     }
 
     @Override
     public void start() {
-        // Reload persisted executed hypotheses so they stay on the page across restarts.
+        // Reload persisted executed hypotheses so they stay on the page across restarts, and
+        // seed the ledger with them (oldest-first, so the chronological order holds).
+        List<HypothesisRecord> persisted = recordStore.recent(EXECUTED_CAP);
         synchronized (executed) {
-            for (HypothesisRecord r : recordStore.recent(EXECUTED_CAP)) {
+            for (HypothesisRecord r : persisted) {
                 executed.addLast(r); // recent() is newest-first
+            }
+        }
+        synchronized (ledger) {
+            for (int i = persisted.size() - 1; i >= 0; i--) {
+                HypothesisRecord r = persisted.get(i);
+                ledger.putIfAbsent(r.instrumentId() + "|" + r.thesis(), new HypothesisEvent(
+                        r.timestampMillis(), r.instrumentId(), r.direction(), r.conviction(), r.thesis(),
+                        "ADMISSIBLE", true, r.backtestSupported(), null, null,
+                        "auto-executed on the AI sleeve — order " + (r.orderStatus() == null ? "" : r.orderStatus())));
             }
         }
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -162,6 +208,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             }
 
             List<NarrativeItem> narrative = narrativeFeed.poll(tradingCore.regime(), singleNames, now);
+            // Cap the narrative fed to the model — every extra headline is more prompt to eval,
+            // which on a slow box dominates inference time. Keep the most recent handful.
+            if (narrative.size() > MAX_NARRATIVE_TO_MODEL) {
+                narrative = narrative.subList(narrative.size() - MAX_NARRATIVE_TO_MODEL, narrative.size());
+            }
             List<HypothesisContext.PortfolioLine> portfolio = new ArrayList<>();
             for (var p : risk.snapshot(now).positions()) {
                 if (p.quantity().signum() != 0) {
@@ -202,9 +253,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             for (Hypothesis h : hypotheses) {
                 evaluated.add(evaluator.evaluate(h, priceMap, backtestByInstrument));
             }
-            latest = List.copyOf(evaluated);
             Set<String> autoTraded = runAutonomy(evaluated, now);
             autoTradedIds = autoTraded;
+            updateLedger(evaluated, autoTraded, now); // append/update the event ledger
             surface(evaluated, now, autoTraded);
 
             int admissible = (int) evaluated.stream()

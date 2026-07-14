@@ -16,11 +16,10 @@ import java.util.Set;
 @RestController
 public final class HypothesisController {
 
-    public record HypothesisDto(String instrumentId, String direction, String horizon, String conviction,
-                                String thesis, List<String> sources, String verdict, String book,
-                                String quantity, String price, String note,
-                                String backtestPnl, Integer backtestTrades, Boolean backtestSupports,
-                                boolean autonomous) {
+    /** One ledger event: a distinct thesis, retained (not just the current cycle). Newest first. */
+    public record HypothesisDto(long timestampMillis, String instrumentId, String direction, String conviction,
+                                String thesis, String verdict, boolean autonomous,
+                                Boolean backtestSupports, String backtestPnl, Integer backtestTrades, String note) {
     }
 
     /** A persisted, executed hypothesis (led to an order) — sticky across cycles and restarts. */
@@ -54,22 +53,9 @@ public final class HypothesisController {
         if (live == null) {
             return List.of();
         }
-        Set<String> autoTraded = live.autoTradedIds();
-        return live.latest().stream().map(e -> new HypothesisDto(
-                e.hypothesis().instrumentId(),
-                e.hypothesis().direction().name(),
-                e.hypothesis().horizon().name(),
-                e.hypothesis().conviction().name(),
-                e.hypothesis().thesis(),
-                e.hypothesis().sources(),
-                e.verdict().name(),
-                e.book(),
-                e.quantity() != null ? e.quantity().toPlainString() : null,
-                e.price() != null ? e.price().toPlainString() : null,
-                e.note(),
-                e.backtest() != null ? e.backtest().pnl().toPlainString() : null,
-                e.backtest() != null ? e.backtest().trades() : null,
-                e.backtest() != null ? e.backtest().supports() : null,
-                autoTraded.contains(e.hypothesis().instrumentId()))).toList();
+        return live.ledger().stream().map(e -> new HypothesisDto(
+                e.timestampMillis(), e.instrumentId(), e.direction(), e.conviction(), e.thesis(),
+                e.verdict(), e.autoTraded(), e.backtestSupports(), e.backtestPnl(), e.backtestTrades(),
+                e.note())).toList();
     }
 }
