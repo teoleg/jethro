@@ -41,9 +41,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
-                "jethro.trading.sim-tick-interval-millis=50",
+                // 250ms ticks: the 50ms IT tape (25 instruments + quotes per tick) saturated
+                // the 2-vCPU runner (ring-buffer drops in the logs) and starved Ollama — the
+                // commentary await then missed its window. Marks still flow far faster than
+                // any assertion needs.
+                "jethro.trading.sim-tick-interval-millis=250",
                 "jethro.ai.interval-seconds=5",
                 "jethro.ai.request-timeout-seconds=180",
+                // Short generations: the IT asserts tokens > 0 and real latency, not prose.
+                "jethro.ai.max-output-tokens=60",
                 // This IT asserts the COMMENTARY path. The hypothesis layer isn't asserted here
                 // and competes for the same single-threaded Ollama on a 2-vCPU runner (its large
                 // prompts every 20s queue ahead of commentary calls) — that contention is what
@@ -85,7 +91,9 @@ class FullStackIT {
         String expectedModel = System.getenv().getOrDefault("JETHRO_IT_MODEL", "qwen2.5:0.5b");
 
         // 1. The attention feed shows a commentary card produced by the real model
-        JsonNode card = await("ai-commentary card", Duration.ofMinutes(5), () -> {
+        // 8 min: a COLD 0.5b model on a busy shared runner can take minutes for its first
+        // generation (load + prompt eval) even unconstrained — patience, not a weaker assert.
+        JsonNode card = await("ai-commentary card", Duration.ofMinutes(8), () -> {
             JsonNode feed = getJson("/api/attention");
             if (feed == null) {
                 return null;
