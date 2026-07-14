@@ -157,6 +157,14 @@ public class RiskConfig {
         return new TradingHaltSwitch();
     }
 
+    /** Measured per-instrument daily vol from recorded daily closes — vol-targeted sizing
+     *  for the strategy AND the AI sleeve reads this; needs the DB. */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
+    InstrumentVolSource instrumentVolSource(org.springframework.jdbc.core.JdbcTemplate jdbc) {
+        return new InstrumentVolService(jdbc);
+    }
+
     /** Historical-simulation VaR over recorded daily closes (ADR-0027); needs the DB. */
     @Bean
     @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)

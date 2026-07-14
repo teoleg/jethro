@@ -44,8 +44,10 @@ public class HypothesisConfig {
 
     @Bean
     HypothesisEvaluator hypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
-                                            StrategyProperties sizing, HypothesisProperties props) {
-        return new HypothesisEvaluator(refs, guardrail, sizing, props.bookOrDefault());
+                                            StrategyProperties sizing, HypothesisProperties props,
+                                            ObjectProvider<io.jethro.app.risk.InstrumentVolSource> vols) {
+        return new HypothesisEvaluator(refs, guardrail, sizing, props.bookOrDefault(),
+                vols.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE));
     }
 
     /**

@@ -56,6 +56,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final StrategyProperties props;
     private final OrderService orderService; // nullable: null → suggestions only
     private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
+    private final io.jethro.app.risk.InstrumentVolSource vols; // measured daily vol (sizing)
 
     private static final int ACTIVITY_CAP = 50;
     private final java.util.Deque<StrategyActivity> activity = new java.util.ArrayDeque<>(); // newest first
@@ -78,7 +79,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
                              InstrumentRefSource refs, PreTradeGuardrail guardrail, RiskProjection risk,
                              RiskLimitSource limits, AttentionFeed feed, SseBroadcaster sse,
                              StrategyProperties props, OrderService orderService,
-                             io.jethro.app.risk.TradingHaltSwitch halt) {
+                             io.jethro.app.risk.TradingHaltSwitch halt,
+                             io.jethro.app.risk.InstrumentVolSource vols) {
         this.strategy = strategy;
         this.tradingCore = tradingCore;
         this.refs = refs;
@@ -90,6 +92,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.props = props;
         this.orderService = orderService;
         this.halt = halt;
+        this.vols = vols;
     }
 
     private boolean autoExecuting() {
@@ -269,17 +272,27 @@ public final class StrategyLifecycle implements SmartLifecycle {
         }
         BigDecimal multiplier = ref.map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
         BigDecimal notionalPerUnit = signal.price().multiply(multiplier);
-        // Vol-scaled sizing (quant-engine phase 5): notional = target × clamp(refσ/σ, 0.5, 2),
-        // where σ is the signal window's own realized vol (bps) recovered from move/z.
-        // Sizing is risk-budgeted, not dollar-fixed: half size in wild markets, more in calm.
-        double z = Math.abs(signal.zScore());
-        double sigmaBps = Double.isFinite(z) && z > 1e-9
-                ? Math.abs(signal.changeBps().doubleValue()) / z
-                : props.volReferenceBpsOrDefault();
-        double scale = Math.max(0.5, Math.min(2.0, props.volReferenceBpsOrDefault() / Math.max(sigmaBps, 1e-9)));
-        // Regime scale on top of vol-scale: risk-off in VOLATILE.
-        BigDecimal notionalTarget = props.targetNotional()
-                .multiply(BigDecimal.valueOf(scale)).multiply(regimeScale);
+        String assetClass = ref.map(InstrumentRef::assetClass).orElse(null);
+        // Vol-TARGETED sizing (risk budget, the primary path): notional = riskBudgetDaily /
+        // σ_daily measured from recorded daily closes (same history as VaR), capped at the
+        // per-class order cap — every position carries a comparable expected daily P&L swing.
+        // Until the instrument has measured vol: the signal-window vol scale (clamp(refσ/σ,
+        // 0.5, 2) of targetNotional) — the disclosed warm-up fallback, never a guess.
+        BigDecimal notionalTarget;
+        var dailyVol = vols.dailyVol(signal.instrumentId());
+        if (dailyVol.isPresent() && dailyVol.get().signum() > 0) {
+            notionalTarget = io.jethro.app.risk.VolTargeting.notionalFor(
+                    props.riskBudgetDailyOrDefault(), dailyVol.get(), props.maxOrderNotionalFor(assetClass));
+        } else {
+            double z = Math.abs(signal.zScore());
+            double sigmaBps = Double.isFinite(z) && z > 1e-9
+                    ? Math.abs(signal.changeBps().doubleValue()) / z
+                    : props.volReferenceBpsOrDefault();
+            double scale = Math.max(0.5, Math.min(2.0, props.volReferenceBpsOrDefault() / Math.max(sigmaBps, 1e-9)));
+            notionalTarget = props.targetNotional().multiply(BigDecimal.valueOf(scale));
+        }
+        // Regime scale on top: risk-off in VOLATILE/RISK_OFF/INFLATION_SHOCK.
+        notionalTarget = notionalTarget.multiply(regimeScale);
         BigDecimal qty = notionalTarget.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             // Cap is per asset class: one Treasury contract (~$110k) is a legitimate order

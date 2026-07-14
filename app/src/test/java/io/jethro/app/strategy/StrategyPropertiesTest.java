@@ -12,7 +12,7 @@ class StrategyPropertiesTest {
 
     private static StrategyProperties withVolatileScale(BigDecimal scale) {
         return new StrategyProperties(true, 5, 24, 2.5, new BigDecimal("2"), new BigDecimal("25000"),
-                "ALPHA", Map.of(), false, 60, null, null, null, Map.of(), false, null, null, true, scale);
+                "ALPHA", Map.of(), false, 60, null, null, null, Map.of(), false, null, null, true, scale, null);
     }
 
     @Test

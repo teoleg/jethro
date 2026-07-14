@@ -103,3 +103,17 @@ trading day's variance (the stylized US overnight share), through the same regim
 machinery, with the rates deltas fed to the curve so futures and swaps gap coherently.
 Follow-ups: exchange holiday calendars + a 17:00-ET futures-style roll; closing-auction marks
 for live feeds; intraday-vs-overnight P&L attribution.
+
+## Implementation note — vol-targeted position sizing (2026-07-14)
+
+Sizing now consumes the measurement layer: order notional = `risk-budget-daily` / σ_daily,
+where σ_daily is the **EWMA (λ=0.94) of recorded daily-close returns** (`VolMath` over
+`daily_close` — the same history the VaR window reads, so sizing and risk measure the same
+world; with the compressed sim calendar the estimate is live after ~10 sim days ≈ 20 wall
+minutes). One formula (`VolTargeting`) for BOTH engines — the momentum strategy and the AI
+hypothesis sleeve — so risk per position is comparable across engines and asset classes.
+Worked: $250/day ÷ 1.8%/day (AAPL) = $13,888.88; ÷ 0.40%/day (ZN) = $62,500 — the Treasury
+future correctly gets MORE notional to carry the same daily risk. Per-class order caps
+bound the near-zero-vol blow-up; regime scale still multiplies on top; warm-up falls back
+to the previous fixed-notional (+ signal-vol clamp in the strategy) sizing, disclosed.
+Follow-up: covariance-aware (portfolio-level) sizing remains listed under Consequences.

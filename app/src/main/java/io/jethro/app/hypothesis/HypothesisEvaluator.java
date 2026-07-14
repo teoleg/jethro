@@ -51,13 +51,23 @@ public final class HypothesisEvaluator {
     private final PreTradeGuardrail guardrail;
     private final StrategyProperties sizing;
     private final String book; // the AI sleeve — separate from the momentum strategy's books
+    private final io.jethro.app.risk.InstrumentVolSource vols;
 
     public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
                                StrategyProperties sizing, String book) {
+        this(refs, guardrail, sizing, book, io.jethro.app.risk.InstrumentVolSource.NONE);
+    }
+
+    /** With measured vol: theses are vol-TARGETED (riskBudgetDaily / σ_daily, per-class cap)
+     *  instead of flat target-notional — same formula as the strategy ({@code VolTargeting}). */
+    public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                               StrategyProperties sizing, String book,
+                               io.jethro.app.risk.InstrumentVolSource vols) {
         this.refs = refs;
         this.guardrail = guardrail;
         this.sizing = sizing;
         this.book = book;
+        this.vols = vols;
     }
 
     /** Evaluates a hypothesis against live marks, no backtest context. */
@@ -86,7 +96,14 @@ public final class HypothesisEvaluator {
         // momentum algo never flattens an AI-opened position (ADR-0022).
         BigDecimal multiplier = ref.get().multiplier();
         BigDecimal notionalPerUnit = price.multiply(multiplier);
-        BigDecimal qty = sizing.targetNotional().divide(notionalPerUnit, 0, RoundingMode.DOWN);
+        // Vol-targeted when the instrument has measured daily vol (riskBudgetDaily / σ_daily,
+        // capped per class — same formula as the strategy); flat target notional during warm-up.
+        BigDecimal targetNotional = vols.dailyVol(h.instrumentId())
+                .filter(v -> v.signum() > 0)
+                .map(v -> io.jethro.app.risk.VolTargeting.notionalFor(
+                        sizing.riskBudgetDailyOrDefault(), v, sizing.maxOrderNotionalFor(assetClass)))
+                .orElse(sizing.targetNotional());
+        BigDecimal qty = targetNotional.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             // One unit already exceeds the per-class order cap → unsizeable, never round up.
             if (notionalPerUnit.compareTo(sizing.maxOrderNotionalFor(assetClass)) > 0) {

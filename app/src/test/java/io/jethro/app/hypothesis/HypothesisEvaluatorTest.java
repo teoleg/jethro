@@ -36,7 +36,7 @@ class HypothesisEvaluatorTest {
     private final StrategyProperties sizing = new StrategyProperties(
             true, 5, 24, 2.5, new BigDecimal("2"), new BigDecimal("25000"),
             "ALPHA", Map.of("EQUITY", "ALPHA", "FUTURE", "MACRO"),
-            false, 60, null, null, null, Map.of(), false, null, null, true, null);
+            false, 60, null, null, null, Map.of(), false, null, null, true, null, null);
 
     private static Hypothesis h(String instrument, Side dir) {
         return new Hypothesis("h1", instrument, dir, Hypothesis.Horizon.SWING,
@@ -56,6 +56,20 @@ class HypothesisEvaluatorTest {
         assertEquals(HypothesisEvaluator.Verdict.ADMISSIBLE, e.verdict());
         assertEquals("AI", e.book());
         assertEquals(0, new BigDecimal("131").compareTo(e.quantity()));
+    }
+
+    @Test
+    void measuredVolMakesSizingVolTargeted() {
+        // AAPL measured σ = 1.8%/day, budget $250/day → notional 250/0.018 = 13,888.88;
+        // qty = 13,888.88 / 190 = 73.09 → floor 73 (vs 131 at the flat 25k target).
+        io.jethro.app.risk.InstrumentVolSource vols = id -> "AAPL".equals(id)
+                ? java.util.Optional.of(new BigDecimal("0.018")) : java.util.Optional.empty();
+        var eval = new HypothesisEvaluator(refs, new PreTradeGuardrail(new RiskProjection(refs),
+                book -> RiskLimits.none()), sizing, "AI", vols);
+        var e = eval.evaluate(h("AAPL", Side.BUY), Map.of("AAPL", new BigDecimal("190")));
+        assertEquals(HypothesisEvaluator.Verdict.ADMISSIBLE, e.verdict());
+        assertEquals(0, new BigDecimal("73").compareTo(e.quantity()),
+                "vol-targeted: 250/0.018 = 13,888.88 → 73 shares @ 190");
     }
 
     @Test
