@@ -4,6 +4,7 @@ import io.jethro.app.kafka.KafkaConfig;
 import io.jethro.app.kafka.KafkaEventPublisher;
 import io.jethro.domain.Fill;
 import io.jethro.domain.Order;
+import io.jethro.order.ExecutionCostSource;
 import io.jethro.order.LastPriceCache;
 import io.jethro.order.OrderController;
 import io.jethro.order.OrderEventPublisher;
@@ -12,12 +13,16 @@ import io.jethro.order.OrderRepository;
 import io.jethro.order.OrderService;
 import io.jethro.order.PreTradeCheck;
 import io.jethro.order.SimulatedExecutor;
+import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.trading.riskpnl.PreTradeGuardrail;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.math.BigDecimal;
 
 /**
  * Order-module wiring (ADR-0015). DB-backed, so gated on jethro.persistence.enabled.
@@ -26,6 +31,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * and simulated fills have no live prices.
  */
 @Configuration
+@EnableConfigurationProperties(ExecutionProperties.class)
 @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class OrderConfig {
 
@@ -39,9 +45,26 @@ public class OrderConfig {
         return new LastPriceCache();
     }
 
+    /** Binds execution costs (ADR-0025) to reference data: instrument → asset class →
+     *  configured spread/fee. Swaps are rate-quoted (additive spread in rate bp). Without
+     *  refdata an instrument gets the conservative EQUITY defaults — never free execution. */
     @Bean
-    SimulatedExecutor simulatedExecutor() {
-        return new SimulatedExecutor();
+    ExecutionCostSource executionCostSource(ExecutionProperties props,
+                                            ObjectProvider<InstrumentRefSource> refSource) {
+        InstrumentRefSource refs = refSource.getIfAvailable();
+        return instrumentId -> {
+            String assetClass = refs != null
+                    ? refs.find(instrumentId).map(r -> r.assetClass()).orElse(null)
+                    : null;
+            BigDecimal spread = props.spreadFor(assetClass);
+            BigDecimal fee = props.feeFor(assetClass);
+            return new ExecutionCostSource.Cost(spread, fee, "SWAP".equals(assetClass));
+        };
+    }
+
+    @Bean
+    SimulatedExecutor simulatedExecutor(ExecutionCostSource costs) {
+        return new SimulatedExecutor(costs);
     }
 
     @Bean

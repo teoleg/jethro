@@ -19,7 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Execution semantics: MARKET fills at the mark, LIMIT only when the mark is crossed. */
 class SimulatedExecutorTest {
 
-    private final SimulatedExecutor executor = new SimulatedExecutor();
+    private final SimulatedExecutor executor = new SimulatedExecutor(ExecutionCostSource.FREE);
 
     private static Order order(OrderType type, Side side, String qty, String limit) {
         return new Order("ord-1", "idem-1", new BookId("ALPHA"), new InstrumentId("AAPL"),

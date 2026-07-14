@@ -81,7 +81,7 @@ class OrderServiceTest {
     private final LastPriceCache prices = new LastPriceCache();
     private final RecordingPublisher publisher = new RecordingPublisher();
     private final OrderService service =
-            new OrderService(store, new SimulatedExecutor(), prices, publisher, PreTradeCheck.APPROVE_ALL);
+            new OrderService(store, new SimulatedExecutor(ExecutionCostSource.FREE), prices, publisher, PreTradeCheck.APPROVE_ALL);
 
     private NewOrder market(String key, Side side, String qty) {
         return new NewOrder(key, "ALPHA", "AAPL", side, OrderType.MARKET, new BigDecimal(qty), null);
@@ -127,7 +127,7 @@ class OrderServiceTest {
     void orderRejectedByThePreTradeGateNeverFillsAndCarriesTheReason() {
         prices.update("AAPL", new BigDecimal("150.00"));
         PreTradeCheck rejectAll = (book, instrument, qty) -> PreTradeCheck.Decision.reject("gross limit");
-        var gated = new OrderService(store, new SimulatedExecutor(), prices, publisher, rejectAll);
+        var gated = new OrderService(store, new SimulatedExecutor(ExecutionCostSource.FREE), prices, publisher, rejectAll);
 
         Order result = gated.submit(market("idem-1", Side.BUY, "100"));
 

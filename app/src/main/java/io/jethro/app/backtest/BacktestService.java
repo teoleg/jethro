@@ -19,8 +19,9 @@ import java.util.Optional;
  */
 public final class BacktestService {
 
-    /** Default transaction cost applied to a backtest when the caller doesn't specify one. */
-    public static final BigDecimal DEFAULT_COST_BPS = new BigDecimal("1.0");
+    /** Fallback per-fill cost when no execution config is wired (ADR-0025 default derivation
+     *  is EQUITY half-spread + fee = 3.5bp; this constant only backs standalone tests). */
+    public static final BigDecimal DEFAULT_COST_BPS = new BigDecimal("3.5");
     private static final int MIN_TICKS = 1_000;
     private static final int MAX_TICKS = 200_000;
 
@@ -28,13 +29,22 @@ public final class BacktestService {
     private final TradingCoreProperties sim;
     private final StrategyProperties strategy;
     private final InstrumentRefSource refs;
+    private final BigDecimal defaultCostBps;
 
     public BacktestService(BacktestEngine engine, TradingCoreProperties sim,
                            StrategyProperties strategy, InstrumentRefSource refs) {
+        this(engine, sim, strategy, refs, DEFAULT_COST_BPS);
+    }
+
+    /** @param defaultCostBps per-fill cost derived from the live execution config (ADR-0025:
+     *                        half-spread + fee), so backtest and sim P&L measure the same economics. */
+    public BacktestService(BacktestEngine engine, TradingCoreProperties sim,
+                           StrategyProperties strategy, InstrumentRefSource refs, BigDecimal defaultCostBps) {
         this.engine = engine;
         this.sim = sim;
         this.strategy = strategy;
         this.refs = refs;
+        this.defaultCostBps = defaultCostBps;
     }
 
     /** Runs a backtest of the live config; nulls fall back to the live/default values. */
@@ -48,7 +58,7 @@ public final class BacktestService {
                 strategy.targetNotional(), strategy.maxOrderNotionalOrDefault(),
                 strategy.maxPositionNotionalOrDefault(), strategy.allowShortOrDefault(),
                 strategy.regimeVolatileScaleOrDefault(),
-                costBps != null ? costBps : DEFAULT_COST_BPS,
+                costBps != null ? costBps : defaultCostBps,
                 universe());
         return engine.run(cfg);
     }
