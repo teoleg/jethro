@@ -73,6 +73,30 @@ class EodServiceTest {
     }
 
     @Test
+    void overnightAndIntradayLegsSplitTodaysPnl() {
+        var calendar = new MutableCalendar(LocalDate.of(2026, 7, 14));
+        var pnl = new AtomicReference<>(risk("100.00"));
+        var eod = new EodService(calendar, null, pnl::get, List::of, () -> 0);
+
+        assertEquals(null, eod.overnightPnl(), "no boundary yet — split honestly unavailable");
+
+        eod.checkOnce();                       // buffers the PRE-boundary state (100.00)
+        pnl.set(risk("130.00"));               // the close→open gap lands on the boundary
+        calendar.day = calendar.day.plusDays(1);
+        eod.checkOnce();                       // rollover: close = buffered 100, open = 130
+
+        assertEquals(0, new BigDecimal("100.00").compareTo(eod.previousCloseTotal()),
+                "the close is the PRE-gap buffered state");
+        assertEquals(0, new BigDecimal("30.00").compareTo(eod.overnightPnl()),
+                "overnight = open 130 − close 100");
+        pnl.set(risk("145.00"));
+        assertEquals(0, new BigDecimal("15.00").compareTo(eod.intradayPnl()),
+                "intraday = live 145 − open 130");
+        assertEquals(0, new BigDecimal("45.00").compareTo(eod.todayPnl()),
+                "today = overnight + intraday");
+    }
+
+    @Test
     void multiDayJumpRollsOnceToTheCurrentDay() {
         var calendar = new MutableCalendar(LocalDate.of(2026, 7, 14));
         var expiries = new AtomicInteger();

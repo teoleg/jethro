@@ -33,6 +33,7 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
     private final long ticksPerDay;                // 0 disables overnight gaps
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
+    private volatile long dayIndexV;               // completed simulated trading days
 
     /**
      * @param instrumentIds full universe to emit; ids the curve links (ZT/ZF/ZN/ZB) are priced
@@ -100,6 +101,12 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
         return sim.regime();
     }
 
+    /** Completed simulated trading days on THIS tape (tick-counted) — the session calendar
+     *  keys to this so day boundaries and overnight gaps never drift apart (ADR-0027). */
+    public long simDayIndex() {
+        return dayIndexV;
+    }
+
     @Override
     public String name() {
         return NAME;
@@ -122,10 +129,11 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
             long now = System.currentTimeMillis();
             // Overnight gap at each simulated day boundary (ADR-0026/0027): one correlated
             // close→open jump between consecutive ticks; the curve consumes its rates deltas
-            // so futures/swaps gap coherently too. (Tick-counted — in lockstep with the sim's
-            // own dtDays time base; the app's session calendar counts wall time, so the two
-            // drift by scheduler overhead. The gap needn't land exactly on the calendar tick.)
+            // so futures/swaps gap coherently too. Tick-counted — in lockstep with the sim's
+            // own dtDays time base — and exported as simDayIndex() so the session calendar
+            // keys to the SAME boundary (a wall clock would drift by scheduler overhead).
             if (ticksPerDay > 0 && tickCount > 0 && tickCount % ticksPerDay == 0) {
+                dayIndexV = tickCount / ticksPerDay;
                 sim.overnightGap(OVERNIGHT_DAY_FRACTION);
                 if (curveSim != null) {
                     curveSim.applyExternalStep(sim.lastLevelDelta(), sim.lastSlopeDelta());

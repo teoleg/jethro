@@ -44,6 +44,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "jethro.trading.sim-tick-interval-millis=50",
                 "jethro.ai.interval-seconds=5",
                 "jethro.ai.request-timeout-seconds=180",
+                // This IT asserts the COMMENTARY path. The hypothesis layer isn't asserted here
+                // and competes for the same single-threaded Ollama on a 2-vCPU runner (its large
+                // prompts every 20s queue ahead of commentary calls) — that contention is what
+                // intermittently pushed the first commentary card past the 5-minute await.
+                "jethro.hypothesis.enabled=false",
         })
 class FullStackIT {
 

@@ -50,6 +50,12 @@ public final class EodService implements AutoCloseable {
 
     private volatile LocalDate currentDay;
     private volatile BigDecimal previousCloseTotal;
+    private volatile BigDecimal openTotal;                    // firm total at session open (nullable)
+    // Pre-boundary buffer: the last state seen BEFORE the calendar rolled. The sim applies its
+    // close→open gap exactly on the boundary, so "the close" must be the state from the last
+    // check before it (≤ CHECK_SECONDS old), not the post-gap state at rollover detection.
+    private volatile ConsolidatedRisk bufferedRisk;
+    private volatile List<MarkSource.Mark> bufferedMarks;
     private volatile ScheduledExecutorService scheduler;
 
     public EodService(TradingCalendar calendar, JdbcTemplate jdbc, Supplier<ConsolidatedRisk> risk,
@@ -61,6 +67,22 @@ public final class EodService implements AutoCloseable {
         this.dayOrderExpirer = dayOrderExpirer;
         this.currentDay = calendar.sessionDay();
         this.previousCloseTotal = seedPreviousClose(this.currentDay);
+        this.openTotal = seedOpen(this.currentDay);
+    }
+
+    /** Restart mid-session: today's open (for the overnight/intraday split) if persisted. */
+    private BigDecimal seedOpen(LocalDate day) {
+        if (jdbc == null) {
+            return null;
+        }
+        try {
+            List<BigDecimal> rows = jdbc.query(
+                    "select open_pnl from firm_equity where day = ?",
+                    (rs, i) -> rs.getBigDecimal(1), day);
+            return rows.isEmpty() ? null : rows.get(0);
+        } catch (Exception e) {
+            return null; // split unavailable until the next boundary — disclosed via null
+        }
     }
 
     /** Restart mid-session: the anchor is the last persisted close BEFORE the current day. */
@@ -95,6 +117,10 @@ public final class EodService implements AutoCloseable {
             LocalDate day = calendar.sessionDay();
             LocalDate ended = currentDay;
             if (!day.isAfter(ended)) {
+                // Intra-day: refresh the pre-boundary buffer so the NEXT rollover has a
+                // guaranteed pre-gap close (≤ CHECK_SECONDS before the boundary).
+                bufferedRisk = risk.get();
+                bufferedMarks = marks.marks();
                 return;
             }
             rollover(ended, day);
@@ -104,10 +130,15 @@ public final class EodService implements AutoCloseable {
     }
 
     private void rollover(LocalDate ended, LocalDate newDay) {
-        ConsolidatedRisk snapshot = risk.get();
+        // Close = the buffered PRE-boundary state (the sim's overnight gap lands ON the
+        // boundary; the state at detection time is already the new day's open). First-ever
+        // check landing straight on a boundary has no buffer — fall back to current, disclosed.
+        ConsolidatedRisk closeSnapshot = bufferedRisk != null ? bufferedRisk : risk.get();
+        List<MarkSource.Mark> closeMarks = bufferedMarks != null ? bufferedMarks : marks.marks();
+        ConsolidatedRisk snapshot = closeSnapshot;
         BigDecimal closeTotal = snapshot != null ? snapshot.total().totalPnl() : previousCloseTotal;
         if (jdbc != null) {
-            for (MarkSource.Mark mark : marks.marks()) {
+            for (MarkSource.Mark mark : closeMarks) {
                 jdbc.update("""
                         insert into daily_close (day, instrument, close) values (?, ?, ?)
                         on conflict (day, instrument) do update set close = excluded.close
@@ -129,12 +160,28 @@ public final class EodService implements AutoCloseable {
             }
         }
         int expired = dayOrderExpirer != null ? dayOrderExpirer.getAsInt() : 0;
+        // The new session's OPEN = the state at rollover detection (post-gap): the overnight
+        // move is open − previous close, intraday is live total − open. Persisted so the split
+        // survives restarts.
+        ConsolidatedRisk openSnapshot = risk.get();
+        BigDecimal open = openSnapshot != null ? openSnapshot.total().totalPnl() : closeTotal;
+        if (jdbc != null) {
+            jdbc.update("""
+                    insert into firm_equity (day, total_pnl, open_pnl) values (?, ?, ?)
+                    on conflict (day) do update set open_pnl = excluded.open_pnl
+                    """, newDay, open, open);
+        }
         // Anchor first, then advance the day — a crash in between re-runs the rollover (upserts
         // make that idempotent) rather than losing it.
         previousCloseTotal = closeTotal;
+        openTotal = open;
         currentDay = newDay;
-        log.info("EOD: session {} closed at firm P&L {} ({} DAY orders expired); session {} open",
-                ended, closeTotal.toPlainString(), expired, newDay);
+        bufferedRisk = openSnapshot;
+        bufferedMarks = marks.marks();
+        log.info("EOD: session {} closed at firm P&L {} ({} DAY orders expired); session {} open at {} "
+                        + "(overnight {})",
+                ended, closeTotal.toPlainString(), expired, newDay, open.toPlainString(),
+                open.subtract(closeTotal).toPlainString());
     }
 
     /** The current session day (for the API and consumers that need "today"). */
@@ -152,6 +199,24 @@ public final class EodService implements AutoCloseable {
         ConsolidatedRisk snapshot = risk.get();
         BigDecimal total = snapshot != null ? snapshot.total().totalPnl() : previousCloseTotal;
         return total.subtract(previousCloseTotal);
+    }
+
+    /** Overnight leg of today's P&L (session open − previous close), or null before the
+     *  first boundary of this run (no open captured — disclosed, never guessed). */
+    public BigDecimal overnightPnl() {
+        BigDecimal open = openTotal;
+        return open != null ? open.subtract(previousCloseTotal) : null;
+    }
+
+    /** Intraday leg of today's P&L (live total − session open), or null without an open. */
+    public BigDecimal intradayPnl() {
+        BigDecimal open = openTotal;
+        if (open == null) {
+            return null;
+        }
+        ConsolidatedRisk snapshot = risk.get();
+        BigDecimal total = snapshot != null ? snapshot.total().totalPnl() : open;
+        return total.subtract(open);
     }
 
     public String calendarDescription() {

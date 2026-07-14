@@ -43,6 +43,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private volatile TradingCoreRuntime runtime;
     private volatile MarketDataAdapter adapter;
     private volatile java.util.function.Supplier<String> regimeSource; // non-null only in sim mode
+    private volatile java.util.function.LongSupplier simDayIndexSource; // correlated sim only
     private volatile RealTreasuryCurve realCurve;     // non-null only when the live curve is active
     private volatile TreasuryCurveFetcher curveFetcher;
     private volatile String curveSource = "sim";      // "treasury-live" or "sim" (for the UI)
@@ -260,6 +261,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                         TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()),
                         properties.simSecondsPerDayOrDefault(), quoteSpecSource());
                 this.regimeSource = () -> sim.regime().name();
+                this.simDayIndexSource = sim::simDayIndex;
                 log.info("SIM ENGINE: correlated factor model (ADR-0026) — {} instruments, {} regimes, "
                                 + "t(ν={}) tails, {}s per simulated trading day",
                         calibration.instruments().size(), calibration.regimes().size(),
@@ -321,6 +323,12 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
             }
         }
         return byId::get;
+    }
+
+    /** The correlated sim's tick-day counter (null on live feeds / legacy sim) — the
+     *  session calendar keys to the TAPE's days, not wall time (ADR-0027). */
+    public java.util.function.LongSupplier simDayIndexSource() {
+        return simDayIndexSource;
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'

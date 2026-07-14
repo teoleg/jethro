@@ -52,6 +52,9 @@ public record TradingCoreProperties(
          *  in this zone. Pure sim runs use the compressed sim calendar instead. Default
          *  America/New_York (the universe is US-centric). */
         String sessionZone,
+        /** Hour (0-23, session-zone local) at which the LIVE-feed trading day rolls to the
+         *  next one — 17 = the CME 17:00-ET futures settlement boundary. */
+        Integer sessionRollHour,
         /** Corporate-action / bad-print guard: max single-update mark move in bps of the
          *  previous mark, per asset class (key = EQUITY/FUTURE/FX/BOND/SWAP, or DEFAULT).
          *  A bigger jump QUARANTINES the instrument until an operator clears it. 0 disables
@@ -79,6 +82,11 @@ public record TradingCoreProperties(
             return markJumpBps.get("DEFAULT");
         }
         return DEFAULT_MARK_JUMP_BPS.getOrDefault(key, DEFAULT_MARK_JUMP_BPS.get("DEFAULT"));
+    }
+
+    public int sessionRollHourOrDefault() {
+        return sessionRollHour != null && sessionRollHour >= 0 && sessionRollHour <= 23
+                ? sessionRollHour : 17;
     }
 
     /** Zone for the live-feed session calendar; a bad zone id fails fast at wiring time. */

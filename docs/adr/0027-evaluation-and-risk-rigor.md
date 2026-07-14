@@ -129,3 +129,21 @@ that is exactly what the harness is for — `jethro.strategy.algo` selects the l
 `/api/backtest?algo=…` (and the Backtest page's selector) runs either through the identical
 guardrails, vol-targeted sizing, honest execution costs and multi-seed OOS medians. Adding
 the second algo required ZERO new harness code — the point of building the harness first.
+
+## Implementation note — calendar refinements (2026-07-14, task #15)
+
+Three refinements to the session calendar. (1) **US trading days + futures roll**: the
+live-feed calendar now rolls at `session-roll-hour` (default 17:00 ET, the CME settlement
+boundary) and skips weekends and the ten NYSE full-closure holidays (`UsTradingCalendar` —
+pure rules incl. Good Friday via the Gregorian computus, Sat→Fri/Sun→Mon observance; early
+closes count as full sessions, disclosed). Friday 17:30 belongs to Monday's session. (2)
+**Tape-synchronized sim days**: the sim adapter's tick loop runs at tickInterval + work
+time, so a wall clock drifts away from the tape's day boundaries over a long run — the sim
+calendar now keys to the adapter's own `simDayIndex()` counter, keeping session closes and
+close→open gaps on the same boundary always (wall-time fallback until the tape starts).
+(3) **Overnight/intraday P&L attribution**: the EOD watcher buffers the last PRE-boundary
+state each check, so the close is guaranteed pre-gap; the new session's open (post-gap) is
+persisted (`firm_equity.open_pnl`, V21) — today's P&L = overnight (open − prev close) +
+intraday (live − open), restart-safe, on `/api/eod` and the Today's-P&L tooltip. Still
+open, stated: real closing-auction prints need a licensed feed — the boundary snapshot
+remains the close for live runs.

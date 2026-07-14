@@ -19,6 +19,7 @@ public final class EodController {
     }
 
     public record EodDto(String sessionDay, String calendar, String todayPnl,
+                         String overnightPnl, String intradayPnl,
                          String previousCloseTotal, List<DayDto> days, String note) {
     }
 
@@ -32,14 +33,15 @@ public final class EodController {
     public EodDto eod() {
         EodService service = this.eod.getIfAvailable();
         if (service == null) {
-            return new EodDto(null, null, null, null, List.of(),
+            return new EodDto(null, null, null, null, null, null, List.of(),
                     "session calendar off (trading disabled)");
         }
         List<DayDto> days = service.recentDays(15).stream()
                 .map(d -> new DayDto(d.day().toString(), plain(d.totalPnl()), plain(d.dayPnl())))
                 .toList();
         return new EodDto(service.sessionDay().toString(), service.calendarDescription(),
-                plain(service.todayPnl()), plain(service.previousCloseTotal()), days, null);
+                plain(service.todayPnl()), plain(service.overnightPnl()), plain(service.intradayPnl()),
+                plain(service.previousCloseTotal()), days, null);
     }
 
     private static String plain(BigDecimal v) {

@@ -25,14 +25,24 @@ public class SessionConfig {
 
     @Bean
     @ConditionalOnProperty(prefix = "jethro.trading", name = "enabled", havingValue = "true", matchIfMissing = true)
-    TradingCalendar tradingCalendar(TradingCoreProperties properties, ObjectProvider<JdbcTemplate> jdbc) {
+    TradingCalendar tradingCalendar(TradingCoreProperties properties, ObjectProvider<JdbcTemplate> jdbc,
+                                    ObjectProvider<TradingCoreLifecycle> tradingCore) {
         // Provider choice is config-time: a finnhub/yahoo run that falls back to the sim feed at
         // runtime (missing token) keeps the wall-clock calendar — real time still passes.
         if (!"sim".equals(properties.providerOrDefault())) {
-            return new WallClockSessionCalendar(properties.sessionZoneOrDefault());
+            return new WallClockSessionCalendar(properties.sessionZoneOrDefault(),
+                    properties.sessionRollHourOrDefault());
         }
+        // Key the sim calendar to the TAPE's own day counter (set once the correlated adapter
+        // starts) so session closes land on the same boundary as the overnight gaps; negative
+        // (not started / legacy engine) falls back to wall time inside the calendar.
+        TradingCoreLifecycle core = tradingCore.getIfAvailable();
+        java.util.function.LongSupplier tapeDays = () -> {
+            var src = core != null ? core.simDayIndexSource() : null;
+            return src != null ? src.getAsLong() : -1;
+        };
         return new SimSessionCalendar(anchorPastHistory(jdbc.getIfAvailable()),
-                properties.simSecondsPerDayOrDefault(), System::currentTimeMillis);
+                properties.simSecondsPerDayOrDefault(), System::currentTimeMillis, tapeDays);
     }
 
     /** Synthetic sim days must stay monotonic across restarts: anchor the first day after the

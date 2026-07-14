@@ -198,7 +198,7 @@
       ? `<div class="stat"><div class="k">VaR 95 (1d)</div><div class="v mono muted" style="font-size:12px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</div></div>`
       : `<div class="stat"><div class="k" title="historical simulation, ${lastVar.observations} days; ES95 ${lastVar.es95}${Number(lastVar.skippedExposure)>0?'; unmeasured exposure '+lastVar.skippedExposure:''}">VaR 95 (1d)</div><div class="v mono down">${money(lastVar.var95)}</div></div>`);
     const dayTile = (lastEod == null || lastEod.todayPnl == null) ? "" :
-      `<div class="stat"><div class="k" title="since the previous session close (${esc(lastEod.previousCloseTotal)}) — session ${esc(lastEod.sessionDay)}, ${esc(lastEod.calendar)}">Today's P&L</div><div class="v mono ${cls(lastEod.todayPnl)}">${money(lastEod.todayPnl)}</div></div>`;
+      `<div class="stat"><div class="k" title="since the previous session close (${esc(lastEod.previousCloseTotal)})${lastEod.overnightPnl!=null?` — overnight ${money(lastEod.overnightPnl)} / intraday ${money(lastEod.intradayPnl)}`:''} — session ${esc(lastEod.sessionDay)}, ${esc(lastEod.calendar)}">Today's P&L</div><div class="v mono ${cls(lastEod.todayPnl)}">${money(lastEod.todayPnl)}</div></div>`;
     document.getElementById("stats").innerHTML =
       stat("Total P&L", t.totalPnl, true) + dayTile + stat("Realized", t.realizedPnl) + stat("Unrealized", t.unrealizedPnl) +
       `<div class="stat"><div class="k">Net exposure</div><div class="v mono">${money(t.netExposure)}</div></div>` +
