@@ -36,8 +36,9 @@ public final class BacktestController {
     public BacktestDto backtest(@RequestParam(name = "seed", required = false) Long seed,
                                 @RequestParam(name = "ticks", defaultValue = "20000") int ticks,
                                 @RequestParam(name = "regimes", required = false) Boolean regimes,
-                                @RequestParam(name = "costBps", required = false) BigDecimal costBps) {
-        return toDto(service.run(seed, ticks, regimes, costBps));
+                                @RequestParam(name = "costBps", required = false) BigDecimal costBps,
+                                @RequestParam(name = "algo", required = false) String algo) {
+        return toDto(service.run(seed, ticks, regimes, costBps, algo));
     }
 
     private static BacktestDto toDto(BacktestResult r) {

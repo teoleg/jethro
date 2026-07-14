@@ -51,6 +51,11 @@ public final class BacktestService {
 
     /** Runs a backtest of the live config; nulls fall back to the live/default values. */
     public BacktestResult run(Long seed, int ticks, Boolean regimes, BigDecimal costBps) {
+        return run(seed, ticks, regimes, costBps, null);
+    }
+
+    /** @param algo signal algo under test ("momentum"/"mean-reversion"); null = the LIVE one. */
+    public BacktestResult run(Long seed, int ticks, Boolean regimes, BigDecimal costBps, String algo) {
         int bounded = Math.max(MIN_TICKS, Math.min(MAX_TICKS, ticks));
         BacktestConfig cfg = new BacktestConfig(
                 seed != null ? seed : sim.simSeed(), bounded,
@@ -61,7 +66,8 @@ public final class BacktestService {
                 strategy.maxPositionNotionalOrDefault(), strategy.allowShortOrDefault(),
                 strategy.regimeVolatileScaleOrDefault(),
                 costBps != null ? costBps : defaultCostBps,
-                universe());
+                universe(),
+                algo != null && !algo.isBlank() ? algo.trim().toLowerCase() : strategy.algoOrDefault());
         return engine.run(cfg);
     }
 

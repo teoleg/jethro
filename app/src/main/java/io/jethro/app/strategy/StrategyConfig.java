@@ -25,14 +25,20 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(prefix = "jethro.strategy", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class StrategyConfig {
 
+    /** The configured signal algo (jethro.strategy.algo): momentum or mean-reversion — both
+     *  drive the same lifecycle/guardrails/harness through the Strategy port. */
     @Bean
-    MomentumStrategy momentumStrategy(StrategyProperties props) {
+    io.jethro.trading.algo.strategy.Strategy tradingStrategy(StrategyProperties props) {
+        if ("mean-reversion".equals(props.algoOrDefault())) {
+            return new io.jethro.trading.algo.strategy.MeanReversionStrategy(
+                    props.lookback(), props.thresholdSigmasOrDefault(), props.minSignalBpsOrDefault());
+        }
         return new MomentumStrategy(props.lookback(), props.thresholdSigmasOrDefault(),
                 props.minSignalBpsOrDefault());
     }
 
     @Bean
-    StrategyLifecycle strategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
+    StrategyLifecycle strategyLifecycle(io.jethro.trading.algo.strategy.Strategy strategy, TradingCoreLifecycle tradingCore,
                                         InstrumentRefSource refs, PreTradeGuardrail guardrail,
                                         RiskProjection risk, RiskLimitSource limits,
                                         AttentionFeed feed, SseBroadcaster sse, StrategyProperties props,

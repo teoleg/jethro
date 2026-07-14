@@ -70,6 +70,7 @@
   <div class="panel">
     <form class="controls" id="f">
       <div class="field"><label>seed (blank = sim seed)</label><input id="seed" placeholder="42" class="mono"></div>
+      <div class="field"><label>algo</label><select id="algo" title="same z-score detector, opposite reading — the OOS harness adjudicates"><option value="">live config</option><option value="momentum">momentum</option><option value="mean-reversion">mean-reversion</option></select></div>
       <div class="field"><label>ticks (1k–200k)</label><input id="ticks" value="20000" class="mono"></div>
       <div class="field"><label>cost (bps/fill)</label><input id="costBps" value="1.0" class="mono"></div>
       <div class="field check"><input type="checkbox" id="regimes" checked><label>market regimes</label></div>
@@ -117,6 +118,7 @@
     const costBps = document.getElementById("costBps").value.trim() || "1.0";
     const regimes = document.getElementById("regimes").checked;
     const qs = new URLSearchParams({ ticks, regimes, costBps }); if (seed) qs.set("seed", seed);
+    const algo = document.getElementById("algo").value; if (algo) qs.set("algo", algo);
     try {
       const r = await (await fetch("/api/backtest?" + qs.toString())).json();
       document.getElementById("results").style.display = "";

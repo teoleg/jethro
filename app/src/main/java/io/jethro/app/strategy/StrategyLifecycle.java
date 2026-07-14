@@ -4,7 +4,7 @@ import io.jethro.app.trading.TradingCoreLifecycle;
 import io.jethro.order.NewOrder;
 import io.jethro.order.OrderService;
 import io.jethro.domain.OrderType;
-import io.jethro.trading.algo.strategy.MomentumStrategy;
+import io.jethro.trading.algo.strategy.Strategy;
 import io.jethro.trading.algo.strategy.TradeSignal;
 import io.jethro.domain.Side;
 import io.jethro.trading.riskpnl.ConsolidatedRisk;
@@ -45,7 +45,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(StrategyLifecycle.class);
 
-    private final MomentumStrategy strategy;
+    private final Strategy strategy;
     private final TradingCoreLifecycle tradingCore;
     private final InstrumentRefSource refs;
     private final PreTradeGuardrail guardrail;
@@ -75,7 +75,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private boolean throttledActive;
     private volatile ScheduledExecutorService scheduler;
 
-    public StrategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
+    public StrategyLifecycle(Strategy strategy, TradingCoreLifecycle tradingCore,
                              InstrumentRefSource refs, PreTradeGuardrail guardrail, RiskProjection risk,
                              RiskLimitSource limits, AttentionFeed feed, SseBroadcaster sse,
                              StrategyProperties props, OrderService orderService,
@@ -108,8 +108,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
         });
         scheduler.scheduleWithFixedDelay(this::runOnce,
                 props.intervalSeconds(), props.intervalSeconds(), TimeUnit.SECONDS);
-        log.info("momentum strategy started: every {}s, lookback {}, threshold {}σ (floor {}bps), default book {}",
-                props.intervalSeconds(), props.lookback(), props.thresholdSigmasOrDefault(),
+        log.info("{} strategy started: every {}s, lookback {}, threshold {}σ (floor {}bps), default book {}",
+                strategy.name(), props.intervalSeconds(), props.lookback(), props.thresholdSigmasOrDefault(),
                 props.minSignalBpsOrDefault(), props.book());
         if (autoExecuting()) {
             log.warn("AUTO-EXECUTE ON (ADR-0019): strategy signals auto-submit SIMULATED orders "
@@ -126,10 +126,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
             if (runtime == null) {
                 return;
             }
-            List<MomentumStrategy.Observation> observations = new ArrayList<>();
+            List<Strategy.Observation> observations = new ArrayList<>();
             int stale = 0;
             for (var mark : runtime.markCache().snapshot()) {
-                observations.add(new MomentumStrategy.Observation(mark.instrumentId(), mark.price(), mark.stale()));
+                observations.add(new Strategy.Observation(mark.instrumentId(), mark.price(), mark.stale()));
                 if (mark.stale()) {
                     stale++;
                 }

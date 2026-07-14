@@ -117,3 +117,15 @@ future correctly gets MORE notional to carry the same daily risk. Per-class orde
 bound the near-zero-vol blow-up; regime scale still multiplies on top; warm-up falls back
 to the previous fixed-notional (+ signal-vol clamp in the strategy) sizing, disclosed.
 Follow-up: covariance-aware (portfolio-level) sizing remains listed under Consequences.
+
+## Implementation note — second strategy through the OOS harness (2026-07-14)
+
+A `Strategy` port now fronts the signal engine (the live lifecycle and the backtest engine
+both drive it), and `MeanReversionStrategy` is the second implementation: the SAME
+vol-adaptive z-score detector as momentum, opposite conclusion — SELL the +σ rip, BUY the
+−σ dip (in a long-only book the SELL side only reduces, the standing guard applies).
+Momentum and mean reversion cannot both be right on the same tape at the same horizon;
+that is exactly what the harness is for — `jethro.strategy.algo` selects the live algo,
+`/api/backtest?algo=…` (and the Backtest page's selector) runs either through the identical
+guardrails, vol-targeted sizing, honest execution costs and multi-seed OOS medians. Adding
+the second algo required ZERO new harness code — the point of building the harness first.

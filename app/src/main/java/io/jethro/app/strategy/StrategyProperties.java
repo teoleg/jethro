@@ -66,7 +66,15 @@ public record StrategyProperties(
          *  notional than a 0.4%/day Treasury future. Used whenever measured vol exists; falls
          *  back to targetNotional (+ signal-vol scaling in the strategy) until history accrues.
          *  Default 250 (≈ 25k target × 1%/day). */
-        BigDecimal riskBudgetDaily) {
+        BigDecimal riskBudgetDaily,
+        /** Signal algo: "momentum" (default) or "mean-reversion" — the SAME z-score detector
+         *  read in opposite directions; both run through the identical guardrails, sizing and
+         *  OOS harness, which is what adjudicates between them (ADR-0027). */
+        String algo) {
+
+    public String algoOrDefault() {
+        return algo != null && !algo.isBlank() ? algo.trim().toLowerCase() : "momentum";
+    }
 
     public BigDecimal riskBudgetDailyOrDefault() {
         return riskBudgetDaily != null && riskBudgetDaily.signum() > 0

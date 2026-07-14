@@ -7,7 +7,9 @@ import io.jethro.domain.InstrumentId;
 import io.jethro.domain.Position;
 import io.jethro.domain.Positions;
 import io.jethro.domain.Side;
+import io.jethro.trading.algo.strategy.MeanReversionStrategy;
 import io.jethro.trading.algo.strategy.MomentumStrategy;
+import io.jethro.trading.algo.strategy.Strategy;
 import io.jethro.trading.algo.strategy.TradeSignal;
 import io.jethro.trading.marketdata.sim.SimTickGenerator;
 
@@ -66,8 +68,9 @@ public final class BacktestEngine {
         }
 
         SimTickGenerator gen = new SimTickGenerator(cfg.seed(), startPrices, maxSteps, cfg.regimes());
-        MomentumStrategy strategy =
-                new MomentumStrategy(cfg.lookback(), cfg.thresholdSigmas(), cfg.minSignalBps());
+        Strategy strategy = "mean-reversion".equals(cfg.algo())
+                ? new MeanReversionStrategy(cfg.lookback(), cfg.thresholdSigmas(), cfg.minSignalBps())
+                : new MomentumStrategy(cfg.lookback(), cfg.thresholdSigmas(), cfg.minSignalBps());
 
         BigDecimal[] mark = new BigDecimal[n];
         List<BigDecimal> equityCurve = new ArrayList<>();
@@ -86,9 +89,9 @@ public final class BacktestEngine {
             }
             if (tick % cfg.evalEveryTicks() == 0) {
                 evaluations++;
-                List<MomentumStrategy.Observation> obs = new ArrayList<>(n);
+                List<Strategy.Observation> obs = new ArrayList<>(n);
                 for (int i = 0; i < n; i++) {
-                    obs.add(new MomentumStrategy.Observation(ids[i], mark[i], false));
+                    obs.add(new Strategy.Observation(ids[i], mark[i], false));
                 }
                 String regime = gen.regime().name();
                 BigDecimal regimeScale = "VOLATILE".equals(regime) ? cfg.volatileScale() : BigDecimal.ONE;
