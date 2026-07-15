@@ -144,10 +144,15 @@ public class RiskConfig {
     RiskDataConsumer riskDataConsumer(KafkaConfig.JethroKafkaProperties properties, RiskProjection projection,
                                       CurveService curveService,
                                       io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView,
-                                      ObjectProvider<SwapTradeRecorder> swapTrades) {
+                                      ObjectProvider<SwapTradeRecorder> swapTrades,
+                                      ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbc) {
         SwapTradeRecorder recorder = swapTrades.getIfAvailable();
+        // Seed the projection from the fills TABLE (source of truth, never retention-bound);
+        // the topic then supplies live increments only. Without a DB, seed from nothing.
+        var template = jdbc.getIfAvailable();
+        FillHistorySource history = template != null ? FillHistorySource.jdbc(template) : FillHistorySource.NONE;
         var consumer = new RiskDataConsumer(properties.bootstrapServers(), projection, curveService,
-                treasuryCurveView, recorder != null ? recorder::onFill : null);
+                treasuryCurveView, recorder != null ? recorder::onFill : null, history);
         consumer.start();
         return consumer;
     }

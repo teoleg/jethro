@@ -29,10 +29,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Feeds {@link RiskProjection} from the {@code fills} and {@code md.marks} topics
- * (invariant 3: positions are projected from fills). Own consumer group — cross-module
- * data via topics (ADR-0015). Idempotency lives in the projection (dedupe on fillId,
- * invariant 6); undecodable records are counted and logged, never silently dropped.
+ * Feeds {@link RiskProjection} from the {@code fills} table (boot rebuild) and the
+ * {@code fills} / {@code md.marks} topics (live increments) — invariant 3: positions are
+ * projected from fills.
+ *
+ * <p><b>Boot rebuild from the TABLE, not the topic.</b> The in-memory projection is derived
+ * and must be rebuilt on every boot. It seeds from the Postgres {@code fills} table
+ * ({@link FillHistorySource}) — the never-expiring source of truth — and then consumes the
+ * fills topic from LATEST for live increments. Replaying the topic from the beginning
+ * instead would silently truncate history once the platform outlives the topic's retention
+ * window (unconfigured ⇒ broker default ~7 days), rebuilding wrong positions with no error.
+ * The projection dedupes on fillId (invariant 6), so any fill present in both the seed and
+ * a live topic record is applied once.
+ *
+ * <p>Own consumer group — cross-module data via topics (ADR-0015). Undecodable records are
+ * counted and logged, never silently dropped.
  */
 public final class RiskDataConsumer implements AutoCloseable {
 
@@ -47,44 +58,73 @@ public final class RiskDataConsumer implements AutoCloseable {
 
     private final TreasuryCurveView treasuryCurve;
     private final java.util.function.Consumer<Fill> fillTap; // nullable: swap-trade registry etc.
+    private final FillHistorySource fillHistory; // boot rebuild source (the fills table)
 
     public RiskDataConsumer(String bootstrapServers, RiskProjection projection,
                             CurveService curveService, TreasuryCurveView treasuryCurve) {
-        this(bootstrapServers, projection, curveService, treasuryCurve, null);
+        this(bootstrapServers, projection, curveService, treasuryCurve, null, FillHistorySource.NONE);
     }
 
-    /** @param fillTap called after each fill is applied to the projection (replayed from the
-     *                 beginning on every boot — taps must be idempotent, invariant 6). */
+    /** @param fillTap called after each fill is applied to the projection (invariant 6: taps
+     *                 must be idempotent — a fill can arrive from the boot seed and the topic).
+     *  @param fillHistory the fills table to seed the projection from at boot (source of truth). */
     public RiskDataConsumer(String bootstrapServers, RiskProjection projection,
                             CurveService curveService, TreasuryCurveView treasuryCurve,
-                            java.util.function.Consumer<Fill> fillTap) {
+                            java.util.function.Consumer<Fill> fillTap, FillHistorySource fillHistory) {
         this.bootstrapServers = bootstrapServers;
         this.projection = projection;
         this.curveService = curveService;
         this.treasuryCurve = treasuryCurve;
         this.fillTap = fillTap;
+        this.fillHistory = fillHistory != null ? fillHistory : FillHistorySource.NONE;
     }
 
     public void start() {
         if (!running.compareAndSet(false, true)) {
             return;
         }
+        seedFromFillsTable(); // rebuild positions from the source of truth BEFORE going live
         Thread t = new Thread(this::consumeLoop, "risk-pnl-consumer");
         t.setDaemon(true);
         thread = t;
         t.start();
     }
 
+    /** Rebuilds the projection from the persisted fill history (invariant 3). Runs before the
+     *  topic consumer so live increments layer on top; the projection dedupes any overlap.
+     *  Package-visible for the seed test (no Kafka needed). */
+    void seedFromFillsTable() {
+        try {
+            List<Fill> history = fillHistory.allFills();
+            for (Fill fill : history) {
+                projection.applyFill(fill);
+                if (fillTap != null) {
+                    fillTap.accept(fill);
+                }
+            }
+            if (!history.isEmpty()) {
+                log.info("risk projection seeded from {} persisted fills (source of truth); "
+                        + "consuming the fills topic from latest for live increments", history.size());
+            }
+        } catch (Exception e) {
+            // Never block startup on the seed; the topic still carries recent fills as a
+            // degraded fallback. Loud, because positions may be incomplete until it recovers.
+            log.error("could not seed risk projection from the fills table ({}); positions may be "
+                    + "incomplete until the table is reachable", e.toString());
+        }
+    }
+
     private void consumeLoop() {
         Properties props = new Properties();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        // The projection is in-memory and derived, so it must be rebuilt from scratch on
-        // every boot: use an ephemeral group (no committed offsets to resume from) and
-        // seek explicitly on assignment — fills from the beginning to replay the full
-        // position history (invariant 3), marks from the end since only the latest matters.
+        // The projection was already seeded from the fills TABLE (the source of truth) before
+        // this thread started, so both topics are consumed from the END — fills for live
+        // increments only (NOT a full replay, which would truncate past the topic's retention
+        // window), marks because only the latest matters. Ephemeral group: no committed
+        // offsets, seek explicitly on assignment.
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "risk-pnl-" + UUID.randomUUID());
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         try (var consumer = new KafkaConsumer<>(props, new StringDeserializer(), new ByteArrayDeserializer())) {
             consumer.subscribe(List.of(Topics.FILLS, Topics.MD_MARKS), new ConsumerRebalanceListener() {
                 @Override
@@ -93,14 +133,9 @@ public final class RiskDataConsumer implements AutoCloseable {
 
                 @Override
                 public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-                    var fills = partitions.stream().filter(p -> Topics.FILLS.equals(p.topic())).toList();
-                    var marks = partitions.stream().filter(p -> Topics.MD_MARKS.equals(p.topic())).toList();
-                    if (!fills.isEmpty()) {
-                        consumer.seekToBeginning(fills);
-                    }
-                    if (!marks.isEmpty()) {
-                        consumer.seekToEnd(marks);
-                    }
+                    // Both from the END: the projection was seeded from the fills table already,
+                    // so the topic supplies only live increments (no retention-truncated replay).
+                    consumer.seekToEnd(partitions);
                 }
             });
             while (running.get()) {
