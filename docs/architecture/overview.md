@@ -141,7 +141,7 @@ jethro/
 │   └── finops/
 ├── app/                     # single-JVM assembly of all modules (ADR-0015)
 ├── deploy/                  # single-node EC2 deploy: prod compose, Caddy, SSM rollout (ADR-0013)
-├── infra/                   # AWS CDK in Java (ADR-0007/0013) — PLANNED; deploy/ runbook is the interim
+├── infra/                   # AWS CDK in Java (ADR-0007/0013): the dev-node stack (standalone build)
 └── docker-compose.yml       # local topology
 ```
 
