@@ -102,3 +102,28 @@ docker-compose.prod.yml` and is individually targetable from the workflow. A `je
 systemd unit restores the stack across the stop-when-idle reboots. **CDK codification of the
 one-time AWS setup (`infra/`, build-order step 9) remains the tracked follow-up** — the
 `deploy/README.md` runbook is the interim.
+
+## Implementation note — baked-AMI path is the DEFAULT (2026-07-15)
+
+The **default deploy is the immutable baked AMI**; the compose-rollout and manual quickstart
+are alternatives (all target the same single-node ADR-0013 shape):
+
+- **Packer** (`infra/packer/jethro.pkr.hcl` + `provision.sh`) bakes the whole stack — the
+  same `docker compose` structure run on the Pi, but x86-64 — into an Ubuntu AMI, with the
+  app image built and the **Ollama model pre-pulled**, plus a `jethro.service` systemd unit.
+  An instance launched from the AMI boots straight into the running stack on `:8080`, no
+  build and no downloads (fast, self-contained — and it sidesteps the boot-time model-pull
+  that flaked CI).
+- The **`Bake AMI` GitHub workflow** builds the AMI and optionally spawns a fresh instance
+  from it in the same account (kappara's), associating a stable IP and terminating the
+  previous instance — classic immutable rollout.
+
+Auth for this path is IAM-user access keys as repo secrets (simplest to set up from mobile);
+the OIDC deploy role from the CDK stack is the hardening alternative. Cost control is
+t3a.xlarge + stop-when-idle + the single account-wide $100 budget (the budget/schedule live
+in the CDK stack and can be deployed on their own). TLS/auth are NOT in the AMI (`:8080` is
+IP-locked via the security group); the Caddy edge in `deploy/docker-compose.prod.yml` is the
+productionised alternative when a public authenticated URL is wanted.
+
+`infra/packer/README.md` is the runbook; `deploy/README.md` is the entry point that steers
+here and lists the alternatives.
