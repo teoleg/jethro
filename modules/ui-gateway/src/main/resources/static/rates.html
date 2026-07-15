@@ -34,6 +34,10 @@
   #curveChart svg .grid { stroke:var(--line); stroke-width:1; }
   #curveChart svg .line { fill:none; stroke:var(--brand); stroke-width:2; }
   #curveChart svg .node { fill:var(--brand); }
+  #curveChart svg .line2 { fill:none; stroke:#e0a83d; stroke-width:2; stroke-dasharray:5 3; }
+  #curveChart svg .node2 { fill:#e0a83d; }
+  .lg { display:inline-flex; align-items:center; gap:5px; margin-right:14px; font-size:11px; color:var(--dim); }
+  .lg .sw { width:16px; height:3px; border-radius:2px; display:inline-block; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:right; padding:3px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
   th:first-child, td:first-child { text-align:left; }
@@ -77,8 +81,12 @@
     <div class="panel"><div id="swaps" class="muted">waiting for the curve…</div></div>
   </div>
   <div style="grid-column:1 / -1">
-    <div class="section-h">Rates risk — DV01 by tenor <span class="muted">— signed P&amp;L per +1bp parallel move, by book</span></div>
+    <div class="section-h">Rates risk — key-rate DV01 <span class="muted">— signed P&amp;L per +1bp move of each curve node, by book (Strata sensitivities)</span></div>
     <div class="panel"><div id="dv01" class="muted">no rates positions yet — trade a Treasury future or a swap to build rates risk.</div></div>
+  </div>
+  <div style="grid-column:1 / -1">
+    <div class="section-h">Swap book — trade-dated <span class="muted">— each fill priced as a SEASONED swap (entry par, remaining schedule → roll-down); the precise rates view beside the ledger's convention</span></div>
+    <div class="panel"><div id="swapbook" class="muted">no swap trades yet — fills on USD_IRS_5Y/10Y appear here dated and revalued.</div></div>
   </div>
 </main>
 <script>
@@ -87,18 +95,27 @@
   const money = s => { const n=Number(s); return (n<0?"−$":"$") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
   const cls = s => Number(s) > 0 ? "up" : (Number(s) < 0 ? "down" : "");
 
-  function curveSvg(points) {
+  // Two curves on one chart: SOFR zeros (solid, brand) and US Treasury pars (dashed, amber) —
+  // the vertical gap between them IS the swap spread, real information a desk watches.
+  function curveSvg(points, tsy) {
     const W=760, H=280, pl=64, pr=16, pt=16, pb=30;
-    const xs = points.map(p=>p.tenorYears), ys = points.map(p=>p.zeroRate);
-    const mn = Math.min(...ys), mx = Math.max(...ys), span = (mx-mn) || 0.0001;
+    const xs = points.map(p=>p.tenorYears);
+    const all = points.map(p=>p.zeroRate).concat((tsy||[]).map(p=>p.parYield));
+    const mn = Math.min(...all), mx = Math.max(...all), span = (mx-mn) || 0.0001;
     const X = t => pl + (Math.log(t)-Math.log(xs[0]))/(Math.log(xs[xs.length-1])-Math.log(xs[0]))*(W-pl-pr);
     const Y = v => H-pb - ((v-mn)/span)*(H-pt-pb);
-    const line = points.map((p,i)=>`${i?'L':'M'}${X(p.tenorYears).toFixed(1)},${Y(p.zeroRate).toFixed(1)}`).join(" ");
+    const path = (pts, get) => pts.map((p,i)=>`${i?'L':'M'}${X(p.tenorYears).toFixed(1)},${Y(get(p)).toFixed(1)}`).join(" ");
     const grid = [mx,(mx+mn)/2,mn].map(v=>`<line class="grid" x1="${pl}" y1="${Y(v).toFixed(1)}" x2="${W-pr}" y2="${Y(v).toFixed(1)}"/>
       <text x="${pl-8}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end">${pct(v)}</text>`).join("");
     const nodes = points.map(p=>`<circle class="node" cx="${X(p.tenorYears).toFixed(1)}" cy="${Y(p.zeroRate).toFixed(1)}" r="3.5"/>
       <text x="${X(p.tenorYears).toFixed(1)}" y="${H-8}" text-anchor="middle">${p.tenorYears}Y</text>`).join("");
-    return `<svg viewBox="0 0 ${W} ${H}">${grid}<path class="line" d="${line}"/>${nodes}</svg>`;
+    const tsyLine = (tsy && tsy.length)
+      ? `<path class="line2" d="${path(tsy, p=>p.parYield)}"/>` +
+        tsy.map(p=>`<circle class="node2" cx="${X(p.tenorYears).toFixed(1)}" cy="${Y(p.parYield).toFixed(1)}" r="3"/>`).join("")
+      : "";
+    return `<svg viewBox="0 0 ${W} ${H}">${grid}<path class="line" d="${path(points, p=>p.zeroRate)}"/>${nodes}${tsyLine}</svg>` +
+      `<div style="margin-top:6px"><span class="lg"><span class="sw" style="background:var(--brand)"></span>SOFR zero (swaps discount here)</span>` +
+      `<span class="lg"><span class="sw" style="background:#e0a83d"></span>US Treasury par (futures key here)</span></div>`;
   }
 
   async function refresh() {
@@ -110,13 +127,20 @@
         document.getElementById("curveTitle").textContent = src.live ? "US Treasury zero curve" : "USD SOFR zero curve";
       } catch (e) {}
       const curve = await (await fetch("/api/curve")).json();
+      const tsy = await fetch("/api/curve/tsy").then(r => r.json()).catch(() => []);
       if (curve.length) {
         document.getElementById("asof").textContent = "· " + new Date().toLocaleTimeString();
-        document.getElementById("curveChart").innerHTML = curveSvg(curve);
+        document.getElementById("curveChart").innerHTML = curveSvg(curve, tsy);
+        const tsyBy = {}; (tsy||[]).forEach(p => tsyBy[p.tenorYears] = p.parYield);
         document.getElementById("curveTable").outerHTML = '<div id="curveTable"><table>' +
-          "<tr><th>tenor</th><th>zero rate</th><th>discount factor</th></tr>" +
-          curve.map(p=>`<tr><td>${p.tenorYears}Y</td><td class="mono">${pct(p.zeroRate)}</td>
-            <td class="mono">${p.discountFactor.toFixed(6)}</td></tr>`).join("") + "</table></div>";
+          "<tr><th>tenor</th><th>TSY par</th><th>SOFR zero</th><th>swap spread</th><th>discount factor</th></tr>" +
+          curve.map(p => { const t = tsyBy[p.tenorYears];
+            const spreadBp = t != null ? ((p.zeroRate - t) * 10000).toFixed(1) : null;
+            return `<tr><td>${p.tenorYears}Y</td>
+            <td class="mono">${t != null ? pct(t) : '—'}</td>
+            <td class="mono">${pct(p.zeroRate)}</td>
+            <td class="mono ${spreadBp != null && spreadBp < 0 ? 'down' : ''}" title="SOFR − TSY, bp (negative = swaps below Treasuries)">${spreadBp != null ? spreadBp + 'bp' : '—'}</td>
+            <td class="mono">${p.discountFactor.toFixed(6)}</td></tr>`; }).join("") + "</table></div>";
       }
       const swaps = await (await fetch("/api/swaps")).json();
       if (swaps.length) {
@@ -133,26 +157,48 @@
           'swaps are tradeable from the Orders ticket (1 lot = $1M notional, BUY = pay fixed).</div></div>';
       }
       const dv01 = await (await fetch("/api/dv01")).json();
-      if (dv01.length) {
-        const cols = ["2Y","5Y","10Y","30Y","other"];
-        const cell = m => c => { const v = m[c]; return `<td class="mono ${v!=null?cls(v):''}">${v!=null?money(v):'·'}</td>`; };
+      if (dv01.books && dv01.books.length) {
+        const cols = dv01.tenors;
+        const row = b => { const firm = b.book === "FIRM";
+          return `<tr${firm?' style="border-top:2px solid var(--line-2);font-weight:600"':''}><td><b>${esc(b.book)}</b></td>` +
+            cols.map(c => { const v = b.buckets[c];
+              return `<td class="mono ${Number(v)?cls(v):''}">${Number(v)?money(v):'·'}</td>`; }).join("") +
+            `<td class="mono ${cls(b.total)}"><b>${money(b.total)}</b></td></tr>`; };
         document.getElementById("dv01").outerHTML = '<div id="dv01"><table>' +
           "<tr><th>book</th>" + cols.map(c=>`<th>${c}</th>`).join("") + "<th>total /bp</th></tr>" +
-          dv01.map(b => { const m={}; b.buckets.forEach(x=>m[x.tenor]=x.dv01); const firm=b.book==="FIRM";
-            return `<tr${firm?' style="border-top:2px solid var(--line-2);font-weight:600"':''}><td><b>${esc(b.book)}</b></td>` +
-              cols.map(cell(m)).join("") +
-              `<td class="mono ${cls(b.totalDv01)}"><b>${money(b.totalDv01)}</b></td></tr>`; }).join("") + "</table>" +
-          '<div class="muted" style="font-size:11px;margin-top:8px">DV01 = P&L for a +1bp parallel rise in yields. ' +
-          'Negative = the book loses as rates rise (long bond futures); positive = gains (pay-fixed swaps). ' +
-          'Bond DV01 = net exposure × (−mod duration) × 10⁻⁴; swap DV01 = lots × the Strata per-$1M number above.</div></div>';
+          dv01.books.map(row).join("") + row(dv01.firm) + "</table>" +
+          '<div class="muted" style="font-size:11px;margin-top:8px">Key-rate DV01 = P&L for a +1bp rise of THAT curve node ' +
+          '(a steepener shows offsetting legs a single total nets away). Negative = loses as rates rise (long bond futures); ' +
+          'positive = gains (pay-fixed swaps). Swap rows are the trade-dated book’s Strata node sensitivities (roll-down included); ' +
+          'futures split −D × exposure × 10⁻⁴ across the nodes bracketing the CTD maturity.' +
+          (dv01.curveLive ? '' : ' <b>Curve not live — swap legs unvalued this cycle.</b>') +
+          (dv01.skipped ? ` <b>${dv01.skipped} rates position(s) skipped (missing data).</b>` : '') + '</div></div>';
       } else {
         document.getElementById("dv01").outerHTML = '<div id="dv01" class="muted">no rates positions yet — ' +
           'trade a Treasury future or a swap to build rates risk.</div>';
       }
     } catch (e) {}
   }
+  async function loadSwapBook() {
+    try {
+      const b = await fetch("/api/swaps/book").then(r => r.json());
+      if (!b.trades || !b.trades.length) return;
+      document.getElementById("swapbook").outerHTML = '<div id="swapbook"><table>' +
+        "<tr><th>trade day</th><th>instrument</th><th>book</th><th>side</th><th>lots</th><th>entry par</th><th>maturity</th><th>PV</th><th>DV01</th></tr>" +
+        b.trades.map(t => `<tr${t.matured?' class="muted"':''}><td class="mono">${esc(t.tradeDay)}</td><td>${esc(t.instrument)}</td><td class="muted">${esc(t.book)}</td>
+          <td class="${t.side==='BUY'?'up':'down'}" title="BUY = pay fixed">${esc(t.side)}</td>
+          <td class="mono">${esc(t.lots)}</td><td class="mono">${esc(t.entryPar)}%</td><td class="mono muted">${esc(t.maturity)}${t.matured?' (matured)':''}</td>
+          <td class="mono ${cls(t.presentValue)}">${t.presentValue!=null?money(t.presentValue):'—'}</td>
+          <td class="mono">${t.dv01!=null?money(t.dv01):'—'}</td></tr>`).join("") +
+        `<tr><td colspan="7" style="text-align:right" class="muted">net (valued ${esc(b.valuationDay)})</td>
+          <td class="mono ${cls(b.totalPv)}">${money(b.totalPv)}</td><td class="mono">${money(b.totalDv01)}</td></tr>` +
+        '</table></div>';
+    } catch (e) {}
+  }
   refresh();
+  loadSwapBook();
   setInterval(refresh, 2000);
+  setInterval(loadSwapBook, 5000);
 </script>
 </body>
 </html>

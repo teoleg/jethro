@@ -59,16 +59,40 @@ public record StrategyProperties(
         /** Regime-aware sizing: in the sim's VOLATILE regime, scale new-entry notional by this
          *  factor (risk-off in turbulence). Default 0.5 = half size; 0 = stand aside. Exits and
          *  de-risking are unaffected — you can always reduce. */
-        BigDecimal regimeVolatileScale) {
+        BigDecimal regimeVolatileScale,
+        /** Vol-targeted sizing: the $ risk budget one position may carry per session day —
+         *  notional = riskBudgetDaily / σ_daily (EWMA of recorded daily closes), capped at the
+         *  per-class order cap. Equalizes risk across assets: a 1.8%/day single name gets less
+         *  notional than a 0.4%/day Treasury future. Used whenever measured vol exists; falls
+         *  back to targetNotional (+ signal-vol scaling in the strategy) until history accrues.
+         *  Default 250 (≈ 25k target × 1%/day). */
+        BigDecimal riskBudgetDaily,
+        /** Signal algo: "momentum" (default) or "mean-reversion" — the SAME z-score detector
+         *  read in opposite directions; both run through the identical guardrails, sizing and
+         *  OOS harness, which is what adjudicates between them (ADR-0027). */
+        String algo) {
+
+    public String algoOrDefault() {
+        return algo != null && !algo.isBlank() ? algo.trim().toLowerCase() : "momentum";
+    }
+
+    public BigDecimal riskBudgetDailyOrDefault() {
+        return riskBudgetDaily != null && riskBudgetDaily.signum() > 0
+                ? riskBudgetDaily : new BigDecimal("250");
+    }
 
     public BigDecimal regimeVolatileScaleOrDefault() {
         return regimeVolatileScale != null && regimeVolatileScale.signum() >= 0
                 ? regimeVolatileScale : new BigDecimal("0.5");
     }
 
-    /** The new-entry sizing scale for a market regime — reduced in VOLATILE, 1 otherwise. */
+    /** The new-entry sizing scale for a market regime — reduced in the high-vol regimes
+     *  (VOLATILE, and ADR-0026's RISK_OFF / INFLATION_SHOCK), 1 otherwise. */
     public BigDecimal regimeScaleFor(String regime) {
-        return "VOLATILE".equals(regime) ? regimeVolatileScaleOrDefault() : BigDecimal.ONE;
+        return switch (regime) {
+            case "VOLATILE", "RISK_OFF", "INFLATION_SHOCK" -> regimeVolatileScaleOrDefault();
+            default -> BigDecimal.ONE;
+        };
     }
 
     public boolean allowShortOrDefault() {

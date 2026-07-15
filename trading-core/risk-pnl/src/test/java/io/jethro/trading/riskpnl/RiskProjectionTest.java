@@ -82,6 +82,22 @@ class RiskProjectionTest {
     }
 
     @Test
+    void feeBooksAsRealizedCashCostExactlyOnce() {
+        var p = new RiskProjection(refs);
+        Fill withFee = new Fill("f1", "ord-f1", new BookId("ALPHA"), new InstrumentId("AAPL"),
+                Side.BUY, new BigDecimal("100"), new BigDecimal("10"), new BigDecimal("2.50"),
+                Instant.EPOCH);
+        p.applyFill(withFee);
+        p.applyFill(withFee); // redelivery must not double the fee (invariant 6)
+        p.applyMark("AAPL", new BigDecimal("10"), 1_000);
+
+        PositionRisk r = only(p.snapshot(1_000));
+        eq("-2.50", r.realizedPnl());   // commission is cash already gone
+        eq("0", r.unrealizedPnl());     // flat mark — the fee never contaminated the price
+        eq("-2.50", r.totalPnl());
+    }
+
+    @Test
     void duplicateFillDeliveryLeavesStateUnchanged() {
         var p = new RiskProjection(refs);
         Fill f = fill("f1", "AAPL", Side.BUY, "100", "10");
@@ -158,5 +174,39 @@ class RiskProjectionTest {
 
         assertEquals(1, risk.byBook().size(), "both positions are in ALPHA");
         eq("12200", risk.byBook().get(0).grossExposure());
+    }
+
+    /** SWAP refdata per V9/V22: mark = par rate in %, static multiplier = inception DV01 × 100,
+     *  exposure = gross notional ($1M per lot). */
+    private final InstrumentRefSource swapRefs = id -> Optional.ofNullable(Map.of(
+            "USD_IRS_5Y", new InstrumentRef("USD_IRS_5Y", "SWAP", "USD", new BigDecimal("45000"),
+                    null, null, new BigDecimal("1000000"))
+    ).get(id));
+
+    @Test
+    void swapPnlUsesTheLiveDv01NotTheInceptionConstant() {
+        // Live annuity fell as rates rose: DV01 now $430/bp per lot (was $450 at inception).
+        SwapDv01Source live = id -> "USD_IRS_5Y".equals(id)
+                ? Optional.of(new BigDecimal("430")) : Optional.empty();
+        var p = new RiskProjection(swapRefs, live);
+        p.applyFill(fill("f1", "USD_IRS_5Y", Side.BUY, "2", "4.04")); // pay fixed, 2 lots
+        p.applyMark("USD_IRS_5Y", new BigDecimal("4.14"), 1_000);     // +10bp
+
+        PositionRisk r = only(p.snapshot(1_000));
+        // unrealized = 2 × (4.14 − 4.04) × (430 × 100) = 2 × 0.10 × 43,000 = 8,600
+        // (the static 45,000 constant would overstate it as 9,000).
+        eq("8600", r.unrealizedPnl());
+        // Exposure is gross NOTIONAL (V22): 2 lots × $1M — not 2 × 4.14 × 43,000 ≈ 356k.
+        eq("2000000", r.netExposure());
+        eq("2000000", r.grossExposure());
+    }
+
+    @Test
+    void swapPnlFallsBackToTheStaticMultiplierUntilTheCurvePrices() {
+        var p = new RiskProjection(swapRefs, SwapDv01Source.NONE);
+        p.applyFill(fill("f1", "USD_IRS_5Y", Side.BUY, "2", "4.04"));
+        p.applyMark("USD_IRS_5Y", new BigDecimal("4.14"), 1_000);
+        // V9 static convention: 2 × 0.10 × 45,000 = 9,000 — disclosed approximation, never zero.
+        eq("9000", only(p.snapshot(1_000)).unrealizedPnl());
     }
 }

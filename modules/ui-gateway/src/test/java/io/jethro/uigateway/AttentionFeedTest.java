@@ -48,13 +48,13 @@ class AttentionFeedTest {
         var rules = new AttentionRules(feed, 10_000);
         long now = 1_000_000L;
 
-        var stale = new MarkState.MarkDto("AAPL", "101.230000", "sim", now - 60_000, 60_000);
+        var stale = new MarkState.MarkDto("AAPL", "101.230000", null, null, "sim", now - 60_000, 60_000);
         rules.evaluate(List.of(stale), now);
         assertEquals(1, feed.snapshot().size());
         assertEquals(AttentionFeed.Severity.WARN, feed.snapshot().get(0).severity());
         assertTrue(feed.snapshot().get(0).body().contains("60s old"));
 
-        var fresh = new MarkState.MarkDto("AAPL", "101.240000", "sim", now, 100);
+        var fresh = new MarkState.MarkDto("AAPL", "101.240000", null, null, "sim", now, 100);
         rules.evaluate(List.of(fresh), now);
         assertTrue(feed.snapshot().isEmpty(), "recovered mark resolves its alert");
     }

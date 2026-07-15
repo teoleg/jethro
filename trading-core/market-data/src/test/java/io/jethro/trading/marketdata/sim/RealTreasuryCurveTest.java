@@ -15,13 +15,17 @@ class RealTreasuryCurveTest {
     private static final double[] ZEROS = {0.050, 0.048, 0.045, 0.043, 0.044};
 
     @Test
-    void tenorMarksAreTheNodeZerosInPercent() {
+    void tenorMarksSplitIntoTsyRawAndSofrMinusSpread() {
         var c = new RealTreasuryCurve(ZEROS);
-        assertEquals(5_000_000L, c.rateScaledPercent(0), "1Y = 5.00%");
-        assertEquals(4_800_000L, c.rateScaledPercent(1), "2Y = 4.80%");
-        assertEquals(4_500_000L, c.rateScaledPercent(2), "5Y = 4.50%");
-        assertEquals(4_300_000L, c.rateScaledPercent(3), "10Y = 4.30%");
-        assertEquals(4_400_000L, c.rateScaledPercent(4), "30Y = 4.40%");
+        // The raw data IS the Treasury par curve...
+        assertEquals(5_000_000L, c.tsyRateScaledPercent(0), "TSY 1Y = 5.00% (raw)");
+        assertEquals(4_400_000L, c.tsyRateScaledPercent(4), "TSY 30Y = 4.40% (raw)");
+        // ...and the SOFR proxy sits BELOW it by the stylized swap spread.
+        assertEquals(4_920_000L, c.rateScaledPercent(0), "SOFR 1Y = 5.00% - 8bp");
+        assertEquals(4_650_000L, c.rateScaledPercent(1), "SOFR 2Y = 4.80% - 15bp");
+        assertEquals(4_250_000L, c.rateScaledPercent(2), "SOFR 5Y = 4.50% - 25bp");
+        assertEquals(3_920_000L, c.rateScaledPercent(3), "SOFR 10Y = 4.30% - 38bp");
+        assertEquals(3_750_000L, c.rateScaledPercent(4), "SOFR 30Y = 4.40% - 65bp");
     }
 
     @Test
@@ -37,22 +41,24 @@ class RealTreasuryCurveTest {
     }
 
     @Test
-    void swapParRateSitsNearTheCurveLevel() {
+    void swapParRateSitsNearTheSofrLevelBelowTreasuries() {
         var c = new RealTreasuryCurve(ZEROS);
         long par5y = c.swapParScaledPercent(0); // 5Y
-        // Par of a 5Y annual-fixed swap on a ~4.3–5.0% curve lands ~4.6%.
-        assertTrue(par5y > 4_400_000L && par5y < 4_800_000L, "5Y par near curve level: " + par5y);
-        assertTrue(c.swapParScaledPercent(1) > 4_000_000L, "10Y par positive and plausible");
+        // Swaps discount on the SOFR proxy (TSY − spread ≈ 4.92→4.25% over 1-5Y) → par ~4.4%.
+        assertTrue(par5y > 4_200_000L && par5y < 4_700_000L, "5Y par near the SOFR level: " + par5y);
+        // And BELOW the 5Y Treasury yield — that's the negative swap spread by construction.
+        assertTrue(par5y < c.tsyRateScaledPercent(2), "5Y swap par below the 5Y TSY yield");
+        assertTrue(c.swapParScaledPercent(1) > 3_800_000L, "10Y par positive and plausible");
     }
 
     @Test
     void stepIsANoOpAndUpdateReplacesLevels() {
         var c = new RealTreasuryCurve(ZEROS);
         c.step(MarketRegime.VOLATILE, 1); // real curve ignores ticks
-        assertEquals(5_000_000L, c.rateScaledPercent(0), "unchanged by step()");
+        assertEquals(5_000_000L, c.tsyRateScaledPercent(0), "unchanged by step()");
         c.update(new double[]{0.030, 0.031, 0.033, 0.035, 0.036});
-        assertEquals(3_000_000L, c.rateScaledPercent(0), "1Y now 3.00% after update");
-        assertEquals(3_600_000L, c.rateScaledPercent(4), "30Y now 3.60%");
+        assertEquals(3_000_000L, c.tsyRateScaledPercent(0), "TSY 1Y now 3.00% after update");
+        assertEquals(3_600_000L, c.tsyRateScaledPercent(4), "TSY 30Y now 3.60%");
     }
 
     @Test
@@ -60,9 +66,9 @@ class RealTreasuryCurveTest {
         var c = new RealTreasuryCurve(ZEROS);
         c.update(null);
         c.update(new double[]{0.04, 0.04}); // wrong length
-        assertEquals(5_000_000L, c.rateScaledPercent(0), "kept the last good curve");
+        assertEquals(5_000_000L, c.tsyRateScaledPercent(0), "kept the last good curve");
         c.update(new double[]{-0.01, 0.02, 0.03, 0.04, 0.05}); // negative short rate
-        assertEquals(10_000L, c.rateScaledPercent(0), "negative floored to 1bp (0.01%)");
+        assertEquals(10_000L, c.tsyRateScaledPercent(0), "negative floored to 1bp (0.01%)");
     }
 
     @Test

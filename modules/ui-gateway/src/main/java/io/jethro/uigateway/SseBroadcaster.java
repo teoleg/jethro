@@ -23,7 +23,15 @@ public final class SseBroadcaster {
         return emitter;
     }
 
-    public void broadcast(String eventName, Object payload) {
+    /**
+     * Pushes an event to every connected client. <b>Synchronized</b>: many threads broadcast
+     * concurrently (the mark loop, the strategy/hypothesis schedulers, the risk/scenario
+     * monitors), and {@link SseEmitter#send} is NOT safe for concurrent calls on the same
+     * emitter — two interleaved writes corrupt the one HTTP response and surface as a
+     * "Broken pipe" IOException on a container thread. Serializing writes fixes that; broadcasts
+     * are small and ~1Hz, so a single lock is ample.
+     */
+    public synchronized void broadcast(String eventName, Object payload) {
         SseEmitter.SseEventBuilder event = SseEmitter.event().name(eventName).data(payload);
         for (SseEmitter emitter : emitters) {
             try {

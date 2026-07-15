@@ -3,7 +3,6 @@ package io.jethro.app.risk;
 import io.jethro.trading.riskpnl.ConsolidatedRisk;
 import io.jethro.trading.riskpnl.CurveService;
 import io.jethro.trading.riskpnl.PositionRisk;
-import io.jethro.trading.riskpnl.RatesRiskService;
 import io.jethro.trading.riskpnl.RiskProjection;
 import io.jethro.trading.riskpnl.SwapPricingService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -40,19 +39,19 @@ public final class RiskController {
 
     private final RiskProjection projection;
     private final CurveService curveService;
+    private final io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurve;
     private final SwapPricingService swapPricing;
     private final io.jethro.trading.riskpnl.ScenarioEngine scenarios;
-    private final RatesRiskService ratesRisk;
 
     public RiskController(RiskProjection projection, CurveService curveService,
+                          io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurve,
                           SwapPricingService swapPricing,
-                          io.jethro.trading.riskpnl.ScenarioEngine scenarios,
-                          RatesRiskService ratesRisk) {
+                          io.jethro.trading.riskpnl.ScenarioEngine scenarios) {
         this.projection = projection;
         this.curveService = curveService;
+        this.treasuryCurve = treasuryCurve;
         this.swapPricing = swapPricing;
         this.scenarios = scenarios;
-        this.ratesRisk = ratesRisk;
     }
 
     public record BookImpactDto(String bookId, String pnlUsd) {
@@ -96,27 +95,10 @@ public final class RiskController {
         return curveService.snapshot();
     }
 
-    /** DV01 in one tenor bucket, signed P&L per +1bp (string, money boundary — invariant 1). */
-    public record TenorDv01Dto(String tenor, String dv01) {
-    }
-
-    /** A book's (or the firm's) bucketed rates risk: DV01 by tenor plus the net total. */
-    public record BookRatesRiskDto(String book, List<TenorDv01Dto> buckets, String totalDv01) {
-    }
-
-    /** Bucketed DV01 per book — the desk's rates exposure by key tenor (2Y/5Y/10Y/30Y),
-     *  signed P&L per +1bp: negative = loses as rates rise (long bond futures), positive =
-     *  gains (pay-fixed swaps). FIRM row aggregates. Quant-engine step 5 (risk beyond notional). */
-    @GetMapping("/api/dv01")
-    public List<BookRatesRiskDto> dv01() {
-        ConsolidatedRisk r = projection.snapshot(System.currentTimeMillis());
-        return ratesRisk.bucketedDv01(r.positions(), java.time.LocalDate.now()).stream()
-                .map(b -> new BookRatesRiskDto(b.book(),
-                        b.buckets().stream()
-                                .map(t -> new TenorDv01Dto(t.tenor(), t.dv01().toPlainString()))
-                                .toList(),
-                        b.totalDv01().toPlainString()))
-                .toList();
+    /** The DISTINCT US Treasury par curve — the swap spread vs SOFR is real information. */
+    @GetMapping("/api/curve/tsy")
+    public java.util.List<io.jethro.trading.riskpnl.TreasuryCurveView.TsyPoint> tsyCurve() {
+        return treasuryCurve.snapshot();
     }
 
     @GetMapping("/api/risk")

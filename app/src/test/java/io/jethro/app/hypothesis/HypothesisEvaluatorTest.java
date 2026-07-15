@@ -36,7 +36,7 @@ class HypothesisEvaluatorTest {
     private final StrategyProperties sizing = new StrategyProperties(
             true, 5, 24, 2.5, new BigDecimal("2"), new BigDecimal("25000"),
             "ALPHA", Map.of("EQUITY", "ALPHA", "FUTURE", "MACRO"),
-            false, 60, null, null, null, Map.of(), false, null, null, true, null);
+            false, 60, null, null, null, Map.of(), false, null, null, true, null, null, null);
 
     private static Hypothesis h(String instrument, Side dir) {
         return new Hypothesis("h1", instrument, dir, Hypothesis.Horizon.SWING,
@@ -44,17 +44,32 @@ class HypothesisEvaluatorTest {
     }
 
     private HypothesisEvaluator evaluator(RiskLimitSource limits, RiskProjection projection) {
-        return new HypothesisEvaluator(refs, new PreTradeGuardrail(projection, limits), sizing);
+        return new HypothesisEvaluator(refs, new PreTradeGuardrail(projection, limits), sizing, "AI");
     }
 
     @Test
-    void admissibleSizesToTargetNotionalAndRoutesByAssetClass() {
+    void admissibleSizesToTargetNotionalAndRoutesToTheAiSleeve() {
         var eval = evaluator(book -> RiskLimits.none(), new RiskProjection(refs));
-        // 25,000 / (190 × 1) = 131.57 → floor 131; EQUITY routes to ALPHA.
+        // 25,000 / (190 × 1) = 131.57 → floor 131; the AI sleeve trades its own book, not the
+        // strategy's — so the momentum algo can't flatten it.
         var e = eval.evaluate(h("AAPL", Side.BUY), Map.of("AAPL", new BigDecimal("190")));
         assertEquals(HypothesisEvaluator.Verdict.ADMISSIBLE, e.verdict());
-        assertEquals("ALPHA", e.book());
+        assertEquals("AI", e.book());
         assertEquals(0, new BigDecimal("131").compareTo(e.quantity()));
+    }
+
+    @Test
+    void measuredVolMakesSizingVolTargeted() {
+        // AAPL measured σ = 1.8%/day, budget $250/day → notional 250/0.018 = 13,888.88;
+        // qty = 13,888.88 / 190 = 73.09 → floor 73 (vs 131 at the flat 25k target).
+        io.jethro.app.risk.InstrumentVolSource vols = id -> "AAPL".equals(id)
+                ? java.util.Optional.of(new BigDecimal("0.018")) : java.util.Optional.empty();
+        var eval = new HypothesisEvaluator(refs, new PreTradeGuardrail(new RiskProjection(refs),
+                book -> RiskLimits.none()), sizing, "AI", vols);
+        var e = eval.evaluate(h("AAPL", Side.BUY), Map.of("AAPL", new BigDecimal("190")));
+        assertEquals(HypothesisEvaluator.Verdict.ADMISSIBLE, e.verdict());
+        assertEquals(0, new BigDecimal("73").compareTo(e.quantity()),
+                "vol-targeted: 250/0.018 = 13,888.88 → 73 shares @ 190");
     }
 
     @Test
@@ -63,7 +78,7 @@ class HypothesisEvaluatorTest {
         // 1 ES = 5450 × 50 = 272,500 > 50,000 cap → unsizeable, never rounded up.
         var e = eval.evaluate(h("ES", Side.BUY), Map.of("ES", new BigDecimal("5450")));
         assertEquals(HypothesisEvaluator.Verdict.UNSIZEABLE, e.verdict());
-        assertEquals("MACRO", e.book());
+        assertEquals("AI", e.book());
         assertNull(e.quantity());
     }
 

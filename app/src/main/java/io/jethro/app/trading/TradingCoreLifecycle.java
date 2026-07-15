@@ -6,8 +6,11 @@ import io.jethro.refdata.RefDataRepository;
 import io.jethro.trading.marketdata.FeedStatus;
 import io.jethro.trading.marketdata.MarketDataAdapter;
 import io.jethro.trading.marketdata.finnhub.FinnhubMarketDataAdapter;
+import io.jethro.trading.marketdata.sim.CorrelatedMarketDataAdapter;
 import io.jethro.trading.marketdata.sim.CurveFactorSimulator;
 import io.jethro.trading.marketdata.sim.CurveMarkSource;
+import io.jethro.trading.marketdata.sim.FactorModelConfig;
+import io.jethro.trading.marketdata.sim.Quotes;
 import io.jethro.trading.marketdata.sim.RealTreasuryCurve;
 import io.jethro.trading.marketdata.sim.SimMarketDataAdapter;
 import io.jethro.trading.marketdata.yahoo.YahooMarketDataAdapter;
@@ -20,6 +23,7 @@ import org.springframework.context.SmartLifecycle;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,9 +39,11 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private final TradingCoreProperties properties;
     private final RefDataRepository refData; // nullable: needed to map yahoo symbols
     private final FinnhubRateLimiter rateLimiter; // shared Finnhub REST budget (news + curve)
+    private final io.jethro.app.order.ExecutionProperties executionCosts; // sim quote spreads (ADR-0025)
     private volatile TradingCoreRuntime runtime;
     private volatile MarketDataAdapter adapter;
-    private volatile SimMarketDataAdapter simAdapter; // non-null only in sim mode (for regime)
+    private volatile java.util.function.Supplier<String> regimeSource; // non-null only in sim mode
+    private volatile java.util.function.LongSupplier simDayIndexSource; // correlated sim only
     private volatile RealTreasuryCurve realCurve;     // non-null only when the live curve is active
     private volatile TreasuryCurveFetcher curveFetcher;
     private volatile String curveSource = "sim";      // "treasury-live" or "sim" (for the UI)
@@ -46,9 +52,16 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     public TradingCoreLifecycle(TradingCoreProperties properties, RefDataRepository refData,
                                 FinnhubRateLimiter rateLimiter) {
+        this(properties, refData, rateLimiter, new io.jethro.app.order.ExecutionProperties(null, null, null));
+    }
+
+    public TradingCoreLifecycle(TradingCoreProperties properties, RefDataRepository refData,
+                                FinnhubRateLimiter rateLimiter,
+                                io.jethro.app.order.ExecutionProperties executionCosts) {
         this.properties = properties;
         this.refData = refData;
         this.rateLimiter = rateLimiter;
+        this.executionCosts = executionCosts;
     }
 
     @Override
@@ -58,7 +71,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         var store = LmdbStateStore.open(
                 Path.of(properties.lmdbPath()),
                 properties.lmdbMaxSizeMb() * 1024 * 1024);
-        var rt = new TradingCoreRuntime(adapter, properties.bufferCapacity(), store);
+        var rt = new TradingCoreRuntime(adapter, properties.bufferCapacity(), store, jumpThresholds());
         rt.start();
         runtime = rt;
 
@@ -116,7 +129,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                         new YahooQuoteClient(Duration.ofSeconds(10)), map, curveSim, spacing);
             }
         }
-        return simAdapter = buildSimAdapter(curveSim, properties.simInstruments());
+        return buildSimAdapter(curveSim, properties.simInstruments());
     }
 
     /** The curve source: a live US Treasury curve via Finnhub when enabled and a token is set
@@ -126,22 +139,34 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         if (!properties.simCurveOrDefault()) {
             return null; // curve disabled — no rates marks at all
         }
-        if (properties.realCurveOrDefault() && !properties.finnhubTokenOrEmpty().isEmpty()) {
-            TreasuryCurveFetcher fetcher = new FinnhubYieldCurveClient(
-                    properties.finnhubTokenOrEmpty(), Duration.ofSeconds(10), rateLimiter);
-            double[] probe = fetcher.fetchNodeZeros();
-            if (probe != null) {
-                RealTreasuryCurve curve = new RealTreasuryCurve(probe);
-                this.realCurve = curve;
-                this.curveFetcher = fetcher;
-                this.curveSource = "treasury-live";
-                log.warn("RATES CURVE: LIVE US Treasury curve via Finnhub — {} (refresh {}s). "
-                                + "DV01, swap PV and rate scenarios now reprice on real levels (ADR-0024).",
-                        describeCurve(probe), properties.treasuryCurveRefreshSecondsOrDefault());
-                return curve;
+        if (properties.realCurveOrDefault()) {
+            // Source chain, most-preferred first: Finnhub only when a token exists (its bond
+            // endpoints are premium-gated on free keys — expected to fail there), then the
+            // OFFICIAL treasury.gov daily par-yield feed (free, keyless). First probe that
+            // returns data wins and stays the refresh source; all fail → the sim curve, logged.
+            List<TreasuryCurveFetcher> chain = new ArrayList<>();
+            if (!properties.finnhubTokenOrEmpty().isEmpty()) {
+                chain.add(new FinnhubYieldCurveClient(
+                        properties.finnhubTokenOrEmpty(), Duration.ofSeconds(10), rateLimiter));
             }
-            log.warn("RATES CURVE: real Treasury curve requested but the Finnhub probe returned no "
-                    + "data (endpoint gated/unavailable on this key) — using the SOFR factor sim curve.");
+            chain.add(new TreasuryDirectYieldCurveClient(Duration.ofSeconds(15)));
+            for (TreasuryCurveFetcher fetcher : chain) {
+                double[] probe = fetcher.fetchNodeZeros();
+                if (probe != null) {
+                    RealTreasuryCurve curve = new RealTreasuryCurve(probe);
+                    this.realCurve = curve;
+                    this.curveFetcher = fetcher;
+                    this.curveSource = "treasury-live";
+                    log.warn("RATES CURVE: LIVE US Treasury curve via {} — {} (refresh {}s). "
+                                    + "DV01, swap PV and rate scenarios reprice on real levels (ADR-0024).",
+                            fetcher.source(), describeCurve(probe),
+                            properties.treasuryCurveRefreshSecondsOrDefault());
+                    return curve;
+                }
+                log.warn("RATES CURVE: {} returned no data — trying the next source", fetcher.source());
+            }
+            log.warn("RATES CURVE: no live source reachable — using the SOFR factor sim curve. "
+                    + "(treasury.gov needs outbound internet; check connectivity.)");
         }
         this.curveSource = "sim";
         return new CurveFactorSimulator(properties.simSeed() + 1, 0.038, 0.009); // 3.8% level, +90bp slope
@@ -208,16 +233,17 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         } else {
             List<String> uncovered = properties.simInstruments().stream()
                     .filter(id -> !covered.containsKey(id)).toList();
-            SimMarketDataAdapter sim = buildSimAdapter(curveSim, uncovered);
-            this.simAdapter = sim; // regime() reads the sim
-            background = sim;
+            background = buildSimAdapter(curveSim, uncovered);
             log.warn("MARKET DATA: Finnhub real-time WS for {} equities + sim for {} others. "
                     + "Dev/demo only (ADR-0024).", covered.size(), uncovered.size());
         }
         return new FinnhubMarketDataAdapter(token, covered, background);
     }
 
-    private SimMarketDataAdapter buildSimAdapter(CurveMarkSource curveSim, List<String> instruments) {
+    /** The sim feed: the correlated cross-asset factor engine (ADR-0026) by default —
+     *  one joint draw per tick moves equities, FX and the curve in concert — or the legacy
+     *  independent-walk engine when {@code sim-engine=legacy} or the calibration won't load. */
+    private MarketDataAdapter buildSimAdapter(CurveMarkSource curveSim, List<String> instruments) {
         if (instruments.isEmpty()) {
             // Nothing left for the sim (all covered by the real feed): a 1-instrument idle sim keeps
             // the curve alive if configured; otherwise the market path just carries the real feed.
@@ -227,7 +253,26 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         long[] startPricesScaled = ids.stream()
                 .mapToLong(id -> Decimals.toScaledLong(properties.startPriceFor(id), Decimals.PRICE_SCALE))
                 .toArray();
-        // Per-tick step calibrated from annualized vol: maxStep(1e-6 of price) =
+        if (properties.correlatedSimOrDefault()) {
+            try {
+                FactorModelConfig calibration = SimCalibrationLoader.load(properties.simCalibrationPathOrNull());
+                var sim = new CorrelatedMarketDataAdapter(
+                        properties.simSeed(), calibration, ids, startPricesScaled, curveSim,
+                        TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()),
+                        properties.simSecondsPerDayOrDefault(), quoteSpecSource());
+                this.regimeSource = () -> sim.regime().name();
+                this.simDayIndexSource = sim::simDayIndex;
+                log.info("SIM ENGINE: correlated factor model (ADR-0026) — {} instruments, {} regimes, "
+                                + "t(ν={}) tails, {}s per simulated trading day",
+                        calibration.instruments().size(), calibration.regimes().size(),
+                        (int) calibration.tDegreesOfFreedom(), properties.simSecondsPerDayOrDefault());
+                return sim;
+            } catch (Exception e) {
+                log.error("sim calibration failed to load — falling back to the LEGACY independent-walk "
+                        + "engine (uncorrelated!): {}", e.toString());
+            }
+        }
+        // Legacy engine: per-tick step calibrated from annualized vol: maxStep(1e-6 of price) =
         // σ_annual · √(Δt / trading-year) · √3 (uniform→σ match).
         double tickSeconds = properties.simTickIntervalMillis() / 1_000.0;
         double tradingYearSeconds = 252 * 6.5 * 3_600;
@@ -235,10 +280,61 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 .mapToLong(id -> Math.max(1, Math.round(properties.annualVolFor(id)
                         * Math.sqrt(tickSeconds / tradingYearSeconds) * Math.sqrt(3.0) * 1_000_000)))
                 .toArray();
-        return new SimMarketDataAdapter(
+        var sim = new SimMarketDataAdapter(
                 properties.simSeed(), ids, startPricesScaled, maxStepMicros,
                 properties.simRegimesOrDefault(), curveSim,
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
+        this.regimeSource = () -> sim.regime().name();
+        return sim;
+    }
+
+    /**
+     * The corporate-action / bad-print jump guard's per-instrument thresholds (bps of the
+     * previous mark), from the instrument's asset class via reference data — configured under
+     * {@code jethro.trading.mark-jump-bps.<CLASS>}. Instruments outside the master (curve
+     * pseudo-quotes) get the default. Thresholds sit far above any legitimate one-tick move
+     * (incl. the sim's shock/overnight gaps) and far below a split (2:1 = −50%).
+     */
+    private io.jethro.trading.runtime.MarkCache.JumpThresholds jumpThresholds() {
+        Map<String, Integer> byInstrument = new LinkedHashMap<>();
+        if (refData != null) {
+            for (Instrument i : refData.findAllInstruments()) {
+                byInstrument.put(i.id().value(), properties.markJumpBpsFor(i.assetClass().name()));
+            }
+        }
+        int fallback = properties.markJumpBpsFor(null);
+        return id -> byInstrument.getOrDefault(id, fallback);
+    }
+
+    /**
+     * Per-instrument quote synthesis for the sim feed (ADR-0025): bid/ask around the mid at
+     * the SAME per-class spreads the execution cost model charges — the quoted touch and the
+     * synthetic touch agree by construction. Swaps are rate-quoted (additive bp). Instruments
+     * outside the master (curve pseudo-quotes) get no quotes.
+     */
+    private Quotes.QuoteSpecSource quoteSpecSource() {
+        Map<String, Quotes.QuoteSpec> byId = new LinkedHashMap<>();
+        if (refData != null) {
+            Map<String, Map<String, String>> attributes = refData.findAllAttributes();
+            for (Instrument i : refData.findAllInstruments()) {
+                String assetClass = i.assetClass().name();
+                // Per-NAME spread (V25) first — the SAME number the execution model charges —
+                // else the class config: quoted touch and charged touch agree by construction.
+                String perName = attributes.getOrDefault(i.id().value(), Map.of()).get("spread_bps");
+                java.math.BigDecimal spread = perName != null
+                        ? new java.math.BigDecimal(perName) : executionCosts.spreadFor(assetClass);
+                int centiBps = spread
+                        .movePointRight(2).setScale(0, java.math.RoundingMode.HALF_UP).intValueExact();
+                byId.put(i.id().value(), new Quotes.QuoteSpec(centiBps, "SWAP".equals(assetClass)));
+            }
+        }
+        return byId::get;
+    }
+
+    /** The correlated sim's tick-day counter (null on live feeds / legacy sim) — the
+     *  session calendar keys to the TAPE's days, not wall time (ADR-0027). */
+    public java.util.function.LongSupplier simDayIndexSource() {
+        return simDayIndexSource;
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'
@@ -315,8 +411,8 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     /** Current sim market regime name (CALM when not in sim mode) — for the narrative feed. */
     public String regime() {
-        var sim = simAdapter;
-        return sim != null ? sim.regime().name() : "CALM";
+        var source = regimeSource;
+        return source != null ? source.get() : "CALM";
     }
 
     /** Market-data feed status(es) for the UI's connection indicators — one per source, so a

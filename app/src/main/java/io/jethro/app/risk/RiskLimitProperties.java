@@ -17,6 +17,10 @@ public record RiskLimitProperties(
         BigDecimal maxLossPnl,
         BigDecimal maxInstrumentExposure,
         BigDecimal warnRatio,
+        /** Firm max drawdown from peak total P&L (ADR-0027): at/over this, the breaker halts
+         *  ALL auto-execution (strategy + AI autonomy; manual orders still allowed) until an
+         *  operator resets. Null/absent = breaker disabled. */
+        BigDecimal maxFirmDrawdown,
         Map<String, BookLimits> books,
         BookLimits firm) {
 

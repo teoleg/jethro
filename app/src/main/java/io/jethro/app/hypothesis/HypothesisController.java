@@ -5,28 +5,34 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Set;
 
 /**
- * Read-only view of the latest LLM hypotheses and the quant layer's verdict on each
- * (ADR-0022): the model's thesis alongside the deterministic sizing/gate decision — so the
- * reasoning is visible, not just the admissible ones on the feed. Decimals as strings
- * (invariant 1). Empty when the hypothesis layer is disabled or the model is unavailable.
+ * Read-only view of the AI hypothesis layer (ADR-0022/0027): the event ledger (every distinct
+ * thesis with its quant verdict and, once scored, its outcome), the persisted executed records,
+ * and the measured hit-rate per conviction. Decimals as strings (invariant 1). Empty when the
+ * hypothesis layer is disabled or the model is unavailable.
  */
 @RestController
 public final class HypothesisController {
 
-    public record HypothesisDto(String instrumentId, String direction, String horizon, String conviction,
-                                String thesis, List<String> sources, String verdict, String book,
-                                String quantity, String price, String note,
-                                String backtestPnl, Integer backtestTrades, Boolean backtestSupports,
-                                boolean autonomous) {
+    /** One ledger event: a distinct thesis, retained (not just the current cycle). Newest first. */
+    public record HypothesisDto(long timestampMillis, String instrumentId, String direction, String conviction,
+                                String thesis, String verdict, boolean autonomous,
+                                Boolean backtestSupports, String backtestPnl, Integer backtestTrades,
+                                String note, String autonomyReason, String outcome, String outcomePnl) {
     }
 
-    /** A persisted, executed hypothesis (led to an order) — sticky across cycles and restarts. */
+    /** A persisted, executed hypothesis (led to an order) with its outcome once scored. */
     public record ExecutedDto(long timestampMillis, String instrumentId, String direction,
                               String horizon, String conviction, String thesis, String book,
-                              String quantity, Boolean backtestSupported, String orderId, String orderStatus) {
+                              String quantity, Boolean backtestSupported, String orderId, String orderStatus,
+                              String entryPrice, long expiresAtMillis,
+                              String outcome, String outcomePnl, String exitPrice) {
+    }
+
+    /** Measured performance of the model's conviction labels (ADR-0027). */
+    public record StatsDto(String conviction, int total, int open, int wins, int losses, int flat,
+                           double hitRate, String outcomePnl) {
     }
 
     private final ObjectProvider<HypothesisLifecycle> lifecycle;
@@ -45,7 +51,26 @@ public final class HypothesisController {
         return live.executed().stream().map(r -> new ExecutedDto(
                 r.timestampMillis(), r.instrumentId(), r.direction(), r.horizon(), r.conviction(),
                 r.thesis(), r.book(), r.quantity() != null ? r.quantity().toPlainString() : null,
-                r.backtestSupported(), r.orderId(), r.orderStatus())).toList();
+                r.backtestSupported(), r.orderId(), r.orderStatus(),
+                r.entryPrice() != null ? r.entryPrice().toPlainString() : null,
+                r.expiresAtMillis(), r.outcome(),
+                r.outcomePnl() != null ? r.outcomePnl().toPlainString() : null,
+                r.exitPrice() != null ? r.exitPrice().toPlainString() : null)).toList();
+    }
+
+    /** Hit-rate/expectancy by conviction — what the model's labels are measurably worth. */
+    @GetMapping("/api/hypotheses/stats")
+    public List<StatsDto> stats() {
+        HypothesisLifecycle live = lifecycle.getIfAvailable();
+        if (live == null) {
+            return List.of();
+        }
+        return live.outcomeStats().stream().map(s -> {
+            int scored = s.wins() + s.losses() + s.flat();
+            double hitRate = scored == 0 ? 0 : (double) s.wins() / scored;
+            return new StatsDto(s.conviction(), s.total(), s.open(), s.wins(), s.losses(), s.flat(),
+                    Math.round(hitRate * 1000) / 1000.0, s.outcomePnl().toPlainString());
+        }).toList();
     }
 
     @GetMapping("/api/hypotheses")
@@ -54,22 +79,9 @@ public final class HypothesisController {
         if (live == null) {
             return List.of();
         }
-        Set<String> autoTraded = live.autoTradedIds();
-        return live.latest().stream().map(e -> new HypothesisDto(
-                e.hypothesis().instrumentId(),
-                e.hypothesis().direction().name(),
-                e.hypothesis().horizon().name(),
-                e.hypothesis().conviction().name(),
-                e.hypothesis().thesis(),
-                e.hypothesis().sources(),
-                e.verdict().name(),
-                e.book(),
-                e.quantity() != null ? e.quantity().toPlainString() : null,
-                e.price() != null ? e.price().toPlainString() : null,
-                e.note(),
-                e.backtest() != null ? e.backtest().pnl().toPlainString() : null,
-                e.backtest() != null ? e.backtest().trades() : null,
-                e.backtest() != null ? e.backtest().supports() : null,
-                autoTraded.contains(e.hypothesis().instrumentId()))).toList();
+        return live.ledger().stream().map(e -> new HypothesisDto(
+                e.timestampMillis(), e.instrumentId(), e.direction(), e.conviction(), e.thesis(),
+                e.verdict(), e.autoTraded(), e.backtestSupports(), e.backtestPnl(), e.backtestTrades(),
+                e.note(), e.autonomyReason(), e.outcome(), e.outcomePnl())).toList();
     }
 }

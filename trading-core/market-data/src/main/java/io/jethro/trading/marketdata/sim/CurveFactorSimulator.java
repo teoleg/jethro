@@ -59,6 +59,10 @@ public final class CurveFactorSimulator implements CurveMarkSource {
     private final java.util.Map<String, Double> basis = new java.util.HashMap<>();
     private double level;
     private double slope;
+    // Stochastic TSY−SOFR swap-spread basis (fraction): mean-reverting around 0, shared by
+    // all TSY tenors on top of the stylized per-node base spread — the two curves breathe
+    // against each other instead of moving in lockstep. Treasury futures key off TSY.
+    private double swapSpreadBasis;
 
     /** @param startLevel e.g. 0.038 (3.8%); @param startSlope e.g. 0.009 (long minus short). */
     public CurveFactorSimulator(long seed, double startLevel, double startSlope) {
@@ -85,8 +89,11 @@ public final class CurveFactorSimulator implements CurveMarkSource {
     @Override
     public long linkedPriceScaled(String instrumentId) {
         Linked l = LINKED.get(instrumentId);
+        // Treasury futures key off the TSY curve: SOFR zero + swap-spread basis (the constant
+        // per-node spread cancels in the delta; the STOCHASTIC basis does not — futures now
+        // carry genuine swap-spread risk vs the SOFR-discounted swaps).
         double deltaYield = zeroRate(l.tenorYears()) - initialZeros.get(instrumentId)
-                + basis.get(instrumentId);
+                + swapSpreadBasis + basis.get(instrumentId);
         double price = l.basePrice() * (1.0 - l.modDuration() * deltaYield);
         return Math.max(10_000L, Math.round(price * 1_000_000));
     }
@@ -94,6 +101,38 @@ public final class CurveFactorSimulator implements CurveMarkSource {
     /** Advances one tick with no regime effects (CALM, no shock) — tests/back-compat. */
     public void step() {
         step(MarketRegime.CALM, 0);
+    }
+
+    /**
+     * Advances the curve by EXTERNALLY supplied factor deltas (ADR-0026): the correlated
+     * cross-asset simulator owns the RATES level/slope innovations so the curve — and the
+     * Treasury futures and swaps priced from it — moves in concert with equities and FX.
+     * Only the small mean-reverting per-future basis still evolves from this class's own
+     * seeded rng (idiosyncratic by design).
+     */
+    @Override
+    public void applyExternalStep(double dLevel, double dSlope) {
+        level = Math.max(MIN_RATE, level + dLevel);
+        slope += dSlope;
+        stepBases();
+    }
+
+    /** Evolves the per-future bases and the shared TSY−SOFR swap-spread basis one tick. */
+    private void stepBases() {
+        for (String id : LINKED_IDS) {
+            double b = basis.get(id);
+            basis.put(id, b * (1.0 - BASIS_KAPPA) + (random.nextDouble() * 2 - 1) * BASIS_STEP);
+        }
+        swapSpreadBasis = swapSpreadBasis * (1.0 - BASIS_KAPPA)
+                + (random.nextDouble() * 2 - 1) * BASIS_STEP;
+    }
+
+    /** US Treasury par yield for node {@code i}: SOFR zero + stylized spread + stochastic basis. */
+    @Override
+    public long tsyRateScaledPercent(int tenorIndex) {
+        double tsy = zeroRate(TENORS[tenorIndex])
+                + CurveMarkSource.TSY_SPREAD_BP[tenorIndex] * 1e-4 + swapSpreadBasis;
+        return Math.round(tsy * 100 * 1_000_000);
     }
 
     /**
@@ -110,10 +149,7 @@ public final class CurveFactorSimulator implements CurveMarkSource {
         if (shockSign != 0) {
             level += Math.signum(shockSign) * (SHOCK_MIN + random.nextDouble() * SHOCK_RANGE);
         }
-        for (String id : LINKED_IDS) {
-            double b = basis.get(id);
-            basis.put(id, b * (1.0 - BASIS_KAPPA) + (random.nextDouble() * 2 - 1) * BASIS_STEP);
-        }
+        stepBases();
     }
 
     /** Zero rate for a tenor in years (fraction, e.g. 0.0421). */

@@ -4,7 +4,7 @@ import io.jethro.app.trading.TradingCoreLifecycle;
 import io.jethro.order.NewOrder;
 import io.jethro.order.OrderService;
 import io.jethro.domain.OrderType;
-import io.jethro.trading.algo.strategy.MomentumStrategy;
+import io.jethro.trading.algo.strategy.Strategy;
 import io.jethro.trading.algo.strategy.TradeSignal;
 import io.jethro.domain.Side;
 import io.jethro.trading.riskpnl.ConsolidatedRisk;
@@ -45,7 +45,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(StrategyLifecycle.class);
 
-    private final MomentumStrategy strategy;
+    private final Strategy strategy;
     private final TradingCoreLifecycle tradingCore;
     private final InstrumentRefSource refs;
     private final PreTradeGuardrail guardrail;
@@ -55,6 +55,12 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final SseBroadcaster sse;
     private final StrategyProperties props;
     private final OrderService orderService; // nullable: null → suggestions only
+    private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
+    private final io.jethro.app.risk.InstrumentVolSource vols; // measured daily vol (sizing)
+    private final io.jethro.app.risk.PortfolioCorrelationSource correlations; // covariance-aware sizing
+
+    private static final int ACTIVITY_CAP = 50;
+    private final java.util.Deque<StrategyActivity> activity = new java.util.ArrayDeque<>(); // newest first
 
     private static final long HEARTBEAT_CYCLES = 24; // ~2 min at a 5s cadence
     // In-flight guard on exits: a close is submitted synchronously but the fill only shrinks
@@ -70,10 +76,13 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private boolean throttledActive;
     private volatile ScheduledExecutorService scheduler;
 
-    public StrategyLifecycle(MomentumStrategy strategy, TradingCoreLifecycle tradingCore,
+    public StrategyLifecycle(Strategy strategy, TradingCoreLifecycle tradingCore,
                              InstrumentRefSource refs, PreTradeGuardrail guardrail, RiskProjection risk,
                              RiskLimitSource limits, AttentionFeed feed, SseBroadcaster sse,
-                             StrategyProperties props, OrderService orderService) {
+                             StrategyProperties props, OrderService orderService,
+                             io.jethro.app.risk.TradingHaltSwitch halt,
+                             io.jethro.app.risk.InstrumentVolSource vols,
+                             io.jethro.app.risk.PortfolioCorrelationSource correlations) {
         this.strategy = strategy;
         this.tradingCore = tradingCore;
         this.refs = refs;
@@ -84,6 +93,9 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.sse = sse;
         this.props = props;
         this.orderService = orderService;
+        this.halt = halt;
+        this.vols = vols;
+        this.correlations = correlations;
     }
 
     private boolean autoExecuting() {
@@ -99,8 +111,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
         });
         scheduler.scheduleWithFixedDelay(this::runOnce,
                 props.intervalSeconds(), props.intervalSeconds(), TimeUnit.SECONDS);
-        log.info("momentum strategy started: every {}s, lookback {}, threshold {}σ (floor {}bps), default book {}",
-                props.intervalSeconds(), props.lookback(), props.thresholdSigmasOrDefault(),
+        log.info("{} strategy started: every {}s, lookback {}, threshold {}σ (floor {}bps), default book {}",
+                strategy.name(), props.intervalSeconds(), props.lookback(), props.thresholdSigmasOrDefault(),
                 props.minSignalBpsOrDefault(), props.book());
         if (autoExecuting()) {
             log.warn("AUTO-EXECUTE ON (ADR-0019): strategy signals auto-submit SIMULATED orders "
@@ -117,10 +129,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
             if (runtime == null) {
                 return;
             }
-            List<MomentumStrategy.Observation> observations = new ArrayList<>();
+            List<Strategy.Observation> observations = new ArrayList<>();
             int stale = 0;
             for (var mark : runtime.markCache().snapshot()) {
-                observations.add(new MomentumStrategy.Observation(mark.instrumentId(), mark.price(), mark.stale()));
+                observations.add(new Strategy.Observation(mark.instrumentId(), mark.price(), mark.stale()));
                 if (mark.stale()) {
                     stale++;
                 }
@@ -182,7 +194,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     sampleReason = rejection.get();
                     continue; // not admissible under the book's limits — don't suggest it
                 }
-                boolean traded = autoExecuting() && maybeAutoExecute(signal, book, quantity, now);
+                // Firm breaker (ADR-0027): a halt stops NEW entries; the exit pass above is
+                // risk-REDUCING and keeps running — a breaker must never trap an open book.
+                boolean traded = autoExecuting() && !halt.isHalted()
+                        && maybeAutoExecute(signal, book, quantity, now);
                 if (traded) {
                     executed++;
                 }
@@ -260,17 +275,35 @@ public final class StrategyLifecycle implements SmartLifecycle {
         }
         BigDecimal multiplier = ref.map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
         BigDecimal notionalPerUnit = signal.price().multiply(multiplier);
-        // Vol-scaled sizing (quant-engine phase 5): notional = target × clamp(refσ/σ, 0.5, 2),
-        // where σ is the signal window's own realized vol (bps) recovered from move/z.
-        // Sizing is risk-budgeted, not dollar-fixed: half size in wild markets, more in calm.
-        double z = Math.abs(signal.zScore());
-        double sigmaBps = Double.isFinite(z) && z > 1e-9
-                ? Math.abs(signal.changeBps().doubleValue()) / z
-                : props.volReferenceBpsOrDefault();
-        double scale = Math.max(0.5, Math.min(2.0, props.volReferenceBpsOrDefault() / Math.max(sigmaBps, 1e-9)));
-        // Regime scale on top of vol-scale: risk-off in VOLATILE.
-        BigDecimal notionalTarget = props.targetNotional()
-                .multiply(BigDecimal.valueOf(scale)).multiply(regimeScale);
+        String assetClass = ref.map(InstrumentRef::assetClass).orElse(null);
+        // Vol-TARGETED sizing (risk budget, the primary path): notional = riskBudgetDaily /
+        // σ_daily measured from recorded daily closes (same history as VaR), capped at the
+        // per-class order cap — every position carries a comparable expected daily P&L swing.
+        // Until the instrument has measured vol: the signal-window vol scale (clamp(refσ/σ,
+        // 0.5, 2) of targetNotional) — the disclosed warm-up fallback, never a guess.
+        BigDecimal notionalTarget;
+        var dailyVol = vols.dailyVol(signal.instrumentId());
+        if (dailyVol.isPresent() && dailyVol.get().signum() > 0) {
+            // Covariance-aware when ρ_ip is measured: size to the position's CONTRIBUTION to
+            // portfolio vol (a duplicate of the book sizes like standalone; a real diversifier
+            // earns more, floored at ρ=0.25). Standalone vol-targeting until then, disclosed.
+            var rho = correlations.correlationToPortfolio(signal.instrumentId());
+            notionalTarget = rho.isPresent()
+                    ? io.jethro.app.risk.VolTargeting.marginalNotionalFor(
+                            props.riskBudgetDailyOrDefault(), dailyVol.get(), rho.get(),
+                            props.maxOrderNotionalFor(assetClass))
+                    : io.jethro.app.risk.VolTargeting.notionalFor(
+                            props.riskBudgetDailyOrDefault(), dailyVol.get(), props.maxOrderNotionalFor(assetClass));
+        } else {
+            double z = Math.abs(signal.zScore());
+            double sigmaBps = Double.isFinite(z) && z > 1e-9
+                    ? Math.abs(signal.changeBps().doubleValue()) / z
+                    : props.volReferenceBpsOrDefault();
+            double scale = Math.max(0.5, Math.min(2.0, props.volReferenceBpsOrDefault() / Math.max(sigmaBps, 1e-9)));
+            notionalTarget = props.targetNotional().multiply(BigDecimal.valueOf(scale));
+        }
+        // Regime scale on top: risk-off in VOLATILE/RISK_OFF/INFLATION_SHOCK.
+        notionalTarget = notionalTarget.multiply(regimeScale);
         BigDecimal qty = notionalTarget.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             // Cap is per asset class: one Treasury contract (~$110k) is a legitimate order
@@ -300,6 +333,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     book, signal.instrumentId(), signal.side(), OrderType.MARKET, qty, null);
             var order = orderService.submit(command);
             lastAutoExec.put(signal.instrumentId(), now);
+            recordActivity(new StrategyActivity(now, StrategyActivity.ENTRY, signal.instrumentId(), book,
+                    signal.side().name(), qty.toPlainString(), signal.rationale(), String.valueOf(order.status())));
             log.info("auto-executed {} {} {} → {} on {} ({})",
                     signal.side(), qty.toPlainString(), signal.instrumentId(), order.status(), book, order.orderId());
             return true;
@@ -427,12 +462,31 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     p.bookId(), p.instrumentId(), side, OrderType.MARKET, qty, null);
             var order = orderService.submit(command);
             lastExit.put(key, now);
+            recordActivity(new StrategyActivity(now, StrategyActivity.EXIT, p.instrumentId(), p.bookId(),
+                    side.name(), qty.toPlainString(), reason, String.valueOf(order.status())));
             log.info("exit {} {} {} ({}) → {} on {} ({})",
                     side, qty.toPlainString(), p.instrumentId(), reason, order.status(), p.bookId(), order.orderId());
             return true;
         } catch (Exception e) {
             log.warn("exit of {} on {} failed: {}", p.instrumentId(), p.bookId(), e.getMessage());
             return false;
+        }
+    }
+
+    /** Records a strategy action (newest first, capped) for the UI's quant-actions view. */
+    private void recordActivity(StrategyActivity a) {
+        synchronized (activity) {
+            activity.addFirst(a);
+            while (activity.size() > ACTIVITY_CAP) {
+                activity.removeLast();
+            }
+        }
+    }
+
+    /** Recent deterministic-strategy actions (entries + exits with reasons), newest first. */
+    public java.util.List<StrategyActivity> recentActivity() {
+        synchronized (activity) {
+            return java.util.List.copyOf(activity);
         }
     }
 

@@ -81,6 +81,8 @@
   /* FIXED heights (not max-) so the right column's three panels never jump as content changes */
   .feed { display:flex; flex-direction:column; gap:8px; height:clamp(180px, 24vh, 320px); overflow-y:auto; padding-right:2px; }
   .hypo-panel { height:clamp(200px, 28vh, 360px); overflow-y:auto; }
+  tr.hypo-exec td:first-child { border-left:2px solid var(--up); }
+  .whyno { color:var(--dim); font-size:10px; }
   .empty { color:var(--dim); text-align:center; padding:24px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
   .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:12px; padding:11px 14px; }
   .card.WARN { border-left-color:var(--warn); } .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
@@ -89,8 +91,21 @@
   .card.WARN .badge { color:var(--warn); border-color:var(--warn); } .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
   .card p { font-size:12.5px; white-space:pre-wrap; margin-top:6px; } .card .meta { color:var(--dim); font-size:11px; margin-top:8px; }
 
-  /* chat — smaller for now (gets the least of the three right-side panels) */
-  .chat { display:flex; flex-direction:column; height:clamp(200px, 22vh, 300px); }
+  /* deterministic (quant) strategy actions — sits under AI hypotheses so both engines are visible */
+  .quant-panel { height:clamp(160px, 22vh, 300px); overflow-y:auto; }
+  .ktag { font-size:9px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); border:1px solid var(--line-2); border-radius:4px; padding:0 4px; margin-left:5px; }
+
+  /* chat is now a floating dock (rarely used) — a button bottom-right opens it */
+  .chat { display:flex; flex-direction:column; height:clamp(220px, 30vh, 340px); }
+  .fab { position:fixed; right:20px; bottom:20px; z-index:60; width:48px; height:48px; border-radius:50%;
+    background:var(--brand); color:#fff; border:0; font-size:20px; cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,.45); }
+  .fab:hover { filter:brightness(1.08); }
+  .chatdock { position:fixed; right:20px; bottom:80px; z-index:60; width:min(380px, 92vw);
+    background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:0 12px 34px rgba(0,0,0,.5); overflow:hidden; }
+  .chatdock[hidden] { display:none; }
+  .chatdock .dh { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--line);
+    font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; }
+  .chatdock .x { background:none; border:0; color:var(--dim); font-size:18px; line-height:1; cursor:pointer; }
   .chatlog { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
   .msg { max-width:88%; padding:7px 11px; border-radius:12px; font-size:13px; white-space:pre-wrap; }
   .msg.user { align-self:flex-end; background:var(--brand); color:#fff; border-bottom-right-radius:4px; }
@@ -147,18 +162,26 @@
   <div class="col">
     <div class="section-h">Needs your attention</div>
     <div id="feed" class="feed"><div class="empty">all quiet</div></div>
-    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— executed decisions persist; live proposals refresh (ADR-0022)</span></div>
+    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM thesis → quant sizes/gates it; scored at horizon expiry (ADR-0022/0027)</span></div>
     <div class="panel pad hypo-panel"><div id="hypotheses" class="muted" style="padding:14px">loading…</div></div>
-    <div class="section-h">Ask</div>
-    <div class="panel chat">
-      <div class="chatlog" id="chatlog"></div>
-      <form class="chatform" id="chatform" autocomplete="off">
-        <input id="chatinput" placeholder="pnl alpha · exposure AAPL · limits?">
-        <button type="submit">Ask</button>
-      </form>
-    </div>
+    <div id="hypoStats" class="muted" style="font-size:11px;padding:2px 4px"></div>
+    <div class="section-h">Strategy actions <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic momentum engine (ALPHA/MACRO), entries &amp; exits with reasons</span></div>
+    <div class="panel pad quant-panel"><div id="quant" class="muted" style="padding:14px">loading…</div></div>
   </div>
 </main>
+
+<!-- chat: a floating dock opened from the button (rarely used, keeps the columns for data) -->
+<button id="chatFab" class="fab" title="Ask a question">💬</button>
+<div id="chatDock" class="chatdock" hidden>
+  <div class="dh"><span>Ask</span><button class="x" id="chatClose" title="close">×</button></div>
+  <div class="chat">
+    <div class="chatlog" id="chatlog"></div>
+    <form class="chatform" id="chatform" autocomplete="off">
+      <input id="chatinput" placeholder="pnl alpha · exposure AAPL · limits?">
+      <button type="submit">Ask</button>
+    </form>
+  </div>
+</div>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
   const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); };
@@ -166,13 +189,20 @@
 
   function stat(k, v, big) { return `<div class="stat"><div class="k">${k}</div><div class="v ${big?'big ':''}${cls(v)}">${money(v)}</div></div>`; }
 
+  let lastVar = null; // /api/var refreshes slower than /api/risk; cache for the tile
+  let lastEod = null; // /api/eod — session day + today's P&L measured from the previous close
   function renderRisk(r) {
     document.getElementById("asof").textContent = "· " + new Date(r.asOfMillis).toLocaleTimeString();
     const t = r.total;
+    const varTile = lastVar == null ? "" : (lastVar.note
+      ? `<div class="stat"><div class="k">VaR 95 (1d)</div><div class="v mono muted" style="font-size:12px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</div></div>`
+      : `<div class="stat"><div class="k" title="historical simulation, ${lastVar.observations} days; ES95 ${lastVar.es95}${Number(lastVar.skippedExposure)>0?'; unmeasured exposure '+lastVar.skippedExposure:''}${lastVar.parametric?`; parametric (normal EWMA) VaR95 ${lastVar.parametric.var95} / ES95 ${lastVar.parametric.es95} — thin-tailed by assumption`:''}">VaR 95 (1d)</div><div class="v mono down">${money(lastVar.var95)}</div></div>`);
+    const dayTile = (lastEod == null || lastEod.todayPnl == null) ? "" :
+      `<div class="stat"><div class="k" title="since the previous session close (${esc(lastEod.previousCloseTotal)})${lastEod.overnightPnl!=null?` — overnight ${money(lastEod.overnightPnl)} / intraday ${money(lastEod.intradayPnl)}`:''} — session ${esc(lastEod.sessionDay)}, ${esc(lastEod.calendar)}">Today's P&L</div><div class="v mono ${cls(lastEod.todayPnl)}">${money(lastEod.todayPnl)}</div></div>`;
     document.getElementById("stats").innerHTML =
-      stat("Total P&L", t.totalPnl, true) + stat("Realized", t.realizedPnl) + stat("Unrealized", t.unrealizedPnl) +
+      stat("Total P&L", t.totalPnl, true) + dayTile + stat("Realized", t.realizedPnl) + stat("Unrealized", t.unrealizedPnl) +
       `<div class="stat"><div class="k">Net exposure</div><div class="v mono">${money(t.netExposure)}</div></div>` +
-      `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>`;
+      `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>` + varTile;
     const g = r.byAssetClass || [];
     document.getElementById("byclass").outerHTML = '<div id="byclass">' + (g.length ?
       "<table><tr><th>market</th><th>pos</th><th>realized</th><th>unrealized</th><th>total P&L</th><th>gross exp</th></tr>" +
@@ -242,13 +272,17 @@
       const el = document.getElementById("indices");
       if (!ix.length) { el.innerHTML = ""; return; }
       const inner = i => {
-        const hasData = i.price != null && i.changePercent != null;
-        if (!hasData) return `<span class="l">${esc(i.label)}</span><span class="v mono muted">N/A</span>`;
-        const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
-        const sign = i.changePercent > 0 ? "+" : "";
-        const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:2});
-        return `<span class="l">${esc(i.label)}</span><span class="v mono">${v}</span>`
-             + `<span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span>`;
+        if (i.price == null) return `<span class="l">${esc(i.label)}</span><span class="v mono muted">N/A</span>`;
+        // Text tile (e.g. the sim regime): show the string as-is, no change chip.
+        if (isNaN(Number(i.price))) return `<span class="l">${esc(i.label)}</span><span class="v mono">${esc(i.price)}</span>`;
+        const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:3});
+        let chip = "";
+        if (i.changePercent != null) {
+          const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
+          const sign = i.changePercent > 0 ? "+" : "";
+          chip = `<span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span>`;
+        }
+        return `<span class="l">${esc(i.label)}</span><span class="v mono">${v}</span>` + chip;
       };
       let track = el.querySelector(".marquee");
       if (!track) {
@@ -282,32 +316,76 @@
     } catch (e) {}
   }
 
-  // ---- AI hypotheses (LLM thesis + deterministic quant verdict) — one table; the order
-  //      itself lands on the blotter (left), so we don't repeat order rows here. Auto-executed
-  //      theses are marked "AUTO ✓" in the verdict column. ----
+  // ---- AI hypotheses: PERSISTED executed decisions (don't vanish) + current live proposals,
+  //      merged into one time-ordered table. Executed rows are pinned (green edge, AUTO ✓). ----
   const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
+  function btCell(s, pnl, trades) {
+    if (s == null) return '<span class="muted">—</span>';
+    if (s) return `<span class="up" title="ADVISORY out-of-sample: momentum strategy net-positive on a MAJORITY of independent sim paths${pnl?` (median ${esc(pnl)}, ${trades} trades)`:''} — context only, does not gate autonomy">supported</span>`;
+    if (trades === 0) return '<span class="muted" title="momentum strategy fired no signals on the majority of out-of-sample paths — not tested, not a loss (advisory only)">no trades</span>';
+    return `<span class="down" title="ADVISORY out-of-sample: momentum strategy net-negative on the majority of independent sim paths — context only, does not gate autonomy">unsupported</span>`;
+  }
   function renderHypotheses(rows) {
     document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
-      "<table><tr><th>thesis</th><th>view</th><th>conv</th><th>quant verdict</th><th>size</th><th>backtest</th></tr>" +
+      "<table><tr><th>time</th><th>thesis</th><th>view</th><th>conv</th><th>verdict</th><th>backtest</th></tr>" +
       rows.map(r => {
-        const dir = r.direction === "BUY" ? "LONG" : "SHORT";
-        const sz = r.quantity ? `${esc(r.quantity)} → ${esc(r.book||'')}` : "—";
-        const bt = r.backtestSupports == null ? '<span class="muted">—</span>'
-          : (r.backtestSupports ? `<span class="up" title="strategy net-positive on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">supported</span>`
-          : (!r.backtestTrades ? `<span class="muted" title="the strategy fired no signals on this name in the backtest window (sim tape) — not tested, not a loss">no trades</span>`
-                               : `<span class="down" title="strategy traded but was net-negative on this name (${esc(r.backtestPnl)}, ${r.backtestTrades} trades)">unsupported</span>`));
-        const verdictCell = r.autonomous
-          ? '<span class="up" title="auto-executed within the risk envelope (simulated) — see the blotter for the order">AUTO ✓</span>'
-          : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}">${esc(r.verdict)}</span>`;
-        return `<tr><td title="${esc(r.note||'')}">${esc(r.instrumentId)} — ${esc(r.thesis)}</td>
-          <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conviction)}</td>
-          <td>${verdictCell}</td>
-          <td class="mono">${sz}</td><td>${bt}</td></tr>`;
+        const dir = r.dir === "BUY" ? "LONG" : "SHORT";
+        const oc = r.outcome
+          ? ` <span class="${r.outcome==='WIN'?'up':(r.outcome==='LOSS'?'down':'muted')}" title="scored mark-to-mark at horizon expiry: ${esc(r.outcomePnl||'')}">${esc(r.outcome)}</span>`
+          : (r.auto ? ' <span class="whyno">open</span>' : '');
+        const v = r.auto
+          ? '<span class="up" title="auto-executed on the AI sleeve — closed & scored at horizon expiry">AUTO ✓</span>' + oc
+          : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}" title="${esc(r.reason||'')}">${esc(r.verdict)}</span>`
+            + (r.reason ? ` <span class="whyno" title="${esc(r.reason)}">· ${esc(r.reason)}</span>` : '');
+        return `<tr class="${r.executed?'hypo-exec':''}"><td class="muted mono">${new Date(r.ts).toLocaleTimeString()}</td>
+          <td title="${esc(r.note||'')}">${esc(r.instr)} — ${esc(r.thesis)}</td>
+          <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conv||'')}</td>
+          <td>${v}</td><td>${btCell(r.btSupports, r.btPnl, r.btTrades)}</td></tr>`;
       }).join("") + "</table>" +
-      '<div class="muted" style="font-size:11px;padding:6px 12px">Model proposes direction only; every number is the quant layer\'s. AUTO ✓ = auto-executed within the risk envelope (the order is on the blotter).</div>'
-      : '<div class="muted" style="padding:14px">no hypotheses right now — the model runs on a cadence; a small model often returns none until a directional headline appears (see the app log line "hypotheses: model proposed N")</div>') + '</div>';
+      '<div class="muted" style="font-size:11px;padding:6px 12px">AUTO ✓ = auto-executed on the AI sleeve (persisted — stays across cycles; order on the blotter). Others are live proposals for review. Autonomy is sized by the AI\'s measured track record: probation size until ' +
+      'enough outcomes are scored, full size only while the record is positive (backtest column is advisory).</div>'
+      : '<div class="muted" style="padding:14px">no hypotheses yet — the model runs on a cadence; a small model often returns none until a directional headline appears (see the app log "hypotheses: model proposed N")</div>') + '</div>';
   }
-  async function loadHypotheses() { try { renderHypotheses(await (await fetch("/api/hypotheses")).json()); } catch (e) {} }
+  async function loadHypotheses() {
+    try {
+      // /api/hypotheses is the event ledger (each distinct thesis retained, newest first);
+      // /api/hypotheses/stats is the measured hit-rate per conviction (ADR-0027).
+      const [led, stats] = await Promise.all([
+        fetch("/api/hypotheses").then(r => r.json()),
+        fetch("/api/hypotheses/stats").then(r => r.json()).catch(() => [])]);
+      renderHypotheses(led.map(r => ({ ts:r.timestampMillis, instr:r.instrumentId, thesis:r.thesis,
+        dir:r.direction, conv:r.conviction, verdict:r.verdict, auto:r.autonomous, executed:r.autonomous,
+        btSupports:r.backtestSupports, btPnl:r.backtestPnl, btTrades:r.backtestTrades, note:r.note,
+        reason:r.autonomyReason, outcome:r.outcome, outcomePnl:r.outcomePnl })));
+      const scored = stats.filter(s => s.wins + s.losses + s.flat > 0);
+      const statsEl = document.getElementById("hypoStats");
+      if (statsEl) statsEl.textContent = scored.length
+        ? "measured hit-rate — " + scored.map(s =>
+            `${s.conviction}: ${s.wins}/${s.wins+s.losses+s.flat} (${(s.hitRate*100).toFixed(0)}%, ${s.outcomePnl})`).join(" · ")
+        : "";
+    } catch (e) {}
+  }
+
+  // ---- deterministic (quant) strategy actions — entries & exits, each with its reason ----
+  function renderQuant(rows) {
+    document.getElementById("quant").outerHTML = '<div id="quant" class="muted">' + (rows.length ?
+      "<table><tr><th>time</th><th>action</th><th>instr</th><th>qty</th><th>reason</th></tr>" +
+      rows.map(a => {
+        const isExit = a.kind === "EXIT";
+        return `<tr><td class="muted mono">${new Date(a.timestampMillis).toLocaleTimeString()}</td>
+          <td class="${a.side==='BUY'?'up':'down'}">${esc(a.side)}${isExit?'<span class="ktag">exit</span>':''}</td>
+          <td class="cls">${esc(a.instrumentId)} <span class="muted" style="font-size:10px">${esc(a.book)}</span></td>
+          <td class="mono">${esc(a.quantity)}</td>
+          <td class="muted" title="${esc(a.reason||'')}">${esc(a.reason||'')}</td></tr>`;
+      }).join("") + "</table>"
+      : '<div class="muted" style="padding:12px">no strategy actions yet — the momentum engine auto-trades ALPHA/MACRO; every entry and risk-reducing exit (with its reason) appears here</div>') + '</div>';
+  }
+  async function loadQuant() { try { renderQuant(await (await fetch("/api/strategy/actions")).json()); } catch (e) {} }
+
+  // ---- floating chat dock ----
+  const chatDock = document.getElementById("chatDock");
+  document.getElementById("chatFab").onclick = () => { chatDock.hidden = !chatDock.hidden; if (!chatDock.hidden) document.getElementById("chatinput").focus(); };
+  document.getElementById("chatClose").onclick = () => { chatDock.hidden = true; };
 
   // ---- today's orders (paginated 100/page) ----
   let obPage = 0, obTotalPages = 1;
@@ -340,6 +418,7 @@
   bootstrap();
   loadOrders();
   loadHypotheses();
+  loadQuant();
   loadTicker();
   loadFeeds();
   loadIndicators();
@@ -348,6 +427,13 @@
   setInterval(loadFeeds, 5000);
   setInterval(loadIndicators, 30000);
   setInterval(loadHypotheses, 15000);
+  setInterval(loadQuant, 5000);
+  const loadVar = () => fetch("/api/var").then(r => r.json()).then(v => { lastVar = v; }).catch(() => {});
+  loadVar();
+  setInterval(loadVar, 15000);
+  const loadEod = () => fetch("/api/eod").then(r => r.json()).then(v => { lastEod = v; }).catch(() => {});
+  loadEod();
+  setInterval(loadEod, 5000); // compressed sim days roll in minutes — keep the tile current
   setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
 </script>
 </body>

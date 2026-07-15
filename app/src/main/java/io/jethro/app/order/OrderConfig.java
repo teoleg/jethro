@@ -4,6 +4,7 @@ import io.jethro.app.kafka.KafkaConfig;
 import io.jethro.app.kafka.KafkaEventPublisher;
 import io.jethro.domain.Fill;
 import io.jethro.domain.Order;
+import io.jethro.order.ExecutionCostSource;
 import io.jethro.order.LastPriceCache;
 import io.jethro.order.OrderController;
 import io.jethro.order.OrderEventPublisher;
@@ -12,12 +13,16 @@ import io.jethro.order.OrderRepository;
 import io.jethro.order.OrderService;
 import io.jethro.order.PreTradeCheck;
 import io.jethro.order.SimulatedExecutor;
+import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.trading.riskpnl.PreTradeGuardrail;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.math.BigDecimal;
 
 /**
  * Order-module wiring (ADR-0015). DB-backed, so gated on jethro.persistence.enabled.
@@ -26,6 +31,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * and simulated fills have no live prices.
  */
 @Configuration
+@EnableConfigurationProperties(ExecutionProperties.class)
 @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class OrderConfig {
 
@@ -39,9 +45,35 @@ public class OrderConfig {
         return new LastPriceCache();
     }
 
+    /** Binds execution costs (ADR-0025) to reference data: instrument → asset class →
+     *  configured spread/fee, plus the impact inputs (ADV from refdata, measured daily vol —
+     *  either missing means the impact model stays off for that name, disclosed). Without
+     *  refdata an instrument gets the conservative EQUITY defaults — never free execution. */
     @Bean
-    SimulatedExecutor simulatedExecutor() {
-        return new SimulatedExecutor();
+    ExecutionCostSource executionCostSource(ExecutionProperties props,
+                                            ObjectProvider<InstrumentRefSource> refSource,
+                                            ObjectProvider<io.jethro.app.risk.InstrumentVolSource> volSource) {
+        InstrumentRefSource refs = refSource.getIfAvailable();
+        io.jethro.app.risk.InstrumentVolSource vols =
+                volSource.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE);
+        return instrumentId -> {
+            var ref = refs != null ? refs.find(instrumentId).orElse(null) : null;
+            String assetClass = ref != null ? ref.assetClass() : null;
+            // Per-NAME spread when refdata has one (V25 — liquid names differ 10× within a
+            // class); the class-level config is the fallback, never free execution.
+            BigDecimal spread = ref != null && ref.spreadBps() != null
+                    ? ref.spreadBps() : props.spreadFor(assetClass);
+            BigDecimal fee = props.feeFor(assetClass);
+            return new ExecutionCostSource.Cost(spread, fee, "SWAP".equals(assetClass),
+                    ref != null ? ref.advUsd() : null,
+                    vols.dailyVol(instrumentId).orElse(null),
+                    ref != null ? ref.multiplier() : null);
+        };
+    }
+
+    @Bean
+    SimulatedExecutor simulatedExecutor(ExecutionCostSource costs, ExecutionProperties props) {
+        return new SimulatedExecutor(costs, props.maxAdvParticipationOrDefault());
     }
 
     @Bean
@@ -68,10 +100,18 @@ public class OrderConfig {
         return g != null ? new RiskPreTradeCheck(g) : PreTradeCheck.APPROVE_ALL;
     }
 
+    /** TCA store (ADR-0025): every fill's slippage vs its arrival price. */
+    @Bean
+    io.jethro.order.ExecutionQualityRepository executionQualityRepository(JdbcTemplate jdbcTemplate,
+                                                                          ExecutionCostSource costs) {
+        return new io.jethro.order.ExecutionQualityRepository(jdbcTemplate, costs);
+    }
+
     @Bean
     OrderService orderService(OrderRepository repository, SimulatedExecutor executor,
-                              LastPriceCache prices, OrderEventPublisher publisher, PreTradeCheck preTradeCheck) {
-        return new OrderService(repository, executor, prices, publisher, preTradeCheck);
+                              LastPriceCache prices, OrderEventPublisher publisher, PreTradeCheck preTradeCheck,
+                              io.jethro.order.ExecutionQualityRepository tca) {
+        return new OrderService(repository, executor, prices, publisher, preTradeCheck, tca);
     }
 
     @Bean
@@ -79,11 +119,20 @@ public class OrderConfig {
         return new OrderController(orderService, repository);
     }
 
+    @Bean
+    io.jethro.order.TcaController tcaController(
+            ObjectProvider<io.jethro.order.ExecutionQualityRepository> repository) {
+        return new io.jethro.order.TcaController(repository);
+    }
+
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
     OrderMarketDataConsumer orderMarketDataConsumer(KafkaConfig.JethroKafkaProperties properties,
-                                                    LastPriceCache prices) {
-        var consumer = new OrderMarketDataConsumer(properties.bootstrapServers(), prices);
+                                                    LastPriceCache prices, OrderService orderService) {
+        // onMark drives working-order matching (ADR-0025): unmarketable GTC LIMIT orders are
+        // retried on every new mark for their instrument until they fill or are cancelled.
+        var consumer = new OrderMarketDataConsumer(properties.bootstrapServers(), prices,
+                orderService::onMark);
         consumer.start();
         return consumer;
     }

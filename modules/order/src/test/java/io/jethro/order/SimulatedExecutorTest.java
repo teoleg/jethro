@@ -7,6 +7,7 @@ import io.jethro.domain.Order;
 import io.jethro.domain.OrderStatus;
 import io.jethro.domain.OrderType;
 import io.jethro.domain.Side;
+import io.jethro.domain.TimeInForce;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -19,13 +20,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Execution semantics: MARKET fills at the mark, LIMIT only when the mark is crossed. */
 class SimulatedExecutorTest {
 
-    private final SimulatedExecutor executor = new SimulatedExecutor();
+    private final SimulatedExecutor executor = new SimulatedExecutor(ExecutionCostSource.FREE);
 
     private static Order order(OrderType type, Side side, String qty, String limit) {
         return new Order("ord-1", "idem-1", new BookId("ALPHA"), new InstrumentId("AAPL"),
                 side, type, new BigDecimal(qty),
                 limit == null ? Optional.empty() : Optional.of(new BigDecimal(limit)),
-                OrderStatus.ROUTED, Instant.EPOCH);
+                TimeInForce.GTC, OrderStatus.ROUTED, Instant.EPOCH);
     }
 
     @Test

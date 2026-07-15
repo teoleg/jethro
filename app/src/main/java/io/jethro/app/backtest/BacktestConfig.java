@@ -20,7 +20,21 @@ public record BacktestConfig(
         long seed, int ticks, boolean regimes, int evalEveryTicks,
         int lookback, double thresholdSigmas, BigDecimal minSignalBps,
         BigDecimal targetNotional, BigDecimal maxOrderNotional, BigDecimal maxPositionNotional,
-        boolean allowShort, BigDecimal volatileScale, BigDecimal costBps, List<Instrument> instruments) {
+        boolean allowShort, BigDecimal volatileScale, BigDecimal costBps, List<Instrument> instruments,
+        /** Signal algo under test: "momentum" or "mean-reversion" (same detector, opposite
+         *  reading — the harness adjudicates between them, ADR-0027). */
+        String algo) {
+
+    /** Momentum config (the original shape — existing call sites/tests unchanged). */
+    public BacktestConfig(long seed, int ticks, boolean regimes, int evalEveryTicks,
+                          int lookback, double thresholdSigmas, BigDecimal minSignalBps,
+                          BigDecimal targetNotional, BigDecimal maxOrderNotional, BigDecimal maxPositionNotional,
+                          boolean allowShort, BigDecimal volatileScale, BigDecimal costBps,
+                          List<Instrument> instruments) {
+        this(seed, ticks, regimes, evalEveryTicks, lookback, thresholdSigmas, minSignalBps,
+                targetNotional, maxOrderNotional, maxPositionNotional, allowShort, volatileScale,
+                costBps, instruments, "momentum");
+    }
 
     /** One tradable instrument in the backtest universe. */
     public record Instrument(String instrumentId, BigDecimal startPrice, double annualVol,

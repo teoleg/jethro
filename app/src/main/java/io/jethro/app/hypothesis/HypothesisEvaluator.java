@@ -18,38 +18,71 @@ import java.util.Optional;
  * direction; this code owns every number. It validates the instrument, sizes to the
  * configured target notional (never using the model's ordinal conviction as a multiplier),
  * routes to the book that fits the asset class, and runs the read-only pre-trade guardrail.
- * The result is a candidate a human executes from the ticket (ADR-0018) — this slice never
- * auto-submits; bounded autonomy (ADR-0022) switches on once the backtest bridge (step 8)
- * can validate a thesis's edge.
+ * The result is a candidate a human executes from the ticket (ADR-0018), or — when the
+ * bounded-autonomy envelope (ADR-0022, default OFF) admits it under its track-record gate
+ * (ADR-0027 correction: probation → earned, with the sim-tape OOS backtest advisory-only)
+ * — an auto-submitted simulated order.
  *
- * <p>Sizing mirrors the strategy's notional sizing (target / (price × multiplier), rounded
- * down, per-class cap) but without vol-scaling — a hypothesis carries no signal vol.
- * A full historical backtest of the thesis is deferred to step 8 (replay); noted, not faked.
+ * <p>Sizing is vol-targeted when a measured daily vol exists (ADR-0027: notional =
+ * risk budget / σ, correlation-adjusted via {@code marginalNotionalFor} when the
+ * portfolio correlation is known), else the flat configured target notional; always
+ * price × multiplier rounded down, per-class capped. A full HISTORICAL replay of a
+ * thesis (as opposed to the sim-tape backtest) remains deferred — see
+ * docs/deferred-register.md.
  */
 public final class HypothesisEvaluator {
 
     /** Why a hypothesis did or didn't become an actionable candidate. */
     public enum Verdict { ADMISSIBLE, UNKNOWN_INSTRUMENT, NO_MARK, UNSIZEABLE, BLOCKED }
 
-    /** Backtest support for the thesis's instrument (the future bounded-autonomy gate,
-     *  ADR-0022): the strategy's measured PnL on this name over the sim tape. {@code supports}
-     *  = net-positive on some trades. Null when no backtest was supplied. */
+    /** Backtest support for the thesis's instrument: the strategy's measured PnL on this
+     *  name over the sim tape. ADVISORY ONLY since the ADR-0027 autonomy correction — the
+     *  autonomy gate is the live track record, not this. {@code supports} = net-positive
+     *  on some trades. Null when no backtest was supplied. */
     public record Backtest(BigDecimal pnl, int trades, boolean supports) {
     }
 
     /** A hypothesis after the quant layer: the deterministic sizing/verdict the model never saw. */
     public record Evaluated(Hypothesis hypothesis, Verdict verdict, String book,
                             BigDecimal quantity, BigDecimal price, String note, Backtest backtest) {
+
+        /** Same evaluation at a different quantity (probation resizing, ADR-0027). */
+        public Evaluated withQuantity(BigDecimal newQuantity) {
+            return new Evaluated(hypothesis, verdict, book, newQuantity, price, note, backtest);
+        }
     }
 
     private final InstrumentRefSource refs;
     private final PreTradeGuardrail guardrail;
     private final StrategyProperties sizing;
+    private final String book; // the AI sleeve — separate from the momentum strategy's books
+    private final io.jethro.app.risk.InstrumentVolSource vols;
+    private final io.jethro.app.risk.PortfolioCorrelationSource correlations;
 
-    public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail, StrategyProperties sizing) {
+    public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                               StrategyProperties sizing, String book) {
+        this(refs, guardrail, sizing, book, io.jethro.app.risk.InstrumentVolSource.NONE,
+                io.jethro.app.risk.PortfolioCorrelationSource.NONE);
+    }
+
+    public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                               StrategyProperties sizing, String book,
+                               io.jethro.app.risk.InstrumentVolSource vols) {
+        this(refs, guardrail, sizing, book, vols, io.jethro.app.risk.PortfolioCorrelationSource.NONE);
+    }
+
+    /** With measured vol (and ρ when the history covers it): theses are vol-TARGETED —
+     *  covariance-aware exactly like the strategy ({@code VolTargeting}). */
+    public HypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
+                               StrategyProperties sizing, String book,
+                               io.jethro.app.risk.InstrumentVolSource vols,
+                               io.jethro.app.risk.PortfolioCorrelationSource correlations) {
         this.refs = refs;
         this.guardrail = guardrail;
         this.sizing = sizing;
+        this.book = book;
+        this.vols = vols;
+        this.correlations = correlations;
     }
 
     /** Evaluates a hypothesis against live marks, no backtest context. */
@@ -74,10 +107,21 @@ public final class HypothesisEvaluator {
             return verdict(h, Verdict.NO_MARK, null, null, null, "no live mark to value it", bt);
         }
         String assetClass = ref.get().assetClass();
-        String book = sizing.bookFor(assetClass);
+        // The AI sleeve trades its own book (not routed to the strategy's ALPHA/MACRO), so the
+        // momentum algo never flattens an AI-opened position (ADR-0022).
         BigDecimal multiplier = ref.get().multiplier();
         BigDecimal notionalPerUnit = price.multiply(multiplier);
-        BigDecimal qty = sizing.targetNotional().divide(notionalPerUnit, 0, RoundingMode.DOWN);
+        // Vol-targeted when the instrument has measured daily vol (riskBudgetDaily / σ_daily,
+        // capped per class — same formula as the strategy); flat target notional during warm-up.
+        BigDecimal targetNotional = vols.dailyVol(h.instrumentId())
+                .filter(v -> v.signum() > 0)
+                .map(v -> correlations.correlationToPortfolio(h.instrumentId())
+                        .map(rho -> io.jethro.app.risk.VolTargeting.marginalNotionalFor(
+                                sizing.riskBudgetDailyOrDefault(), v, rho, sizing.maxOrderNotionalFor(assetClass)))
+                        .orElseGet(() -> io.jethro.app.risk.VolTargeting.notionalFor(
+                                sizing.riskBudgetDailyOrDefault(), v, sizing.maxOrderNotionalFor(assetClass))))
+                .orElse(sizing.targetNotional());
+        BigDecimal qty = targetNotional.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             // One unit already exceeds the per-class order cap → unsizeable, never round up.
             if (notionalPerUnit.compareTo(sizing.maxOrderNotionalFor(assetClass)) > 0) {

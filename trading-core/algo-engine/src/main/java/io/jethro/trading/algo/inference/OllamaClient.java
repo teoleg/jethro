@@ -48,6 +48,9 @@ public final class OllamaClient implements ModelInferenceClient {
             body.put("system", request.systemPrompt());
         }
         body.put("stream", false);
+        // Keep the model resident between calls so a brief idle gap doesn't force a slow reload
+        // (on a Pi the cold load can take a minute+). Ollama's default unloads after 5 min idle.
+        body.put("keep_alive", "30m");
         body.putObject("options").put("num_predict", request.maxOutputTokens());
 
         HttpRequest httpRequest;

@@ -9,6 +9,7 @@ import io.jethro.messaging.FillEvent;
 import io.jethro.messaging.MarkEvent;
 import io.jethro.messaging.Topics;
 import io.jethro.trading.riskpnl.CurveService;
+import io.jethro.trading.riskpnl.TreasuryCurveView;
 import io.jethro.trading.riskpnl.RiskProjection;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
@@ -44,10 +45,24 @@ public final class RiskDataConsumer implements AutoCloseable {
     private final AtomicLong skipped = new AtomicLong();
     private volatile Thread thread;
 
-    public RiskDataConsumer(String bootstrapServers, RiskProjection projection, CurveService curveService) {
+    private final TreasuryCurveView treasuryCurve;
+    private final java.util.function.Consumer<Fill> fillTap; // nullable: swap-trade registry etc.
+
+    public RiskDataConsumer(String bootstrapServers, RiskProjection projection,
+                            CurveService curveService, TreasuryCurveView treasuryCurve) {
+        this(bootstrapServers, projection, curveService, treasuryCurve, null);
+    }
+
+    /** @param fillTap called after each fill is applied to the projection (replayed from the
+     *                 beginning on every boot — taps must be idempotent, invariant 6). */
+    public RiskDataConsumer(String bootstrapServers, RiskProjection projection,
+                            CurveService curveService, TreasuryCurveView treasuryCurve,
+                            java.util.function.Consumer<Fill> fillTap) {
         this.bootstrapServers = bootstrapServers;
         this.projection = projection;
         this.curveService = curveService;
+        this.treasuryCurve = treasuryCurve;
+        this.fillTap = fillTap;
     }
 
     public void start() {
@@ -93,12 +108,18 @@ public final class RiskDataConsumer implements AutoCloseable {
                 for (var record : records) {
                     try {
                         if (Topics.FILLS.equals(record.topic())) {
-                            projection.applyFill(toFill(AvroCodec.decode(record.value(), FillEvent.class)));
+                            Fill fill = toFill(AvroCodec.decode(record.value(), FillEvent.class));
+                            projection.applyFill(fill);
+                            if (fillTap != null) {
+                                fillTap.accept(fill);
+                            }
                         } else {
                             MarkEvent mark = AvroCodec.decode(record.value(), MarkEvent.class);
                             String id = mark.getInstrumentId().toString();
                             if (CurveService.isCurveQuote(id)) {
                                 curveService.onRate(id, mark.getPrice()); // curve, not a position mark
+                            } else if (TreasuryCurveView.isTsyQuote(id)) {
+                                treasuryCurve.onRate(id, mark.getPrice()); // TSY par curve (distinct)
                             } else {
                                 projection.applyMark(id, mark.getPrice(),
                                         mark.getMeta().getIngestTimestamp().toEpochMilli());
@@ -126,6 +147,7 @@ public final class RiskDataConsumer implements AutoCloseable {
                 Side.valueOf(e.getSide().name()),
                 e.getQuantity(),
                 e.getPrice(),
+                e.getFee() != null ? e.getFee() : java.math.BigDecimal.ZERO, // pre-fee events = 0
                 e.getMeta().getIngestTimestamp());
     }
 

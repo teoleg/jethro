@@ -118,3 +118,22 @@ pollers exist; per-client throttles alone couldn't guarantee that.
   the composite grows; Finnhub `/bond/yield-curve` (real rates), `/stock/candle` (real backtests)
   and `/forex/rates` (real FX) are further real-data upgrades; a licensed news/market-data provider
   ADR before any production use.
+
+## Implementation note — corporate-action / bad-print quarantine (2026-07-14)
+
+Real feeds deliver raw prices: a stock split (2:1 = −50% overnight), an unadjusted reprice or
+a fat-fingered print would flow straight into P&L, stops, momentum and the daily history as a
+phantom crash. The guard sits at the ONE choke point every consumer shares — `MarkCache.update`
+on the core loop (scaled-long cross-multiplication, no floats, no allocation): a single update
+that moves more than the instrument's threshold (`jethro.trading.mark-jump-bps.<CLASS>`, bps
+of the previous mark; defaults EQUITY/DEFAULT 20%, FUTURE/SWAP 10%, FX/BOND 8%) **quarantines**
+the instrument. The suspect price never enters the cache — risk, orders, sizing, md.marks and
+`daily_close` all keep the last good mark — further ticks are rejected AND counted (never
+silently dropped), an ALERT card fires on the attention floor, and an operator accepts the new
+level with `POST /api/marks/{id}/clear-quarantine` (the next mark becomes the baseline and the
+guard re-arms). The first refresh after a warm/stale restart is exempt — the market moving
+while we were down is not a corporate action. Stated limits: ordinary dividends (~0.5–2%) are
+below any sane threshold and are NOT detected, and quarantining freezes rather than adjusts —
+proper split/dividend ADJUSTMENT needs a real corporate-action data source (tracked follow-up,
+not faked). A real 20%+ earnings gap on a single name will also quarantine — acceptable: a
+one-tick 20% move deserves a human look before machines trade it.

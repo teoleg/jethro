@@ -6,30 +6,106 @@ import io.jethro.domain.OrderType;
 import io.jethro.domain.Side;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Simulated execution until a real broker is wired (ADR-0003). Deterministic given a
- * price: MARKET fills the full quantity at the current mark; LIMIT fills at the limit
- * price only when the mark is marketable (crossed), otherwise the order stays working.
- * No real venue, no partial fills yet.
+ * Simulated execution with realistic costs (ADR-0025). The mark is treated as the mid; a
+ * marketable order crosses the half-spread (in the PRICE), and the commission is a
+ * SEPARATE cash fee on the fill — prices stay clean traded prices (exact decimals,
+ * invariant 1), so LIMIT fills carry fees too without ever violating their limit price:
+ *
+ * <pre>
+ *   touch(BUY)  = mid × (1 + spread/2·10⁻⁴)      price-quoted (equity/future/FX)
+ *   touch(SELL) = mid × (1 − spread/2·10⁻⁴)
+ *   touch(SWAP) = mid ± spread/2 · 0.01           rate-quoted: additive in rate bp
+ *   fee         = qty × fillPrice × multiplier × feeBps·10⁻⁴   (cash, every fill)
+ * </pre>
+ *
+ * Worked example (finance-math rule): BUY MARKET 131 AAPL, mid 190.00, EQUITY spread 5bp
+ * fee 1bp → fill price = touch = 190 × 1.00025 = <b>190.0475</b>, fee = 131 × 190.0475 ×
+ * 10⁻⁴ = <b>$2.489522</b> cash — the round trip still costs ≈ (5+2)bp, now split honestly
+ * between price (spread) and cash (fee), which is what lets TCA separate them.
+ *
+ * <p>LIMIT fills at the limit price when the <em>touch</em> (not the mid) crosses it — you
+ * cannot buy at your limit until the ask reaches it, which is how real books behave.
+ * No partial fills yet (noted, not hidden). Rate-quoted swaps charge no bps-of-notional
+ * fee (their configured fee is zero; a per-lot ticket fee is a refinement, stated).
  */
 public final class SimulatedExecutor {
 
-    /** Attempts to execute an order at the given mark. Empty = cannot fill now. */
-    public Optional<Fill> tryExecute(Order order, BigDecimal mark) {
-        if (mark == null) {
+    private static final int PRICE_SCALE = 6;
+    private static final RoundingMode ROUND = RoundingMode.HALF_EVEN;
+
+    private final ExecutionCostSource costs;
+    private final BigDecimal maxAdvParticipation; // nullable → participation cap off
+
+    public SimulatedExecutor(ExecutionCostSource costs) {
+        this(costs, null);
+    }
+
+    /** @param maxAdvParticipation reject orders whose notional exceeds this fraction of the
+     *                             instrument's ADV (e.g. 0.02 = 2%); null disables the cap. */
+    public SimulatedExecutor(ExecutionCostSource costs, BigDecimal maxAdvParticipation) {
+        this.costs = costs;
+        this.maxAdvParticipation = maxAdvParticipation;
+    }
+
+    /**
+     * ADV participation gate (ADR-0025): an order that would be more than the configured
+     * fraction of the instrument's average daily volume is rejected pre-route — the impact
+     * model's square-root law is calibrated for small participations and a desk wouldn't
+     * slam 2%+ of ADV as one MARKET order anyway. Empty = fine to route. No ADV on file →
+     * no cap (unmodelled, disclosed).
+     */
+    public Optional<String> participationRejection(Order order, BigDecimal mid) {
+        if (maxAdvParticipation == null || mid == null) {
+            return Optional.empty();
+        }
+        ExecutionCostSource.Cost cost = costs.costFor(order.instrumentId().value());
+        if (cost.advUsd() == null || cost.advUsd().signum() <= 0 || cost.rateQuoted()) {
+            return Optional.empty();
+        }
+        BigDecimal multiplier = cost.multiplier() != null ? cost.multiplier() : BigDecimal.ONE;
+        BigDecimal notional = order.quantity().multiply(mid).multiply(multiplier).abs();
+        BigDecimal cap = cost.advUsd().multiply(maxAdvParticipation);
+        if (notional.compareTo(cap) > 0) {
+            return Optional.of("order notional " + notional.toPlainString() + " exceeds "
+                    + maxAdvParticipation.movePointRight(2).toPlainString() + "% of ADV ("
+                    + cost.advUsd().toPlainString() + ") — split the order or reduce size");
+        }
+        return Optional.empty();
+    }
+
+    /** Attempts to execute at the mid alone (no quote data — synthetic spread). */
+    public Optional<Fill> tryExecute(Order order, BigDecimal mid) {
+        return tryExecute(order, mid, null, null);
+    }
+
+    /**
+     * Attempts to execute an order. When a REAL top-of-book quote rides with the mark
+     * (ADR-0025: the sim publishes bid/ask synthesized from the same spread config), the
+     * marketable side IS the quoted touch — BUY crosses to the ask, SELL hits the bid; the
+     * synthetic mid±half-spread only remains as the fallback for feeds without quote data.
+     * Empty = cannot fill now.
+     */
+    public Optional<Fill> tryExecute(Order order, BigDecimal mid, BigDecimal bid, BigDecimal ask) {
+        if (mid == null) {
             return Optional.empty(); // no market data — caller rejects
         }
+        ExecutionCostSource.Cost cost = costs.costFor(order.instrumentId().value());
+        BigDecimal quoted = order.side() == Side.BUY ? ask : bid;
+        BigDecimal touch = quoted != null && quoted.signum() > 0 ? quoted : touch(order.side(), mid, cost);
         BigDecimal fillPrice = switch (order.type()) {
-            case MARKET -> mark;
-            case LIMIT -> marketable(order, mark) ? order.limitPrice().orElseThrow() : null;
+            case MARKET -> withImpact(order, mid, touch, cost);
+            case LIMIT -> marketable(order, touch) ? order.limitPrice().orElseThrow() : null;
         };
         if (fillPrice == null) {
             return Optional.empty(); // limit not marketable — stays working
         }
+        fillPrice = fillPrice.setScale(PRICE_SCALE, ROUND);
         return Optional.of(new Fill(
                 "fill-" + UUID.randomUUID(),
                 order.orderId(),
@@ -38,15 +114,71 @@ public final class SimulatedExecutor {
                 order.side(),
                 order.quantity(),
                 fillPrice,
+                fee(order.quantity(), fillPrice, cost),
                 Instant.now()));
     }
 
-    private static boolean marketable(Order order, BigDecimal mark) {
-        BigDecimal limit = order.limitPrice().orElseThrow();
-        // BUY fills when the market is at or below the limit; SELL at or above.
+    /** Commission as cash (ADR-0025): qty × price × multiplier × feeBps·10⁻⁴. Zero for
+     *  rate-quoted instruments (bps of a par-rate "notional" would be meaningless). */
+    private static BigDecimal fee(BigDecimal qty, BigDecimal fillPrice, ExecutionCostSource.Cost cost) {
+        if (cost.feeBps().signum() == 0 || cost.rateQuoted()) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal multiplier = cost.multiplier() != null ? cost.multiplier() : BigDecimal.ONE;
+        return qty.multiply(fillPrice).multiply(multiplier)
+                .multiply(cost.feeBps()).movePointLeft(4).setScale(PRICE_SCALE, ROUND);
+    }
+
+    /** The side of the spread a marketable order crosses: mid ± half-spread. */
+    private static BigDecimal touch(Side side, BigDecimal mid, ExecutionCostSource.Cost cost) {
+        if (cost.spreadBps().signum() == 0) {
+            return mid;
+        }
+        if (cost.rateQuoted()) {
+            // Rate quote (percent): 1bp of rate = 0.01 quote units; half the spread, additive.
+            BigDecimal delta = cost.spreadBps().movePointLeft(2).divide(BigDecimal.TWO); // bps·0.01/2
+            return side == Side.BUY ? mid.add(delta) : mid.subtract(delta);
+        }
+        // Price quote: half the spread as a fraction of price — (bps·10⁻⁴)/2. Division by 2
+        // is exact for decimals (finance-math rule: no hidden rounding mid-calculation).
+        BigDecimal factor = cost.spreadBps().movePointLeft(4).divide(BigDecimal.TWO);
+        return side == Side.BUY
+                ? mid.multiply(BigDecimal.ONE.add(factor))
+                : mid.multiply(BigDecimal.ONE.subtract(factor));
+    }
+
+    /**
+     * Square-root market impact on MARKET fills (ADR-0025 follow-up): the standard empirical
+     * law — impact fraction = σ_daily × √(orderNotional / ADV) — applied adversely to the
+     * price like the fee. Worked: SELL 200 AAPL @ ~190 → notional 38,000; ADV $12B; σ 1.8%/day
+     * → impact = 0.018 × √(38,000/12e9) = 0.018 × 0.00178 ≈ 0.32bp — small at demo sizes,
+     * grows with the square root, which is exactly the point. Needs ADV AND measured vol AND
+     * a price quote; anything missing → no impact (unmodelled, disclosed, never guessed).
+     * The coefficient (Y=1) is the conventional order-of-magnitude choice, stated not fitted.
+     */
+    private static BigDecimal withImpact(Order order, BigDecimal mid, BigDecimal price,
+                                         ExecutionCostSource.Cost cost) {
+        if (cost.advUsd() == null || cost.advUsd().signum() <= 0
+                || cost.dailyVol() == null || cost.dailyVol().signum() <= 0 || cost.rateQuoted()) {
+            return price;
+        }
+        BigDecimal multiplier = cost.multiplier() != null ? cost.multiplier() : BigDecimal.ONE;
+        double notional = order.quantity().multiply(mid).multiply(multiplier).abs().doubleValue();
+        double participation = notional / cost.advUsd().doubleValue();
+        // Impact coefficient is analytics (double); it becomes money only multiplied into the
+        // exact price below (same boundary convention as duration/vol).
+        BigDecimal impact = BigDecimal.valueOf(cost.dailyVol().doubleValue() * Math.sqrt(participation));
         return order.side() == Side.BUY
-                ? mark.compareTo(limit) <= 0
-                : mark.compareTo(limit) >= 0;
+                ? price.multiply(BigDecimal.ONE.add(impact))
+                : price.multiply(BigDecimal.ONE.subtract(impact));
+    }
+
+    private static boolean marketable(Order order, BigDecimal touch) {
+        BigDecimal limit = order.limitPrice().orElseThrow();
+        // BUY fills when the ask is at or below the limit; SELL when the bid is at or above.
+        return order.side() == Side.BUY
+                ? touch.compareTo(limit) <= 0
+                : touch.compareTo(limit) >= 0;
     }
 
     /** Guard so callers don't construct MARKET orders without a mark path. */

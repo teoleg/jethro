@@ -11,7 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Exact-value tests for the first-order scenario engine — each case is the worked
+ * Exact-value tests for the scenario engine's FIRST-ORDER fallback paths (no live curves
+ * here) — each case is the worked
  * numeric example from the engine's javadoc (finance-math rule: hand-computed first).
  */
 class ScenarioEngineTest {

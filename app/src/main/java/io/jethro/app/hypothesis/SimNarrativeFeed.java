@@ -67,7 +67,7 @@ public final class SimNarrativeFeed implements NarrativeFeed {
     @Override
     public synchronized List<NarrativeItem> poll(String regime, List<String> singleNameInstruments, long nowMillis) {
         double emitChance = switch (regime) {
-            case "VOLATILE" -> 1.0;
+            case "VOLATILE", "RISK_OFF", "INFLATION_SHOCK" -> 1.0; // shock regimes make headlines
             case "TREND_UP", "TREND_DOWN" -> 0.7;
             default -> 0.3; // CALM and anything else
         };
@@ -80,14 +80,16 @@ public final class SimNarrativeFeed implements NarrativeFeed {
     private NarrativeItem newItem(String regime, List<String> names, long nowMillis) {
         NarrativeItem.Sentiment bias = switch (regime) {
             case "TREND_UP" -> NarrativeItem.Sentiment.BULLISH;
-            case "TREND_DOWN" -> NarrativeItem.Sentiment.BEARISH;
+            case "TREND_DOWN", "RISK_OFF", "INFLATION_SHOCK" -> NarrativeItem.Sentiment.BEARISH;
             case "VOLATILE" -> rng.nextBoolean() ? NarrativeItem.Sentiment.BULLISH : NarrativeItem.Sentiment.BEARISH;
             default -> NarrativeItem.Sentiment.NEUTRAL;
         };
+        boolean shockRegime = "VOLATILE".equals(regime) || "RISK_OFF".equals(regime)
+                || "INFLATION_SHOCK".equals(regime);
         String id = "sim-news-" + (counter++);
-        // A VOLATILE regime is a macro surprise; otherwise ~half the items are single-name.
+        // A shock regime is a macro surprise; otherwise ~half the items are single-name.
         boolean singleName = !names.isEmpty() && bias != NarrativeItem.Sentiment.NEUTRAL
-                && !"VOLATILE".equals(regime) && rng.nextBoolean();
+                && !shockRegime && rng.nextBoolean();
         if (singleName) {
             String instrument = names.get(rng.nextInt(names.size()));
             String[] pool = bias == NarrativeItem.Sentiment.BULLISH ? NAME_BULLISH : NAME_BEARISH;
@@ -97,8 +99,8 @@ public final class SimNarrativeFeed implements NarrativeFeed {
             return new NarrativeItem(id, nowMillis, cat, instrument, bias, headline);
         }
         String[] pool = switch (bias) {
-            case BULLISH -> "VOLATILE".equals(regime) ? MACRO_SURPRISE : MACRO_BULLISH;
-            case BEARISH -> "VOLATILE".equals(regime) ? MACRO_SURPRISE : MACRO_BEARISH;
+            case BULLISH -> shockRegime ? MACRO_SURPRISE : MACRO_BULLISH;
+            case BEARISH -> shockRegime ? MACRO_SURPRISE : MACRO_BEARISH;
             case NEUTRAL -> MACRO_NEUTRAL;
         };
         return new NarrativeItem(id, nowMillis, NarrativeItem.Category.MACRO, null, bias, pool[rng.nextInt(pool.length)]);

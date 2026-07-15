@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Config for the LLM hypothesis layer (ADR-0022, jethro.hypothesis). The model proposes
@@ -22,17 +23,31 @@ public record HypothesisProperties(
          *  hypothesis cadence. Ignored by the sim feed. Default 60. */
         Long narrativeRefreshSeconds,
         Integer backtestTicks,
+        /** Out-of-sample seeds for the autonomy backtest gate (ADR-0027): the strategy must be
+         *  net-positive on a MAJORITY of these independent paths (seeds disjoint from the live
+         *  sim seed). Odd numbers make the median-majority exact. Default 5. */
+        Integer oosSeeds,
+        /** Horizon → lifetime in seconds (ADR-0027): at expiry the AI-sleeve position is closed
+         *  and the thesis scored. Defaults: INTRADAY 6h, SWING 5 days, POSITION 20 days —
+         *  real-feed wall-clock; override for compressed sim runs. */
+        Map<String, Long> horizonSeconds,
+        /** Book the AI hypothesis sleeve trades — kept separate from the momentum strategy's
+         *  books so the two engines don't flatten each other's positions. Default "AI". */
+        String book,
         Autonomy autonomy) {
 
     /**
-     * The deterministic risk envelope for bounded autonomy (ADR-0022): a thesis auto-executes
-     * (simulated, ADR-0019) only if ALL hold — autonomy on, the backtest supports it, conviction
-     * ≥ min, order notional ≤ the (tight) autonomy cap, and the instrument is whitelisted (empty
-     * = all). Outside the envelope it stays a human-review card. The model never widens this —
-     * it's operator config, evaluated in code. Default OFF; must never front a real broker.
+     * The deterministic risk envelope for bounded autonomy (ADR-0022, amended by ADR-0027):
+     * a thesis auto-executes (simulated, ADR-0019) only if admissible, conviction ≥ min, and
+     * whitelisted — SIZED by the AI's own MEASURED track record: below {@code minTrackRecord}
+     * scored outcomes it trades PROBATION size ({@code probationOrderNotional}) to build the
+     * record; with a record, full size ({@code maxOrderNotional}) only while measured outcome
+     * P&L is positive — a negative record REVOKES autonomy (human review only). The model
+     * never widens this — operator config, evaluated in code. Must never front a real broker.
      */
     public record Autonomy(Boolean enabled, String minConviction, BigDecimal maxOrderNotional,
-                           Long cooldownSeconds, List<String> whitelist) {
+                           Long cooldownSeconds, List<String> whitelist,
+                           BigDecimal probationOrderNotional, Integer minTrackRecord) {
 
         public boolean enabledOrDefault() {
             return enabled != null && enabled;
@@ -53,15 +68,44 @@ public record HypothesisProperties(
         public List<String> whitelistOrEmpty() {
             return whitelist != null ? whitelist : List.of();
         }
+
+        /** Probation size while the track record builds — small on purpose. */
+        public BigDecimal probationOrderNotionalOrDefault() {
+            return probationOrderNotional != null ? probationOrderNotional
+                    : maxOrderNotionalOrDefault().divide(new BigDecimal("4"), 2, java.math.RoundingMode.DOWN);
+        }
+
+        /** Scored outcomes needed before autonomy is judged on its record. */
+        public int minTrackRecordOrDefault() {
+            return minTrackRecord != null && minTrackRecord > 0 ? minTrackRecord : 10;
+        }
     }
 
     /** Never-null autonomy view (all-default when the block is absent). */
     public Autonomy autonomyOrDefault() {
-        return autonomy != null ? autonomy : new Autonomy(null, null, null, null, null);
+        return autonomy != null ? autonomy : new Autonomy(null, null, null, null, null, null, null);
     }
 
     public int backtestTicksOrDefault() {
         return backtestTicks != null && backtestTicks > 0 ? backtestTicks : 15_000;
+    }
+
+    public int oosSeedsOrDefault() {
+        return oosSeeds != null && oosSeeds > 0 ? oosSeeds : 5;
+    }
+
+    private static final Map<String, Long> DEFAULT_HORIZON_SECONDS = Map.of(
+            "INTRADAY", 6L * 3600,
+            "SWING", 5L * 24 * 3600,
+            "POSITION", 20L * 24 * 3600);
+
+    /** Lifetime of a horizon in seconds; unknown horizons get the conservative INTRADAY. */
+    public long horizonSecondsFor(String horizon) {
+        if (horizonSeconds != null && horizon != null && horizonSeconds.containsKey(horizon)) {
+            return horizonSeconds.get(horizon);
+        }
+        Long fallback = horizon != null ? DEFAULT_HORIZON_SECONDS.get(horizon) : null;
+        return fallback != null ? fallback : DEFAULT_HORIZON_SECONDS.get("INTRADAY");
     }
 
     public int maxPerCycleOrDefault() {
@@ -78,6 +122,10 @@ public record HypothesisProperties(
 
     public long narrativeSeedOrDefault() {
         return narrativeSeed != null ? narrativeSeed : 42L;
+    }
+
+    public String bookOrDefault() {
+        return book != null && !book.isBlank() ? book : "AI";
     }
 
     public long narrativeRefreshSecondsOrDefault() {

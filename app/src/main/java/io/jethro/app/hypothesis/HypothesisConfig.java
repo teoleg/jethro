@@ -44,8 +44,12 @@ public class HypothesisConfig {
 
     @Bean
     HypothesisEvaluator hypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
-                                            StrategyProperties sizing) {
-        return new HypothesisEvaluator(refs, guardrail, sizing);
+                                            StrategyProperties sizing, HypothesisProperties props,
+                                            ObjectProvider<io.jethro.app.risk.InstrumentVolSource> vols,
+                                            ObjectProvider<io.jethro.app.risk.PortfolioCorrelationSource> correlations) {
+        return new HypothesisEvaluator(refs, guardrail, sizing, props.bookOrDefault(),
+                vols.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE),
+                correlations.getIfAvailable(() -> io.jethro.app.risk.PortfolioCorrelationSource.NONE));
     }
 
     /**
@@ -105,7 +109,8 @@ public class HypothesisConfig {
                                             TradingCoreLifecycle tradingCore, RiskProjection risk,
                                             InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
                                             ObjectProvider<OrderService> orderService,
-                                            HypothesisRecordStore recordStore) {
+                                            HypothesisRecordStore recordStore,
+                                            io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
         // the broker is wired — every hypothesis-generation run is an audited AiDecision.
         DecisionSink sink = decision -> {
@@ -120,7 +125,8 @@ public class HypothesisConfig {
         // OrderService present only when persistence is on; without it (or with autonomy off)
         // the layer is human-in-loop even if autonomy is configured on.
         return new HypothesisLifecycle(generator, evaluator, narrativeFeed, backtest,
-                tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable(), recordStore);
+                tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable(), recordStore,
+                tradingHaltSwitch);
     }
 
     @Bean

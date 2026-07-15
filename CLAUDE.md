@@ -6,6 +6,8 @@ risk/PnL per book, with a monitoring UI. Owner: Oleg (strong Java/C++, backend-f
 ## Ground truth
 
 - Architecture: `docs/architecture/overview.md`
+- Deferred work: `docs/deferred-register.md` — any "deferred/tracked/revisit" note added
+  in code REQUIRES a row there in the same change; deferred items must never get lost.
 - Decisions: `docs/adr/` — **read the ADR index before proposing designs or stacks.**
   Accepted ADRs are settled; do not re-litigate them. To change one, propose a
   superseding ADR.

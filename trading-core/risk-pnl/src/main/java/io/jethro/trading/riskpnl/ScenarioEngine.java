@@ -10,27 +10,30 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Deterministic scenario/stress engine (quant-engine sequencing step 2, first slice):
- * revalues the current positions under defined market shocks and reports the P&amp;L
- * impact per book and firm-wide, in USD. Pure code — no model anywhere near it
- * (invariant 7); results are estimates by construction but computed EXACTLY from the
- * stated first-order formulas (no binary floating point on the money arithmetic).
+ * Deterministic scenario/stress engine (quant-engine sequencing step 2): revalues the
+ * current positions under defined market shocks and reports the P&amp;L impact per book
+ * and firm-wide, in USD. Pure code — no model anywhere near it (invariant 7). The RATES
+ * legs are <b>full revaluation on the shifted curve</b> when the curves are live —
+ * carrying convexity and (for swaps) trade aging — with graceful first-order fallbacks,
+ * each stated below; money arithmetic is exact decimals throughout (invariant 1).
  *
- * <p>First-order revaluation per position (sign convention: quantity &gt; 0 long,
+ * <p>Revaluation per position (sign convention: quantity &gt; 0 long,
  * P&amp;L &gt; 0 profit; all shocks are exact decimals):
  * <ul>
  *   <li><b>EQUITY / FUTURE</b> (equity-index futures) under equity shock {@code s}:
  *       ΔP&amp;L = netExposure × s. Worked: long 100 AAPL @ 190 → net 19,000;
- *       equities −5% → −950.00.</li>
- *   <li><b>BOND</b> (Treasury futures) under rate shock Δy: ΔP&amp;L = netExposure ×
- *       (−D·Δy), D = modified duration from reference data. Worked: long 1 ZN @
- *       110.50 × $1000 (net 110,500, D 6.3), rates +100bp → 110,500 × −0.063 =
- *       −6,961.50. No duration on file → the position is SKIPPED and counted, never
- *       silently treated as insensitive.</li>
- *   <li><b>SWAP</b> (V9 convention: mark = par rate in %, multiplier = DV01×100):
- *       ΔP&amp;L = quantity × (Δy in percentage points) × multiplier. Worked: 1 lot
- *       pay-fixed USD_IRS_5Y (mult 45,000), rates +100bp → 1 × 1.00 × 45,000 =
- *       +45,000.00 (pay-fixed gains when rates rise).</li>
+ *       equities −5% → −950.00. (The shock IS the revaluation — nothing to reprice.)</li>
+ *   <li><b>BOND</b> (Treasury futures) under rate shock Δy: FULL reval — the CTD par bond
+ *       re-priced at the shocked yield ({@link BondFutureDurations#priceChangeUnderShock}),
+ *       ΔP&amp;L = netExposure × ΔP. Worked (ZN, CTD 6.5y @ 4.5%): +100bp → net ×
+ *       −0.0540350543, −100bp → +0.0576882049 — the convexity asymmetry linear misses.
+ *       No live curve → first-order −D·Δy on the refdata duration; no duration either →
+ *       SKIPPED and counted, never silently treated as insensitive.</li>
+ *   <li><b>SWAP</b>: most precise available leg, in order — (1) the trade-dated book's
+ *       seasoned trades re-priced on base vs shifted curve ({@link SeasonedSwapReval}:
+ *       aged trades respond like their REMAINING tenor); (2) fresh-tenor per-lot full
+ *       reval ({@link SwapPricingService#swapPnlPerLotUnderShock}); (3) first-order V9
+ *       convention — ΔP&amp;L = quantity × (Δy in percentage points) × multiplier.</li>
  *   <li><b>FX pairs</b> under USD shock u: a *USD pair falls when USD strengthens —
  *       ΔP&amp;L = netExposure × (−u). CONVENTION: only *USD pairs trade today; a
  *       non-USD cross would be skipped and counted.</li>
@@ -81,8 +84,25 @@ public final class ScenarioEngine {
             new Scenario("risk-off", "Risk-off (equities −5%, rates −25bp, USD +1%)",
                     new Shock(new BigDecimal("-0.05"), new BigDecimal("-25"), new BigDecimal("0.01"))));
 
+    /**
+     * Full-revaluation hook for the trade-dated swap book (quant-engine step 2 remainder):
+     * the TOTAL scenario P&amp;L of a (book, instrument) group's seasoned trades under a
+     * parallel shift — every trade re-priced on base vs shifted curve with its REMAINING
+     * schedule, so aged trades respond like their remaining tenor. Empty = not available
+     * (no curve / no persistence); the engine then falls back to fresh-tenor per-lot
+     * reval, then first-order.
+     */
+    public interface SeasonedSwapReval {
+        java.util.Optional<BigDecimal> pnlUnderShock(String bookId, String instrumentId,
+                                                     BigDecimal shiftBps);
+
+        SeasonedSwapReval NONE = (book, instrument, shift) -> java.util.Optional.empty();
+    }
+
     private final InstrumentRefSource refs;
     private final SwapPricingService swaps; // nullable: full-reval swaps when present, else first-order
+    private final BondFutureDurations durations;
+    private final SeasonedSwapReval seasonedSwaps;
 
     public ScenarioEngine(InstrumentRefSource refs) {
         this(refs, null);
@@ -91,8 +111,22 @@ public final class ScenarioEngine {
     /** @param swaps when non-null, swap scenario P&amp;L is FULL revaluation on the shocked curve
      *               (captures convexity), not first-order DV01. */
     public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps) {
+        this(refs, swaps, BondFutureDurations.staticOnly(refs));
+    }
+
+    /** @param durations bond-future duration source — live par-bond duration at the current
+     *                   Treasury yield when the curve has quoted, static refdata otherwise. */
+    public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps, BondFutureDurations durations) {
+        this(refs, swaps, durations, SeasonedSwapReval.NONE);
+    }
+
+    /** @param seasonedSwaps trade-dated swap book reval — the most precise swap scenario leg. */
+    public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps,
+                          BondFutureDurations durations, SeasonedSwapReval seasonedSwaps) {
         this.refs = refs;
         this.swaps = swaps;
+        this.durations = durations;
+        this.seasonedSwaps = seasonedSwaps;
     }
 
     /** Runs the standard scenarios over the given positions with the given FX marks. */
@@ -128,26 +162,39 @@ public final class ScenarioEngine {
                 case "EQUITY", "FUTURE" -> impactCcy = p.netExposure().multiply(shock.equityPct());
                 case "FX" -> impactCcy = p.netExposure().multiply(shock.usdPct().negate());
                 case "BOND" -> {
-                    BigDecimal duration = refs.find(p.instrumentId())
-                            .map(InstrumentRef::modDuration).orElse(null);
-                    if (duration == null) {
-                        if (shock.ratesBps().signum() != 0) {
+                    // FULL revaluation first: the CTD par bond re-priced at the shocked yield
+                    // (carries convexity — rates DOWN gains more than rates UP loses; at ±100bp
+                    // on ZB the linear number misses ~7% of the move). Needs the live curve.
+                    BigDecimal reval = shock.ratesBps().signum() != 0
+                            ? durations.priceChangeUnderShock(p.instrumentId(), shock.ratesBps()).orElse(null)
+                            : ZERO;
+                    if (reval != null) {
+                        impactCcy = p.netExposure().multiply(reval);
+                    } else {
+                        BigDecimal duration = durations.modifiedDuration(p.instrumentId()).orElse(null);
+                        if (duration == null) {
                             skipped++; // rates shock but no duration on file — honest skip
                             continue;
                         }
-                        impactCcy = ZERO;
-                    } else {
-                        // Δy as an exact fraction: bp / 10^4 via decimal point shift.
+                        // First-order fallback (no live curve): Δy as an exact fraction.
                         impactCcy = p.netExposure()
                                 .multiply(duration.negate())
                                 .multiply(shock.ratesBps().movePointLeft(4));
                     }
                 }
                 case "SWAP" -> {
+                    // Most precise first: the trade-dated book's seasoned trades re-priced on
+                    // base vs shifted curve (aged trades respond like their REMAINING tenor).
+                    BigDecimal seasoned = shock.ratesBps().signum() != 0
+                            ? seasonedSwaps.pnlUnderShock(p.bookId(), p.instrumentId(), shock.ratesBps())
+                                    .orElse(null)
+                            : ZERO;
                     BigDecimal perLot = swapReval.get(p.instrumentId());
-                    if (perLot != null) {
-                        // Full revaluation: qty lots ($1M each) × ΔPV re-priced on the shocked
-                        // curve — carries convexity (a first-order DV01 shock would be symmetric).
+                    if (seasoned != null) {
+                        impactCcy = seasoned; // TOTAL for this (book, instrument) — not per lot
+                    } else if (perLot != null) {
+                        // Fresh-tenor full reval: qty lots ($1M each) × ΔPV on the shocked
+                        // curve — convexity yes, trade aging no.
                         impactCcy = p.quantity().multiply(perLot);
                     } else {
                         // First-order fallback (no pricer/curve): V9 convention — mark is the par

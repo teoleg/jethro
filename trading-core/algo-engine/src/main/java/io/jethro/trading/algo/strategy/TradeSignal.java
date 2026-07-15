@@ -13,13 +13,22 @@ import java.math.RoundingMode;
  * estimate, hence double — never money).
  */
 public record TradeSignal(String instrumentId, Side side, BigDecimal referencePrice,
-                          BigDecimal price, BigDecimal changeBps, double zScore) {
+                          BigDecimal price, BigDecimal changeBps, double zScore, String kind) {
+
+    /** Momentum signal (the original shape — existing call sites unchanged). */
+    public TradeSignal(String instrumentId, Side side, BigDecimal referencePrice,
+                       BigDecimal price, BigDecimal changeBps, double zScore) {
+        this(instrumentId, side, referencePrice, price, changeBps, zScore, "momentum");
+    }
 
     /** Human-readable why, e.g. "momentum +36bps (2.8σ) over lookback". */
     public String rationale() {
         BigDecimal bps = changeBps.setScale(0, RoundingMode.HALF_UP);
+        String signed = (bps.signum() >= 0 ? "+" : "") + bps.toPlainString();
         String sigma = Double.isFinite(zScore) ? String.format("%.1fσ", Math.abs(zScore)) : "steady trend";
-        return "momentum " + (bps.signum() >= 0 ? "+" : "") + bps.toPlainString()
-                + "bps (" + sigma + ") over lookback";
+        if ("mean-reversion".equals(kind)) {
+            return "mean-reversion — fading " + signed + "bps (" + sigma + ") over lookback";
+        }
+        return kind + " " + signed + "bps (" + sigma + ") over lookback";
     }
 }

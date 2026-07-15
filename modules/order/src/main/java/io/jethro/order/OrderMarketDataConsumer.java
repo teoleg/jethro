@@ -26,12 +26,21 @@ public final class OrderMarketDataConsumer implements AutoCloseable {
 
     private final String bootstrapServers;
     private final LastPriceCache prices;
+    private final java.util.function.BiConsumer<String, java.math.BigDecimal> onMark; // nullable
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread thread;
 
     public OrderMarketDataConsumer(String bootstrapServers, LastPriceCache prices) {
+        this(bootstrapServers, prices, null);
+    }
+
+    /** @param onMark working-order matching hook (ADR-0025): called after each cache update
+     *                so unmarketable GTC LIMIT orders get retried against the new mark. */
+    public OrderMarketDataConsumer(String bootstrapServers, LastPriceCache prices,
+                                   java.util.function.BiConsumer<String, java.math.BigDecimal> onMark) {
         this.bootstrapServers = bootstrapServers;
         this.prices = prices;
+        this.onMark = onMark;
     }
 
     public void start() {
@@ -56,7 +65,11 @@ public final class OrderMarketDataConsumer implements AutoCloseable {
                 for (var record : records) {
                     try {
                         MarkEvent mark = AvroCodec.decode(record.value(), MarkEvent.class);
-                        prices.update(mark.getInstrumentId().toString(), mark.getPrice());
+                        String instrumentId = mark.getInstrumentId().toString();
+                        prices.update(instrumentId, mark.getPrice(), mark.getBid(), mark.getAsk());
+                        if (onMark != null) {
+                            onMark.accept(instrumentId, mark.getPrice()); // working-order matching
+                        }
                     } catch (RuntimeException e) {
                         log.warn("skipping undecodable mark: {}", e.getMessage());
                     }

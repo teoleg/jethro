@@ -52,9 +52,24 @@ jobs:
       - name: Pull the real model (no stubs)
         run: docker compose exec -T ollama ollama pull "$JETHRO_IT_MODEL"
 
-      - name: Warm up the model
+      # Hard gate, not best-effort: when Ollama is broken on a runner (e.g. a llama-server
+      # segfault — seen 2026-07-14 with an unpinned image), `|| true` here let the job burn
+      # 9 minutes to an opaque await-timeout in FullStackIT. Failing HERE labels the failure
+      # as infra, in seconds, with the container log attached.
+      - name: Warm up the model (hard gate)
         run: |
-          docker compose exec -T ollama ollama run "$JETHRO_IT_MODEL" "Reply with the single word ready" || true
+          for attempt in 1 2 3; do
+            if docker compose exec -T ollama ollama run "$JETHRO_IT_MODEL" "Reply with the single word ready"; then
+              echo "model generated on attempt $attempt"
+              exit 0
+            fi
+            echo "warm-up attempt $attempt failed — restarting ollama and retrying"
+            docker compose restart ollama
+            sleep 5
+          done
+          echo "::error::Ollama cannot generate on this runner (llama-server crash?). This is an INFRA failure, not a code failure — re-run the job."
+          docker compose logs ollama --tail 100
+          exit 1
 
       - name: Full-stack integration tests
         run: ./gradlew :app:integrationTest -Pci   # integrationTest is not gated, but keep the flag consistent

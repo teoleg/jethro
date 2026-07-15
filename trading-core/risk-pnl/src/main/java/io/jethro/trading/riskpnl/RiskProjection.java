@@ -25,9 +25,11 @@ import java.util.function.Function;
  * <p>Idempotent under at-least-once redelivery (invariant 6): a fill whose {@code fillId}
  * has been seen is ignored, so applying the same fill twice leaves state unchanged.
  *
- * <p>Currency: figures are in each instrument's currency; cross-currency conversion to a
- * book base currency is deferred (all dev instruments are USD) — a rollup spanning
- * currencies is reported as {@code MIXED} rather than silently summed as one number.
+ * <p>Currency: position rows stay in each instrument's currency; rollups convert to USD
+ * at the live FX mark ({@link FxConversion}). A rollup containing a currency that cannot
+ * be converted (no spot-vs-USD mark yet) is reported as {@code MIXED} rather than
+ * silently summed as one number. A configurable per-book base currency (non-USD
+ * reporting) is deferred — see docs/deferred-register.md.
  *
  * <p>Thread-safety: all mutation and reads are synchronized. Volume is low (fills are
  * rare, marks and snapshots ~1Hz), so a single monitor is simpler than finer locking and
@@ -39,6 +41,7 @@ public final class RiskProjection {
     private static final RoundingMode ROUND = RoundingMode.HALF_EVEN;
 
     private final InstrumentRefSource refs;
+    private final SwapDv01Source swapDv01;
 
     private final Map<String, Position> positions = new HashMap<>();
     private final Map<String, BigDecimal> realized = new HashMap<>();
@@ -49,7 +52,14 @@ public final class RiskProjection {
     }
 
     public RiskProjection(InstrumentRefSource refs) {
+        this(refs, SwapDv01Source.NONE);
+    }
+
+    /** With live swap pricing: SWAP positions value at the LIVE per-lot DV01 × 100 instead of
+     *  the V9 inception-constant multiplier (the annuity drifts with the curve). */
+    public RiskProjection(InstrumentRefSource refs, SwapDv01Source swapDv01) {
         this.refs = refs;
+        this.swapDv01 = swapDv01;
     }
 
     /** Applies a fill to the positions projection. Idempotent on {@link Fill#fillId()}. */
@@ -60,9 +70,14 @@ public final class RiskProjection {
         String key = key(fill.bookId().value(), fill.instrumentId().value());
         InstrumentRef ref = ref(fill.instrumentId().value());
         Position pos = positions.getOrDefault(key, Position.flat(fill.bookId(), fill.instrumentId()));
-        Positions.FillApplication applied = Positions.applyFill(pos, fill, ref.multiplier());
+        // Realized P&L on a closing fill monetizes at TODAY's multiplier (for a swap, the live
+        // annuity you'd actually monetize at) — same convention as the unrealized leg.
+        Positions.FillApplication applied =
+                Positions.applyFill(pos, fill, effectiveMultiplier(fill.instrumentId().value(), ref));
         positions.put(key, applied.position());
-        realized.merge(key, applied.realizedPnl(), BigDecimal::add);
+        // The fee is a SEPARATE cash cost (ADR-0025): booked against realized immediately —
+        // it is money already gone, whatever the position later does.
+        realized.merge(key, applied.realizedPnl().subtract(fill.fee()), BigDecimal::add);
     }
 
     /** Records the latest mark for an instrument (drives unrealized PnL and exposure). */
@@ -85,10 +100,16 @@ public final class RiskProjection {
             long age = hasMark ? Math.max(0, nowMillis - m.asOfMillis()) : -1;
             BigDecimal qty = pos.quantity();
 
+            BigDecimal multiplier = effectiveMultiplier(pos.instrumentId().value(), ref);
             BigDecimal unrealized = hasMark
-                    ? p8(qty.multiply(m.price().subtract(pos.avgCost())).multiply(ref.multiplier()))
+                    ? p8(qty.multiply(m.price().subtract(pos.avgCost())).multiply(multiplier))
                     : zero();
-            BigDecimal net = hasMark ? p8(qty.multiply(m.price()).multiply(ref.multiplier())) : zero();
+            // Exposure: gross NOTIONAL for notional-quoted instruments (a swap lot = $1M —
+            // qty × par-rate × DV01-multiplier would understate it ~5×); price × multiplier
+            // for everything else. P&L above is unaffected — only the exposure measure.
+            BigDecimal net = ref.notionalPerLot() != null
+                    ? p8(qty.multiply(ref.notionalPerLot()))
+                    : (hasMark ? p8(qty.multiply(m.price()).multiply(multiplier)) : zero());
 
             rows.add(new PositionRisk(
                     pos.bookId().value(), pos.instrumentId().value(), ref.assetClass(), ref.currency(),
@@ -223,11 +244,34 @@ public final class RiskProjection {
     }
 
     private BigDecimal exposureOf(String instrumentId, BigDecimal qty) {
+        InstrumentRef ref = ref(instrumentId);
+        if (ref.notionalPerLot() != null) {
+            return qty.multiply(ref.notionalPerLot()); // notional-quoted: no mark needed
+        }
         MarkPoint m = marks.get(instrumentId);
         if (m == null) {
             return BigDecimal.ZERO;
         }
-        return qty.multiply(m.price()).multiply(ref(instrumentId).multiplier());
+        return qty.multiply(m.price()).multiply(effectiveMultiplier(instrumentId, ref));
+    }
+
+    /**
+     * The money-per-point multiplier used to value one instrument. Static contract multiplier
+     * for everything except SWAP, where the LIVE per-lot DV01 × 100 replaces the V9 inception
+     * constant when the curve is priced — the swap annuity drifts with rates (a 2022-style
+     * +300bp move shrinks a 5Y DV01 by ~10%), so a constant multiplier mis-states P&L exactly
+     * when rates move most. Worked: BUY 2 USD_IRS_5Y @ 4.04, par now 4.14, live DV01 $430/bp
+     * → unrealized = 2 × (4.14 − 4.04) × 43,000 = $8,600 (static 45,000 would say $9,000).
+     * No live pricing → the static multiplier (the disclosed V9 approximation), never zero.
+     */
+    private BigDecimal effectiveMultiplier(String instrumentId, InstrumentRef ref) {
+        if ("SWAP".equals(ref.assetClass())) {
+            var live = swapDv01.dv01PerLot(instrumentId);
+            if (live.isPresent()) {
+                return live.get().movePointRight(2); // $/bp per lot → $/point (100bp) per lot
+            }
+        }
+        return ref.multiplier();
     }
 
     private static ConsolidatedRisk.Totals totals(List<PositionRisk> rows, FxConversion fx) {

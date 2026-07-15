@@ -2,6 +2,7 @@ package io.jethro.order;
 
 import io.jethro.domain.OrderType;
 import io.jethro.domain.Side;
+import io.jethro.domain.TimeInForce;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,9 +17,11 @@ import java.util.UUID;
 @RestController
 public class OrderController {
 
-    /** Submit payload; decimals as strings (invariant 1). limitPrice/idempotencyKey optional. */
+    /** Submit payload; decimals as strings (invariant 1). limitPrice/idempotencyKey/
+     *  timeInForce optional (timeInForce defaults to GTC; IOC cancels if not marketable). */
     public record OrderRequest(String bookId, String instrumentId, String side, String type,
-                               String quantity, String limitPrice, String idempotencyKey) {
+                               String quantity, String limitPrice, String idempotencyKey,
+                               String timeInForce) {
     }
 
     private final OrderService orderService;
@@ -41,7 +44,9 @@ public class OrderController {
                     request.type() == null ? OrderType.MARKET : OrderType.valueOf(request.type().toUpperCase()),
                     new BigDecimal(request.quantity()),
                     request.limitPrice() == null || request.limitPrice().isBlank()
-                            ? null : new BigDecimal(request.limitPrice()));
+                            ? null : new BigDecimal(request.limitPrice()),
+                    request.timeInForce() == null || request.timeInForce().isBlank()
+                            ? TimeInForce.GTC : TimeInForce.valueOf(request.timeInForce().toUpperCase()));
             var order = orderService.submit(command);
             // Return the persisted row view (single-element lookup by re-reading recent).
             var row = repository.recentOrders(50).stream()
@@ -56,6 +61,19 @@ public class OrderController {
 
     /** Error payload so a rejected submit shows a reason in the UI, not a bare 500. */
     public record ApiError(String error) {
+    }
+
+    /** Cancels a working order (ADR-0025). Idempotent-friendly: an already-terminal order
+     *  returns its final state (a fill that won the race is reported, not errored). */
+    @PostMapping("/api/orders/{orderId}/cancel")
+    public ResponseEntity<?> cancel(@org.springframework.web.bind.annotation.PathVariable String orderId) {
+        return orderService.cancel(orderId)
+                .<ResponseEntity<?>>map(order -> ResponseEntity.ok(
+                        new CancelResult(order.orderId(), order.status().name())))
+                .orElseGet(() -> ResponseEntity.status(404).body(new ApiError("unknown order " + orderId)));
+    }
+
+    public record CancelResult(String orderId, String status) {
     }
 
     @GetMapping("/api/orders")

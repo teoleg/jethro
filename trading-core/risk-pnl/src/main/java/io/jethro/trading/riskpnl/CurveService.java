@@ -76,6 +76,11 @@ public final class CurveService {
                 CurveInterpolators.LINEAR));
     }
 
+    /** The curve's tenor node grid (years, sorted) — the DV01 bucket axis (quant-engine step 4). */
+    public static double[] nodeTenorYears() {
+        return TENORS.values().stream().mapToDouble(Double::doubleValue).sorted().toArray();
+    }
+
     /** Zero rate at any tenor (interpolated), if the curve is available. */
     public Optional<Double> zeroRate(double tenorYears) {
         return curve().map(c -> c.yValue(tenorYears));

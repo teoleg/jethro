@@ -43,7 +43,11 @@ services:
       retries: 6
 
   ollama:
-    image: ollama/ollama:latest
+    # Pinned: an unpinned :latest is re-pulled fresh by every CI run, so an upstream image
+    # regression breaks CI with no code change (2026-07-14: the just-published image's
+    # llama-server segfaulted on model load on some runners → FullStackIT commentary
+    # timeout). Bump deliberately: change the tag, watch CI go green, commit.
+    image: ollama/ollama:0.31.2
     ports:
       - "11434:11434"
     volumes:

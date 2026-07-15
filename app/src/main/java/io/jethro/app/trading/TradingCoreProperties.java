@@ -23,6 +23,14 @@ public record TradingCoreProperties(
         Boolean simRegimes,
         /** Factor-based SOFR curve sim publishing USD.SOFR.* tenor marks; default true. */
         Boolean simCurve,
+        /** Sim engine (ADR-0026): "correlated" (cross-asset factor model, default) or "legacy"
+         *  (independent per-instrument walks — kept for A/B and old-tape tests). */
+        String simEngine,
+        /** Optional path to a sim-calibration.json overriding the checked-in default. */
+        String simCalibrationPath,
+        /** Time compression: wall seconds per simulated trading day (default 120 — multi-day
+         *  regimes play out in minutes). */
+        Double simSecondsPerDay,
         long simTickIntervalMillis,
         /** Market-data provider: "sim" (default), "yahoo" (ADR-0023), or "finnhub" (ADR-0024,
          *  real-time equities over WebSocket — needs finnhub-token). Dev/demo only. */
@@ -40,12 +48,51 @@ public record TradingCoreProperties(
         Boolean realCurve,
         /** Seconds between real-curve refreshes (curves move slowly; keeps REST calls low). Default 120. */
         Long treasuryCurveRefreshSeconds,
+        /** Session-calendar zone for LIVE feeds (ADR-0027): the trading day is the calendar date
+         *  in this zone. Pure sim runs use the compressed sim calendar instead. Default
+         *  America/New_York (the universe is US-centric). */
+        String sessionZone,
+        /** Hour (0-23, session-zone local) at which the LIVE-feed trading day rolls to the
+         *  next one — 17 = the CME 17:00-ET futures settlement boundary. */
+        Integer sessionRollHour,
+        /** Corporate-action / bad-print guard: max single-update mark move in bps of the
+         *  previous mark, per asset class (key = EQUITY/FUTURE/FX/BOND/SWAP, or DEFAULT).
+         *  A bigger jump QUARANTINES the instrument until an operator clears it. 0 disables
+         *  a class. Defaults: EQUITY/DEFAULT 2000 (20%), FUTURE/SWAP 1000, FX/BOND 800. */
+        Map<String, Integer> markJumpBps,
         String lmdbPath,
         long lmdbMaxSizeMb,
         int bufferCapacity) {
 
     public String providerOrDefault() {
         return provider != null && !provider.isBlank() ? provider : "sim";
+    }
+
+    private static final Map<String, Integer> DEFAULT_MARK_JUMP_BPS = Map.of(
+            "EQUITY", 2000, "FUTURE", 1000, "FX", 800, "BOND", 800, "SWAP", 1000, "DEFAULT", 2000);
+
+    /** Jump-guard threshold (bps) for an asset class; null class → DEFAULT. Explicit config
+     *  overrides per key; unlisted classes use the built-in defaults above. */
+    public int markJumpBpsFor(String assetClass) {
+        String key = assetClass != null ? assetClass : "DEFAULT";
+        if (markJumpBps != null && markJumpBps.containsKey(key)) {
+            return markJumpBps.get(key);
+        }
+        if (markJumpBps != null && assetClass == null && markJumpBps.containsKey("DEFAULT")) {
+            return markJumpBps.get("DEFAULT");
+        }
+        return DEFAULT_MARK_JUMP_BPS.getOrDefault(key, DEFAULT_MARK_JUMP_BPS.get("DEFAULT"));
+    }
+
+    public int sessionRollHourOrDefault() {
+        return sessionRollHour != null && sessionRollHour >= 0 && sessionRollHour <= 23
+                ? sessionRollHour : 17;
+    }
+
+    /** Zone for the live-feed session calendar; a bad zone id fails fast at wiring time. */
+    public java.time.ZoneId sessionZoneOrDefault() {
+        return java.time.ZoneId.of(sessionZone != null && !sessionZone.isBlank()
+                ? sessionZone : "America/New_York");
     }
 
     public long yahooRequestSpacingMillisOrDefault() {
@@ -82,6 +129,18 @@ public record TradingCoreProperties(
 
     public boolean simCurveOrDefault() {
         return simCurve == null || simCurve;
+    }
+
+    public boolean correlatedSimOrDefault() {
+        return simEngine == null || simEngine.isBlank() || "correlated".equalsIgnoreCase(simEngine);
+    }
+
+    public String simCalibrationPathOrNull() {
+        return simCalibrationPath != null && !simCalibrationPath.isBlank() ? simCalibrationPath : null;
+    }
+
+    public double simSecondsPerDayOrDefault() {
+        return simSecondsPerDay != null && simSecondsPerDay > 0 ? simSecondsPerDay : 120.0;
     }
 
     /** Annualized vol for one instrument: override, else default, else 20%. */

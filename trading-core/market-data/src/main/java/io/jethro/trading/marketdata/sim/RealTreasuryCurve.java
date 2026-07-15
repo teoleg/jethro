@@ -45,8 +45,19 @@ public final class RealTreasuryCurve implements CurveMarkSource {
         // Real curve — levels come from the provider, not a random walk. Nothing to do per tick.
     }
 
+    /** SOFR-proxy node: the REAL Treasury par yield MINUS the stylized swap spread (swap
+     *  rates trade below Treasuries in the negative-swap-spread era) — a stated estimate
+     *  until a live source carries the SOFR curve itself. Floored at 1bp. */
     @Override
     public long rateScaledPercent(int tenorIndex) {
+        double sofr = Math.max(MIN_RATE,
+                zeros[tenorIndex] - CurveMarkSource.TSY_SPREAD_BP[tenorIndex] * 1e-4);
+        return Math.round(sofr * 100 * 1_000_000);
+    }
+
+    /** The REAL Treasury par yield — this source's native data. */
+    @Override
+    public long tsyRateScaledPercent(int tenorIndex) {
         return Math.round(zeros[tenorIndex] * 100 * 1_000_000);
     }
 
@@ -59,6 +70,28 @@ public final class RealTreasuryCurve implements CurveMarkSource {
         }
         double par = (1.0 - discountFactor(years)) / annuity;
         return Math.round(par * 100 * 1_000_000);
+    }
+
+    /** SOFR-proxy rate at any tenor: Treasury par MINUS the spread, linearly interpolated. */
+    private double sofrRate(double tenorYears) {
+        return Math.max(MIN_RATE, zeroRate(tenorYears) - spreadAt(tenorYears));
+    }
+
+    /** The stylized TSY−SOFR spread interpolated across the node grid, as a fraction. */
+    private static double spreadAt(double tenorYears) {
+        if (tenorYears <= TENORS[0]) {
+            return TSY_SPREAD_BP[0] * 1e-4;
+        }
+        if (tenorYears >= TENORS[TENORS.length - 1]) {
+            return TSY_SPREAD_BP[TSY_SPREAD_BP.length - 1] * 1e-4;
+        }
+        for (int i = 1; i < TENORS.length; i++) {
+            if (tenorYears <= TENORS[i]) {
+                double w = (tenorYears - TENORS[i - 1]) / (TENORS[i] - TENORS[i - 1]);
+                return (TSY_SPREAD_BP[i - 1] + w * (TSY_SPREAD_BP[i] - TSY_SPREAD_BP[i - 1])) * 1e-4;
+            }
+        }
+        return TSY_SPREAD_BP[TSY_SPREAD_BP.length - 1] * 1e-4;
     }
 
     /** Zero rate for a tenor in years (fraction), linear-interpolated across the nodes. */
@@ -79,7 +112,8 @@ public final class RealTreasuryCurve implements CurveMarkSource {
         return z[z.length - 1];
     }
 
+    /** Swaps discount on the SOFR-proxy curve, not raw Treasury yields (they're OIS swaps). */
     private double discountFactor(double tenorYears) {
-        return Math.exp(-zeroRate(tenorYears) * tenorYears);
+        return Math.exp(-sofrRate(tenorYears) * tenorYears);
     }
 }

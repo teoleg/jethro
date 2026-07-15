@@ -28,6 +28,9 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0022](0022-llm-hypothesis-layer-bounded-autonomy.md) | LLM hypothesis layer — model synthesises structured theses, quant layer computes, a deterministic risk envelope decides auto-execute vs human approval | Accepted |
 | [0023](0023-yahoo-market-data-adapter.md) | Yahoo Finance market-data adapter — a free, delayed, dev/demo-only provider behind the ADR-0009 port | Accepted |
 | [0024](0024-finnhub-realtime-market-data.md) | Finnhub real-time market data — free WebSocket equities feed, composed with Yahoo/sim for the rest | Accepted |
+| [0025](0025-realistic-execution-cost-model.md) | Realistic simulated execution — spread/fee cost model, working-order matching, cancel/TIF | Proposed |
+| [0026](0026-correlated-factor-market-simulator.md) | High-fidelity market simulator — correlated cross-asset factor model, regime switching, calibrated from real history | Proposed |
+| [0027](0027-evaluation-and-risk-rigor.md) | Evaluation & risk rigor — hypothesis outcome scoring, out-of-sample backtests, VaR + firm breaker, day boundary | Proposed |
 
 ## Lifecycle
 

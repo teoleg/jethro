@@ -30,7 +30,7 @@ import java.util.Map;
  * infinite z — trending, so it signals if above the floor. Deterministic given the same
  * observations (invariant: it proposes, never trades — ADR-0018/0019 downstream).
  */
-public final class MomentumStrategy {
+public final class MomentumStrategy implements Strategy {
 
     private final int lookback;
     private final double thresholdSigmas;
@@ -55,9 +55,10 @@ public final class MomentumStrategy {
     }
 
     /** Feeds one observation snapshot and returns any signals it triggers. */
-    public List<TradeSignal> evaluate(List<Observation> observations) {
+    @Override
+    public List<TradeSignal> evaluate(List<Strategy.Observation> observations) {
         List<TradeSignal> signals = new ArrayList<>();
-        for (Observation obs : observations) {
+        for (Strategy.Observation obs : observations) {
             if (obs.stale()) {
                 continue; // don't trade off a stale mark
             }
@@ -109,7 +110,8 @@ public final class MomentumStrategy {
         return move / (sigma * Math.sqrt(lookback));
     }
 
-    /** One instrument's current mark for the strategy to consider. */
-    public record Observation(String instrumentId, BigDecimal price, boolean stale) {
+    @Override
+    public String name() {
+        return "momentum";
     }
 }
