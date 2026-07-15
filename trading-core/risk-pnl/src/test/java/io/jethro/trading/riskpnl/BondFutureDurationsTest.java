@@ -14,6 +14,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BondFutureDurationsTest {
 
+    /** CME deliverable windows standing in for refdata (V28); the risk-pnl domain code no
+     *  longer hardcodes them. */
+    private static final BondFutureDurations.DeliverableWindowSource WINDOWS = id -> switch (id) {
+        case "ZT" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(1.75, 2.0));
+        case "ZF" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(4.17, 5.25));
+        case "ZN" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(6.5, 10.0));
+        case "ZB" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(15.0, 25.0));
+        default -> java.util.Optional.empty();
+    };
+
     private static final InstrumentRefSource REFS = id -> switch (id) {
         case "ZN" -> Optional.of(new InstrumentRef("ZN", "BOND", "USD",
                 new BigDecimal("1000"), new BigDecimal("6.3")));
@@ -45,11 +55,11 @@ class BondFutureDurationsTest {
         // Flat 4.50% curve < the 6% conversion-factor pivot → ZN's CTD is the SHORT end of
         // its 6.5–10y deliverable window: D(0.045, 6.5) = 5.5818 — not the naive 10y 7.9819,
         // and not the refdata static 6.3.
-        var durations = new BondFutureDurations(curveAt(4.50), REFS);
+        var durations = new BondFutureDurations(curveAt(4.50), REFS, WINDOWS);
         assertEquals(0, new BigDecimal("5.5818").compareTo(durations.modifiedDuration("ZN").orElseThrow()),
                 "CTD at the short window end below the 6% pivot");
 
-        var lowRates = new BondFutureDurations(curveAt(1.50), REFS);
+        var lowRates = new BondFutureDurations(curveAt(1.50), REFS, WINDOWS);
         assertTrue(lowRates.modifiedDuration("ZN").orElseThrow()
                         .compareTo(durations.modifiedDuration("ZN").orElseThrow()) > 0,
                 "duration extends as yields fall");
@@ -59,7 +69,7 @@ class BondFutureDurationsTest {
     void aboveTheSixPercentPivotTheLongEndBecomesCtd() {
         // At 7% yields the conversion-factor advantage flips: ZN's CTD is the 10y end.
         // D(0.07, 10) = (1/0.07)(1 − 1.035⁻²⁰) = 7.1062.
-        var durations = new BondFutureDurations(curveAt(7.00), REFS);
+        var durations = new BondFutureDurations(curveAt(7.00), REFS, WINDOWS);
         assertEquals(0, BondFutureDurations.parBondModifiedDuration(0.07, 10)
                         .compareTo(durations.modifiedDuration("ZN").orElseThrow()),
                 "long window end above the pivot");
@@ -67,7 +77,7 @@ class BondFutureDurationsTest {
 
     @Test
     void fallsBackToRefdataUntilTheCurveQuotes() {
-        var durations = new BondFutureDurations(new TreasuryCurveView(), REFS); // nothing quoted
+        var durations = new BondFutureDurations(new TreasuryCurveView(), REFS, WINDOWS); // nothing quoted
         assertEquals(0, new BigDecimal("6.3").compareTo(durations.modifiedDuration("ZN").orElseThrow()));
         assertTrue(durations.modifiedDuration("ZQ").isEmpty(),
                 "no curve tenor and no refdata duration → empty, never guessed");

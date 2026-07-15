@@ -27,21 +27,27 @@ import java.util.List;
  * calibrated parameter sensitivity summed and scaled to 1bp.
  *
  * <p>Boundary (invariant 1): PV and DV01 become exact {@link BigDecimal} at the money
- * boundary; par rates stay double (market data). Valuations are for the platform's
- * <b>reference swaps</b> — the defined USD_IRS products at a fixed demo coupon and
- * notional (CONVENTION below) — until swaps are tradeable positions.
+ * boundary; par rates stay double (market data). {@link #valueAll} values the platform's
+ * <b>reference swaps</b> — the universe (which swaps, at what coupon/notional) comes from
+ * reference data via {@link ReferenceSwapUniverse}, never a hardcoded list (review GAP-4).
  */
 public final class SwapPricingService {
 
-    /** A reference swap being valued: the defined product + demo economics. */
-    private record ReferenceSwap(String instrumentId, int tenorYears, double fixedRate, double notional) {
+    /** A reference swap being valued: the defined product + its reference economics. */
+    public record ReferenceSwap(String instrumentId, int tenorYears, double fixedRate, double notional) {
     }
 
-    // CONVENTION: demo economics — pay-fixed, $1M notional, coupons near the demo curve
-    // so PV starts small and moves visibly with the curve. Real trades replace these.
-    private static final List<ReferenceSwap> REFERENCE_SWAPS = List.of(
-            new ReferenceSwap("USD_IRS_5Y", 5, 0.0400, 1_000_000),
-            new ReferenceSwap("USD_IRS_10Y", 10, 0.0410, 1_000_000));
+    /**
+     * The platform's reference-swap universe — which swaps exist to value and at what
+     * reference coupon/notional. Sourced from reference data (V27 tenor_years + V28
+     * reference_coupon; $1M/lot V9 convention), never a hardcoded list in code (review
+     * GAP-4). Empty when refdata is absent → {@code valueAll} returns nothing (disclosed).
+     */
+    public interface ReferenceSwapUniverse {
+        List<ReferenceSwap> swaps();
+
+        ReferenceSwapUniverse NONE = List::of;
+    }
 
     private static final ReferenceData REF_DATA = ReferenceData.standard();
 
@@ -51,9 +57,17 @@ public final class SwapPricingService {
     }
 
     private final CurveService curves;
+    private final ReferenceSwapUniverse universe;
 
+    /** No reference universe (tests of the seasoned/shock paths, which pass trades explicitly):
+     *  valueAll() is empty. */
     public SwapPricingService(CurveService curves) {
+        this(curves, ReferenceSwapUniverse.NONE);
+    }
+
+    public SwapPricingService(CurveService curves, ReferenceSwapUniverse universe) {
         this.curves = curves;
+        this.universe = universe != null ? universe : ReferenceSwapUniverse.NONE;
     }
 
     /** Values every reference swap on the current curve; empty until the curve is live. */
@@ -210,7 +224,7 @@ public final class SwapPricingService {
         var baseProvider = ratesProvider(base.get(), valuationDate);
         var shockedProvider = ratesProvider(shocked.get(), valuationDate);
         java.util.Map<String, BigDecimal> out = new java.util.LinkedHashMap<>();
-        for (ReferenceSwap swap : REFERENCE_SWAPS) {
+        for (ReferenceSwap swap : universe.swaps()) {
             ResolvedSwapTrade trade = referenceTrade(swap, valuationDate);
             double pvBase = presentValue(trade, baseProvider);
             double pvShocked = presentValue(trade, shockedProvider);
@@ -222,7 +236,7 @@ public final class SwapPricingService {
     private List<SwapValuation> value(Curve curve, LocalDate valuationDate) {
         ImmutableRatesProvider provider = ratesProvider(curve, valuationDate);
         List<SwapValuation> out = new ArrayList<>();
-        for (ReferenceSwap swap : REFERENCE_SWAPS) {
+        for (ReferenceSwap swap : universe.swaps()) {
             ResolvedSwapTrade trade = referenceTrade(swap, valuationDate);
             double pv = presentValue(trade, provider);
             double parRate = DiscountingSwapProductPricer.DEFAULT.parRate(trade.getProduct(), provider);

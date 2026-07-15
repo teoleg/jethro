@@ -17,6 +17,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BucketedDv01Test {
 
+    /** CME deliverable windows standing in for refdata (V28); the risk-pnl domain code no
+     *  longer hardcodes them. */
+    private static final BondFutureDurations.DeliverableWindowSource WINDOWS = id -> switch (id) {
+        case "ZT" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(1.75, 2.0));
+        case "ZF" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(4.17, 5.25));
+        case "ZN" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(6.5, 10.0));
+        case "ZB" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(15.0, 25.0));
+        default -> java.util.Optional.empty();
+    };
+
     private static final LocalDate VAL_DATE = LocalDate.of(2026, 1, 15);
 
     private static CurveService flatCurve(String pct) {
@@ -102,17 +112,17 @@ class BucketedDv01Test {
     @Test
     void keyTenorFollowsTheCtdWindowAndSixPercentRule() {
         // No curve: known futures default to the SHORT window end (below-6% world), disclosed.
-        var noCurve = BondFutureDurations.staticOnly(id -> java.util.Optional.empty());
+        var noCurve = BondFutureDurations.staticOnly(id -> java.util.Optional.empty(), WINDOWS);
         assertEquals(1.75, noCurve.keyTenorYears("ZT").orElseThrow());
         assertEquals(6.5, noCurve.keyTenorYears("ZN").orElseThrow());
         assertTrue(noCurve.keyTenorYears("ES").isEmpty(), "not a bond future");
 
         // Live curve at 4.5% (< 6%): CTD stays the short end.
-        var live = new BondFutureDurations(tsyCurveAt(4.5), id -> java.util.Optional.empty());
+        var live = new BondFutureDurations(tsyCurveAt(4.5), id -> java.util.Optional.empty(), WINDOWS);
         assertEquals(15.0, live.keyTenorYears("ZB").orElseThrow());
 
         // At 7% (> 6%) the LONG end becomes cheapest-to-deliver.
-        var inverted = new BondFutureDurations(tsyCurveAt(7.0), id -> java.util.Optional.empty());
+        var inverted = new BondFutureDurations(tsyCurveAt(7.0), id -> java.util.Optional.empty(), WINDOWS);
         assertEquals(25.0, inverted.keyTenorYears("ZB").orElseThrow());
     }
 

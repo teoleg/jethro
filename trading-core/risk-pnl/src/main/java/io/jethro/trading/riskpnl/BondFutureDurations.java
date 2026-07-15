@@ -2,7 +2,6 @@ package io.jethro.trading.riskpnl;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -31,30 +30,40 @@ import java.util.Optional;
  */
 public final class BondFutureDurations {
 
-    /** Published CME deliverable maturity windows (years) per future. */
-    record DeliverableWindow(double shortYears, double longYears) {
+    /** Published CME deliverable maturity window (years) for one Treasury future. */
+    public record DeliverableWindow(double shortYears, double longYears) {
     }
 
-    private static final Map<String, DeliverableWindow> DELIVERABLE = Map.of(
-            "ZT", new DeliverableWindow(1.75, 2.0),
-            "ZF", new DeliverableWindow(4.17, 5.25),
-            "ZN", new DeliverableWindow(6.5, 10.0),
-            "ZB", new DeliverableWindow(15.0, 25.0));
+    /**
+     * Source of the CME deliverable windows — reference data (V28), never a hardcoded map
+     * in domain code (review GAP-4). An instrument with no window is not a modelled bond
+     * future here: {@link #keyTenorYears}/{@link #modifiedDuration} fall back to the refdata
+     * static duration, never guess.
+     */
+    public interface DeliverableWindowSource {
+        Optional<DeliverableWindow> windowFor(String instrumentId);
+
+        DeliverableWindowSource NONE = id -> Optional.empty();
+    }
 
     /** CME conversion factors assume a 6% yield: below it the SHORT window end is CTD. */
     private static final double CF_PIVOT_YIELD = 0.06;
 
     private final TreasuryCurveView curve; // nullable → static refdata fallback only
     private final InstrumentRefSource refs;
+    private final DeliverableWindowSource windows;
 
-    public BondFutureDurations(TreasuryCurveView curve, InstrumentRefSource refs) {
+    public BondFutureDurations(TreasuryCurveView curve, InstrumentRefSource refs,
+                               DeliverableWindowSource windows) {
         this.curve = curve;
         this.refs = refs;
+        this.windows = windows != null ? windows : DeliverableWindowSource.NONE;
     }
 
-    /** Static-refdata-only view (no live curve) — the pre-existing behaviour. */
-    public static BondFutureDurations staticOnly(InstrumentRefSource refs) {
-        return new BondFutureDurations(null, refs);
+    /** Static-refdata-only view (no live curve). */
+    public static BondFutureDurations staticOnly(InstrumentRefSource refs,
+                                                 DeliverableWindowSource windows) {
+        return new BondFutureDurations(null, refs, windows);
     }
 
     /**
@@ -85,12 +94,12 @@ public final class BondFutureDurations {
      * DV01 onto the curve's tenor buckets (quant-engine step 4).
      */
     public Optional<Double> keyTenorYears(String instrumentId) {
-        DeliverableWindow window = DELIVERABLE.get(instrumentId);
-        if (window == null) {
+        Optional<DeliverableWindow> window = windows.windowFor(instrumentId);
+        if (window.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(ctd(instrumentId).map(CtdPoint::maturityYears)
-                .orElse(window.shortYears()));
+                .orElse(window.get().shortYears()));
     }
 
     private Optional<BigDecimal> liveDuration(String instrumentId) {
@@ -102,7 +111,7 @@ public final class BondFutureDurations {
     }
 
     private Optional<CtdPoint> ctd(String instrumentId) {
-        DeliverableWindow window = DELIVERABLE.get(instrumentId);
+        DeliverableWindow window = windows.windowFor(instrumentId).orElse(null);
         if (window == null || curve == null) {
             return Optional.empty();
         }

@@ -73,10 +73,36 @@ public class RiskConfig {
 
     /** Live bond-future durations off the Treasury curve (dynamic DV01); static refdata
      *  durations until it quotes. */
+    /** CME deliverable windows from refdata (V28) — no hardcoded window map (GAP-4). */
+    @Bean
+    io.jethro.trading.riskpnl.BondFutureDurations.DeliverableWindowSource deliverableWindowSource(
+            ObjectProvider<RefDataRepository> refData) {
+        RefDataRepository repository = refData.getIfAvailable();
+        if (repository == null) {
+            return io.jethro.trading.riskpnl.BondFutureDurations.DeliverableWindowSource.NONE;
+        }
+        Map<String, String> shortY = repository.instrumentAttribute("deliverable_short_years");
+        Map<String, String> longY = repository.instrumentAttribute("deliverable_long_years");
+        return id -> {
+            String s = shortY.get(id);
+            String l = longY.get(id);
+            if (s == null || l == null) {
+                return Optional.empty();
+            }
+            try {
+                return Optional.of(new io.jethro.trading.riskpnl.BondFutureDurations.DeliverableWindow(
+                        Double.parseDouble(s), Double.parseDouble(l)));
+            } catch (NumberFormatException e) {
+                return Optional.empty(); // malformed refdata — skip, never guess
+            }
+        };
+    }
+
     @Bean
     io.jethro.trading.riskpnl.BondFutureDurations bondFutureDurations(
-            io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView, InstrumentRefSource refs) {
-        return new io.jethro.trading.riskpnl.BondFutureDurations(treasuryCurveView, refs);
+            io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView, InstrumentRefSource refs,
+            io.jethro.trading.riskpnl.BondFutureDurations.DeliverableWindowSource windows) {
+        return new io.jethro.trading.riskpnl.BondFutureDurations(treasuryCurveView, refs, windows);
     }
 
     /** Live SOFR curve from streamed tenor quotes (quant-engine phase 4). */
@@ -91,10 +117,40 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.TreasuryCurveView();
     }
 
-    /** Strata swap valuation (PV/DV01/par) on the live curve. */
+    /** Strata swap valuation (PV/DV01/par) on the live curve. The reference-swap universe
+     *  (which swaps, at what coupon) comes from refdata (V27 tenor_years + V28
+     *  reference_coupon), never a hardcoded list (GAP-4). */
     @Bean
-    io.jethro.trading.riskpnl.SwapPricingService swapPricingService(CurveService curveService) {
-        return new io.jethro.trading.riskpnl.SwapPricingService(curveService);
+    io.jethro.trading.riskpnl.SwapPricingService swapPricingService(CurveService curveService,
+                                                                    ObjectProvider<RefDataRepository> refData) {
+        RefDataRepository repo = refData.getIfAvailable();
+        var universe = repo != null ? referenceSwapUniverse(repo)
+                : io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwapUniverse.NONE;
+        return new io.jethro.trading.riskpnl.SwapPricingService(curveService, universe);
+    }
+
+    /** Reference swaps = instruments carrying BOTH tenor_years and reference_coupon; $1M/lot
+     *  (V9 convention). Snapshotted at wiring — the defined universe is static. */
+    private static io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwapUniverse referenceSwapUniverse(
+            RefDataRepository repo) {
+        Map<String, String> tenors = repo.instrumentAttribute("tenor_years");
+        Map<String, String> coupons = repo.instrumentAttribute("reference_coupon");
+        java.util.List<io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwap> swaps = new java.util.ArrayList<>();
+        coupons.forEach((id, coupon) -> {
+            String tenor = tenors.get(id);
+            if (tenor == null) {
+                return;
+            }
+            try {
+                swaps.add(new io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwap(
+                        id, Integer.parseInt(tenor.trim()), Double.parseDouble(coupon.trim()), 1_000_000));
+            } catch (NumberFormatException ignored) {
+                // malformed refdata row — skip, never guess
+            }
+        });
+        swaps.sort(java.util.Comparator.comparing(
+                io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwap::instrumentId));
+        return () -> swaps;
     }
 
     /** Deterministic scenario/stress over live positions (quant-engine step 2). Rates legs

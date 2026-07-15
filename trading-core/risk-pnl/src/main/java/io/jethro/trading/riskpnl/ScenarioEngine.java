@@ -111,7 +111,9 @@ public final class ScenarioEngine {
     /** @param swaps when non-null, swap scenario P&amp;L is FULL revaluation on the shocked curve
      *               (captures convexity), not first-order DV01. */
     public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps) {
-        this(refs, swaps, BondFutureDurations.staticOnly(refs));
+        // No deliverable windows here (this convenience path has no live curve anyway → the
+        // bond leg uses refdata static duration); the app wires the full curve-aware durations.
+        this(refs, swaps, BondFutureDurations.staticOnly(refs, BondFutureDurations.DeliverableWindowSource.NONE));
     }
 
     /** @param durations bond-future duration source — live par-bond duration at the current

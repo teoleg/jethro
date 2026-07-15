@@ -101,6 +101,18 @@ hardcoded maps. The fix is one small refdata schema addition plus reading those 
 where the maps are today — after which the maps delete. This is exactly the principle you
 stated: instrument attributes must come from the refdata source, not code.
 
+**RESOLVED (commits after this review).** All of the above now come from reference data:
+- `display_name` (V27) → `InstrumentNameSource`; the 16-entry name map deleted.
+- `tenor_years` (V27) → `SwapTenorSource`; both duplicated swap-tenor maps deleted.
+- `deliverable_short/long_years` (V28) → `BondFutureDurations.DeliverableWindowSource`;
+  the CME window map deleted.
+- `reference_coupon` (V28) + `tenor_years` → `SwapPricingService.ReferenceSwapUniverse`;
+  the hardcoded REFERENCE_SWAPS list deleted.
+Each source snapshots the refdata attribute at wiring time and falls back to skip/empty
+when refdata is absent (never guesses). `SimIndicatorsSource.TILES` (display curation) and
+the `HypothesisGenerator` few-shot "AAPL" (a prompt example) remain — they are presentation
+/ prompt scaffolding, not instrument data feeding risk, and are POLISH not GAP.
+
 ---
 
 ## Math / trading lens — what still blocks *real* (real-money) use

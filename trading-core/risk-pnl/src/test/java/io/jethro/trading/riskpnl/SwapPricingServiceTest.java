@@ -16,6 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class SwapPricingServiceTest {
 
+    /** Reference-swap universe standing in for refdata (V27/V28); SwapPricingService no longer
+     *  hardcodes it. */
+    private static final SwapPricingService.ReferenceSwapUniverse UNIVERSE = () -> java.util.List.of(
+            new SwapPricingService.ReferenceSwap("USD_IRS_5Y", 5, 0.0400, 1_000_000),
+            new SwapPricingService.ReferenceSwap("USD_IRS_10Y", 10, 0.0410, 1_000_000));
+
     private static final LocalDate VAL_DATE = LocalDate.of(2026, 1, 15);
 
     private CurveService flatCurve(String pct) {
@@ -28,13 +34,13 @@ class SwapPricingServiceTest {
 
     @Test
     void emptyUntilTheCurveIsLive() {
-        assertTrue(new SwapPricingService(new CurveService()).valueAll(VAL_DATE).isEmpty());
+        assertTrue(new SwapPricingService(new CurveService(), UNIVERSE).valueAll(VAL_DATE).isEmpty());
     }
 
     @Test
     void valuesBothReferenceSwapsWithSaneParRates() {
         List<SwapPricingService.SwapValuation> vals =
-                new SwapPricingService(flatCurve("4.00")).valueAll(VAL_DATE);
+                new SwapPricingService(flatCurve("4.00"), UNIVERSE).valueAll(VAL_DATE);
         assertEquals(2, vals.size());
         for (var v : vals) {
             // On a flat 4% continuous zero curve the OIS par rate is ~4.0-4.2% (annual comp).
@@ -45,7 +51,7 @@ class SwapPricingServiceTest {
 
     @Test
     void swapStruckAtParHasNearZeroPvAndRealDv01() {
-        var service = new SwapPricingService(flatCurve("4.00"));
+        var service = new SwapPricingService(flatCurve("4.00"), UNIVERSE);
         var fiveY = service.valueAll(VAL_DATE).get(0);
 
         // The 5Y reference swap is struck at 4.00% fixed; measure PV against how far the
@@ -62,9 +68,9 @@ class SwapPricingServiceTest {
 
     @Test
     void pvRisesWhenTheCurveRisesForAPayFixedSwap() {
-        double pvLow = new SwapPricingService(flatCurve("4.00")).valueAll(VAL_DATE).get(0)
+        double pvLow = new SwapPricingService(flatCurve("4.00"), UNIVERSE).valueAll(VAL_DATE).get(0)
                 .presentValue().doubleValue();
-        double pvHigh = new SwapPricingService(flatCurve("4.50")).valueAll(VAL_DATE).get(0)
+        double pvHigh = new SwapPricingService(flatCurve("4.50"), UNIVERSE).valueAll(VAL_DATE).get(0)
                 .presentValue().doubleValue();
         assertTrue(pvHigh > pvLow + 1_000,
                 "pay-fixed PV must rise materially with rates: " + pvLow + " -> " + pvHigh);
