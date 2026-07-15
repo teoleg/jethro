@@ -140,9 +140,9 @@ jethro/
 │   ├── ui-gateway/
 │   └── finops/
 ├── app/                     # single-JVM assembly of all modules (ADR-0015)
-├── deploy/                  # single-node EC2 deploy: prod compose, Caddy, SSM rollout + quickstart (ADR-0013)
-├── infra/                   # AWS provisioning (ADR-0007/0013): CDK dev-node stack + Packer baked-AMI path
-│   └── packer/              # bake the full stack into an x86 AMI; GitHub 'Bake AMI' spawns the instance
+├── infra/packer/            # DEFAULT deploy (ADR-0013): bake the full stack into an x86 AMI; 'Bake AMI' spawns it
+├── infra/                   # AWS CDK (ADR-0007/0013): cost guardrails ($100 budget, stop-when-idle), IAM, EIP
+├── deploy/                  # alternatives: quickstart (manual) + managed compose rollout with Caddy TLS
 └── docker-compose.yml       # local topology
 ```
 

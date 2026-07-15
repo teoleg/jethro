@@ -103,10 +103,10 @@ systemd unit restores the stack across the stop-when-idle reboots. **CDK codific
 one-time AWS setup (`infra/`, build-order step 9) remains the tracked follow-up** — the
 `deploy/README.md` runbook is the interim.
 
-## Implementation note — baked-AMI path (2026-07-15)
+## Implementation note — baked-AMI path is the DEFAULT (2026-07-15)
 
-A second, immutable deploy path sits alongside the compose-rollout one (both target the same
-single-node ADR-0013 shape; pick per taste):
+The **default deploy is the immutable baked AMI**; the compose-rollout and manual quickstart
+are alternatives (all target the same single-node ADR-0013 shape):
 
 - **Packer** (`infra/packer/jethro.pkr.hcl` + `provision.sh`) bakes the whole stack — the
   same `docker compose` structure run on the Pi, but x86-64 — into an Ubuntu AMI, with the
@@ -119,8 +119,11 @@ single-node ADR-0013 shape; pick per taste):
   previous instance — classic immutable rollout.
 
 Auth for this path is IAM-user access keys as repo secrets (simplest to set up from mobile);
-the OIDC deploy role from the CDK stack is the hardening alternative. Cost control is the
-same t3a.xlarge + stop-when-idle + the single account-wide $100 budget. TLS/auth are NOT in
-the AMI (`:8080` is IP-locked via the security group); the Caddy edge in
-`deploy/docker-compose.prod.yml` is the productionised alternative when a public URL is
-wanted. See `infra/packer/README.md`.
+the OIDC deploy role from the CDK stack is the hardening alternative. Cost control is
+t3a.xlarge + stop-when-idle + the single account-wide $100 budget (the budget/schedule live
+in the CDK stack and can be deployed on their own). TLS/auth are NOT in the AMI (`:8080` is
+IP-locked via the security group); the Caddy edge in `deploy/docker-compose.prod.yml` is the
+productionised alternative when a public authenticated URL is wanted.
+
+`infra/packer/README.md` is the runbook; `deploy/README.md` is the entry point that steers
+here and lists the alternatives.

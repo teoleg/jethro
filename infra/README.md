@@ -1,5 +1,11 @@
 # infra — AWS CDK (Java) for the single-node dev stack
 
+> **The default deploy is the baked AMI → [`packer/README.md`](packer/README.md).** This CDK
+> stack is optional: use it for the **cost guardrails** ($100 account budget + stop-when-idle
+> schedule) and, if you want them, the ECR/OIDC/instance pieces the *managed compose-rollout*
+> alternative uses. You don't need it for the baked-AMI path.
+
+
 Codifies the `deploy/README.md` runbook (ADR-0007/0013). One CDK app, one stack
 (`JethroDev`): the EC2 host + its IAM/networking, the ECR repo, the GitHub OIDC deploy
 role, stop-when-idle schedules, an optional budget alarm, and the non-secret SSM
