@@ -1,0 +1,21 @@
+# Caddy fronts the whole stack (ADR-0013): automatic TLS + HTTP basic auth in front of the
+# ui-gateway, which itself has no authentication yet (review finding #5 — the ADR-0015
+# order-JVM extraction is the gate before real auth). One credential guards everything.
+#
+# JETHRO_DOMAIN must resolve to the node's Elastic IP (a real domain, or a
+# <ip-with-dashes>.nip.io for a quick cert without owning DNS). The bcrypt hash comes from
+# `docker run --rm caddy:2.8-alpine caddy hash-password --plaintext 'yourpassword'`.
+{$JETHRO_DOMAIN} {
+	encode zstd gzip
+
+	basic_auth {
+		{$JETHRO_BASIC_AUTH_USER} {$JETHRO_BASIC_AUTH_HASH}
+	}
+
+	reverse_proxy app:8080
+
+	log {
+		output stdout
+		format console
+	}
+}

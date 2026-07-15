@@ -77,3 +77,28 @@ IAM/tagging/CDK path the rest of the platform uses (ADR-0007, 0011). Rejected.
 - Follow-ups: mark ADR-0005/0007 status lines "amended for dev by ADR-0013"; EventBridge
   stop/start schedule + nightly pg_dump-to-S3 in the first CDK stack (with the budget
   backstop, ADR-0011); running-resources panel in the Costs view shows the node state.
+
+## Implementation note — CI/CD deploy to the single node (2026-07-15, task #33)
+
+The dev-node shape is now executable from `deploy/` + a GitHub Actions workflow, moving off
+the Pi. Two refinements to the decision above, both from things learned since:
+
+- **Instance size**: `t4g.large` (2 vCPU/8GB) is too tight once Ollama shares the box with
+  Redpanda + Postgres + the JVM — the same 2-vCPU squeeze that flakes CI's Ollama. Default
+  is now `m6i.xlarge` (4 vCPU/16GB, Ubuntu x86-64; Graviton `m7g.xlarge` is a cheaper
+  drop-in since all images are multi-arch). Architecture parity with the Pi is no longer a
+  goal — any fitting Linux image is fine.
+- **Access/auth**: the app still has no authentication (review finding #5), so the public
+  edge is **Caddy with automatic TLS + HTTP basic auth** in front of `ui-gateway`; that one
+  credential is the gate until the ADR-0015 order-JVM extraction enables real auth. The
+  SG/owner-IP-allowlist idea is superseded by "one password over TLS".
+
+Deploy mechanism (new, not in the original decision): **GitHub Actions → build the app
+image → push to ECR → roll out via SSM Run Command**. No SSH keys and no static AWS
+credentials (OIDC federation); the node is reached only through SSM. Secrets stay in SSM
+Parameter Store and are written into `deploy/.env` on the node at rollout, never committed.
+Every component (redpanda/postgres/ollama/app/caddy) comes up from `deploy/
+docker-compose.prod.yml` and is individually targetable from the workflow. A `jethro.service`
+systemd unit restores the stack across the stop-when-idle reboots. **CDK codification of the
+one-time AWS setup (`infra/`, build-order step 9) remains the tracked follow-up** — the
+`deploy/README.md` runbook is the interim.

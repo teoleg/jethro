@@ -1,0 +1,98 @@
+name: Deploy
+
+# Manual, deliberate deploys (ADR-0013): pick the ref and which component(s) to roll out.
+# Builds the app image, pushes it to ECR, and rolls out on the single EC2 node via SSM Run
+# Command — no SSH keys, IAM-gated, GitHub authenticates to AWS via OIDC (no static creds).
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Which component(s) to deploy
+        type: choice
+        default: all
+        options: [all, app, ollama, redpanda, postgres, caddy]
+      ref:
+        description: Git ref to deploy (branch, tag or SHA)
+        type: string
+        default: claude/new-session-smb8v6
+
+concurrency:
+  group: deploy-prod          # never two overlapping deploys to the one node
+  cancel-in-progress: false
+
+permissions:
+  id-token: write             # OIDC federation to AWS
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}      # e.g. jethro-app
+  EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}    # i-0abc...
+  SSM_PREFIX: ${{ vars.SSM_PREFIX }}              # e.g. /jethro/prod
+
+jobs:
+  deploy:
+    name: Build + deploy (${{ inputs.component }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve image tag
+        id: img
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # The app is the only built component; infra images (redpanda/postgres/ollama/caddy)
+      # are upstream and pulled directly on the node. Build+push only when the app is in scope.
+      - name: Build and push app image
+        if: ${{ inputs.component == 'all' || inputs.component == 'app' }}
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/${ECR_REPOSITORY}:${{ steps.img.outputs.sha }}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "APP_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      # For infra-only deploys the app image isn't rebuilt; point at the last-deployed tag so
+      # compose can still resolve ${APP_IMAGE} (remote-deploy only touches the named component).
+      - name: Resolve app image for infra-only deploy
+        if: ${{ inputs.component != 'all' && inputs.component != 'app' }}
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: echo "APP_IMAGE=$REGISTRY/${ECR_REPOSITORY}:${{ steps.img.outputs.sha }}" >> "$GITHUB_ENV"
+
+      - name: Roll out on the node via SSM
+        run: |
+          CMD="cd /opt/jethro \
+            && git fetch origin '${{ inputs.ref }}' \
+            && git checkout -f FETCH_HEAD \
+            && AWS_REGION='${AWS_REGION}' JETHRO_SSM_PREFIX='${SSM_PREFIX}' \
+               bash deploy/remote-deploy.sh '${APP_IMAGE}' '${{ inputs.component }}'"
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${{ inputs.component }} @ ${{ steps.img.outputs.sha }}" \
+            --parameters "commands=[\"$CMD\"]" \
+            --cloud-watch-output-config CloudWatchOutputEnabled=true \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $CMD_ID"
+          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" || true
+          STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query Status --output text)
+          echo "----- remote stdout -----"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query StandardOutputContent --output text
+          echo "----- remote stderr -----"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$EC2_INSTANCE_ID" --query StandardErrorContent --output text
+          echo "SSM status: $STATUS"
+          [ "$STATUS" = "Success" ]
