@@ -77,7 +77,7 @@ flowchart LR
 | `order` | Order lifecycle; simulated execution until a broker is wired | 0003, 0008, 0012 | **hard: before any real-money broker connection** |
 | `reference-data` | Instruments, symbology, book tree | 0008 | on need |
 | `ui-gateway` | BFF: REST snapshots + the static UI pages (polled; streaming deferred with ADR-0028) | 0006, 0028 | streaming fan-out load |
-| `finops` | Cost telemetry: Cost Explorer polling, real-time LLM token pricing from `ai.decisions`, budget alerts | 0011 | on need |
+| `finops` | PLANNED, not built (empty shell): cost telemetry — Cost Explorer polling, LLM token pricing from `ai.decisions`, budget alerts | 0011 | on need |
 
 Module isolation is build-enforced (Gradle constraints + ArchUnit): modules depend only
 on `common-domain`, `common-messaging`, and published interfaces — never internals.
@@ -140,7 +140,7 @@ jethro/
 │   ├── ui-gateway/
 │   └── finops/
 ├── app/                     # single-JVM assembly of all modules (ADR-0015)
-├── infra/                   # AWS CDK in Java (ADR-0007/0013)
+├── infra/                   # AWS CDK in Java (ADR-0007/0013) — PLANNED, not created yet
 └── docker-compose.yml       # local topology
 ```
 
