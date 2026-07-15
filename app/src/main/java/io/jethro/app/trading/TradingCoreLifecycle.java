@@ -40,6 +40,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private final RefDataRepository refData; // nullable: needed to map yahoo symbols
     private final FinnhubRateLimiter rateLimiter; // shared Finnhub REST budget (news + curve)
     private final io.jethro.app.order.ExecutionProperties executionCosts; // sim quote spreads (ADR-0025)
+    private final io.jethro.trading.runtime.MarkCache.QuarantineStore quarantineStore; // durable freeze (GAP-2)
     private volatile TradingCoreRuntime runtime;
     private volatile MarketDataAdapter adapter;
     private volatile java.util.function.Supplier<String> regimeSource; // non-null only in sim mode
@@ -58,10 +59,20 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     public TradingCoreLifecycle(TradingCoreProperties properties, RefDataRepository refData,
                                 FinnhubRateLimiter rateLimiter,
                                 io.jethro.app.order.ExecutionProperties executionCosts) {
+        this(properties, refData, rateLimiter, executionCosts,
+                io.jethro.trading.runtime.MarkCache.QuarantineStore.NONE);
+    }
+
+    public TradingCoreLifecycle(TradingCoreProperties properties, RefDataRepository refData,
+                                FinnhubRateLimiter rateLimiter,
+                                io.jethro.app.order.ExecutionProperties executionCosts,
+                                io.jethro.trading.runtime.MarkCache.QuarantineStore quarantineStore) {
         this.properties = properties;
         this.refData = refData;
         this.rateLimiter = rateLimiter;
         this.executionCosts = executionCosts;
+        this.quarantineStore = quarantineStore != null
+                ? quarantineStore : io.jethro.trading.runtime.MarkCache.QuarantineStore.NONE;
     }
 
     @Override
@@ -71,7 +82,8 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         var store = LmdbStateStore.open(
                 Path.of(properties.lmdbPath()),
                 properties.lmdbMaxSizeMb() * 1024 * 1024);
-        var rt = new TradingCoreRuntime(adapter, properties.bufferCapacity(), store, jumpThresholds());
+        var rt = new TradingCoreRuntime(adapter, properties.bufferCapacity(), store,
+                jumpThresholds(), quarantineStore);
         rt.start();
         runtime = rt;
 

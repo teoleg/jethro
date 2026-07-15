@@ -24,11 +24,19 @@ public class TradingCoreConfig {
     TradingCoreLifecycle tradingCoreLifecycle(TradingCoreProperties properties,
                                               ObjectProvider<RefDataRepository> refData,
                                               FinnhubRateLimiter rateLimiter,
-                                              ObjectProvider<io.jethro.app.order.ExecutionProperties> executionCosts) {
+                                              ObjectProvider<io.jethro.app.order.ExecutionProperties> executionCosts,
+                                              ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbc) {
         // RefData present only when persistence is on; needed to map yahoo symbols (ADR-0023).
         // Execution costs feed the sim's quote synthesis (ADR-0025); defaults when order module is off.
+        // A durable quarantine store when the DB is present, so a corporate-action freeze survives
+        // a restart (GAP-2); NONE (memory-only, pre-existing behaviour) without persistence.
+        var template = jdbc.getIfAvailable();
+        io.jethro.trading.runtime.MarkCache.QuarantineStore quarantine = template != null
+                ? new JdbcMarkQuarantineStore(template)
+                : io.jethro.trading.runtime.MarkCache.QuarantineStore.NONE;
         return new TradingCoreLifecycle(properties, refData.getIfAvailable(), rateLimiter,
-                executionCosts.getIfAvailable(() -> new io.jethro.app.order.ExecutionProperties(null, null, null)));
+                executionCosts.getIfAvailable(() -> new io.jethro.app.order.ExecutionProperties(null, null, null)),
+                quarantine);
     }
 
     /** Quarantined-mark ALERT cards (corporate action / bad print) — deterministic floor. */
