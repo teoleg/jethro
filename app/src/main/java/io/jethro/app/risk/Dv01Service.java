@@ -59,11 +59,7 @@ public final class Dv01Service {
                            String valuationDay, boolean curveLive, int skipped) {
     }
 
-    /** Tenor in years per tradeable swap (V7/V9 defined products) — shared by every
-     *  consumer that rebuilds a trade's schedule (DV01, scenarios, VaR). */
-    public static final Map<String, Integer> SWAP_TENOR_YEARS =
-            Map.of("USD_IRS_5Y", 5, "USD_IRS_10Y", 10);
-    /** V9 quoting convention: 1 lot = $1M notional. */
+    /** V9 quoting convention: 1 lot = $1M notional (a market convention, not per-name data). */
     public static final double NOTIONAL_PER_LOT = 1_000_000.0;
     private static final int SCALE = io.jethro.domain.Decimals.PNL_SCALE;
 
@@ -71,15 +67,17 @@ public final class Dv01Service {
     private final SwapPricingService pricer;
     private final BondFutureDurations durations;
     private final SwapTradeSource swapTrades;
+    private final SwapTenorSource tenors; // swap tenor from refdata (GAP-4)
     private final Supplier<LocalDate> sessionDay;
 
     public Dv01Service(RiskProjection projection, SwapPricingService pricer,
                        BondFutureDurations durations, SwapTradeSource swapTrades,
-                       Supplier<LocalDate> sessionDay) {
+                       SwapTenorSource tenors, Supplier<LocalDate> sessionDay) {
         this.projection = projection;
         this.pricer = pricer;
         this.durations = durations;
         this.swapTrades = swapTrades;
+        this.tenors = tenors != null ? tenors : SwapTenorSource.NONE;
         this.sessionDay = sessionDay;
     }
 
@@ -96,7 +94,7 @@ public final class Dv01Service {
 
         // Swap legs: per-trade Strata bucketed sensitivity (empty ⇒ curve not live yet).
         for (SwapTradeSource.Trade trade : swapTrades.trades()) {
-            Integer tenor = SWAP_TENOR_YEARS.get(trade.instrument());
+            Integer tenor = tenors.tenorYears(trade.instrument()).orElse(null);
             if (tenor == null) {
                 skipped++; // unknown product — never guess a schedule
                 continue;

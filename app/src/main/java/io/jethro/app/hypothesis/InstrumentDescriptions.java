@@ -1,44 +1,27 @@
 package io.jethro.app.hypothesis;
 
-import java.util.Map;
-
 /**
- * Short human descriptions of the demo instruments, so the LLM knows WHAT a ticker is and stops
- * inventing an issuer for it (ADR-0022) — a future like {@code ZN} is a 10Y Treasury future, not a
- * stock called "Zapata Resources"; {@code USD_IRS_10Y} is a swap, not the 10Y Treasury. Reference
- * data carries no name field, so these are curated demo labels; anything not listed falls back to a
- * generic phrase from its asset class. Descriptive text only — never a number into sizing/risk
- * (invariant 1), the model just reads it.
+ * Turns an instrument's reference-data {@code display_name} (V27) into the phrase the
+ * narration model reads, so it reasons about the real instrument instead of inventing an
+ * issuer for the ticker (ADR-0022) — a future like {@code ZN} is a 10Y Treasury future,
+ * not a stock called "Zapata Resources". The names come from REFERENCE DATA, never a
+ * hardcoded per-name map (review GAP-4); an instrument with no {@code display_name} row
+ * falls back to a GENERIC asset-class phrase (a generic phrase, not a specific security).
+ * Descriptive text only — never a number into sizing/risk (invariant 1).
  */
 public final class InstrumentDescriptions {
 
     private InstrumentDescriptions() {
     }
 
-    // Terse on purpose — every token is prompt the model must eval (slow on a small box).
-    private static final Map<String, String> CURATED = Map.ofEntries(
-            Map.entry("AAPL", "Apple stock"),
-            Map.entry("MSFT", "Microsoft stock"),
-            Map.entry("AMZN", "Amazon stock"),
-            Map.entry("GOOG", "Alphabet (Google) stock"),
-            Map.entry("SAP", "SAP SE stock (EUR)"),
-            Map.entry("ES", "S&P 500 future"),
-            Map.entry("NQ", "Nasdaq-100 future"),
-            Map.entry("ZT", "2Y US Treasury future (rates)"),
-            Map.entry("ZF", "5Y US Treasury future (rates)"),
-            Map.entry("ZN", "10Y US Treasury future (rates)"),
-            Map.entry("ZB", "30Y US Treasury future (rates)"),
-            Map.entry("USD_IRS_5Y", "5Y USD rate swap (pay-fixed)"),
-            Map.entry("USD_IRS_10Y", "10Y USD rate swap (pay-fixed)"),
-            Map.entry("EURUSD", "EUR/USD FX"),
-            Map.entry("GBPUSD", "GBP/USD FX"),
-            Map.entry("USDJPY", "USD/JPY FX"));
-
-    /** A description for the model, or a generic asset-class phrase, or null if nothing is known. */
-    public static String of(String instrumentId, String assetClass) {
-        String curated = CURATED.get(instrumentId);
-        if (curated != null) {
-            return curated;
+    /**
+     * @param displayName the instrument's refdata {@code display_name}, or null if it has none.
+     * @param assetClass  the instrument's asset class, for the generic fallback.
+     * @return the refdata name when present, else a generic asset-class phrase, else null.
+     */
+    public static String of(String displayName, String assetClass) {
+        if (displayName != null && !displayName.isBlank()) {
+            return displayName;
         }
         if (assetClass == null) {
             return null;

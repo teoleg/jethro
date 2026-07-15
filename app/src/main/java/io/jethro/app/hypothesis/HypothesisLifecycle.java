@@ -55,6 +55,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private final TradingCoreLifecycle tradingCore;
     private final RiskProjection risk;
     private final InstrumentRefSource refs;
+    private final InstrumentNameSource names; // refdata display names (GAP-4)
     private final AttentionFeed feed;
     private final SseBroadcaster sse;
     private final HypothesisProperties props;
@@ -83,7 +84,8 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                                InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
                                HypothesisProperties props, OrderService orderService,
                                HypothesisRecordStore recordStore,
-                               io.jethro.app.risk.TradingHaltSwitch halt) {
+                               io.jethro.app.risk.TradingHaltSwitch halt,
+                               InstrumentNameSource names) {
         this.generator = generator;
         this.evaluator = evaluator;
         this.narrativeFeed = narrativeFeed;
@@ -98,6 +100,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         this.feed = feed;
         this.sse = sse;
         this.props = props;
+        this.names = names != null ? names : InstrumentNameSource.NONE;
     }
 
     /** The hypothesis event ledger, newest first — every distinct thesis the model proposed,
@@ -217,7 +220,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 // about the real instrument instead of inventing an issuer for the ticker.
                 markViews.add(new HypothesisContext.MarkView(
                         mark.instrumentId(), assetClass, ref.get().currency(),
-                        InstrumentDescriptions.of(mark.instrumentId(), assetClass),
+                        InstrumentDescriptions.of(names.displayName(mark.instrumentId()), assetClass),
                         mark.price().toPlainString(), mark.stale()));
                 if ("EQUITY".equals(assetClass) || "FUTURE".equals(assetClass)) {
                     singleNames.add(mark.instrumentId());

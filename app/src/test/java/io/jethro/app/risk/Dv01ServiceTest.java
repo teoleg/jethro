@@ -35,6 +35,13 @@ class Dv01ServiceTest {
                     new BigDecimal("1000"), new BigDecimal("6.3")))
             : Optional.empty();
 
+    /** Stands in for the refdata tenor_years attribute (V27); USD_IRS_7Y is deliberately unknown. */
+    private static final SwapTenorSource TENORS = id -> switch (id) {
+        case "USD_IRS_5Y" -> Optional.of(5);
+        case "USD_IRS_10Y" -> Optional.of(10);
+        default -> Optional.empty();
+    };
+
     private static CurveService flatSofr(String pct) {
         var s = new CurveService();
         for (String id : List.of("USD.SOFR.1Y", "USD.SOFR.2Y", "USD.SOFR.5Y", "USD.SOFR.10Y", "USD.SOFR.30Y")) {
@@ -57,7 +64,7 @@ class Dv01ServiceTest {
 
         var service = new Dv01Service(projection, new SwapPricingService(new CurveService()),
                 BondFutureDurations.staticOnly(REFS), Dv01Service.SwapTradeSource.NONE,
-                () -> VAL_DATE);
+                TENORS, () -> VAL_DATE);
         var view = service.view(1_000);
 
         assertEquals(List.of("1Y", "2Y", "5Y", "10Y", "30Y"), view.tenors());
@@ -79,7 +86,7 @@ class Dv01ServiceTest {
                         new BigDecimal("2"), new BigDecimal("4.00"), VAL_DATE));
         var pricer = new SwapPricingService(flatSofr("4.00"));
         var service = new Dv01Service(new RiskProjection(REFS), pricer,
-                BondFutureDurations.staticOnly(REFS), trades, () -> VAL_DATE);
+                BondFutureDurations.staticOnly(REFS), trades, TENORS, () -> VAL_DATE);
 
         var view = service.view(1_000);
         assertTrue(view.curveLive());
@@ -103,7 +110,7 @@ class Dv01ServiceTest {
                         BigDecimal.ONE, new BigDecimal("4.00"), VAL_DATE));
         var service = new Dv01Service(new RiskProjection(REFS),
                 new SwapPricingService(new CurveService()),  // nothing quoted
-                BondFutureDurations.staticOnly(REFS), trades, () -> VAL_DATE);
+                BondFutureDurations.staticOnly(REFS), trades, TENORS, () -> VAL_DATE);
         assertTrue(!service.view(1_000).curveLive(), "swap legs unvalued must be disclosed");
     }
 
@@ -117,7 +124,7 @@ class Dv01ServiceTest {
                 Side.BUY, new BigDecimal("2"), new BigDecimal("110"), Instant.EPOCH));
         // no mark for ZN
         var service = new Dv01Service(projection, new SwapPricingService(flatSofr("4.00")),
-                BondFutureDurations.staticOnly(REFS), trades, () -> VAL_DATE);
+                BondFutureDurations.staticOnly(REFS), trades, TENORS, () -> VAL_DATE);
         assertEquals(2, service.view(1_000).skipped(), "never silently dropped");
     }
 

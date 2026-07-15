@@ -54,6 +54,7 @@ public final class VarService {
     private final InstrumentRefSource refs;
     private final SwapPricingService pricer; // nullable → swaps stay unmeasured (disclosed)
     private final Dv01Service.SwapTradeSource swapTrades;
+    private final SwapTenorSource tenors; // swap tenor from refdata (GAP-4)
     private final Supplier<LocalDate> sessionDay;
 
     private final java.util.concurrent.atomic.AtomicReference<Map.Entry<Long, Optional<CovMath.Covariance>>>
@@ -64,17 +65,18 @@ public final class VarService {
     /** Without swap pricing: swap positions surface in skippedExposure (pre-existing shape). */
     public VarService(JdbcTemplate jdbc, RiskProjection projection) {
         this(jdbc, projection, id -> Optional.empty(), null,
-                Dv01Service.SwapTradeSource.NONE, LocalDate::now);
+                Dv01Service.SwapTradeSource.NONE, SwapTenorSource.NONE, LocalDate::now);
     }
 
     public VarService(JdbcTemplate jdbc, RiskProjection projection, InstrumentRefSource refs,
                       SwapPricingService pricer, Dv01Service.SwapTradeSource swapTrades,
-                      Supplier<LocalDate> sessionDay) {
+                      SwapTenorSource tenors, Supplier<LocalDate> sessionDay) {
         this.jdbc = jdbc;
         this.projection = projection;
         this.refs = refs;
         this.pricer = pricer;
         this.swapTrades = swapTrades;
+        this.tenors = tenors != null ? tenors : SwapTenorSource.NONE;
         this.sessionDay = sessionDay;
     }
 
@@ -164,7 +166,7 @@ public final class VarService {
         Map<String, BigDecimal> totals = new LinkedHashMap<>();
         LocalDate valuation = sessionDay.get();
         for (var t : swapTrades.trades()) {
-            Integer tenor = Dv01Service.SWAP_TENOR_YEARS.get(t.instrument());
+            Integer tenor = tenors.tenorYears(t.instrument()).orElse(null);
             if (tenor == null) {
                 continue; // unknown product — its position falls back to unmeasured
             }

@@ -110,7 +110,8 @@ public class HypothesisConfig {
                                             InstrumentRefSource refs, AttentionFeed feed, SseBroadcaster sse,
                                             ObjectProvider<OrderService> orderService,
                                             HypothesisRecordStore recordStore,
-                                            io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch) {
+                                            io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch,
+                                            ObjectProvider<RefDataRepository> refData) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
         // the broker is wired — every hypothesis-generation run is an audited AiDecision.
         DecisionSink sink = decision -> {
@@ -124,9 +125,12 @@ public class HypothesisConfig {
                 props.maxPerCycleOrDefault(), props.maxOutputTokensOrDefault());
         // OrderService present only when persistence is on; without it (or with autonomy off)
         // the layer is human-in-loop even if autonomy is configured on.
+        // Instrument display names from refdata (V27) — never a hardcoded map (GAP-4).
+        var rd = refData.getIfAvailable();
+        InstrumentNameSource names = rd != null ? InstrumentNameSource.from(rd) : InstrumentNameSource.NONE;
         return new HypothesisLifecycle(generator, evaluator, narrativeFeed, backtest,
                 tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable(), recordStore,
-                tradingHaltSwitch);
+                tradingHaltSwitch, names);
     }
 
     @Bean

@@ -40,6 +40,14 @@ public class RiskConfig {
         return instrumentId -> Optional.empty();
     }
 
+    /** Swap tenor from reference data (V27 tenor_years) — the single source used by the DV01,
+     *  scenario, VaR and swap-book paths; no hardcoded per-name tenor map (GAP-4). */
+    @Bean
+    SwapTenorSource swapTenorSource(ObjectProvider<RefDataRepository> refData) {
+        RefDataRepository repository = refData.getIfAvailable();
+        return repository != null ? SwapTenorSource.from(repository) : SwapTenorSource.NONE;
+    }
+
     /** The ledger with LIVE swap economics: SWAP positions value at the Strata per-lot DV01
      *  × 100 (re-read on a 1s memo — off the tick path) instead of the V9 inception-constant
      *  multiplier; falls back to the static multiplier until the curve prices. */
@@ -98,12 +106,13 @@ public class RiskConfig {
                                                             io.jethro.trading.riskpnl.SwapPricingService swapPricing,
                                                             io.jethro.trading.riskpnl.BondFutureDurations durations,
                                                             Dv01Service.SwapTradeSource swapTrades,
+                                                            SwapTenorSource tenors,
                                                             ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
         var cal = calendar.getIfAvailable();
         java.util.function.Supplier<java.time.LocalDate> sessionDay =
                 cal != null ? cal::sessionDay : java.time.LocalDate::now;
         io.jethro.trading.riskpnl.ScenarioEngine.SeasonedSwapReval seasoned = (book, instrument, shiftBps) -> {
-            var tenor = Dv01Service.SWAP_TENOR_YEARS.get(instrument);
+            var tenor = tenors.tenorYears(instrument).orElse(null);
             if (tenor == null) {
                 return Optional.empty(); // unknown product — engine falls back, never guesses
             }
@@ -173,9 +182,10 @@ public class RiskConfig {
     @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
     SwapBookService swapBookService(org.springframework.jdbc.core.JdbcTemplate jdbc,
                                     io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                                    SwapTenorSource tenors,
                                     ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
         var cal = calendar.getIfAvailable();
-        return new SwapBookService(jdbc, swapPricing,
+        return new SwapBookService(jdbc, swapPricing, tenors,
                 cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
@@ -202,9 +212,10 @@ public class RiskConfig {
                             io.jethro.trading.riskpnl.SwapPricingService swapPricing,
                             io.jethro.trading.riskpnl.BondFutureDurations durations,
                             Dv01Service.SwapTradeSource swapTrades,
+                            SwapTenorSource tenors,
                             ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
         var cal = calendar.getIfAvailable();
-        return new Dv01Service(projection, swapPricing, durations, swapTrades,
+        return new Dv01Service(projection, swapPricing, durations, swapTrades, tenors,
                 cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
@@ -268,9 +279,10 @@ public class RiskConfig {
                           InstrumentRefSource refs,
                           io.jethro.trading.riskpnl.SwapPricingService swapPricing,
                           Dv01Service.SwapTradeSource swapTrades,
+                          SwapTenorSource tenors,
                           ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
         var cal = calendar.getIfAvailable();
-        return new VarService(jdbc, projection, refs, swapPricing, swapTrades,
+        return new VarService(jdbc, projection, refs, swapPricing, swapTrades, tenors,
                 cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
