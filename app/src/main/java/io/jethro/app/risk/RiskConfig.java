@@ -53,14 +53,18 @@ public class RiskConfig {
      *  multiplier; falls back to the static multiplier until the curve prices. */
     @Bean
     RiskProjection riskProjection(InstrumentRefSource refs,
-                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
+                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                                  ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
+        java.util.function.Supplier<java.time.LocalDate> sessionDay =
+                cal != null ? cal::sessionDay : java.time.LocalDate::now;
         var cache = new java.util.concurrent.atomic.AtomicReference<Map.Entry<Long, Map<String, java.math.BigDecimal>>>();
         io.jethro.trading.riskpnl.SwapDv01Source dv01 = instrumentId -> {
             long now = System.currentTimeMillis();
             var entry = cache.get();
             if (entry == null || now - entry.getKey() > 1_000) {
                 Map<String, java.math.BigDecimal> fresh = new java.util.LinkedHashMap<>();
-                for (var v : swapPricing.valueAll(java.time.LocalDate.now())) {
+                for (var v : swapPricing.valueAll(sessionDay.get())) { // session day, not wall clock (finding 3)
                     fresh.put(v.instrumentId(), v.dv01());
                 }
                 entry = Map.entry(now, fresh);
@@ -191,7 +195,7 @@ public class RiskConfig {
             }
             return any ? Optional.of(total) : Optional.empty();
         };
-        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations, seasoned);
+        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations, seasoned, sessionDay);
     }
 
 
@@ -199,9 +203,11 @@ public class RiskConfig {
     RiskController riskController(RiskProjection projection, CurveService curveService,
                                   io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView,
                                   io.jethro.trading.riskpnl.SwapPricingService swapPricing,
-                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine) {
+                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine,
+                                  ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
         return new RiskController(projection, curveService, treasuryCurveView, swapPricing,
-                scenarioEngine);
+                scenarioEngine, cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
     @Bean(destroyMethod = "close")
