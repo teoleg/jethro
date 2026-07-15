@@ -1,6 +1,6 @@
 # ADR-0006: UI in TypeScript + React (Vite), streaming over WebSocket
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR-0028 (UI stays server-served static pages; React deferred behind concrete triggers)
 - **Date:** 2026-07-11
 - **Deciders:** Oleg
 - **Tags:** ui

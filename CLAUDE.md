@@ -34,10 +34,11 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
   narration/triage/scenario-proposal (ADR-0016 — a model output is NEVER parsed for a
   number feeding positions/PnL/risk); external frontier API via AWS for trading
   decisions, embedded self-hosted behind measured cost/latency triggers (ADR-0010).
-- UI: TypeScript + React + Vite under `ui/`, WebSocket streaming. Attention-first
-  (ADR-0017): landing page is an agent-curated attention feed with a deterministic
-  floor (models may never suppress a triggered alert); grids (AG Grid) are drill-down
-  evidence views with a "show everything" mode.
+- UI: server-served static HTML pages from module resources, polling REST — no Node
+  toolchain; React/AG Grid deferred behind concrete triggers (ADR-0028, supersedes
+  ADR-0006). Attention-first (ADR-0017): landing page is an agent-curated attention
+  feed with a deterministic floor (models may never suppress a triggered alert); grids
+  are drill-down evidence views with a "show everything" mode.
 - Deployment: single-JVM modular monolith (`app/`) for now — modules isolated by Gradle
   constraints + ArchUnit, cross-domain flow via Redpanda topics even in-process; the
   `order` module MUST be extracted to its own JVM before any real-money broker
