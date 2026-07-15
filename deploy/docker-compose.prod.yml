@@ -1,0 +1,106 @@
+# Production-shape single-node stack (ADR-0013): the same components as local dev, but the
+# app runs from an ECR image (not build:.), Caddy is the only public surface (TLS + basic
+# auth in front of the unauthenticated app — review finding #5), and nothing else publishes
+# a host port. Deployed by .github/workflows/deploy.yml via SSM; secrets come from SSM
+# Parameter Store into deploy/.env (see deploy/README.md). Values via --env-file deploy/.env.
+services:
+  redpanda:
+    image: redpandadata/redpanda:v24.2.18
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=1G   # >=1G recommended; comfortable on the 16G node (dev used 512M)
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      # In-container app connects via the compose network name, so advertise THAT, not
+      # localhost (the dev compose advertises localhost because the app runs on the host).
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+      - --schema-registry-addr=0.0.0.0:8081
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health --exit-when-healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: jethro
+      POSTGRES_USER: ${POSTGRES_USER:?set in deploy/.env from SSM}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in deploy/.env from SSM}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d jethro"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.31.2
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    image: ${APP_IMAGE:?set by the deploy workflow to the ECR image tag}
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      POSTGRES_URL: jdbc:postgresql://postgres:5432/jethro
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JETHRO_AI_BASE_URL: http://ollama:11434
+      JETHRO_AI_MODEL: ${JETHRO_AI_MODEL:-qwen2.5:1.5b}
+      JETHRO_TRADING_PROVIDER: ${JETHRO_TRADING_PROVIDER:-sim}
+      FINNHUB_TOKEN: ${FINNHUB_TOKEN:-}
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/books >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20   # first boot runs Flyway + warms up; give it room
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # A real domain (or a <ip-dashes>.nip.io) pointing at the node's Elastic IP → Caddy
+      # provisions a Let's Encrypt cert automatically. Basic-auth user + bcrypt hash gate
+      # the whole app (the app itself has no auth yet — ADR-0015 extraction gate).
+      JETHRO_DOMAIN: ${JETHRO_DOMAIN:?set in deploy/.env}
+      JETHRO_BASIC_AUTH_USER: ${JETHRO_BASIC_AUTH_USER:?set in deploy/.env}
+      JETHRO_BASIC_AUTH_HASH: ${JETHRO_BASIC_AUTH_HASH:?bcrypt hash from `caddy hash-password`}
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  redpanda-data:
+  postgres-data:
+  ollama-models:
+  caddy-data:
+  caddy-config:

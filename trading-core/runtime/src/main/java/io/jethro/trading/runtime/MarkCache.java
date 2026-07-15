@@ -35,6 +35,39 @@ public final class MarkCache {
         JumpThresholds DISABLED = instrumentId -> 0;
     }
 
+    /**
+     * Durable store for the quarantine set so an operator's corporate-action freeze survives
+     * a process restart (a safety control a restart could silently disarm is worse than none).
+     * Transitions are rare (a jump trip or an operator clear), never per-tick, so a
+     * synchronous write here is fine — this port is NEVER called from the per-tick accept path.
+     */
+    public interface QuarantineStore {
+        void onQuarantine(String instrumentId, long lastGoodScaled, long suspectScaled);
+
+        void onClear(String instrumentId);
+
+        /** Persisted quarantines to restore at boot. */
+        List<Persisted> load();
+
+        record Persisted(String instrumentId, long lastGoodScaled, long suspectScaled) {
+        }
+
+        QuarantineStore NONE = new QuarantineStore() {
+            @Override
+            public void onQuarantine(String instrumentId, long lastGoodScaled, long suspectScaled) {
+            }
+
+            @Override
+            public void onClear(String instrumentId) {
+            }
+
+            @Override
+            public List<Persisted> load() {
+                return List.of();
+            }
+        };
+    }
+
     /** Mutable per-instrument holder. Fields volatile: written by core loop, read anywhere. */
     public static final class MarkHolder {
         private volatile long priceScaled;
@@ -73,6 +106,7 @@ public final class MarkCache {
 
     private final ConcurrentHashMap<String, MarkHolder> marks = new ConcurrentHashMap<>();
     private final JumpThresholds thresholds;
+    private final QuarantineStore quarantineStore;
     private final java.util.concurrent.atomic.LongAdder rejectedTicks = new java.util.concurrent.atomic.LongAdder();
 
     public MarkCache() {
@@ -80,7 +114,30 @@ public final class MarkCache {
     }
 
     public MarkCache(JumpThresholds thresholds) {
+        this(thresholds, QuarantineStore.NONE);
+    }
+
+    public MarkCache(JumpThresholds thresholds, QuarantineStore quarantineStore) {
         this.thresholds = thresholds;
+        this.quarantineStore = quarantineStore != null ? quarantineStore : QuarantineStore.NONE;
+    }
+
+    /**
+     * Restores persisted quarantines at boot (call after warm-load): each returns to the
+     * quarantined state with its frozen last-good and rejected suspect level, so incoming
+     * marks are rejected exactly as before the restart (the {@code quarantined} check runs
+     * before the stale/jump logic, so a restored quarantine is NOT exempt like a stale load).
+     */
+    public void restoreQuarantines() {
+        for (QuarantineStore.Persisted p : quarantineStore.load()) {
+            MarkHolder holder = marks.computeIfAbsent(p.instrumentId(), k -> new MarkHolder());
+            holder.priceScaled = p.lastGoodScaled();
+            holder.suspectPriceScaled = p.suspectScaled();
+            holder.quarantined = true;
+            holder.stale = false; // a quarantine is a live freeze, not a warm-load
+            log.warn("restored quarantine for {} (last good {}, suspect {}) — still frozen until "
+                    + "an operator clears it", p.instrumentId(), p.lastGoodScaled(), p.suspectScaled());
+        }
     }
 
     /** Hot path: live update from the core loop. Scaled-long arithmetic only. */
@@ -104,6 +161,8 @@ public final class MarkCache {
                                 + "corporate action or bad print; trading data frozen until an operator "
                                 + "clears it (POST /api/marks/{}/clear-quarantine)",
                         instrumentId, maxBps, prev, priceScaled, instrumentId);
+                // Durable so the freeze survives a restart (this is the rare trip path, not per-tick).
+                quarantineStore.onQuarantine(instrumentId, prev, priceScaled);
                 return;
             }
         }
@@ -123,6 +182,7 @@ public final class MarkCache {
         }
         holder.quarantined = false;
         holder.stale = true; // stale ⇒ the next live update is exempt from the jump guard
+        quarantineStore.onClear(instrumentId); // drop the durable freeze too
         log.warn("quarantine CLEARED for {} — next mark accepted as the new baseline", instrumentId);
         return true;
     }

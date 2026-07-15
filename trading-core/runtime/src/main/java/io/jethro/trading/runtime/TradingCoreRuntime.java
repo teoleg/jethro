@@ -34,9 +34,15 @@ public final class TradingCoreRuntime implements AutoCloseable {
      *  (corporate action / bad print — see {@link MarkCache}). */
     public TradingCoreRuntime(MarketDataAdapter adapter, int bufferCapacity, LmdbStateStore stateStore,
                               MarkCache.JumpThresholds thresholds) {
+        this(adapter, bufferCapacity, stateStore, thresholds, MarkCache.QuarantineStore.NONE);
+    }
+
+    /** With a durable quarantine store: an operator's freeze survives a restart (ADR-0024). */
+    public TradingCoreRuntime(MarketDataAdapter adapter, int bufferCapacity, LmdbStateStore stateStore,
+                              MarkCache.JumpThresholds thresholds, MarkCache.QuarantineStore quarantineStore) {
         this.adapter = adapter;
         this.buffer = new TickRingBuffer(bufferCapacity);
-        this.markCache = new MarkCache(thresholds);
+        this.markCache = new MarkCache(thresholds, quarantineStore);
         this.stateStore = stateStore;
         this.stats = new TradingCoreStats(buffer);
     }
@@ -52,6 +58,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
                 stats.markWarmLoaded();
             });
         }
+        // AFTER the warm-load: a persisted quarantine re-freezes the instrument, overriding
+        // the stale warm mark, so an operator's corporate-action freeze survives the restart.
+        markCache.restoreQuarantines();
         // Non-daemon by design: the market path IS the application — it keeps the
         // JVM alive until the context shuts it down.
         Thread thread = new Thread(this::consumeLoop, "trading-core");

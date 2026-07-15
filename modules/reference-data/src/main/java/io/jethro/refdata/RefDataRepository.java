@@ -40,6 +40,15 @@ public class RefDataRepository {
         return attributes;
     }
 
+    /** One attribute across all instruments: {@code instrumentId → value}. The refdata source
+     *  for per-instrument data code must not hardcode (names, tenor, spec — review GAP-4). */
+    public Map<String, String> instrumentAttribute(String name) {
+        Map<String, String> out = new HashMap<>();
+        jdbc.query("select instrument_id, value from instrument_attributes where name = ?",
+                (rs, i) -> out.put(rs.getString("instrument_id"), rs.getString("value")), name);
+        return out;
+    }
+
     public List<Instrument> findAllInstruments() {
         Map<String, Map<String, String>> symbology = new HashMap<>();
         jdbc.query("select instrument_id, source, symbol from instrument_symbology", rs -> {

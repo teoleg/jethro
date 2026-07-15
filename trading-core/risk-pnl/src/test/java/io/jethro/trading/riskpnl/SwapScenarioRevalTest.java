@@ -16,6 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class SwapScenarioRevalTest {
 
+    /** Reference-swap universe standing in for refdata (V27/V28); SwapPricingService no longer
+     *  hardcodes it. */
+    private static final SwapPricingService.ReferenceSwapUniverse UNIVERSE = () -> java.util.List.of(
+            new SwapPricingService.ReferenceSwap("USD_IRS_5Y", 5, 0.0400, 1_000_000),
+            new SwapPricingService.ReferenceSwap("USD_IRS_10Y", 10, 0.0410, 1_000_000));
+
     private static final LocalDate VAL_DATE = LocalDate.of(2026, 1, 15);
 
     private SwapPricingService serviceAt(String pct) {
@@ -23,7 +29,7 @@ class SwapScenarioRevalTest {
         for (String id : List.of("USD.SOFR.1Y", "USD.SOFR.2Y", "USD.SOFR.5Y", "USD.SOFR.10Y", "USD.SOFR.30Y")) {
             s.onRate(id, new BigDecimal(pct));
         }
-        return new SwapPricingService(s);
+        return new SwapPricingService(s, UNIVERSE);
     }
 
     @Test
@@ -55,7 +61,7 @@ class SwapScenarioRevalTest {
 
     @Test
     void emptyWhenNoCurve() {
-        assertTrue(new SwapPricingService(new CurveService())
+        assertTrue(new SwapPricingService(new CurveService(), UNIVERSE)
                 .swapPnlPerLotUnderShock(new BigDecimal("100"), VAL_DATE).isEmpty());
     }
 

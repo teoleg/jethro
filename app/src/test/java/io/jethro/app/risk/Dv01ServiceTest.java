@@ -27,6 +27,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class Dv01ServiceTest {
 
+    /** CME deliverable windows standing in for refdata (V28); the risk-pnl domain code no
+     *  longer hardcodes them. */
+    private static final BondFutureDurations.DeliverableWindowSource WINDOWS = id -> switch (id) {
+        case "ZT" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(1.75, 2.0));
+        case "ZF" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(4.17, 5.25));
+        case "ZN" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(6.5, 10.0));
+        case "ZB" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(15.0, 25.0));
+        default -> java.util.Optional.empty();
+    };
+
     private static final LocalDate VAL_DATE = LocalDate.of(2026, 1, 15);
 
     /** ZN: 10Y Treasury future, $1000 multiplier, static refdata duration 6.3. */
@@ -34,6 +44,13 @@ class Dv01ServiceTest {
             ? Optional.of(new InstrumentRef("ZN", "FUTURE", "USD",
                     new BigDecimal("1000"), new BigDecimal("6.3")))
             : Optional.empty();
+
+    /** Stands in for the refdata tenor_years attribute (V27); USD_IRS_7Y is deliberately unknown. */
+    private static final SwapTenorSource TENORS = id -> switch (id) {
+        case "USD_IRS_5Y" -> Optional.of(5);
+        case "USD_IRS_10Y" -> Optional.of(10);
+        default -> Optional.empty();
+    };
 
     private static CurveService flatSofr(String pct) {
         var s = new CurveService();
@@ -56,8 +73,8 @@ class Dv01ServiceTest {
         projection.applyMark("ZN", new BigDecimal("110.50"), 1_000);
 
         var service = new Dv01Service(projection, new SwapPricingService(new CurveService()),
-                BondFutureDurations.staticOnly(REFS), Dv01Service.SwapTradeSource.NONE,
-                () -> VAL_DATE);
+                BondFutureDurations.staticOnly(REFS, WINDOWS), Dv01Service.SwapTradeSource.NONE,
+                TENORS, () -> VAL_DATE);
         var view = service.view(1_000);
 
         assertEquals(List.of("1Y", "2Y", "5Y", "10Y", "30Y"), view.tenors());
@@ -79,7 +96,7 @@ class Dv01ServiceTest {
                         new BigDecimal("2"), new BigDecimal("4.00"), VAL_DATE));
         var pricer = new SwapPricingService(flatSofr("4.00"));
         var service = new Dv01Service(new RiskProjection(REFS), pricer,
-                BondFutureDurations.staticOnly(REFS), trades, () -> VAL_DATE);
+                BondFutureDurations.staticOnly(REFS, WINDOWS), trades, TENORS, () -> VAL_DATE);
 
         var view = service.view(1_000);
         assertTrue(view.curveLive());
@@ -103,7 +120,7 @@ class Dv01ServiceTest {
                         BigDecimal.ONE, new BigDecimal("4.00"), VAL_DATE));
         var service = new Dv01Service(new RiskProjection(REFS),
                 new SwapPricingService(new CurveService()),  // nothing quoted
-                BondFutureDurations.staticOnly(REFS), trades, () -> VAL_DATE);
+                BondFutureDurations.staticOnly(REFS, WINDOWS), trades, TENORS, () -> VAL_DATE);
         assertTrue(!service.view(1_000).curveLive(), "swap legs unvalued must be disclosed");
     }
 
@@ -117,7 +134,7 @@ class Dv01ServiceTest {
                 Side.BUY, new BigDecimal("2"), new BigDecimal("110"), Instant.EPOCH));
         // no mark for ZN
         var service = new Dv01Service(projection, new SwapPricingService(flatSofr("4.00")),
-                BondFutureDurations.staticOnly(REFS), trades, () -> VAL_DATE);
+                BondFutureDurations.staticOnly(REFS, WINDOWS), trades, TENORS, () -> VAL_DATE);
         assertEquals(2, service.view(1_000).skipped(), "never silently dropped");
     }
 

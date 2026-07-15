@@ -103,6 +103,7 @@ public final class ScenarioEngine {
     private final SwapPricingService swaps; // nullable: full-reval swaps when present, else first-order
     private final BondFutureDurations durations;
     private final SeasonedSwapReval seasonedSwaps;
+    private final java.util.function.Supplier<java.time.LocalDate> valuationDate;
 
     public ScenarioEngine(InstrumentRefSource refs) {
         this(refs, null);
@@ -111,7 +112,9 @@ public final class ScenarioEngine {
     /** @param swaps when non-null, swap scenario P&amp;L is FULL revaluation on the shocked curve
      *               (captures convexity), not first-order DV01. */
     public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps) {
-        this(refs, swaps, BondFutureDurations.staticOnly(refs));
+        // No deliverable windows here (this convenience path has no live curve anyway → the
+        // bond leg uses refdata static duration); the app wires the full curve-aware durations.
+        this(refs, swaps, BondFutureDurations.staticOnly(refs, BondFutureDurations.DeliverableWindowSource.NONE));
     }
 
     /** @param durations bond-future duration source — live par-bond duration at the current
@@ -123,10 +126,20 @@ public final class ScenarioEngine {
     /** @param seasonedSwaps trade-dated swap book reval — the most precise swap scenario leg. */
     public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps,
                           BondFutureDurations durations, SeasonedSwapReval seasonedSwaps) {
+        this(refs, swaps, durations, seasonedSwaps, java.time.LocalDate::now);
+    }
+
+    /** @param valuationDate the session day the fresh-tenor swap fallback values on — the
+     *                       session calendar in sim mode, so this stays consistent with the
+     *                       rest of the platform's day basis (review finding 3). */
+    public ScenarioEngine(InstrumentRefSource refs, SwapPricingService swaps,
+                          BondFutureDurations durations, SeasonedSwapReval seasonedSwaps,
+                          java.util.function.Supplier<java.time.LocalDate> valuationDate) {
         this.refs = refs;
         this.swaps = swaps;
         this.durations = durations;
         this.seasonedSwaps = seasonedSwaps;
+        this.valuationDate = valuationDate != null ? valuationDate : java.time.LocalDate::now;
     }
 
     /** Runs the standard scenarios over the given positions with the given FX marks. */
@@ -143,7 +156,7 @@ public final class ScenarioEngine {
         // Full-revaluation swap P&L per lot on the shocked curve (convexity), computed once per
         // scenario when a pricer is available and the scenario moves rates; else first-order below.
         Map<String, BigDecimal> swapReval = swaps != null && shock.ratesBps().signum() != 0
-                ? swaps.swapPnlPerLotUnderShock(shock.ratesBps(), java.time.LocalDate.now())
+                ? swaps.swapPnlPerLotUnderShock(shock.ratesBps(), valuationDate.get())
                 : Map.of();
         Map<String, BigDecimal> byBook = new LinkedHashMap<>();
         BigDecimal firm = ZERO;

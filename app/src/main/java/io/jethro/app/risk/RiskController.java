@@ -42,16 +42,19 @@ public final class RiskController {
     private final io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurve;
     private final SwapPricingService swapPricing;
     private final io.jethro.trading.riskpnl.ScenarioEngine scenarios;
+    private final java.util.function.Supplier<java.time.LocalDate> sessionDay; // session calendar (finding 3)
 
     public RiskController(RiskProjection projection, CurveService curveService,
                           io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurve,
                           SwapPricingService swapPricing,
-                          io.jethro.trading.riskpnl.ScenarioEngine scenarios) {
+                          io.jethro.trading.riskpnl.ScenarioEngine scenarios,
+                          java.util.function.Supplier<java.time.LocalDate> sessionDay) {
         this.projection = projection;
         this.curveService = curveService;
         this.treasuryCurve = treasuryCurve;
         this.swapPricing = swapPricing;
         this.scenarios = scenarios;
+        this.sessionDay = sessionDay != null ? sessionDay : java.time.LocalDate::now;
     }
 
     public record BookImpactDto(String bookId, String pnlUsd) {
@@ -83,7 +86,7 @@ public final class RiskController {
     /** Reference-swap valuations (Strata pricer over the live curve). */
     @GetMapping("/api/swaps")
     public List<SwapDto> swaps() {
-        return swapPricing.valueAll(java.time.LocalDate.now()).stream()
+        return swapPricing.valueAll(sessionDay.get()).stream()
                 .map(v -> new SwapDto(v.instrumentId(), v.tenor(), v.notional(), v.fixedRate(),
                         v.parRate(), v.presentValue().toPlainString(), v.dv01().toPlainString()))
                 .toList();

@@ -40,19 +40,31 @@ public class RiskConfig {
         return instrumentId -> Optional.empty();
     }
 
+    /** Swap tenor from reference data (V27 tenor_years) — the single source used by the DV01,
+     *  scenario, VaR and swap-book paths; no hardcoded per-name tenor map (GAP-4). */
+    @Bean
+    SwapTenorSource swapTenorSource(ObjectProvider<RefDataRepository> refData) {
+        RefDataRepository repository = refData.getIfAvailable();
+        return repository != null ? SwapTenorSource.from(repository) : SwapTenorSource.NONE;
+    }
+
     /** The ledger with LIVE swap economics: SWAP positions value at the Strata per-lot DV01
      *  × 100 (re-read on a 1s memo — off the tick path) instead of the V9 inception-constant
      *  multiplier; falls back to the static multiplier until the curve prices. */
     @Bean
     RiskProjection riskProjection(InstrumentRefSource refs,
-                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing) {
+                                  io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                                  ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
+        java.util.function.Supplier<java.time.LocalDate> sessionDay =
+                cal != null ? cal::sessionDay : java.time.LocalDate::now;
         var cache = new java.util.concurrent.atomic.AtomicReference<Map.Entry<Long, Map<String, java.math.BigDecimal>>>();
         io.jethro.trading.riskpnl.SwapDv01Source dv01 = instrumentId -> {
             long now = System.currentTimeMillis();
             var entry = cache.get();
             if (entry == null || now - entry.getKey() > 1_000) {
                 Map<String, java.math.BigDecimal> fresh = new java.util.LinkedHashMap<>();
-                for (var v : swapPricing.valueAll(java.time.LocalDate.now())) {
+                for (var v : swapPricing.valueAll(sessionDay.get())) { // session day, not wall clock (finding 3)
                     fresh.put(v.instrumentId(), v.dv01());
                 }
                 entry = Map.entry(now, fresh);
@@ -65,10 +77,36 @@ public class RiskConfig {
 
     /** Live bond-future durations off the Treasury curve (dynamic DV01); static refdata
      *  durations until it quotes. */
+    /** CME deliverable windows from refdata (V28) — no hardcoded window map (GAP-4). */
+    @Bean
+    io.jethro.trading.riskpnl.BondFutureDurations.DeliverableWindowSource deliverableWindowSource(
+            ObjectProvider<RefDataRepository> refData) {
+        RefDataRepository repository = refData.getIfAvailable();
+        if (repository == null) {
+            return io.jethro.trading.riskpnl.BondFutureDurations.DeliverableWindowSource.NONE;
+        }
+        Map<String, String> shortY = repository.instrumentAttribute("deliverable_short_years");
+        Map<String, String> longY = repository.instrumentAttribute("deliverable_long_years");
+        return id -> {
+            String s = shortY.get(id);
+            String l = longY.get(id);
+            if (s == null || l == null) {
+                return Optional.empty();
+            }
+            try {
+                return Optional.of(new io.jethro.trading.riskpnl.BondFutureDurations.DeliverableWindow(
+                        Double.parseDouble(s), Double.parseDouble(l)));
+            } catch (NumberFormatException e) {
+                return Optional.empty(); // malformed refdata — skip, never guess
+            }
+        };
+    }
+
     @Bean
     io.jethro.trading.riskpnl.BondFutureDurations bondFutureDurations(
-            io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView, InstrumentRefSource refs) {
-        return new io.jethro.trading.riskpnl.BondFutureDurations(treasuryCurveView, refs);
+            io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView, InstrumentRefSource refs,
+            io.jethro.trading.riskpnl.BondFutureDurations.DeliverableWindowSource windows) {
+        return new io.jethro.trading.riskpnl.BondFutureDurations(treasuryCurveView, refs, windows);
     }
 
     /** Live SOFR curve from streamed tenor quotes (quant-engine phase 4). */
@@ -83,10 +121,40 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.TreasuryCurveView();
     }
 
-    /** Strata swap valuation (PV/DV01/par) on the live curve. */
+    /** Strata swap valuation (PV/DV01/par) on the live curve. The reference-swap universe
+     *  (which swaps, at what coupon) comes from refdata (V27 tenor_years + V28
+     *  reference_coupon), never a hardcoded list (GAP-4). */
     @Bean
-    io.jethro.trading.riskpnl.SwapPricingService swapPricingService(CurveService curveService) {
-        return new io.jethro.trading.riskpnl.SwapPricingService(curveService);
+    io.jethro.trading.riskpnl.SwapPricingService swapPricingService(CurveService curveService,
+                                                                    ObjectProvider<RefDataRepository> refData) {
+        RefDataRepository repo = refData.getIfAvailable();
+        var universe = repo != null ? referenceSwapUniverse(repo)
+                : io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwapUniverse.NONE;
+        return new io.jethro.trading.riskpnl.SwapPricingService(curveService, universe);
+    }
+
+    /** Reference swaps = instruments carrying BOTH tenor_years and reference_coupon; $1M/lot
+     *  (V9 convention). Snapshotted at wiring — the defined universe is static. */
+    private static io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwapUniverse referenceSwapUniverse(
+            RefDataRepository repo) {
+        Map<String, String> tenors = repo.instrumentAttribute("tenor_years");
+        Map<String, String> coupons = repo.instrumentAttribute("reference_coupon");
+        java.util.List<io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwap> swaps = new java.util.ArrayList<>();
+        coupons.forEach((id, coupon) -> {
+            String tenor = tenors.get(id);
+            if (tenor == null) {
+                return;
+            }
+            try {
+                swaps.add(new io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwap(
+                        id, Integer.parseInt(tenor.trim()), Double.parseDouble(coupon.trim()), 1_000_000));
+            } catch (NumberFormatException ignored) {
+                // malformed refdata row — skip, never guess
+            }
+        });
+        swaps.sort(java.util.Comparator.comparing(
+                io.jethro.trading.riskpnl.SwapPricingService.ReferenceSwap::instrumentId));
+        return () -> swaps;
     }
 
     /** Deterministic scenario/stress over live positions (quant-engine step 2). Rates legs
@@ -98,12 +166,13 @@ public class RiskConfig {
                                                             io.jethro.trading.riskpnl.SwapPricingService swapPricing,
                                                             io.jethro.trading.riskpnl.BondFutureDurations durations,
                                                             Dv01Service.SwapTradeSource swapTrades,
+                                                            SwapTenorSource tenors,
                                                             ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
         var cal = calendar.getIfAvailable();
         java.util.function.Supplier<java.time.LocalDate> sessionDay =
                 cal != null ? cal::sessionDay : java.time.LocalDate::now;
         io.jethro.trading.riskpnl.ScenarioEngine.SeasonedSwapReval seasoned = (book, instrument, shiftBps) -> {
-            var tenor = Dv01Service.SWAP_TENOR_YEARS.get(instrument);
+            var tenor = tenors.tenorYears(instrument).orElse(null);
             if (tenor == null) {
                 return Optional.empty(); // unknown product — engine falls back, never guesses
             }
@@ -126,7 +195,7 @@ public class RiskConfig {
             }
             return any ? Optional.of(total) : Optional.empty();
         };
-        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations, seasoned);
+        return new io.jethro.trading.riskpnl.ScenarioEngine(refs, swapPricing, durations, seasoned, sessionDay);
     }
 
 
@@ -134,9 +203,11 @@ public class RiskConfig {
     RiskController riskController(RiskProjection projection, CurveService curveService,
                                   io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView,
                                   io.jethro.trading.riskpnl.SwapPricingService swapPricing,
-                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine) {
+                                  io.jethro.trading.riskpnl.ScenarioEngine scenarioEngine,
+                                  ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
         return new RiskController(projection, curveService, treasuryCurveView, swapPricing,
-                scenarioEngine);
+                scenarioEngine, cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
     @Bean(destroyMethod = "close")
@@ -144,10 +215,15 @@ public class RiskConfig {
     RiskDataConsumer riskDataConsumer(KafkaConfig.JethroKafkaProperties properties, RiskProjection projection,
                                       CurveService curveService,
                                       io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView,
-                                      ObjectProvider<SwapTradeRecorder> swapTrades) {
+                                      ObjectProvider<SwapTradeRecorder> swapTrades,
+                                      ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbc) {
         SwapTradeRecorder recorder = swapTrades.getIfAvailable();
+        // Seed the projection from the fills TABLE (source of truth, never retention-bound);
+        // the topic then supplies live increments only. Without a DB, seed from nothing.
+        var template = jdbc.getIfAvailable();
+        FillHistorySource history = template != null ? FillHistorySource.jdbc(template) : FillHistorySource.NONE;
         var consumer = new RiskDataConsumer(properties.bootstrapServers(), projection, curveService,
-                treasuryCurveView, recorder != null ? recorder::onFill : null);
+                treasuryCurveView, recorder != null ? recorder::onFill : null, history);
         consumer.start();
         return consumer;
     }
@@ -168,9 +244,10 @@ public class RiskConfig {
     @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
     SwapBookService swapBookService(org.springframework.jdbc.core.JdbcTemplate jdbc,
                                     io.jethro.trading.riskpnl.SwapPricingService swapPricing,
+                                    SwapTenorSource tenors,
                                     ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
         var cal = calendar.getIfAvailable();
-        return new SwapBookService(jdbc, swapPricing,
+        return new SwapBookService(jdbc, swapPricing, tenors,
                 cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
@@ -197,9 +274,10 @@ public class RiskConfig {
                             io.jethro.trading.riskpnl.SwapPricingService swapPricing,
                             io.jethro.trading.riskpnl.BondFutureDurations durations,
                             Dv01Service.SwapTradeSource swapTrades,
+                            SwapTenorSource tenors,
                             ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
         var cal = calendar.getIfAvailable();
-        return new Dv01Service(projection, swapPricing, durations, swapTrades,
+        return new Dv01Service(projection, swapPricing, durations, swapTrades, tenors,
                 cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
@@ -263,9 +341,10 @@ public class RiskConfig {
                           InstrumentRefSource refs,
                           io.jethro.trading.riskpnl.SwapPricingService swapPricing,
                           Dv01Service.SwapTradeSource swapTrades,
+                          SwapTenorSource tenors,
                           ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
         var cal = calendar.getIfAvailable();
-        return new VarService(jdbc, projection, refs, swapPricing, swapTrades,
+        return new VarService(jdbc, projection, refs, swapPricing, swapTrades, tenors,
                 cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 

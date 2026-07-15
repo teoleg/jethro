@@ -396,8 +396,9 @@
       document.getElementById("obcount").textContent = "· " + r.total + " today";
       document.getElementById("obpage").textContent = `page ${r.page + 1} / ${r.totalPages}`;
       document.getElementById("oblotter").outerHTML = '<div id="oblotter">' + (r.orders.length ?
-        "<table><tr><th>time</th><th>instr</th><th>book</th><th>side</th><th>qty</th><th>status</th></tr>" +
+        "<table><tr><th>time</th><th>order id</th><th>instr</th><th>book</th><th>side</th><th>qty</th><th>status</th></tr>" +
         r.orders.map(o => `<tr><td class="muted mono">${new Date(o.createdAtMillis).toLocaleTimeString()}</td>
+          <td class="mono muted" style="font-size:11px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.orderId)}">${esc(o.orderId)}</td>
           <td class="cls">${esc(o.instrumentId)}</td><td class="muted">${esc(o.bookId)}</td>
           <td class="${esc(o.side)}">${esc(o.side)}</td><td class="mono">${esc(o.quantity)}</td>
           <td><span class="st ${esc(o.status)}" title="${esc(o.reason||'')}">${esc(o.status)}</span>${o.status==='REJECTED'&&o.reason?` <span class="muted" style="font-size:10px">${esc(o.reason)}</span>`:''}</td></tr>`).join("") + "</table>"

@@ -140,7 +140,8 @@ jethro/
 │   ├── ui-gateway/
 │   └── finops/
 ├── app/                     # single-JVM assembly of all modules (ADR-0015)
-├── infra/                   # AWS CDK in Java (ADR-0007/0013) — PLANNED, not created yet
+├── deploy/                  # single-node EC2 deploy: prod compose, Caddy, SSM rollout (ADR-0013)
+├── infra/                   # AWS CDK in Java (ADR-0007/0013): the dev-node stack (standalone build)
 └── docker-compose.yml       # local topology
 ```
 

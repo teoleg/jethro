@@ -22,8 +22,6 @@ import java.util.function.Supplier;
  */
 public final class SwapBookService {
 
-    /** Tenor in years per tradeable swap (the V7/V9 defined products). */
-    private static final Map<String, Integer> TENOR_YEARS = Map.of("USD_IRS_5Y", 5, "USD_IRS_10Y", 10);
     private static final double NOTIONAL_PER_LOT = 1_000_000.0;
 
     /** One dated trade with its live seasoned economics. */
@@ -39,11 +37,14 @@ public final class SwapBookService {
 
     private final JdbcTemplate jdbc;
     private final SwapPricingService pricer;
+    private final SwapTenorSource tenors; // swap tenor from refdata (GAP-4)
     private final Supplier<LocalDate> sessionDay;
 
-    public SwapBookService(JdbcTemplate jdbc, SwapPricingService pricer, Supplier<LocalDate> sessionDay) {
+    public SwapBookService(JdbcTemplate jdbc, SwapPricingService pricer,
+                           SwapTenorSource tenors, Supplier<LocalDate> sessionDay) {
         this.jdbc = jdbc;
         this.pricer = pricer;
+        this.tenors = tenors != null ? tenors : SwapTenorSource.NONE;
         this.sessionDay = sessionDay;
     }
 
@@ -62,7 +63,7 @@ public final class SwapBookService {
                 rs.getObject("trade_day", LocalDate.class)});
         for (Object[] r : rows) {
             String instrument = (String) r[1];
-            Integer tenor = TENOR_YEARS.get(instrument);
+            Integer tenor = tenors.tenorYears(instrument).orElse(null);
             if (tenor == null) {
                 continue; // unknown product — never guess a schedule
             }

@@ -19,6 +19,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class ScenarioFullRevalTest {
 
+    /** CME deliverable windows standing in for refdata (V28); the risk-pnl domain code no
+     *  longer hardcodes them. */
+    private static final BondFutureDurations.DeliverableWindowSource WINDOWS = id -> switch (id) {
+        case "ZT" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(1.75, 2.0));
+        case "ZF" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(4.17, 5.25));
+        case "ZN" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(6.5, 10.0));
+        case "ZB" -> java.util.Optional.of(new BondFutureDurations.DeliverableWindow(15.0, 25.0));
+        default -> java.util.Optional.empty();
+    };
+
     private static final LocalDate VAL_DATE = LocalDate.of(2026, 1, 15);
 
     private final InstrumentRefSource refs = id -> Optional.ofNullable(Map.of(
@@ -75,7 +85,7 @@ class ScenarioFullRevalTest {
         //   +100bp: 110,500 × −0.0540350543 = −5,970.87350015
         //   −100bp: 110,500 × +0.0576882049 = +6,374.54664145 (gains MORE than it loses — convexity)
         //   risk-off (−25bp): 110,500 × +0.0140692906 = +1,554.65661130
-        var engine = new ScenarioEngine(refs, null, new BondFutureDurations(tsyCurveAt(4.5), refs));
+        var engine = new ScenarioEngine(refs, null, new BondFutureDurations(tsyCurveAt(4.5), refs, WINDOWS));
         var results = engine.run(List.of(pos("MACRO", "ZN", "BOND", "1", "110.50", "1000")), fx);
         assertMoney("-5970.87350015", byId(results, "rates-up-100").firmPnlUsd());
         assertMoney("6374.54664145", byId(results, "rates-down-100").firmPnlUsd());
@@ -89,7 +99,7 @@ class ScenarioFullRevalTest {
     void bondFullRevalRefusesANonPositiveShockedYieldAndFallsBack() {
         // TSY curve at 0.5%: −100bp would take the yield ≤ 0 — no sane reprice; the engine
         // falls back to first-order on the LIVE duration rather than guessing.
-        var durations = new BondFutureDurations(tsyCurveAt(0.5), refs);
+        var durations = new BondFutureDurations(tsyCurveAt(0.5), refs, WINDOWS);
         assertTrue(durations.priceChangeUnderShock("ZN", new BigDecimal("-100")).isEmpty());
         var engine = new ScenarioEngine(refs, null, durations);
         var results = engine.run(List.of(pos("MACRO", "ZN", "BOND", "1", "110.50", "1000")), fx);
@@ -103,7 +113,7 @@ class ScenarioFullRevalTest {
         ScenarioEngine.SeasonedSwapReval seasoned = (book, instrument, shiftBps) ->
                 Optional.of(new BigDecimal(shiftBps.signum() > 0 ? "12345.00" : "-13000.00"));
         var engine = new ScenarioEngine(refs, null,
-                BondFutureDurations.staticOnly(refs), seasoned);
+                BondFutureDurations.staticOnly(refs, WINDOWS), seasoned);
         // Quantity 3 — the hook's number is the TOTAL for the group, never re-multiplied.
         var results = engine.run(List.of(pos("MACRO", "USD_IRS_5Y", "SWAP", "3", "4.45", "45000")), fx);
         assertMoney("12345.00", byId(results, "rates-up-100").firmPnlUsd());
