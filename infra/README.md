@@ -20,13 +20,39 @@ module graph — CDK is a deploy-time tool.
 
 ```bash
 cd infra
-# account/region come from your AWS CLI creds (CDK_DEFAULT_ACCOUNT/REGION)
+# account/region come from your AWS CLI creds (CDK_DEFAULT_ACCOUNT/REGION) — point these at
+# the account you want to run in (e.g. the same one your other Claude project uses).
 cdk diff
 cdk deploy \
   -c githubBranch=claude/new-session-smb8v6 \
-  -c alertEmail=you@example.com          # optional: enables the monthly budget alarm
-# other context keys: githubRepo, instanceType, monthlyBudgetUsd, createOidcProvider
+  -c alertEmail=you@example.com \        # REQUIRED for the budget alarm
+  -c createOidcProvider=false            # if the GitHub OIDC provider already exists (see below)
+# other context keys: githubRepo, instanceType, monthlyBudgetUsd
 ```
+
+## Sharing an existing AWS account (e.g. your other Claude project)
+
+CDK deploys to whatever account your AWS CLI credentials point at — just use that account's
+profile; no code change. Two things matter when the account is shared:
+
+1. **GitHub OIDC provider** for `token.actions.githubusercontent.com` is account-wide and
+   can exist only once. If another GitHub-deploying project already created it, pass
+   `-c createOidcProvider=false` (the stack imports it instead of failing). Check:
+   ```bash
+   aws iam list-open-id-connect-providers   # look for token.actions.githubusercontent.com
+   ```
+2. **The budget is scoped to `project=jethro`**, so it tracks ONLY this app's spend, not the
+   whole account. For that filter to work you must **activate the `project` cost-allocation
+   tag once** in Billing → Cost allocation tags (it takes ~24h to start populating). Every
+   resource here is tagged `project=jethro` (ADR-0011).
+
+**Cost note:** a 16 GB instance is **not** free-tier eligible (free tier is `t3.micro`), so
+Jethro is real — but small — spend on top of the free-tier project. Default `t3a.xlarge`
+(4 vCPU/16 GB x86) is ~$0.15/hr; with the stop-when-idle schedule (weekday daytime only,
+off nights/weekends) that's ~$45–65/mo all-in, well under the **$100** budget. Left running
+24/7 it would be ~$110/mo — which is why the schedule exists and the budget alerts fire at
+50/80/100%. Swap to `m6i.xlarge` (`-c instanceType=m6i.xlarge`) for predictable non-burstable
+CPU if Ollama feels throttled; still under $100 with the schedule.
 
 The stack outputs the values you wire into **GitHub → Actions → Variables**
 (`EcrRepositoryUri` → `ECR_REPOSITORY`, `DeployRoleArn` → `AWS_DEPLOY_ROLE_ARN`,

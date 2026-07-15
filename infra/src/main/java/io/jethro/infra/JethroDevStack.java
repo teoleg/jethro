@@ -67,9 +67,9 @@ public class JethroDevStack extends Stack {
 
         String githubRepo = ctx("githubRepo", "teoleg/jethro");
         String githubBranch = ctx("githubBranch", "claude/new-session-smb8v6");
-        String instanceTypeStr = ctx("instanceType", "m6i.xlarge");
+        String instanceTypeStr = ctx("instanceType", "t3a.xlarge");
         String alertEmail = ctx("alertEmail", "");
-        String budgetUsd = ctx("monthlyBudgetUsd", "80");
+        String budgetUsd = ctx("monthlyBudgetUsd", "100");
         boolean createOidc = Boolean.parseBoolean(ctx("createOidcProvider", "true"));
 
         // ---- ECR: the app image the deploy workflow builds and the node pulls ----
@@ -189,22 +189,24 @@ public class JethroDevStack extends Stack {
         instanceSchedule("StopNightly", "cron(0 3 ? * * *)", "stopInstances", node.getInstanceId(), schedulerRole);
         instanceSchedule("StartWeekdays", "cron(0 12 ? * MON-FRI *)", "startInstances", node.getInstanceId(), schedulerRole);
 
-        // ---- Monthly cost budget alarm (ADR-0011), if an email was provided ----
+        // ---- Monthly cost budget (ADR-0011) — SCOPED to project=jethro so a SHARED account's
+        // other spend is not counted, giving a clean Jethro-only ceiling. Alerts at 50/80/100%
+        // actual + a forecast-over-100% warning; Budgets ALERTS but does not auto-stop, so the
+        // real cap is the stop-when-idle schedule above (the alarms are the backstop). Requires
+        // an alert email and the `project` cost-allocation tag activated in Billing (one-time).
         if (!alertEmail.isBlank()) {
             CfnBudget.Builder.create(this, "MonthlyBudget")
                     .budget(CfnBudget.BudgetDataProperty.builder()
                             .budgetType("COST").timeUnit("MONTHLY")
                             .budgetLimit(CfnBudget.SpendProperty.builder()
                                     .amount(Double.parseDouble(budgetUsd)).unit("USD").build())
+                            .costFilters(Map.of("TagKeyValue", List.of("user:project$jethro")))
                             .build())
                     .notificationsWithSubscribers(List.of(
-                            CfnBudget.NotificationWithSubscribersProperty.builder()
-                                    .notification(CfnBudget.NotificationProperty.builder()
-                                            .notificationType("ACTUAL").comparisonOperator("GREATER_THAN")
-                                            .threshold(80.0).thresholdType("PERCENTAGE").build())
-                                    .subscribers(List.of(CfnBudget.SubscriberProperty.builder()
-                                            .subscriptionType("EMAIL").address(alertEmail).build()))
-                                    .build()))
+                            budgetAlert("ACTUAL", 50.0, alertEmail),
+                            budgetAlert("ACTUAL", 80.0, alertEmail),
+                            budgetAlert("ACTUAL", 100.0, alertEmail),
+                            budgetAlert("FORECASTED", 100.0, alertEmail)))
                     .build();
         }
 
@@ -243,6 +245,16 @@ public class JethroDevStack extends Stack {
                 "fi",
                 "");
         return UserData.custom(prelude + "\n" + bootstrap);
+    }
+
+    private CfnBudget.NotificationWithSubscribersProperty budgetAlert(String type, double pct, String email) {
+        return CfnBudget.NotificationWithSubscribersProperty.builder()
+                .notification(CfnBudget.NotificationProperty.builder()
+                        .notificationType(type).comparisonOperator("GREATER_THAN")
+                        .threshold(pct).thresholdType("PERCENTAGE").build())
+                .subscribers(List.of(CfnBudget.SubscriberProperty.builder()
+                        .subscriptionType("EMAIL").address(email).build()))
+                .build();
     }
 
     private void instanceSchedule(String id, String cron, String apiAction, String instanceId, Role role) {

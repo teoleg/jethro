@@ -12,9 +12,12 @@
     "//": "Deployment inputs — override with `cdk deploy -c key=value` or edit here.",
     "githubRepo": "teoleg/jethro",
     "githubBranch": "claude/new-session-smb8v6",
+    "//createOidcProvider": "set FALSE on a shared account where the GitHub OIDC provider already exists",
     "createOidcProvider": true,
+    "//alertEmail": "required for the budget alarm — pass -c alertEmail=you@example.com",
     "alertEmail": "",
-    "monthlyBudgetUsd": "80",
-    "instanceType": "m6i.xlarge"
+    "monthlyBudgetUsd": "100",
+    "//instanceType": "t3a.xlarge = 4 vCPU/16GB AMD x86, cheapest at this size; m6i.xlarge for non-burstable",
+    "instanceType": "t3a.xlarge"
   }
 }

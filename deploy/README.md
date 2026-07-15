@@ -15,11 +15,11 @@ and the sim regenerates everything.
 
 | Piece | Default | Notes |
 |---|---|---|
-| Instance | `m6i.xlarge` (4 vCPU / 16 GB), Ubuntu 24.04 x86-64 | Comfortable for CPU-only Ollama + Redpanda + Postgres + JVM together. Graviton `m7g.xlarge` is ~20% cheaper and all images are multi-arch — swap the AMI + type if you prefer ARM. |
+| Instance | `t3a.xlarge` (4 vCPU / 16 GB), Ubuntu 24.04 x86-64 | Cheapest x86 at 16 GB (~$0.15/hr, burstable) — fits CPU-only Ollama + Redpanda + Postgres + JVM and leaves headroom under the $100 budget. `m6i.xlarge` (`-c instanceType=m6i.xlarge`) for non-burstable CPU. |
 | Storage | one `gp3` EBS volume (~100 GB) | Postgres + LMDB + Redpanda live on local block storage (LMDB needs a real filesystem — never EFS, ADR-0014). |
 | Inference | `qwen2.5:1.5b` CPU-only | Bump to `qwen2.5:3b` if you want; GPU is a separate (pricey) decision. |
 | Edge | Caddy, auto TLS + HTTP basic auth | The app has no auth yet (review finding #5); the basic-auth credential guards everything. |
-| Cost | ~$40–70/mo, ≈half with stop-when-idle | EventBridge Scheduler stop/start; the systemd unit restores the stack on boot. |
+| Cost | ~$45–65/mo with stop-when-idle (**$100 budget cap**) | EventBridge Scheduler stop/start; budget alerts at 50/80/100%, scoped to `project=jethro` so a shared account's other spend isn't counted. |
 
 ## One-time AWS setup
 
