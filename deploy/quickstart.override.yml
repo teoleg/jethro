@@ -1,0 +1,9 @@
+# Overlay for the quick single-box run (deploy/quickstart.sh): adds the env the root compose
+# app service doesn't set for an all-in-one-box layout — Ollama reached by its compose name,
+# offline sim feed by default. Used with the root docker-compose.yml, not the prod one.
+services:
+  app:
+    environment:
+      JETHRO_AI_BASE_URL: http://ollama:11434
+      JETHRO_TRADING_PROVIDER: ${JETHRO_TRADING_PROVIDER:-sim}
+      JETHRO_AI_MODEL: ${JETHRO_AI_MODEL:-qwen2.5:1.5b}
