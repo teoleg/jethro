@@ -12,8 +12,8 @@ microseconds from tick to decision. The **durable log** (Kafka API via Redpanda,
 ADR-0012) carries only transactional flow and snapshots: orders, fills, AI decisions,
 conflated marks and risk snapshots — at-least-once, idempotent consumers. Ticks are
 archived write-behind to S3 Parquet; backtests replay the archive through the same
-pipeline via the feed SPI (ADR-0009). UI is a React/TypeScript SPA (ADR-0006) streaming
-from `ui-gateway` over WebSocket. **All modules currently assemble into a single JVM
+pipeline via the feed SPI (ADR-0009). UI is server-served static pages polling
+`ui-gateway` REST (ADR-0028; React/streaming deferred behind concrete triggers). **All modules currently assemble into a single JVM
 (`app`, ADR-0015)** — the diagram below shows logical module boundaries; every arrow
 touching the log is a real Redpanda topic even in-process, so extraction later is
 mechanical. Dev runs the whole stack (app + Redpanda + Postgres) on one EC2 node; ECS
@@ -66,7 +66,7 @@ flowchart LR
     RISK --> PG
     REF --> PG
 
-    UIG -- WebSocket + REST --> SPA[React SPA<br/>S3 + CloudFront]
+    UIG -- REST, polled --> SPA[static HTML pages<br/>served by the app]
 ```
 
 ## Modules (one deployable JVM — ADR-0015)
@@ -76,8 +76,8 @@ flowchart LR
 | `trading-core` cluster (market-data, algo-engine, risk-pnl, runtime) | Fused market path: feed adapters (provider SPI), AI algo engine (model-inference SPI), risk/PnL over the ring buffer; tick archiver; LMDB local state | 0009, 0010, 0014 | measured GC interference |
 | `order` | Order lifecycle; simulated execution until a broker is wired | 0003, 0008, 0012 | **hard: before any real-money broker connection** |
 | `reference-data` | Instruments, symbology, book tree | 0008 | on need |
-| `ui-gateway` | BFF: REST snapshots + WebSocket streaming, per-view subscriptions | 0006 | WebSocket fan-out load |
-| `finops` | Cost telemetry: Cost Explorer polling, real-time LLM token pricing from `ai.decisions`, budget alerts | 0011 | on need |
+| `ui-gateway` | BFF: REST snapshots + the static UI pages (polled; streaming deferred with ADR-0028) | 0006, 0028 | streaming fan-out load |
+| `finops` | PLANNED, not built (empty shell): cost telemetry — Cost Explorer polling, LLM token pricing from `ai.decisions`, budget alerts | 0011 | on need |
 
 Module isolation is build-enforced (Gradle constraints + ArchUnit): modules depend only
 on `common-domain`, `common-messaging`, and published interfaces — never internals.
@@ -140,8 +140,7 @@ jethro/
 │   ├── ui-gateway/
 │   └── finops/
 ├── app/                     # single-JVM assembly of all modules (ADR-0015)
-├── ui/                      # React + TypeScript SPA (ADR-0006)
-├── infra/                   # AWS CDK in Java (ADR-0007/0013)
+├── infra/                   # AWS CDK in Java (ADR-0007/0013) — PLANNED, not created yet
 └── docker-compose.yml       # local topology
 ```
 

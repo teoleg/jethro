@@ -9,7 +9,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0003](0003-event-driven-service-architecture.md) | Event-driven services around a streaming backbone | Accepted |
 | [0004](0004-messaging-backbone-kafka.md) | Kafka (Amazon MSK) as the messaging backbone | Superseded by 0012 |
 | [0005](0005-data-storage.md) | Aurora PostgreSQL for state, Kafka + S3 for tick history | Accepted |
-| [0006](0006-ui-stack.md) | UI in TypeScript + React (Vite), streaming over WebSocket | Accepted |
+| [0006](0006-ui-stack.md) | UI in TypeScript + React (Vite), streaming over WebSocket | Superseded by 0028 |
 | [0007](0007-aws-runtime-ecs-fargate-cdk.md) | Runtime on ECS Fargate, infrastructure as code with AWS CDK (Java) | Accepted |
 | [0008](0008-domain-model-books-instruments-positions.md) | Domain model: books, instruments, positions, marks | Accepted |
 | [0009](0009-market-data-provider-abstraction.md) | Market data provider abstraction | Accepted |
@@ -31,6 +31,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0025](0025-realistic-execution-cost-model.md) | Realistic simulated execution — spread/fee cost model, working-order matching, cancel/TIF | Proposed |
 | [0026](0026-correlated-factor-market-simulator.md) | High-fidelity market simulator — correlated cross-asset factor model, regime switching, calibrated from real history | Proposed |
 | [0027](0027-evaluation-and-risk-rigor.md) | Evaluation & risk rigor — hypothesis outcome scoring, out-of-sample backtests, VaR + firm breaker, day boundary | Proposed |
+| [0028](0028-ui-static-pages-react-deferred.md) | UI stays server-served static pages; React deferred behind concrete triggers | Accepted |
 
 ## Lifecycle
 
