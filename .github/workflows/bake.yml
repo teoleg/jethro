@@ -1,0 +1,107 @@
+name: Bake AMI
+
+# Immutable path: build an x86-64 AMI with the whole stack baked in (Packer), then optionally
+# spawn a fresh instance from it in the same AWS account — replacing the previous one. The
+# Ollama model is baked in, so instances boot straight into a running stack with no downloads.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to bake
+        type: string
+        default: claude/new-session-smb8v6
+      ai_model:
+        description: SLM to bake in
+        type: string
+        default: qwen2.5:1.5b
+      launch:
+        description: Spawn/replace an instance from the new AMI
+        type: boolean
+        default: true
+      instance_type:
+        description: Runtime instance type (x86, >=16GB for Ollama)
+        type: choice
+        default: t3a.xlarge
+        options: [t3a.xlarge, m6i.xlarge, t3.xlarge]
+
+concurrency:
+  group: bake-jethro
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  bake:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      # Clean source tarball (no .git/build) for the Packer file provisioner.
+      - name: Package source
+        run: git archive --format=tar.gz -o infra/packer/jethro-src.tgz HEAD
+
+      - uses: hashicorp/setup-packer@v3
+        with:
+          version: latest
+
+      # kappara's IAM user keys, stored as repo secrets (simple). OIDC is the hardening path;
+      # the CDK provisions an OIDC deploy role if you'd rather not keep static keys.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build AMI
+        working-directory: infra/packer
+        run: |
+          packer init .
+          packer build \
+            -var region=${AWS_REGION} \
+            -var ai_model='${{ inputs.ai_model }}' \
+            .
+
+      - name: Read AMI id
+        id: ami
+        working-directory: infra/packer
+        run: |
+          AMI=$(jq -r '.builds[-1].artifact_id' manifest.json | cut -d: -f2)
+          echo "id=$AMI" >> "$GITHUB_OUTPUT"
+          echo "Baked AMI: $AMI"
+
+      - name: Spawn / replace instance
+        if: ${{ inputs.launch }}
+        env:
+          AMI: ${{ steps.ami.outputs.id }}
+          TYPE: ${{ inputs.instance_type }}
+          SG: ${{ vars.JETHRO_SG_ID }}                 # SG locked to your IP, allows 8080 (+22/443)
+          SUBNET: ${{ vars.JETHRO_SUBNET_ID }}          # optional; default subnet if empty
+          PROFILE: ${{ vars.JETHRO_INSTANCE_PROFILE }}  # optional (SSM shell etc.)
+          EIP_ALLOC: ${{ vars.JETHRO_EIP_ALLOC_ID }}    # optional stable IP
+        run: |
+          set -euo pipefail
+          [ -n "$SG" ] || { echo "::error::set the JETHRO_SG_ID repo variable (a security group locked to your IP, port 8080)"; exit 1; }
+          OLD=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=jethro-app" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          NEW=$(aws ec2 run-instances \
+            --image-id "$AMI" --instance-type "$TYPE" --security-group-ids "$SG" \
+            ${SUBNET:+--subnet-id "$SUBNET"} \
+            ${PROFILE:+--iam-instance-profile Name="$PROFILE"} \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=jethro-app},{Key=project,Value=jethro}]' \
+            --query 'Instances[0].InstanceId' --output text)
+          echo "Launched $NEW; waiting for running…"
+          aws ec2 wait instance-running --instance-ids "$NEW"
+          if [ -n "$EIP_ALLOC" ]; then
+            aws ec2 associate-address --allocation-id "$EIP_ALLOC" --instance-id "$NEW"
+          fi
+          for id in $OLD; do
+            [ "$id" != "$NEW" ] && aws ec2 terminate-instances --instance-ids "$id" >/dev/null && echo "terminated old $id" || true
+          done
+          IP=$(aws ec2 describe-instances --instance-ids "$NEW" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          echo "### Jethro up: http://${IP}:8080 (instance $NEW)" >> "$GITHUB_STEP_SUMMARY"
+          echo "UI: http://${IP}:8080  — the baked stack starts on boot (give it ~60s)."
