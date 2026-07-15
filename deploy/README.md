@@ -19,7 +19,7 @@ and the sim regenerates everything.
 | Storage | one `gp3` EBS volume (~100 GB) | Postgres + LMDB + Redpanda live on local block storage (LMDB needs a real filesystem — never EFS, ADR-0014). |
 | Inference | `qwen2.5:1.5b` CPU-only | Bump to `qwen2.5:3b` if you want; GPU is a separate (pricey) decision. |
 | Edge | Caddy, auto TLS + HTTP basic auth | The app has no auth yet (review finding #5); the basic-auth credential guards everything. |
-| Cost | ~$45–65/mo with stop-when-idle (**$100 budget cap**) | EventBridge Scheduler stop/start; budget alerts at 50/80/100%, scoped to `project=jethro` so a shared account's other spend isn't counted. |
+| Cost | ~$45–65/mo with stop-when-idle (**$100 account budget**) | EventBridge Scheduler stop/start; one account-wide budget alerts at 50/80/100% — the single cost control point. |
 
 ## One-time AWS setup
 

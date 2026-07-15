@@ -189,18 +189,17 @@ public class JethroDevStack extends Stack {
         instanceSchedule("StopNightly", "cron(0 3 ? * * *)", "stopInstances", node.getInstanceId(), schedulerRole);
         instanceSchedule("StartWeekdays", "cron(0 12 ? * MON-FRI *)", "startInstances", node.getInstanceId(), schedulerRole);
 
-        // ---- Monthly cost budget (ADR-0011) — SCOPED to project=jethro so a SHARED account's
-        // other spend is not counted, giving a clean Jethro-only ceiling. Alerts at 50/80/100%
-        // actual + a forecast-over-100% warning; Budgets ALERTS but does not auto-stop, so the
-        // real cap is the stop-when-idle schedule above (the alarms are the backstop). Requires
-        // an alert email and the `project` cost-allocation tag activated in Billing (one-time).
+        // ---- Monthly cost budget (ADR-0011) — ACCOUNT-WIDE, the single cost control point for
+        // this account (the other demo project is negligible/rarely on, so one cap over
+        // everything is the simplest ceiling). Alerts at 50/80/100% actual + a forecast-over-100%
+        // warning; Budgets ALERTS but does not auto-stop, so the real cap is the stop-when-idle
+        // schedule above (the alarms are the backstop). Requires an alert email.
         if (!alertEmail.isBlank()) {
             CfnBudget.Builder.create(this, "MonthlyBudget")
                     .budget(CfnBudget.BudgetDataProperty.builder()
                             .budgetType("COST").timeUnit("MONTHLY")
                             .budgetLimit(CfnBudget.SpendProperty.builder()
                                     .amount(Double.parseDouble(budgetUsd)).unit("USD").build())
-                            .costFilters(Map.of("TagKeyValue", List.of("user:project$jethro")))
                             .build())
                     .notificationsWithSubscribers(List.of(
                             budgetAlert("ACTUAL", 50.0, alertEmail),
