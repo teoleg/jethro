@@ -1,0 +1,74 @@
+name: Launch Jethro
+
+# Spawn a fresh on-demand instance from an already-baked AMI (no rebuild).
+# Defaults to the most recent jethro-* AMI in the account. Use this to (re)launch
+# quickly; use 'Bake AMI' only when the code changed and you need a new image.
+on:
+  workflow_dispatch:
+    inputs:
+      instance_type:
+        description: Instance type (x86, >=16GB for Ollama)
+        type: choice
+        default: t3a.xlarge
+        options: [t3a.xlarge, m6i.xlarge, t3.xlarge]
+      ami:
+        description: AMI id to launch (leave blank = newest jethro-* AMI)
+        type: string
+        default: ""
+
+concurrency:
+  group: launch-jethro
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Spawn / replace instance
+        env:
+          AMI_IN: ${{ inputs.ami }}
+          TYPE: ${{ inputs.instance_type }}
+          SG: ${{ vars.JETHRO_SG_ID || 'sg-03e71c0481e7c16f4' }}   # default: jethro-sg; override with the JETHRO_SG_ID repo variable
+          SUBNET: ${{ vars.JETHRO_SUBNET_ID }}          # optional; default subnet if empty
+          PROFILE: ${{ vars.JETHRO_INSTANCE_PROFILE }}  # optional (SSM shell etc.)
+          EIP_ALLOC: ${{ vars.JETHRO_EIP_ALLOC_ID }}    # optional stable IP
+        run: |
+          set -euo pipefail
+          AMI="$AMI_IN"
+          if [ -z "$AMI" ]; then
+            AMI=$(aws ec2 describe-images --owners self \
+              --filters "Name=name,Values=jethro-*" \
+              --query 'sort_by(Images,&CreationDate)[-1].ImageId' --output text)
+          fi
+          [ -n "$AMI" ] && [ "$AMI" != "None" ] || { echo "::error::no jethro-* AMI found - run 'Bake AMI' first"; exit 1; }
+          echo "Launching from $AMI ($TYPE) into $SG"
+          OLD=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=jethro-app" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          NEW=$(aws ec2 run-instances \
+            --image-id "$AMI" --instance-type "$TYPE" --security-group-ids "$SG" \
+            ${SUBNET:+--subnet-id "$SUBNET"} \
+            ${PROFILE:+--iam-instance-profile Name="$PROFILE"} \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=jethro-app},{Key=project,Value=jethro}]' \
+            --query 'Instances[0].InstanceId' --output text)
+          echo "Launched $NEW; waiting for running..."
+          aws ec2 wait instance-running --instance-ids "$NEW"
+          if [ -n "$EIP_ALLOC" ]; then
+            aws ec2 associate-address --allocation-id "$EIP_ALLOC" --instance-id "$NEW"
+          fi
+          for id in $OLD; do
+            [ "$id" != "$NEW" ] && aws ec2 terminate-instances --instance-ids "$id" >/dev/null && echo "terminated old $id" || true
+          done
+          IP=$(aws ec2 describe-instances --instance-ids "$NEW" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          echo "### Jethro up: http://${IP}:8080 (instance $NEW)" >> "$GITHUB_STEP_SUMMARY"
+          echo "UI: http://${IP}:8080  - the baked stack starts on boot (give it ~60s)."
