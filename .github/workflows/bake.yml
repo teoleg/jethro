@@ -6,30 +6,31 @@ name: Bake AMI
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: Git ref to bake
-        type: string
-        default: claude/new-session-smb8v6
+      launch:
+        description: Also spawn an instance (leave OFF for the first run — just builds the image)
+        type: boolean
+        default: false
       ai_model:
         description: SLM to bake in
         type: string
         default: qwen2.5:1.5b
-      launch:
-        description: Spawn/replace an instance from the new AMI
-        type: boolean
-        default: true
       instance_type:
-        description: Runtime instance type (x86, >=16GB for Ollama)
+        description: Runtime instance type (x86, >=16GB for Ollama) — only used if launch is ON
         type: choice
         default: t3a.xlarge
         options: [t3a.xlarge, m6i.xlarge, t3.xlarge]
+      ref:
+        description: Git ref to bake
+        type: string
+        default: claude/new-session-smb8v6
 
 concurrency:
   group: bake-jethro
   cancel-in-progress: false
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
+  # Hardcoded to Ohio so it can never be empty (edit this one line to change region).
+  AWS_REGION: us-east-2
 
 jobs:
   bake:
