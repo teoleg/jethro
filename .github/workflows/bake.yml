@@ -33,8 +33,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Region comes from the run form (falls back to the AWS_REGION repo variable if you set one).
-  AWS_REGION: ${{ inputs.region || vars.AWS_REGION }}
+  # Region from the run form, else the AWS_REGION repo variable, else a hardcoded default so it
+  # can NEVER be empty (the mobile Run form doesn't always pass the input default through).
+  AWS_REGION: ${{ inputs.region || vars.AWS_REGION || 'us-east-1' }}
 
 jobs:
   bake:
