@@ -78,7 +78,7 @@ jobs:
         env:
           AMI: ${{ steps.ami.outputs.id }}
           TYPE: ${{ inputs.instance_type }}
-          SG: ${{ vars.JETHRO_SG_ID }}                 # SG locked to your IP, allows 8080 (+22/443)
+          SG: ${{ vars.JETHRO_SG_ID || 'sg-03e71c0481e7c16f4' }}   # default: jethro-sg (IP-locked, 8080/22); override with the JETHRO_SG_ID repo variable
           SUBNET: ${{ vars.JETHRO_SUBNET_ID }}          # optional; default subnet if empty
           PROFILE: ${{ vars.JETHRO_INSTANCE_PROFILE }}  # optional (SSM shell etc.)
           EIP_ALLOC: ${{ vars.JETHRO_EIP_ALLOC_ID }}    # optional stable IP
