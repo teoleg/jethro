@@ -42,7 +42,7 @@ source "amazon-ebs" "jethro" {
   instance_type = var.build_instance_type
   ssh_username  = "ubuntu"
   ami_name      = "jethro-{{timestamp}}"
-  ami_description = "Jethro full stack (x86-64) — app image + Ollama model baked in"
+  ami_description = "Jethro full stack (x86-64) - app image + Ollama model baked in"
 
   source_ami_filter {
     filters = {
