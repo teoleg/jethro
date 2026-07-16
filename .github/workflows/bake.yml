@@ -6,10 +6,6 @@ name: Bake AMI
 on:
   workflow_dispatch:
     inputs:
-      region:
-        description: AWS region (where your account is, e.g. us-east-1)
-        type: string
-        default: us-east-2
       launch:
         description: Also spawn an instance (leave OFF for the first run — just builds the image)
         type: boolean
@@ -33,9 +29,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Region from the run form, else the AWS_REGION repo variable, else a hardcoded default so it
-  # can NEVER be empty (the mobile Run form doesn't always pass the input default through).
-  AWS_REGION: ${{ inputs.region || vars.AWS_REGION || 'us-east-2' }}
+  # Hardcoded to Ohio so it can never be empty (edit this one line to change region).
+  AWS_REGION: us-east-2
 
 jobs:
   bake:
