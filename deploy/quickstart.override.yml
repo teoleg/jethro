@@ -7,3 +7,7 @@ services:
       JETHRO_AI_BASE_URL: http://ollama:11434
       JETHRO_TRADING_PROVIDER: ${JETHRO_TRADING_PROVIDER:-sim}
       JETHRO_AI_MODEL: ${JETHRO_AI_MODEL:-qwen2.5:1.5b}
+      # Auto-submit admissible strategy signals as SIMULATED orders so the single-box demo
+      # shows the full order -> fill -> position -> PnL loop (ADR-0019). Safe here: this box
+      # is sim-only with no broker wired (ADR-0015). NEVER set true against a real broker.
+      JETHRO_STRATEGY_AUTO_EXECUTE: ${JETHRO_STRATEGY_AUTO_EXECUTE:-true}
