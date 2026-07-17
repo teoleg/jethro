@@ -1,6 +1,6 @@
 # ADR-0030: Schema-registry serde — writer-schema resolution on the wire
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-17
 - **Deciders:** Oleg
 - **Tags:** messaging, data, contracts

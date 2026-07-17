@@ -33,7 +33,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0027](0027-evaluation-and-risk-rigor.md) | Evaluation & risk rigor — hypothesis outcome scoring, out-of-sample backtests, VaR + firm breaker, day boundary | Proposed |
 | [0028](0028-ui-static-pages-react-deferred.md) | UI stays server-served static pages; React deferred behind concrete triggers | Accepted |
 | [0029](0029-runtime-feed-switching.md) | Runtime feed switching and hard sim/live/replay data separation | Proposed |
-| [0030](0030-schema-registry-serde.md) | Schema-registry serde — writer-schema resolution on the wire | Proposed |
+| [0030](0030-schema-registry-serde.md) | Schema-registry serde — writer-schema resolution on the wire | Accepted |
 
 ## Lifecycle
 

@@ -20,14 +20,36 @@ import org.springframework.context.annotation.Configuration;
 public class KafkaConfig {
 
     @ConfigurationProperties(prefix = "jethro.kafka")
-    public record JethroKafkaProperties(boolean enabled, String bootstrapServers) {
+    public record JethroKafkaProperties(boolean enabled, String bootstrapServers, String schemaRegistryUrl) {
+        /** Schema-registry URL (ADR-0030): explicit override, else derived from the first
+         *  bootstrap host on :8081 — so it tracks the broker host in dev and in the container. */
+        public String effectiveSchemaRegistryUrl() {
+            if (schemaRegistryUrl != null && !schemaRegistryUrl.isBlank()) {
+                return schemaRegistryUrl.trim();
+            }
+            String hostPort = (bootstrapServers == null || bootstrapServers.isBlank())
+                    ? "localhost:9092" : bootstrapServers.split(",")[0].trim();
+            String host = hostPort.contains(":")
+                    ? hostPort.substring(0, hostPort.lastIndexOf(':')) : hostPort;
+            return "http://" + host + ":8081";
+        }
     }
 
     @Configuration
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
     static class BrokerWiring {
 
+        /** Configure the Avro codec against the durable schema registry (ADR-0030) before any
+         *  producer or consumer bean is built — those {@code @DependsOn} this. */
+        @Bean
+        io.jethro.messaging.SchemaRegistryClient schemaRegistry(JethroKafkaProperties properties) {
+            var client = new io.jethro.messaging.HttpSchemaRegistry(properties.effectiveSchemaRegistryUrl());
+            io.jethro.messaging.AvroCodec.configure(client);
+            return client;
+        }
+
         @Bean(destroyMethod = "close")
+        @org.springframework.context.annotation.DependsOn("schemaRegistry")
         KafkaEventPublisher kafkaEventPublisher(JethroKafkaProperties properties) {
             return new KafkaEventPublisher(properties.bootstrapServers());
         }
@@ -38,6 +60,7 @@ public class KafkaConfig {
         }
 
         @Bean(destroyMethod = "close")
+        @org.springframework.context.annotation.DependsOn("schemaRegistry")
         UiGatewayRuntime uiGatewayRuntime(JethroKafkaProperties properties, MarkState markState,
                                           MarkHistory markHistory, AttentionFeed feed,
                                           AttentionRules rules, SseBroadcaster sse) {

@@ -40,7 +40,7 @@ public final class KafkaEventPublisher implements AutoCloseable {
 
     public void publish(String topic, String key, SpecificRecordBase event) {
         try {
-            producer.send(new ProducerRecord<>(topic, key, AvroCodec.encode(event)), (metadata, exception) -> {
+            producer.send(new ProducerRecord<>(topic, key, AvroCodec.encode(topic, event)), (metadata, exception) -> {
                 if (exception != null) {
                     long failures = failed.incrementAndGet();
                     if (failures == 1 || failures % 100 == 0) {

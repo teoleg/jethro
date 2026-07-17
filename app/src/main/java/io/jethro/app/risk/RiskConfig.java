@@ -212,6 +212,7 @@ public class RiskConfig {
 
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @org.springframework.context.annotation.DependsOn("schemaRegistry")
     RiskDataConsumer riskDataConsumer(KafkaConfig.JethroKafkaProperties properties, RiskProjection projection,
                                       CurveService curveService,
                                       io.jethro.trading.riskpnl.TreasuryCurveView treasuryCurveView,

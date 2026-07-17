@@ -127,6 +127,7 @@ public class OrderConfig {
 
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @org.springframework.context.annotation.DependsOn("schemaRegistry")
     OrderMarketDataConsumer orderMarketDataConsumer(KafkaConfig.JethroKafkaProperties properties,
                                                     LastPriceCache prices, OrderService orderService) {
         // onMark drives working-order matching (ADR-0025): unmarketable GTC LIMIT orders are
