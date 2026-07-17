@@ -234,6 +234,8 @@ public final class HypothesisGenerator {
                         .setEventId(UUID.randomUUID().toString())
                         .setProviderTimestamp(now)
                         .setIngestTimestamp(now)
+                        .setFeedMode(io.jethro.messaging.Provenance.mode())
+                        .setSessionEpoch(io.jethro.messaging.Provenance.epoch())
                         .build())
                 .setDecisionId(UUID.randomUUID().toString())
                 .setModelId(result.modelId())

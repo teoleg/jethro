@@ -2,10 +2,16 @@
   "type": "record",
   "name": "EventMeta",
   "namespace": "io.jethro.messaging",
-  "doc": "Common event envelope. eventId is the dedupe key under at-least-once delivery (invariant 6/8); dual timestamps make staleness measurable (invariant 4).",
+  "doc": "Common event envelope. eventId is the dedupe key under at-least-once delivery (invariant 6/8); dual timestamps make staleness measurable (invariant 4); feedMode + sessionEpoch keep sim/live/replay data un-mixed (ADR-0029).",
   "fields": [
     {"name": "eventId", "type": "string", "doc": "Stable unique id; consumers dedupe on it"},
     {"name": "providerTimestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "When the source produced the underlying data"},
-    {"name": "ingestTimestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "When jethro ingested/created the event"}
+    {"name": "ingestTimestamp", "type": {"type": "long", "logicalType": "timestamp-millis"}, "doc": "When jethro ingested/created the event"},
+    {"name": "feedMode",
+     "type": {"type": "enum", "name": "FeedMode", "symbols": ["SIM", "LIVE", "REPLAY"], "default": "SIM"},
+     "default": "SIM",
+     "doc": "Provenance of the data this event derives from (ADR-0029). Added backward-compatibly (invariant 4)."},
+    {"name": "sessionEpoch", "type": "string", "default": "",
+     "doc": "Run/epoch id; a sim<->live switch starts a new epoch so state never aggregates across modes (ADR-0029)."}
   ]
 }

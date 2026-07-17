@@ -57,6 +57,8 @@ public final class MarkPublisher implements SmartLifecycle {
                             .setEventId(UUID.randomUUID().toString())
                             .setProviderTimestamp(mark.providerTimestamp())
                             .setIngestTimestamp(now)
+                            .setFeedMode(io.jethro.messaging.Provenance.mode())
+                            .setSessionEpoch(io.jethro.messaging.Provenance.epoch())
                             .build())
                     .setInstrumentId(mark.instrumentId())
                     .setPrice(mark.price())

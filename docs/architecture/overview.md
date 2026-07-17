@@ -121,6 +121,10 @@ mode:
 9. Embedded local state (LMDB) holds **derived data only** — losing it may cost restart
    time, never data (ADR-0014). Ticks/marks are droppable under pressure, but drops and
    archive gaps are always counted and exposed as metrics — never silent.
+10. Sim, live, and replay data are never aggregated across modes (ADR-0029): every event
+    carries `feedMode` + `sessionEpoch`; one mode per session, and a sim↔live switch rolls
+    a new epoch/namespace. Serde resolves the writer schema via the registry so
+    backward-compatible evolution actually decodes across versions (ADR-0030).
 
 ## Repository layout (planned)
 

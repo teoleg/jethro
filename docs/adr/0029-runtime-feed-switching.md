@@ -1,6 +1,6 @@
 # ADR-0029: Runtime feed switching and hard sim/live/replay data separation
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-17
 - **Deciders:** Oleg
 - **Tags:** market-data, ops, data, trading-core
