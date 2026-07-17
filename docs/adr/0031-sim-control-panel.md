@@ -1,6 +1,6 @@
 # ADR-0031: Sim control panel — live UI dials over the simulator for model testing
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-17
 - **Deciders:** Oleg
 - **Tags:** market-data, sim, ui, testing
@@ -59,3 +59,22 @@ need the same LIVE guard anyway. Rejected.
 - **Follow-ups:** scenario capture/replay (script files); a "shock" one-click preset library;
   wiring the panel behind the same auth as `/api/admin/*` once that exists (sim-only lowers the
   urgency). Depends on ADR-0029 for the `feedMode` gate.
+
+## Implementation status (2026-07-17)
+
+Built:
+- **`SimControl`** (`trading-core/market-data`) — the live dials the `sim-feed` thread reads each
+  tick: global speed / pause / regime-override / reseed, per-instrument nudge / drift / idio-vol /
+  volume. Thread-safe (volatile globals, `AtomicLongArray` per-instrument), every dial defaulting
+  to the identity so an untouched panel reproduces the exact seeded tape (a test asserts the
+  bit-for-bit match against the no-control constructor).
+- **Engine wiring** — `CorrelatedFactorSimulator` applies reseed/nudges, honours the forced
+  regime, and folds per-instrument vol/drift into the return; `CorrelatedMarketDataAdapter` honours
+  pause + speed pacing and the volume dial. A second constructor keeps the old call sites unchanged.
+- **REST + UI** — `SimControlController` (`/api/sim/*`) hard-gated to `feedMode == SIM` **and** the
+  correlated engine being present (403 otherwise, a tested invariant); `/sim.html` panel with the
+  live instrument universe (names from refdata) and a panel-driven-vs-seeded label.
+
+Deferred (per "Follow-ups" above): scenario capture/replay, a preset shock library, auth on the
+panel, and stamping a panel-driven flag onto emitted events (today the label is UI-only, derived
+from `anyDialActive()`).

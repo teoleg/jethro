@@ -45,6 +45,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private volatile MarketDataAdapter adapter;
     private volatile java.util.function.Supplier<String> regimeSource; // non-null only in sim mode
     private volatile java.util.function.LongSupplier simDayIndexSource; // correlated sim only
+    private volatile io.jethro.trading.marketdata.sim.SimControl simControl; // ADR-0031: correlated sim only
     private volatile RealTreasuryCurve realCurve;     // non-null only when the live curve is active
     private volatile TreasuryCurveFetcher curveFetcher;
     private volatile String curveSource = "sim";      // "treasury-live" or "sim" (for the UI)
@@ -274,6 +275,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                         properties.simSecondsPerDayOrDefault(), quoteSpecSource());
                 this.regimeSource = () -> sim.regime().name();
                 this.simDayIndexSource = sim::simDayIndex;
+                this.simControl = sim.control();
                 log.info("SIM ENGINE: correlated factor model (ADR-0026) — {} instruments, {} regimes, "
                                 + "t(ν={}) tails, {}s per simulated trading day",
                         calibration.instruments().size(), calibration.regimes().size(),
@@ -347,6 +349,12 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
      *  session calendar keys to the TAPE's days, not wall time (ADR-0027). */
     public java.util.function.LongSupplier simDayIndexSource() {
         return simDayIndexSource;
+    }
+
+    /** The live sim control panel (ADR-0031), or null when the feed isn't the correlated sim
+     *  (live/replay/legacy). The REST surface additionally gates on {@code feedMode == SIM}. */
+    public io.jethro.trading.marketdata.sim.SimControl simControl() {
+        return simControl;
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'
