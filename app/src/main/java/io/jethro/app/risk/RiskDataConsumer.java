@@ -126,7 +126,7 @@ public final class RiskDataConsumer implements AutoCloseable {
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         try (var consumer = new KafkaConsumer<>(props, new StringDeserializer(), new ByteArrayDeserializer())) {
-            consumer.subscribe(List.of(Topics.FILLS, Topics.MD_MARKS), new ConsumerRebalanceListener() {
+            consumer.subscribe(List.of(Topics.resolved(Topics.FILLS), Topics.resolved(Topics.MD_MARKS)), new ConsumerRebalanceListener() {
                 @Override
                 public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
                 }
@@ -142,7 +142,7 @@ public final class RiskDataConsumer implements AutoCloseable {
                 var records = consumer.poll(Duration.ofMillis(500));
                 for (var record : records) {
                     try {
-                        if (Topics.FILLS.equals(record.topic())) {
+                        if (Topics.resolved(Topics.FILLS).equals(record.topic())) {
                             Fill fill = toFill(AvroCodec.decode(record.value(), FillEvent.class));
                             projection.applyFill(fill);
                             if (fillTap != null) {

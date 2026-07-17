@@ -1,6 +1,7 @@
 package io.jethro.app.kafka;
 
 import io.jethro.messaging.AvroCodec;
+import io.jethro.messaging.Topics;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -39,8 +40,10 @@ public final class KafkaEventPublisher implements AutoCloseable {
     }
 
     public void publish(String topic, String key, SpecificRecordBase event) {
+        // Namespace by feed mode (ADR-0029): sim/live/replay never share a topic.
+        String resolved = Topics.resolved(topic);
         try {
-            producer.send(new ProducerRecord<>(topic, key, AvroCodec.encode(topic, event)), (metadata, exception) -> {
+            producer.send(new ProducerRecord<>(resolved, key, AvroCodec.encode(resolved, event)), (metadata, exception) -> {
                 if (exception != null) {
                     long failures = failed.incrementAndGet();
                     if (failures == 1 || failures % 100 == 0) {

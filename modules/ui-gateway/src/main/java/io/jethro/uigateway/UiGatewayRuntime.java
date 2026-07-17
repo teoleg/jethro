@@ -73,7 +73,7 @@ public final class UiGatewayRuntime implements AutoCloseable {
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
         long lastRulesRun = 0;
         try (var consumer = new KafkaConsumer<>(props, new StringDeserializer(), new ByteArrayDeserializer())) {
-            consumer.subscribe(List.of(Topics.MD_MARKS, Topics.AI_DECISIONS),
+            consumer.subscribe(List.of(Topics.resolved(Topics.MD_MARKS), Topics.resolved(Topics.AI_DECISIONS)),
                     new org.apache.kafka.clients.consumer.ConsumerRebalanceListener() {
                         @Override
                         public void onPartitionsRevoked(
@@ -87,16 +87,16 @@ public final class UiGatewayRuntime implements AutoCloseable {
                         }
                     });
             log.info("ui-gateway consuming {} (replaying last {}min) and {} from {}",
-                    Topics.MD_MARKS, markHistory.retentionMillis() / 60_000, Topics.AI_DECISIONS, bootstrapServers);
+                    Topics.resolved(Topics.MD_MARKS), markHistory.retentionMillis() / 60_000, Topics.resolved(Topics.AI_DECISIONS), bootstrapServers);
             while (running.get()) {
                 var records = consumer.poll(POLL);
                 boolean marksChanged = false;
                 for (var record : records) {
                     try {
-                        if (Topics.MD_MARKS.equals(record.topic())) {
+                        if (Topics.resolved(Topics.MD_MARKS).equals(record.topic())) {
                             onMark(AvroCodec.decode(record.value(), MarkEvent.class));
                             marksChanged = true;
-                        } else if (Topics.AI_DECISIONS.equals(record.topic())) {
+                        } else if (Topics.resolved(Topics.AI_DECISIONS).equals(record.topic())) {
                             onDecision(AvroCodec.decode(record.value(), AiDecision.class));
                         }
                     } catch (RuntimeException e) {
@@ -124,8 +124,8 @@ public final class UiGatewayRuntime implements AutoCloseable {
     /** md.marks → back to now−retention (rebuild the chart history); ai.decisions → end. */
     private void seekForReplay(KafkaConsumer<String, byte[]> consumer,
                                java.util.Collection<org.apache.kafka.common.TopicPartition> partitions) {
-        var marks = partitions.stream().filter(p -> Topics.MD_MARKS.equals(p.topic())).toList();
-        var decisions = partitions.stream().filter(p -> Topics.AI_DECISIONS.equals(p.topic())).toList();
+        var marks = partitions.stream().filter(p -> Topics.resolved(Topics.MD_MARKS).equals(p.topic())).toList();
+        var decisions = partitions.stream().filter(p -> Topics.resolved(Topics.AI_DECISIONS).equals(p.topic())).toList();
         if (!decisions.isEmpty()) {
             consumer.seekToEnd(decisions);
         }

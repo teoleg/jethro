@@ -60,7 +60,7 @@ public class KafkaConfig {
         }
 
         @Bean(destroyMethod = "close")
-        @org.springframework.context.annotation.DependsOn("schemaRegistry")
+        @org.springframework.context.annotation.DependsOn({"schemaRegistry", "provenanceConfig"})
         UiGatewayRuntime uiGatewayRuntime(JethroKafkaProperties properties, MarkState markState,
                                           MarkHistory markHistory, AttentionFeed feed,
                                           AttentionRules rules, SseBroadcaster sse) {

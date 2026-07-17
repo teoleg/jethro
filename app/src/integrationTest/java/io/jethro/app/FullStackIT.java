@@ -206,7 +206,7 @@ class FullStackIT {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "it-" + UUID.randomUUID());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         try (var consumer = new KafkaConsumer<>(props, new StringDeserializer(), new ByteArrayDeserializer())) {
-            consumer.subscribe(List.of(Topics.AI_DECISIONS));
+            consumer.subscribe(List.of(Topics.resolved(Topics.AI_DECISIONS)));
             var records = consumer.poll(Duration.ofSeconds(5));
             AiDecision latest = null;
             for (var record : records) {
