@@ -71,3 +71,20 @@ demo switch. Deferred: real-money running is the trigger to physically split the
   never aggregated across modes; every event carries `feedMode` + `sessionEpoch`" — in CLAUDE.md
   and the architecture overview. Depends on ADR-0030 for the additive `EventMeta` fields;
   `FeedSwitched` on an ops/audit topic; Config-page UI control; auth on `/api/admin/*`.
+
+## Implementation status (2026-07-17)
+
+Built, and the invariant is now a hard invariant (CLAUDE.md #8, overview #10):
+- **Provenance tags** — `EventMeta.feedMode` + `sessionEpoch`, stamped on every event from a
+  `Provenance` holder configured at startup from the provider (sim→SIM, yahoo/finnhub→LIVE,
+  replay→REPLAY).
+- **Topic namespacing** — producers/consumers resolve through `Topics.resolved(base)` →
+  `<mode>.<topic>`; sim/live/replay never share a stream.
+- **DB scoping** — the `fills` source-of-truth carries `feed_mode` (V27); the positions rebuild
+  seeds only from the current mode's fills.
+
+Deferred (decision-level, governed here): per-mode scoping of the remaining derived tables
+(`daily_closes`, `swap_trades`, `mark_quarantine`, equity) and the S3 archive prefix — triggered
+when a live feed first runs against a shared DB/bucket. The **runtime feed-switch endpoint**
+(stage 3) is deferred until (a) a correct in-process consumer re-subscription across the epoch
+roll and (b) auth on `/api/admin/*` exist; today a mode change is a restart with new config.

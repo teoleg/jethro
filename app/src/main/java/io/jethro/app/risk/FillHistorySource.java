@@ -31,7 +31,7 @@ public interface FillHistorySource {
     static FillHistorySource jdbc(JdbcTemplate jdbc) {
         return () -> jdbc.query("""
                 select fill_id, order_id, book_id, instrument_id, side, quantity, price, fee, executed_at
-                from fills order by executed_at, fill_id
+                from fills where feed_mode = ? order by executed_at, fill_id
                 """, (rs, i) -> new Fill(
                 rs.getString("fill_id"),
                 rs.getString("order_id"),
@@ -41,7 +41,8 @@ public interface FillHistorySource {
                 rs.getBigDecimal("quantity"),
                 rs.getBigDecimal("price"),
                 rs.getBigDecimal("fee") != null ? rs.getBigDecimal("fee") : java.math.BigDecimal.ZERO,
-                toInstant(rs.getTimestamp("executed_at"))));
+                toInstant(rs.getTimestamp("executed_at"))),
+                io.jethro.messaging.Provenance.mode().name());
     }
 
     private static Instant toInstant(java.sql.Timestamp ts) {
