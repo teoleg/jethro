@@ -72,11 +72,39 @@ public final class SimulatedExecutor {
         BigDecimal notional = order.quantity().multiply(mid).multiply(multiplier).abs();
         BigDecimal cap = cost.advUsd().multiply(maxAdvParticipation);
         if (notional.compareTo(cap) > 0) {
-            return Optional.of("order notional " + notional.toPlainString() + " exceeds "
-                    + maxAdvParticipation.movePointRight(2).toPlainString() + "% of ADV ("
-                    + cost.advUsd().toPlainString() + ") — split the order or reduce size");
+            return Optional.of("order notional " + money(notional) + " exceeds "
+                    + maxAdvParticipation.movePointRight(2).stripTrailingZeros().toPlainString()
+                    + "% of ADV (" + money(cost.advUsd()) + ")");
         }
         return Optional.empty();
+    }
+
+    /**
+     * The maximum quantity of this instrument a single order may carry under the participation
+     * cap at the given mid — the slicer's chunk size (ADR-0025 follow-up). Empty when the cap
+     * doesn't apply (off / no mid / no ADV / rate-quoted) or the cap rounds to a zero quantity.
+     */
+    public Optional<BigDecimal> maxQuantityUnderCap(Order order, BigDecimal mid) {
+        if (maxAdvParticipation == null || mid == null || mid.signum() <= 0) {
+            return Optional.empty();
+        }
+        ExecutionCostSource.Cost cost = costs.costFor(order.instrumentId().value());
+        if (cost.advUsd() == null || cost.advUsd().signum() <= 0 || cost.rateQuoted()) {
+            return Optional.empty();
+        }
+        BigDecimal multiplier = cost.multiplier() != null ? cost.multiplier() : BigDecimal.ONE;
+        BigDecimal capNotional = cost.advUsd().multiply(maxAdvParticipation);
+        BigDecimal perUnit = mid.multiply(multiplier);
+        if (perUnit.signum() <= 0) {
+            return Optional.empty();
+        }
+        BigDecimal qty = capNotional.divide(perUnit, 6, ROUND);
+        return qty.signum() > 0 ? Optional.of(qty) : Optional.empty();
+    }
+
+    /** Money in a human message: 2dp, no scale noise. */
+    private static String money(BigDecimal v) {
+        return v.setScale(2, ROUND).toPlainString();
     }
 
     /** Attempts to execute at the mid alone (no quote data — synthetic spread). */

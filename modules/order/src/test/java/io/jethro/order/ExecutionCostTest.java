@@ -79,6 +79,22 @@ class ExecutionCostTest {
     }
 
     @Test
+    void maxQuantityUnderCapIsTheSlicerChunkSize() {
+        // ADV $1M, cap 2% = $20k notional; mid 200 → max 100 units per slice.
+        ExecutionCostSource thinAdv = id -> new ExecutionCostSource.Cost(
+                BigDecimal.ZERO, BigDecimal.ZERO, false,
+                new BigDecimal("1000000"), new BigDecimal("0.02"), BigDecimal.ONE);
+        var exec = new SimulatedExecutor(thinAdv, new BigDecimal("0.02"));
+        var max = exec.maxQuantityUnderCap(sized(Side.BUY, "500"), new BigDecimal("200")).orElseThrow();
+        assertTrue(new BigDecimal("100").compareTo(max) == 0, "20k / 200 = 100, got " + max);
+        // A slice of exactly that size passes the gate.
+        assertTrue(exec.participationRejection(sized(Side.BUY, "100"), new BigDecimal("200")).isEmpty());
+        // Cap off / no mid → empty (caller falls back to reject-or-pass).
+        assertTrue(new SimulatedExecutor(thinAdv).maxQuantityUnderCap(sized(Side.BUY, "500"), new BigDecimal("200")).isEmpty());
+        assertTrue(exec.maxQuantityUnderCap(sized(Side.BUY, "500"), null).isEmpty());
+    }
+
+    @Test
     void quotedTouchOverridesTheSyntheticSpread() {
         // A REAL quote rides with the mark (ADR-0025): BUY crosses to the ASK as quoted —
         // fill price IS the ask (fees are cash now, never in the price).
