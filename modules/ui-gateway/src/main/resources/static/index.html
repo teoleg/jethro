@@ -437,7 +437,7 @@
       const src = h.source && h.source !== "live" ? " " + h.source : "";
       b.textContent = h.ready ? `history ✓ ${h.days}d${src}` : `history warming ${h.days}/20d`;
       b.style.color = h.ready ? "var(--up)" : "var(--warn)";
-      const how = h.source === "sim-seed" ? ` · seeded ${when}` : h.source === "existing" ? ` · loaded ${when}`
+      const how = h.source === "yahoo-history" ? ` · from Yahoo ${when}` : h.source === "existing" ? ` · loaded ${when}`
         : h.source === "unavailable" ? " · persistence off" : " · accumulating live";
       b.title = `covariance history: ${h.days} days · ${h.instruments} instruments · latest ${h.latestDay || "—"}${how}`;
     } catch (e) {}

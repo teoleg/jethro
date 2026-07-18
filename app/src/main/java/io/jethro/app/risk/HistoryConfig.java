@@ -1,18 +1,20 @@
 package io.jethro.app.risk;
 
-import io.jethro.app.trading.SimHistorySeeder;
 import io.jethro.app.trading.TradingCoreProperties;
+import io.jethro.app.trading.YahooHistoryClient;
+import io.jethro.app.trading.YahooHistorySeeder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.Duration;
+
 /**
- * Daily-return history status + boot seed (ADR-0038). DB-backed, so gated on persistence; the
- * seeder is SIM-only and idempotent. Seeding depends on the provenance (feed mode) being resolved
- * first, so the SIM gate reads the right mode.
+ * Daily-return history status + boot seed (ADR-0038). DB-backed, so gated on persistence. The
+ * seeder pulls REAL history from the existing Yahoo channel — even in sim mode — on a background
+ * thread, so it never blocks boot and a network failure is harmless.
  */
 @Configuration
 @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
@@ -23,12 +25,15 @@ public class HistoryConfig {
         return new HistoryStatus(jdbc);
     }
 
-    @Bean
-    @DependsOn("provenanceConfig")
-    SimHistorySeeder simHistorySeeder(JdbcTemplate jdbc, TradingCoreProperties props, HistoryStatus status,
-                                      @Value("${jethro.hedge.history-seed-days:60}") int windowDays) {
-        var seeder = new SimHistorySeeder(jdbc, props, status, windowDays);
-        seeder.start(); // no-op unless SIM mode and daily_close is under a full window
+    @Bean(destroyMethod = "stop")
+    @ConditionalOnProperty(prefix = "jethro.hedge", name = "history-seed", havingValue = "yahoo", matchIfMissing = true)
+    YahooHistorySeeder yahooHistorySeeder(JdbcTemplate jdbc, TradingCoreProperties props, HistoryStatus status,
+                                          @Value("${jethro.hedge.history-seed-days:60}") int windowDays,
+                                          @Value("${jethro.hedge.history-range:5y}") String range,
+                                          @Value("${jethro.hedge.history-request-spacing-millis:800}") long spacingMillis) {
+        var client = new YahooHistoryClient(Duration.ofSeconds(15), range);
+        var seeder = new YahooHistorySeeder(jdbc, props, status, client, windowDays, spacingMillis);
+        seeder.start(); // background thread; no-op-ish when a full window already exists
         return seeder;
     }
 }

@@ -9,8 +9,8 @@
     "correlations tighten); INFLATION_SHOCK = the 2022 pattern (stocks down WHILE yields up,",
     "stock-bond correlation flips sign). Treasury futures (ZT/ZF/ZN/ZB) and swaps carry no spec:",
     "they price FROM the curve, whose level/slope ARE the RATES factors.",
-    "Refresh from real daily history with: python3 scripts/calibrate_sim.py (needs internet;",
-    "run on the Pi). The platform itself never fetches at runtime (ADR-0009)."
+    "Hand-curated from long-run market stats; the hedge covariance is seeded separately from",
+    "real Yahoo history in-app at boot (YahooHistorySeeder). The platform never fetches on the tick path (ADR-0009)."
   ],
   "equityFactorVolAnnual": 0.16,
   "usdFactorVolAnnual": 0.07,

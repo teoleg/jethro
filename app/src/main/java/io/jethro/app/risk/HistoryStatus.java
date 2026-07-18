@@ -22,8 +22,8 @@ public final class HistoryStatus {
         this.jdbc = jdbc;
     }
 
-    public void markSeeded(int days, int instruments) {
-        this.source = "sim-seed";
+    public void markSeeded(String source) {
+        this.source = source;
         this.seededAtMillis = System.currentTimeMillis();
     }
 
