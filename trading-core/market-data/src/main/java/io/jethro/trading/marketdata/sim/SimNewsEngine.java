@@ -68,6 +68,32 @@ public final class SimNewsEngine {
         }
     }
 
+    /** Manually fire a news event on a named instrument (ADR-0034 follow-up — the sim panel's
+     *  "fire a news shock" button): applies the shock and records the headline like an organic
+     *  event, so it reaches the model too. No-op (returns false) for an instrument the sim can't
+     *  control (curve pseudo-quotes). */
+    public synchronized boolean fireManual(String instrumentId, int sign, double magnitude) {
+        boolean known = false;
+        for (String id : ids) {
+            if (id.equals(instrumentId)) {
+                known = true;
+                break;
+            }
+        }
+        if (!known) {
+            return false;
+        }
+        int s = sign >= 0 ? 1 : -1;
+        control.fireNewsShock(instrumentId, s, magnitude, horizonTicks);
+        SimNewsEvent event = new SimNewsEvent("sim-news-" + (seq++), instrumentId, s,
+                headline(instrumentId, s), -1);
+        recent.addLast(event);
+        while (recent.size() > MAX_RECENT) {
+            recent.removeFirst();
+        }
+        return true;
+    }
+
     /** Recent generated events, oldest first (the narrative feed maps these to its items). */
     public synchronized List<SimNewsEvent> recent() {
         return new ArrayList<>(recent);

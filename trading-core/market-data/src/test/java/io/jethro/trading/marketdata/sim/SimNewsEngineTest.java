@@ -56,4 +56,32 @@ class SimNewsEngineTest {
         }
         assertTrue(engine.recent().isEmpty());
     }
+
+    @Test
+    void fireManualShocksAndRecordsForAKnownInstrument() {
+        var control = new SimControl(1, IDS);
+        var engine = new SimNewsEngine(1, IDS, control, 0.0, 5); // never fires organically
+        assertTrue(engine.fireManual("AAPL", -1, 0.02));
+        int aapl = IDS.indexOf("AAPL");
+        assertTrue(control.volumeScale(aapl) > 1.0 || control.driftBias(aapl) != 0.0,
+                "a manual event must apply a shock to its instrument");
+        assertEquals(1, engine.recent().size());
+        var event = engine.recent().get(0);
+        assertEquals("AAPL", event.instrumentId());
+        assertEquals(-1, event.sign(), "a negative sign is bearish");
+    }
+
+    @Test
+    void fireManualIgnoresAnUnknownInstrument() {
+        var engine = new SimNewsEngine(1, IDS, new SimControl(1, IDS), 0.0, 5);
+        assertFalse(engine.fireManual("NOPE", 1, 0.02));
+        assertTrue(engine.recent().isEmpty());
+    }
+
+    @Test
+    void fireManualNonNegativeSignIsBullish() {
+        var engine = new SimNewsEngine(1, IDS, new SimControl(1, IDS), 0.0, 5);
+        assertTrue(engine.fireManual("ES", 0, 0.015));
+        assertEquals(1, engine.recent().get(0).sign(), "zero maps to bullish (+1)");
+    }
 }

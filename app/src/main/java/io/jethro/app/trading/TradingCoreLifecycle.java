@@ -454,6 +454,23 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         return engine != null ? engine.recent() : java.util.List.of();
     }
 
+    /** Manually fire a sim news shock (ADR-0034 follow-up) on an instrument: routes through the
+     *  news engine when news is on (so the headline reaches the model), else applies the shock via
+     *  the control directly. Returns false when there's no sim control / unknown instrument. */
+    public boolean fireSimNews(String instrumentId, int sign, double magnitude) {
+        var src = simNewsSource;
+        var engine = src != null ? src.get() : null;
+        if (engine != null) {
+            return engine.fireManual(instrumentId, sign, magnitude);
+        }
+        var control = simControl;
+        if (control != null) {
+            control.fireNewsShock(instrumentId, sign, magnitude, newsHorizonTicks());
+            return true;
+        }
+        return false;
+    }
+
     /** Per-tick probability of a news event, from the configured events/day and ticks/day (ADR-0034). */
     private double newsPerTickProbability() {
         double ticksPerDay = Math.max(1, simTradesPerDay);

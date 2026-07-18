@@ -141,6 +141,52 @@ public final class SimControlController {
         return state();
     }
 
+    // ---- news shock (ADR-0034 follow-up) ----
+
+    /** A manual news shock: instrument, direction ({@code BULL}/{@code BEAR}), and an optional
+     *  magnitude (fraction, e.g. 0.015 = 1.5% repricing jump). Magnitude defaults when omitted. */
+    public record NewsRequest(String instrumentId, String direction, Double magnitude) {
+    }
+
+    /**
+     * Fire a (sim) news shock on demand — the "fire a news shock" button. Same SIM gate as every
+     * other dial; routes through {@link TradingCoreLifecycle#fireSimNews} so the shock is a real
+     * correlated event (repricing jump + decaying momentum + volume surge) AND is recorded as a
+     * headline the model reads — never a bare price nudge. 404s for an instrument the sim can't
+     * move (e.g. curve pseudo-quotes).
+     */
+    @PostMapping("/api/sim/news")
+    public ControlStateDto news(@RequestBody NewsRequest req) {
+        SimControl control = control(); // gate first (403 outside SIM / no correlated engine)
+        if (req == null || req.instrumentId() == null || req.instrumentId().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "instrumentId is required");
+        }
+        guardInstrument(control, req.instrumentId());
+        int sign = parseDirection(req.direction());
+        double magnitude = req.magnitude() != null ? req.magnitude() : DEFAULT_NEWS_MAGNITUDE;
+        TradingCoreLifecycle core = tradingCore.getIfAvailable();
+        boolean fired = core != null && core.fireSimNews(req.instrumentId(), sign, magnitude);
+        if (!fired) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND,
+                    "could not fire a news shock for " + req.instrumentId());
+        }
+        return state();
+    }
+
+    private static final double DEFAULT_NEWS_MAGNITUDE = 0.015; // 1.5% repricing jump
+
+    private int parseDirection(String direction) {
+        if (direction == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "direction is required (BULL/BEAR)");
+        }
+        return switch (direction.trim().toUpperCase(java.util.Locale.ROOT)) {
+            case "BULL", "BULLISH", "UP", "+", "LONG" -> 1;
+            case "BEAR", "BEARISH", "DOWN", "-", "SHORT" -> -1;
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "unknown direction (expected BULL/BEAR): " + direction);
+        };
+    }
+
     // ---- gating + helpers ----
 
     /** The live control, or 403 when the feed isn't the correlated sim under SIM mode. The

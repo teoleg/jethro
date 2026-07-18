@@ -59,8 +59,8 @@ any volume signal train on a coincidence. Rejected.
   shocks can stack into unrealistic moves (bounded magnitudes + a per-instrument cap); generated
   headlines are **templated/synthetic** and must read as sim, never mistaken for real news; news
   timing is seedable but adds a second stochastic source to reason about in a tape.
-- **Follow-ups:** a manual "fire a news shock" control on `/sim.html` (ADR-0031 overlay); richer
-  headline templates; once G3/G4 land, volume-confirmed signals consume the surge. Depends on
+- **Follow-ups:** richer headline templates; once G3/G4 land, volume-confirmed signals consume the
+  surge (a manual "fire a news shock" control on `/sim.html` shipped — see below). Depends on
   ADR-0031 (SimControl), ADR-0026/0032 (engines), ADR-0029 (`feedMode` gate).
 
 ## Implementation status (2026-07-18) — built
@@ -73,4 +73,9 @@ any volume signal train on a coincidence. Rejected.
 - **Model sees the news.** `SimEngineNarrativeFeed` surfaces the generated headlines (with display
   names + sentiment) to the hypothesis layer in pure-sim mode, so the model reads the very headline
   that moved the tape — news→price→volume is now causal and the model closes the loop.
+- **Manual "fire a news shock" button (follow-up shipped).** `SimNewsEngine.fireManual` +
+  `TradingCoreLifecycle.fireSimNews` route a hand-triggered event through the same coupling (jump +
+  momentum + volume surge) and record the headline so the model reads it too — never a bare price
+  nudge. Exposed as `POST /api/sim/news` (`{instrumentId, direction: BULL/BEAR, magnitude?}`, default
+  1.5%), sharing the SIM-mode 403 gate of every other dial; a control on `/sim.html` fires it.
 - Untouched (news-free) runs are bit-for-bit the old seeded tape; every path is tested.

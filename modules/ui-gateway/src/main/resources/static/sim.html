@@ -157,6 +157,34 @@
           <tr><th>instrument</th><th>nudge price</th><th>drift bias</th><th>vol ×</th><th>volume ×</th></tr>
           ${rows}
         </table>
+      </div>
+      <div class="section-h">News shock (ADR-0034)
+        <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
+          fires a correlated event — repricing jump + decaying momentum + volume surge — and a headline the model reads</span></div>
+      <div class="panel">
+        <div class="globals">
+          <div class="field">
+            <label>Instrument</label>
+            <select id="newsInstrument">
+              ${state.instruments.map(it=>`<option value="${esc(it.id)}">${esc(it.name)} (${esc(it.id)})</option>`).join("")}
+            </select>
+          </div>
+          <div class="field">
+            <label>Magnitude % <span class="val mono" id="newsMagVal">1.50</span></label>
+            <input type="range" id="newsMag" min="0.5" max="3.0" step="0.1" value="1.5">
+          </div>
+          <div class="field">
+            <label>Fire</label>
+            <div style="display:flex; gap:8px">
+              <button id="newsBull" class="primary">▲ Bullish</button>
+              <button id="newsBear" class="warn">▼ Bearish</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>&nbsp;</label>
+            <span class="muted mono" id="newsStatus" style="font-size:12px"></span>
+          </div>
+        </div>
       </div>`;
     wire();
   }
@@ -171,6 +199,21 @@
       state = await post("/api/sim/control/regime", { regime: e.target.value }); render(); };
     document.getElementById("reseed").onclick = async () => { state = await post("/api/sim/control/reseed", {}); render(); };
     document.getElementById("reset").onclick = async () => { state = await post("/api/sim/control/reset", {}); render(); };
+
+    const newsMag = document.getElementById("newsMag");
+    newsMag.oninput = () => document.getElementById("newsMagVal").textContent = f2(newsMag.value);
+    const fireNews = async (direction) => {
+      const id = document.getElementById("newsInstrument").value;
+      const magnitude = Number(newsMag.value) / 100;
+      const status = document.getElementById("newsStatus");
+      try {
+        state = await post("/api/sim/news", { instrumentId: id, direction, magnitude });
+        status.textContent = `fired ${direction.toLowerCase()} on ${id}`;
+        render();
+      } catch (e) { status.textContent = "fire failed (" + e.message + ")"; }
+    };
+    document.getElementById("newsBull").onclick = () => fireNews("BULL");
+    document.getElementById("newsBear").onclick = () => fireNews("BEAR");
 
     document.querySelectorAll("tr[data-id]").forEach(tr => {
       const id = tr.getAttribute("data-id");
