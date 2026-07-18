@@ -48,16 +48,20 @@ public final class SimHistorySeeder {
     public void start() {
         try {
             if (Provenance.mode() != FeedMode.SIM) {
+                log.info("history seed: NOT seeding — feed mode is {} (seed is SIM-only; run PROVIDER=sim). "
+                        + "The hedge covariance will accumulate from the live feed instead.", Provenance.mode());
                 return; // seed only the sim; live history accrues from the real feed
             }
             Long have = jdbc.queryForObject("select count(distinct day) from daily_close", Long.class);
             if (have != null && have >= windowDays) {
                 status.markExisting();
+                log.info("history seed: NOT needed — {} days already on file (>= {} window)", have, windowDays);
                 return; // already enough real/kept history — never re-seed or overwrite
             }
+            log.info("history seed: only {} day(s) on file — seeding the {}-day window now", have, windowDays);
             seed();
         } catch (Exception e) {
-            log.warn("history seed skipped ({}) — the covariance will warm up live instead", e.toString());
+            log.warn("history seed FAILED ({}) — covariance will warm up live instead", e.toString(), e);
         }
     }
 
