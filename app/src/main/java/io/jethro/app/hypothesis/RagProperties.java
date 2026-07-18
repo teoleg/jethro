@@ -3,10 +3,12 @@ package io.jethro.app.hypothesis;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Retrieval-augmented context config (ADR-0035). OFF by default: enabling it needs a local
- * embedding model pulled (e.g. {@code ollama pull nomic-embed-text}), so CI/offline runs without
- * one are unaffected. When on, the hypothesis layer de-dups triggers semantically (beyond the
- * deterministic id/text guard) and — later slice — retrieves past outcomes into the prompt.
+ * Retrieval-augmented context config (ADR-0035). ON by default — retrieval is the point: it
+ * de-dups triggers semantically (beyond the deterministic id/text guard, so the same story doesn't
+ * re-fire and burn model calls) and grounds theses in past outcomes. It needs a local embedding
+ * model pulled ({@code ollama pull nomic-embed-text}); if none is present it degrades silently to
+ * the deterministic guard (best-effort — see {@code HypothesisMemory}), so CI/offline still run.
+ * Set {@code jethro.rag.enabled=false} to force it off.
  */
 @ConfigurationProperties(prefix = "jethro.rag")
 public record RagProperties(Boolean enabled, String model, Double dedupThreshold,
@@ -14,7 +16,7 @@ public record RagProperties(Boolean enabled, String model, Double dedupThreshold
                             String ollamaBaseUrl) {
 
     public boolean enabledOrDefault() {
-        return enabled != null && enabled;
+        return enabled == null || enabled; // ON unless explicitly disabled
     }
 
     public String modelOrDefault() {

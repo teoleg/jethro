@@ -42,8 +42,9 @@ public class HypothesisConfig {
 
     private static final Logger log = LoggerFactory.getLogger(HypothesisConfig.class);
 
-    /** Semantic hypothesis de-dup (ADR-0035) — off unless jethro.rag.enabled and an embedding
-     *  model is reachable; the DISABLED no-op otherwise, so the deterministic guard stands alone. */
+    /** Semantic hypothesis de-dup + outcome memory (ADR-0035) — ON by default; the DISABLED no-op
+     *  only when jethro.rag.enabled=false. If the embedding model isn't reachable it degrades at
+     *  call time (best-effort) so the deterministic guard stands alone. */
     @Bean
     HypothesisMemory hypothesisMemory(RagProperties rag,
                                       ObjectProvider<io.jethro.app.ai.AiProperties> aiProps) {
