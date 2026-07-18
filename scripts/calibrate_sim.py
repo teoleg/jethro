@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Recalibrate sim-calibration.json from REAL daily market history (ADR-0026).
 
-Pulls free daily closes from Yahoo's chart JSON (no API key) for the full universe — the equities
-themselves, ETF/index proxies for the futures (SPY→ES, QQQ→NQ), IEF for the 10Y yield
+Reads daily closes from LOCAL CSV files in data/history/ (no network — every free API now blocks
+scripted pulls, so you download each symbol once in a browser). Covers the full universe — the
+equities themselves, ETF/index proxies for the futures (SPY→ES, QQQ→NQ), IEF for the 10Y yield
 factor, and spot FX — then estimates:
 
   - per-name annualized vol and beta to the equity factor (SPY returns),
@@ -13,36 +14,35 @@ factor, and spot FX — then estimates:
     signs, and computing correlations within each bucket,
   - the daily regime transition matrix from the observed day-to-day bucket sequence.
 
-Usage (on a machine with internet — the platform itself never fetches, ADR-0009):
+Usage: run once with no data/history/ to get the download list, drop the CSVs there, re-run:
 
     python3 scripts/calibrate_sim.py > app/src/main/resources/sim-calibration.json
+
+(the platform itself never fetches at runtime — ADR-0009)
 
 Stdlib only. If a symbol fails to download the script keeps the hand-curated default
 for that piece and says so on stderr — it never emits a partially-broken file silently.
 """
-import datetime
-import http.cookiejar
+import csv
 import json
 import math
+import os
 import statistics as st
 import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 
 YEARS = 5
-# Yahoo chart JSON (keyless, the same host the live adapter uses). Stooq's CSV endpoint now
-# serves an anti-bot HTML page to scripts, so it's no longer usable here.
-YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range={yrs}y"
+# Read history from LOCAL CSV files you download once in a browser — no network. Every free API
+# (Stooq, Yahoo) now blocks scripted pulls (HTML block pages / 429), so fighting them is a waste;
+# a browser download is reliable and one-time. Drop the files in data/history/ (gitignored).
+HISTORY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "history")
 
-# instrument -> Yahoo symbol (proxies documented; invariant 2 does not apply here — this is an
-# offline calibration tool, symbols never enter the platform). Equities are their own tickers;
-# index futures use the ETF proxy (SPY→ES, QQQ→NQ); FX uses Yahoo's "=X" spot symbols.
+# instrument -> data symbol (proxies documented; invariant 2 does not apply here — this is an
+# offline calibration tool, symbols never enter the platform). Index futures use the ETF proxy
+# (SPY→ES, QQQ→NQ); FX uses the pair name. The CSV file for a symbol is <SYMBOL>.csv.
 EQUITIES = {"AAPL": "AAPL", "MSFT": "MSFT", "AMZN": "AMZN", "GOOG": "GOOGL",
             "SAP": "SAP", "JNJ": "JNJ", "NVDA": "NVDA", "JPM": "JPM"}  # SAP US ADR ~ EUR listing
 FUTURE_PROXIES = {"ES": "SPY", "NQ": "QQQ"}
-FX = {"EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "USDJPY=X", "AUDUSD": "AUDUSD=X"}
+FX = {"EURUSD": "EURUSD", "GBPUSD": "GBPUSD", "USDJPY": "USDJPY", "AUDUSD": "AUDUSD"}
 RATES_PROXY = "IEF"                    # 7-10Y Treasury ETF; dYield ≈ -ret / 7.5
 IEF_DURATION = 7.5
 EQ_FACTOR = "SPY"
@@ -50,77 +50,46 @@ EQ_FACTOR = "SPY"
 REGIMES = ["CALM", "TREND_UP", "TREND_DOWN", "RISK_OFF", "INFLATION_SHOCK"]
 
 
-# Yahoo serves the chart JSON to a normal browser UA (a bare urllib UA is sometimes blocked).
-UA = ("Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
-      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
-
-
-_OPENER = None
-
-
-def _opener():
-    """A cookie-bearing opener. Yahoo's data API 429s ANONYMOUS requests — it wants the session
-    cookie a browser gets on first visit — so prime one from finance.yahoo.com and reuse it. This
-    (not backoff) is what actually clears the 429; the cookie is set for .yahoo.com, so it carries
-    to query1.finance.yahoo.com."""
-    global _OPENER
-    if _OPENER is None:
-        op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
-        op.addheaders = [("User-Agent", UA), ("Accept", "text/html,application/json,*/*")]
-        try:
-            op.open("https://finance.yahoo.com/quote/SPY", timeout=30).read(4096)
-        except Exception as e:
-            print(f"  … cookie prime failed ({e}); trying the API anyway", file=sys.stderr)
-        _OPENER = op
-    return _OPENER
-
-
-def _get_json(url, tries=5):
-    """GET JSON with the session cookie, plus backoff on any residual 429."""
-    for attempt in range(tries):
-        try:
-            with _opener().open(url, timeout=30) as r:
-                return json.load(r)
-        except urllib.error.HTTPError as e:
-            if e.code == 429 and attempt < tries - 1:
-                wait = 5 * (2 ** attempt)  # 5, 10, 20, 40s
-                print(f"  … 429 rate-limited, backing off {wait}s", file=sys.stderr)
-                time.sleep(wait)
-                continue
-            raise
-    raise RuntimeError("unreachable")
+def needed_symbols():
+    return sorted(set([EQ_FACTOR, RATES_PROXY]
+                      + list(FUTURE_PROXIES.values()) + list(EQUITIES.values()) + list(FX.values())))
 
 
 def fetch_closes(sym):
-    """Daily adjusted closes {YYYY-MM-DD: close} for a Yahoo symbol (last YEARS years)."""
-    url = YAHOO.format(sym=urllib.parse.quote(sym), yrs=YEARS)
-    time.sleep(1.5)  # trickle between symbols so we don't trip the rate limit in the first place
-    data = _get_json(url)
-    chart = data.get("chart") or {}
-    if not chart.get("result"):
-        err = (chart.get("error") or {}).get("description", "no data")
-        raise RuntimeError(f"yahoo returned no data for {sym}: {err}")
-    result = chart["result"][0]
-    stamps = result.get("timestamp") or []
-    ind = result.get("indicators", {})
-    # Prefer adjusted close (splits/dividends) so returns are clean; fall back to raw close.
-    series = None
-    if ind.get("adjclose") and ind["adjclose"][0].get("adjclose"):
-        series = ind["adjclose"][0]["adjclose"]
-    elif ind.get("quote") and ind["quote"][0].get("close"):
-        series = ind["quote"][0]["close"]
-    if not stamps or not series:
-        raise RuntimeError(f"yahoo payload for {sym} had no close series")
-    out = {}
-    for t, c in zip(stamps, series):
-        if c is None:
-            continue
-        d = datetime.datetime.utcfromtimestamp(t).strftime("%Y-%m-%d")
-        out[d] = float(c)
-    if not out:
-        raise RuntimeError(f"yahoo close series for {sym} was all null")
-    dates = sorted(out)[-(YEARS * 252):]
-    return {d: out[d] for d in dates}
+    """Daily closes {YYYY-MM-DD: close} from data/history/<SYM>.csv. Accepts the Yahoo download
+    format (Date,Open,High,Low,Close,Adj Close,Volume) or the Stooq one (…,Close,Volume) — it
+    prefers 'Adj Close' when present (split/dividend adjusted), else 'Close'."""
+    path = os.path.join(HISTORY_DIR, sym + ".csv")
+    if not os.path.isfile(path):
+        raise RuntimeError(f"missing {path}")
+    closes = {}
+    with open(path, newline="") as f:
+        for row in csv.DictReader(f):
+            date = (row.get("Date") or row.get("date") or "")[:10]
+            raw = row.get("Adj Close") or row.get("Close") or row.get("close")
+            if not date or raw in (None, "", "null", "N/A"):
+                continue
+            try:
+                closes[date] = float(raw)
+            except ValueError:
+                pass
+    if not closes:
+        raise RuntimeError(f"{path} has no usable Date/Close columns")
+    dates = sorted(closes)[-(YEARS * 252):]
+    return {d: closes[d] for d in dates}
+
+
+def print_data_help():
+    syms = needed_symbols()
+    print(f"\nNo history found. Put {len(syms)} daily-CSV files (≥{YEARS}y each) in:\n  "
+          + os.path.normpath(HISTORY_DIR), file=sys.stderr)
+    print("\nDownload each once from a browser (Yahoo: open the link, range 5Y, 'Download'):",
+          file=sys.stderr)
+    for s in syms:
+        q = s + "=X" if s in ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD") else s
+        print(f"  {s + '.csv':13s} https://finance.yahoo.com/quote/{q}/history", file=sys.stderr)
+    print("\nThen re-run. Missing a few names only drops those specs (the rest still calibrate).\n",
+          file=sys.stderr)
 
 
 def returns(closes):
@@ -171,12 +140,18 @@ def classify_days(eq, d_yield, dates):
 
 
 def main():
+    have = os.path.isdir(HISTORY_DIR) and any(
+        os.path.isfile(os.path.join(HISTORY_DIR, s + ".csv")) for s in needed_symbols())
+    if not have:
+        print_data_help()
+        sys.exit(1)
     try:
         eq_closes = fetch_closes(EQ_FACTOR)
         ief_closes = fetch_closes(RATES_PROXY)
         fx_closes = {k: fetch_closes(v) for k, v in FX.items()}
     except Exception as e:
-        print(f"FATAL: could not fetch core factors ({e}) — keep the checked-in default", file=sys.stderr)
+        print(f"FATAL: core-factor CSV missing/bad ({e}) — need SPY, IEF and the FX pairs in "
+              + os.path.normpath(HISTORY_DIR) + "; keeping the checked-in default", file=sys.stderr)
         sys.exit(1)
 
     eq_r = returns(eq_closes)
