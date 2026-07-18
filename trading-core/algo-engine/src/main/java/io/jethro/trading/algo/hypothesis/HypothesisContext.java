@@ -12,12 +12,19 @@ import java.util.Set;
  */
 public record HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
                                 List<PortfolioLine> portfolio, Set<String> tradableInstruments,
-                                List<String> alreadyProposed) {
+                                List<String> alreadyProposed, List<String> pastOutcomes) {
 
-    /** Without an {@code alreadyProposed} list (defaults to empty) — the pre-idempotency shape. */
+    /** Without idempotency/RAG lists (both default empty) — the original shape. */
     public HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
                              List<PortfolioLine> portfolio, Set<String> tradableInstruments) {
-        this(marks, narrative, portfolio, tradableInstruments, List.of());
+        this(marks, narrative, portfolio, tradableInstruments, List.of(), List.of());
+    }
+
+    /** With the live calls (idempotency) but no recalled outcomes — the pre-RAG-memory shape. */
+    public HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
+                             List<PortfolioLine> portfolio, Set<String> tradableInstruments,
+                             List<String> alreadyProposed) {
+        this(marks, narrative, portfolio, tradableInstruments, alreadyProposed, List.of());
     }
 
     /**

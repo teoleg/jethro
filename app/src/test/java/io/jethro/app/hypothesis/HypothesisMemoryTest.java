@@ -2,6 +2,7 @@ package io.jethro.app.hypothesis;
 
 import io.jethro.domain.Side;
 import io.jethro.trading.algo.hypothesis.Hypothesis;
+import io.jethro.trading.algo.hypothesis.NarrativeItem;
 import io.jethro.trading.algo.inference.EmbeddingClient;
 import io.jethro.trading.algo.inference.InferenceException;
 import io.jethro.trading.algo.inference.SemanticMemory;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,7 +45,7 @@ class HypothesisMemoryTest {
     }
 
     private static HypothesisMemory memory(EmbeddingClient client) {
-        return new HypothesisMemory(client, new SemanticMemory<>(100), 0.9);
+        return new HypothesisMemory(client, new SemanticMemory<>(100), new SemanticMemory<>(100), 0.9, 0.55);
     }
 
     @Test
@@ -89,10 +91,39 @@ class HypothesisMemoryTest {
     }
 
     @Test
+    void recallsPastOutcomesForRelatedNewsPerInstrument() {
+        var mem = memory(TOY);
+        mem.rememberOutcome("AAPL", "BUY", "earnings beat drives upside", "WIN", "1200");
+
+        var news = List.of(new NarrativeItem("n1", 0, NarrativeItem.Category.EARNINGS,
+                "AAPL", NarrativeItem.Sentiment.BULLISH, "AAPL beat expectations"));
+        List<String> recalled = mem.recallSimilar(news);
+        assertEquals(1, recalled.size());
+        assertTrue(recalled.get(0).contains("WIN"), "the recalled digest carries the outcome");
+        assertTrue(recalled.get(0).contains("AAPL"));
+    }
+
+    @Test
+    void recallIgnoresOtherInstrumentsAndMacroNews() {
+        var mem = memory(TOY);
+        mem.rememberOutcome("AAPL", "BUY", "earnings beat", "WIN", "1200");
+
+        // Same story text but a different instrument scope → no recall.
+        assertTrue(mem.recallSimilar(List.of(new NarrativeItem("n2", 0, NarrativeItem.Category.NEWS,
+                "ES", NarrativeItem.Sentiment.BULLISH, "ES beat"))).isEmpty());
+        // Macro news has no instrument to scope on → skipped.
+        assertTrue(mem.recallSimilar(List.of(new NarrativeItem("n3", 0, NarrativeItem.Category.MACRO,
+                null, NarrativeItem.Sentiment.NEUTRAL, "CPI beat"))).isEmpty());
+    }
+
+    @Test
     void disabledMemoryIsANoOp() {
         assertFalse(HypothesisMemory.DISABLED.enabled());
         var call = h("AAPL", Side.BUY, "earnings beat");
         assertFalse(HypothesisMemory.DISABLED.isSemanticDuplicate(call));
         HypothesisMemory.DISABLED.remember(call); // must not throw
+        HypothesisMemory.DISABLED.rememberOutcome("AAPL", "BUY", "beat", "WIN", "10"); // must not throw
+        assertTrue(HypothesisMemory.DISABLED.recallSimilar(List.of(new NarrativeItem(
+                "n", 0, NarrativeItem.Category.NEWS, "AAPL", NarrativeItem.Sentiment.BULLISH, "x"))).isEmpty());
     }
 }

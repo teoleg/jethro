@@ -69,14 +69,22 @@ volume comfortably; revisit if the corpus outgrows it.
   balance) since retrieved counter-examples may reduce one-sidedness. Depends on ADR-0022 (hypothesis
   layer), ADR-0016 (local SLM tier), ADR-0005 (Postgres).
 
-## Implementation status (2026-07-18)
+## Implementation status (2026-07-18) — functionally complete
 
-- **Slice 1 (semantic de-dup) built.** `EmbeddingClient` SPI + `OllamaEmbeddingClient`
-  (`/api/embeddings`); `SemanticMemory<T>` in-process cosine index (bounded, scoped); `HypothesisMemory`
-  embeds each fired call's thesis and flags a reworded same-story repeat, layered ON TOP of the
-  deterministic id/text guard. **Off by default** (`jethro.rag.enabled`, default false) so CI/offline
-  without an embedding model is unaffected; best-effort — any embedding failure degrades silently to
-  the deterministic guard. Enable with `ollama pull nomic-embed-text` + `jethro.rag.enabled=true`.
-- **Deferred:** slice 2 (retrieve past theses+outcomes into the prompt — needs a query strategy);
-  **pgvector durability** (slice 1 is in-memory, so the corpus resets on restart — fine for a session,
-  the durable index is the follow-up).
+- **Slice 1 — semantic de-dup.** `EmbeddingClient` SPI + `OllamaEmbeddingClient` (`/api/embeddings`);
+  `SemanticMemory<T>` in-process cosine index (bounded, scoped); `HypothesisMemory` embeds each fired
+  call's thesis and flags a reworded same-story repeat, ON TOP of the deterministic id/text guard.
+- **Slice 2 — outcome memory.** Each *scored* call is embedded (scoped by instrument); at generation
+  time the nearest past outcomes for the instruments in today's news are retrieved (queried by
+  headline) and injected into the prompt as `pastOutcomes` (thesis → WIN/LOSS/FLAT + P&L), so the
+  model reasons with its own track record. Capped and de-duplicated.
+- **Durability without pgvector.** The vectors are derived data; the durable source is the
+  `hypothesis_record` table. The outcome index is **rebuilt at boot by re-embedding persisted scored
+  records** (off the boot thread, best-effort), so memory survives a restart with no vector store.
+- **Posture.** OFF by default (`jethro.rag.enabled`, default false) so CI/offline without an embedding
+  model is unaffected; every path is best-effort — an embedding failure degrades silently to the
+  deterministic guard and no memory (invariant 7). Enable: `ollama pull nomic-embed-text` +
+  `jethro.rag.enabled=true`.
+- **Remaining (scale-only, deferred):** a persistent vector DB (pgvector) — not a functional gap now
+  that durability comes from re-embedding; it would only save the boot-time re-embed cost once the
+  corpus is large.

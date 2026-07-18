@@ -74,6 +74,9 @@ public final class HypothesisGenerator {
             re-propose the same call (same instrument + direction) on the SAME news — only add a \
             hypothesis when genuinely new information or a materially different reason justifies it. \
             Repeating a live call on unchanged news is an error.
+            - MEMORY: pastOutcomes is YOUR OWN track record on similar past setups (thesis → \
+            WIN/LOSS/FLAT with P&L). Learn from it — lean into patterns that won, and be sceptical \
+            of a call that resembles past losers. It is context, not a rule.
             - Output the JSON array only — no prose, no markdown fences.""";
 
     private final ModelInferenceClient client;
@@ -292,6 +295,11 @@ public final class HypothesisGenerator {
         if (context.alreadyProposed() != null && !context.alreadyProposed().isEmpty()) {
             root.putArray("alreadyProposed").addAll(
                     context.alreadyProposed().stream().map(JSON.getNodeFactory()::textNode).toList());
+        }
+        // Retrieved past outcomes on similar setups (RAG memory, ADR-0035) — advisory context.
+        if (context.pastOutcomes() != null && !context.pastOutcomes().isEmpty()) {
+            root.putArray("pastOutcomes").addAll(
+                    context.pastOutcomes().stream().map(JSON.getNodeFactory()::textNode).toList());
         }
         return root.toString();
     }

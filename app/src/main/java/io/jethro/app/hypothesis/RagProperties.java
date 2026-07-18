@@ -10,7 +10,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "jethro.rag")
 public record RagProperties(Boolean enabled, String model, Double dedupThreshold,
-                            Integer memoryCapacity, Integer timeoutSeconds, String ollamaBaseUrl) {
+                            Double recallThreshold, Integer memoryCapacity, Integer timeoutSeconds,
+                            String ollamaBaseUrl) {
 
     public boolean enabledOrDefault() {
         return enabled != null && enabled;
@@ -23,6 +24,12 @@ public record RagProperties(Boolean enabled, String model, Double dedupThreshold
     /** Cosine ≥ this ⇒ a semantic duplicate. High (0.92) so only genuinely-same calls collapse. */
     public double dedupThresholdOrDefault() {
         return dedupThreshold != null ? dedupThreshold : 0.92;
+    }
+
+    /** Cosine ≥ this ⇒ a past outcome is "similar enough" to recall into the prompt. Lower than
+     *  dedup (0.55): retrieval wants related setups, not identical ones. */
+    public double recallThresholdOrDefault() {
+        return recallThreshold != null ? recallThreshold : 0.55;
     }
 
     public int memoryCapacityOrDefault() {

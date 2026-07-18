@@ -137,6 +137,22 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         return out;
     }
 
+    /** Re-embeds persisted scored hypotheses into the RAG outcome memory at boot (ADR-0035) —
+     *  durability by rebuild, no vector store. Best-effort; runs off the boot thread. */
+    private void rebuildOutcomeMemory(List<HypothesisRecord> persisted) {
+        int rebuilt = 0;
+        for (HypothesisRecord r : persisted) {
+            if (!r.isOpen() && r.outcome() != null) {
+                memory.rememberOutcome(r.instrumentId(), r.direction(), r.thesis(), r.outcome(),
+                        r.outcomePnl() != null ? r.outcomePnl().toPlainString() : "");
+                rebuilt++;
+            }
+        }
+        if (rebuilt > 0) {
+            log.info("RAG: rebuilt outcome memory from {} persisted scored hypotheses (ADR-0035)", rebuilt);
+        }
+    }
+
     /** Records/updates a hypothesis in the ledger: same (instrument, thesis) updates in place
      *  (keeping its first-seen time); a new thesis is a new event; identical repeats don't pile up. */
     private void updateLedger(List<HypothesisEvaluator.Evaluated> evaluated, Set<String> autoTraded, long now) {
@@ -197,6 +213,14 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                         null, r.outcome(),
                         r.outcomePnl() != null ? r.outcomePnl().toPlainString() : null));
             }
+        }
+        // Rebuild the RAG outcome memory (ADR-0035) from the persisted scored records — the vectors
+        // are derived data, so re-embedding the durable Postgres records at boot gives durability
+        // with no vector store. Off the boot thread (embeddings hit Ollama) and best-effort.
+        if (memory.enabled()) {
+            Thread rebuild = new Thread(() -> rebuildOutcomeMemory(persisted), "rag-memory-rebuild");
+            rebuild.setDaemon(true);
+            rebuild.start();
         }
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "hypothesis");
@@ -276,9 +300,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             try {
                 // Tell the model which calls are already live (ADR-0022 idempotency) so it stops
                 // re-proposing the same trade on unchanged news; the deterministic guard below is
-                // the backstop.
+                // the backstop. Plus RAG memory (ADR-0035): its own outcomes on setups like today's
+                // news, retrieved semantically — empty/no-op when RAG is off.
                 hypotheses = generator.generate(new HypothesisContext(
-                        markViews, narrative, portfolio, tradable, activeCallsForPrompt()));
+                        markViews, narrative, portfolio, tradable,
+                        activeCallsForPrompt(), memory.recallSimilar(narrative)));
                 consecutiveFailures.set(0);
             } catch (InferenceException e) {
                 long failures = consecutiveFailures.incrementAndGet();
@@ -477,6 +503,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 log.warn("could not persist outcome for {}: {}", r.id(), ex.toString());
             }
             HypothesisRecord scored = r.scored(score.outcome(), score.pnl(), exitMark);
+            // RAG memory (ADR-0035): remember the scored call so future prompts recall it.
+            memory.rememberOutcome(r.instrumentId(), r.direction(), r.thesis(),
+                    score.outcome(), score.pnl().toPlainString());
             synchronized (executed) {
                 executed.removeIf(x -> x.id().equals(r.id()));
                 executed.addFirst(scored);

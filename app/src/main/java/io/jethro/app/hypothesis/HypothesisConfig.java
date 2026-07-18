@@ -54,12 +54,13 @@ public class HypothesisConfig {
         String baseUrl = ai != null ? ai.baseUrl() : rag.ollamaBaseUrlOrDefault();
         var client = new io.jethro.trading.algo.inference.OllamaEmbeddingClient(
                 baseUrl, rag.modelOrDefault(), Duration.ofSeconds(rag.timeoutSecondsOrDefault()));
-        log.warn("RAG: semantic hypothesis de-dup ON (ADR-0035) — embeddings via {} at {}, "
-                        + "dedup cosine ≥ {}. Advisory only; the deterministic guard stays the floor.",
-                rag.modelOrDefault(), baseUrl, rag.dedupThresholdOrDefault());
+        log.warn("RAG ON (ADR-0035) — embeddings via {} at {}; semantic de-dup (cosine ≥ {}) + "
+                        + "past-outcome memory (recall ≥ {}). Advisory only; deterministic guard stays the floor.",
+                rag.modelOrDefault(), baseUrl, rag.dedupThresholdOrDefault(), rag.recallThresholdOrDefault());
         return new HypothesisMemory(client,
                 new io.jethro.trading.algo.inference.SemanticMemory<>(rag.memoryCapacityOrDefault()),
-                rag.dedupThresholdOrDefault());
+                new io.jethro.trading.algo.inference.SemanticMemory<>(rag.memoryCapacityOrDefault()),
+                rag.dedupThresholdOrDefault(), rag.recallThresholdOrDefault());
     }
 
     @Bean
