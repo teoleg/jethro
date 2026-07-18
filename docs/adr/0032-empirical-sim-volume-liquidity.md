@@ -97,5 +97,15 @@ that makes it meaningful. Guiding rule: never add an algo feature the sim can't 
 - **P4 — Flow in the alpha.** Consumer: **relative-volume confirmation** in momentum/mean-
   reversion (discount a move on thin volume), volume features into the hypothesis/AI layer.
   Sim already emits the volume that makes this testable. *Closes the "algos ignore flow" gap.*
+- **P5 — News drives the tape.** Today the narrative feed and the price/volume sim are
+  independent — news is text to the LLM, it moves nothing. Couple them: a (sim) news item for an
+  instrument injects a **correlated shock** — a bp-momentum move in the headline's direction AND
+  a **volume surge** (real markets move *because of* flow) — sized by the item's sentiment/
+  magnitude and faded over a short horizon. This makes the news→momentum→volume correlation real,
+  so a volume-confirmed signal (P4) and the hypothesis layer have a genuine signal to find, not a
+  coincidence. Gated to SIM (never fabricates moves on a live tape); overlays the SimControl panel
+  as a "fire a news shock" action. *The unifying realism piece.*
 
-Status: P1 in progress.
+Status: P1 shipped. (Separately, the ADR-0022 hypothesis layer now de-dups triggers on the same
+news — deterministic news-id/thesis-signature guard + the live calls fed back to the model — so a
+headline sitting in the narrative window no longer re-fires the same call every cycle.)

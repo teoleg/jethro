@@ -67,6 +67,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private static final int EXECUTED_CAP = 50;
     private static final int LEDGER_CAP = 60;
     private static final int MAX_NARRATIVE_TO_MODEL = 6; // cap prompt size (slow-box inference)
+    private static final int ALREADY_PROPOSED_TO_MODEL = 12; // live calls fed back for idempotency
+    // Same news won't re-fire a hypothesis inside this window; genuinely new news (new id) always
+    // fires. Wall-clock — the hypothesis cycle and news timestamps are real time (ADR-0022).
+    private static final long IDEMPOTENCY_WINDOW_MILLIS = 4 * 60 * 60 * 1_000L;
+    private final HypothesisIdempotency idempotency = new HypothesisIdempotency(IDEMPOTENCY_WINDOW_MILLIS);
     private final Deque<HypothesisRecord> executed = new ArrayDeque<>(); // sticky, newest first
     // The event ledger: (instrument|thesis) → event, insertion-ordered (chronological). A new
     // narrative for the same security is a new event; a repeat updates in place. Never overwritten
@@ -111,6 +116,23 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             java.util.Collections.reverse(out); // insertion order is oldest→newest
             return out;
         }
+    }
+
+    /** Live calls fed back to the model for idempotency (ADR-0022): recent, not-yet-scored ledger
+     *  theses as "INSTRUMENT DIRECTION: thesis", newest first, capped — so the model can see what
+     *  it already proposed and not repeat it on unchanged news. */
+    private List<String> activeCallsForPrompt() {
+        List<String> out = new ArrayList<>();
+        for (HypothesisEvent e : ledger()) { // newest first
+            if (e.outcome() != null) {
+                continue; // already scored/closed — no longer a live call
+            }
+            out.add(e.instrumentId() + " " + e.direction() + ": " + e.thesis());
+            if (out.size() >= ALREADY_PROPOSED_TO_MODEL) {
+                break;
+            }
+        }
+        return out;
     }
 
     /** Records/updates a hypothesis in the ledger: same (instrument, thesis) updates in place
@@ -250,8 +272,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
 
             List<Hypothesis> hypotheses;
             try {
-                hypotheses = generator.generate(
-                        new HypothesisContext(markViews, narrative, portfolio, tradable));
+                // Tell the model which calls are already live (ADR-0022 idempotency) so it stops
+                // re-proposing the same trade on unchanged news; the deterministic guard below is
+                // the backstop.
+                hypotheses = generator.generate(new HypothesisContext(
+                        markViews, narrative, portfolio, tradable, activeCallsForPrompt()));
                 consecutiveFailures.set(0);
             } catch (InferenceException e) {
                 long failures = consecutiveFailures.incrementAndGet();
@@ -280,13 +305,30 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             for (Hypothesis h : hypotheses) {
                 evaluated.add(evaluator.evaluate(h, priceMap, backtestByInstrument));
             }
-            Set<String> autoTraded = runAutonomy(evaluated, now);
+            // Idempotency (ADR-0022 follow-up): drop calls whose triggering news already fired a
+            // hypothesis — the model re-proposes the same trade every cycle while a headline sits
+            // in the narrative window. Ledger writes and autonomy see only genuinely new triggers;
+            // cards (surface) keep working off the full set so a still-valid card doesn't blink.
+            List<HypothesisEvaluator.Evaluated> fresh = new ArrayList<>(evaluated.size());
+            int suppressed = 0;
+            for (HypothesisEvaluator.Evaluated e : evaluated) {
+                if (idempotency.isDuplicate(e.hypothesis(), now)) {
+                    suppressed++;
+                    continue;
+                }
+                idempotency.markFired(e.hypothesis(), now); // also de-dups within this cycle
+                fresh.add(e);
+            }
+            Set<String> autoTraded = runAutonomy(fresh, now);
             autoTradedIds = autoTraded;
-            updateLedger(evaluated, autoTraded, now); // append/update the event ledger
+            updateLedger(fresh, autoTraded, now); // append/update the event ledger (new triggers only)
             surface(evaluated, now, autoTraded);
 
-            int admissible = (int) evaluated.stream()
+            int admissible = (int) fresh.stream()
                     .filter(e -> e.verdict() == HypothesisEvaluator.Verdict.ADMISSIBLE).count();
+            if (suppressed > 0) {
+                log.debug("hypothesis idempotency: suppressed {} repeat trigger(s) on unchanged news", suppressed);
+            }
             // Log every cycle so "no hypotheses" is explained: the model ran (Ollama up) but
             // returned 0 usable structured theses, vs the layer being disabled or the model down.
             // The elapsed time is dominated by the local SLM inference — it's the real floor on how
