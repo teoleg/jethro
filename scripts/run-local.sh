@@ -116,6 +116,12 @@ if [ "$AUTONOMY" = "on" ]; then
   EXTRA_ARGS+=(--jethro.hypothesis.autonomy.enabled=true)
 fi
 EXTRA_ARGS+=(--jethro.trading.provider="$PROVIDER")
+# Sim time compression: wall-seconds per simulated trading day. Unset = app default (23400 =
+# real time, the steady watchable tape). SIM_DAY_SECONDS=120 fast-cycles days for EOD/VaR work.
+if [ -n "${SIM_DAY_SECONDS:-}" ]; then
+  EXTRA_ARGS+=(--jethro.trading.sim-seconds-per-day="$SIM_DAY_SECONDS")
+  echo "==> SIM TIME: $SIM_DAY_SECONDS wall-seconds per trading day"
+fi
 if [ "$PROVIDER" = "yahoo" ]; then
   echo "==> MARKET DATA: Yahoo (real, ~15-min delayed, dev/demo only — ADR-0023). Needs internet."
 fi

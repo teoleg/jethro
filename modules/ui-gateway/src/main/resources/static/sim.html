@@ -114,10 +114,13 @@
   const enc=encodeURIComponent;
   async function post(u,b){const r=await fetch(u,{method:"POST",headers:{"content-type":"application/json"},body:b==null?null:JSON.stringify(b)});if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}
 
-  // mappings ↔ SimControl dials
-  const volToF=v=>clamp(v/3,0,1),  fToVol=f=>+(f*3).toFixed(2);            // BP range = idio vol ×
+  // mappings ↔ SimControl dials. Calibrated for the REAL-TIME tape (~0.34bp/tick baseline σ):
+  // vol× up to 10 (a ×10 name prints a violent-day tape); drift ±2bp/tick = ±20bp/sec at full —
+  // strong, steerable, and the label tells the truth (the old map sent 60bp/tick, showing 0.6).
+  const VOL_MAX=10, DRIFT_MAX=0.0002; // ±log-drift per tick (0.0002 = 2bp/tick)
+  const volToF=v=>clamp(v/VOL_MAX,0,1), fToVol=f=>+(f*VOL_MAX).toFixed(2);
   const qToF =v=>clamp(v/3,0,1),   fToQ=f=>+(f*3).toFixed(2);             // volume ×
-  const drToF=d=>clamp(d/0.006/2+0.5,0,1), fToDr=f=>+(((f-0.5)*2)*0.006).toFixed(5); // bipolar drift
+  const drToF=d=>clamp(d/DRIFT_MAX/2+0.5,0,1), fToDr=f=>+(((f-0.5)*2)*DRIFT_MAX).toFixed(6);
   const spToF=s=>clamp(Math.log(s/0.1)/Math.log(200),0,1), fToSp=f=>+(0.1*Math.pow(200,f)).toFixed(2);
 
   let state=null, instrClass={}, current=null, view="inst", chartMinutes=15, chartTimer=null, activeCh=null, lastMid={};
@@ -192,7 +195,8 @@
     const meter=vu("activity");
     const fBp=fader({label:'BP range<b>move size</b>',value:volToF(it.volMultiplier),fmt:f=>"×"+fToVol(f).toFixed(2),
       onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/vol`,{value:fToVol(f)}).then(()=>it.volMultiplier=fToVol(f))});
-    const fDr=fader({label:'Drift<b>trend</b>',value:drToF(it.driftBias),bipolar:true,fmt:f=>{const d=(f-0.5)*2*0.6;return (d>=0?"+":"")+d.toFixed(2)+"bp";},
+    const fDr=fader({label:'Drift<b>trend</b>',value:drToF(it.driftBias),bipolar:true,
+      fmt:f=>{const bpTick=(f-0.5)*2*DRIFT_MAX*1e4;return (bpTick>=0?"+":"")+bpTick.toFixed(2)+"bp/t ("+(bpTick>=0?"+":"")+(bpTick*10).toFixed(0)+"bp/s)";},
       onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/drift`,{value:fToDr(f)}).then(()=>it.driftBias=fToDr(f))});
     const fVol=fader({label:'Volume<b>size ×</b>',value:qToF(it.volumeScale),fmt:f=>"×"+fToQ(f).toFixed(2),
       onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/volume`,{value:fToQ(f)})});
