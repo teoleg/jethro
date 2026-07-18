@@ -1,79 +1,39 @@
 package io.jethro.uigateway;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.Deque;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Rolling in-memory price history per instrument for the interactive "last N hours" chart
- * (ADR-0006/0017 market view). Fed from the {@code md.marks} stream; bounded by a
- * retention window so memory stays flat. This is the <em>recent</em> series only — durable
+ * Rolling recent price history per instrument for the interactive "last N hours" chart
+ * (ADR-0017 market view). Fed from the {@code md.marks} stream; bounded by a retention
+ * window so the store stays flat. This is the <em>recent</em> series only — durable
  * long-term history is the S3 Parquet tick archive (ADR-0014), a separate concern.
  *
- * <p>Prices are kept as strings (invariant 1 — never a float). ~1Hz conflated marks, so a
- * 2h window is ~7,200 points/instrument.
+ * <p>Prices are kept as strings (invariant 1 — never a float). Marks are ~1Hz conflated,
+ * so a 12h window is ~43,000 points/instrument.
+ *
+ * <p>Two implementations: {@link InMemoryMarkHistory} (a bounded ring, used in tests and
+ * when no history path is configured) and {@link LmdbMarkHistory} (durable, memory-mapped,
+ * ordered range scans — the production wiring, so a long window survives a restart and reads
+ * fast without a full broker replay).
  */
-public final class MarkHistory {
+public interface MarkHistory {
 
-    public record Point(long t, String price) {
+    /** One conflated mark: provider timestamp (ms) and the price as an exact decimal string. */
+    record Point(long t, String price) {
     }
 
-    private final long retentionMillis;
-    private final Map<String, Deque<Point>> series = new ConcurrentHashMap<>();
-
-    public MarkHistory(long retentionMillis) {
-        this.retentionMillis = retentionMillis;
-    }
-
-    public long retentionMillis() {
-        return retentionMillis;
-    }
+    /** The retention window in milliseconds — points older than this are evicted. */
+    long retentionMillis();
 
     /** Appends a mark and evicts anything older than the retention window. */
-    public void record(String instrumentId, String price, long timestampMillis) {
-        Deque<Point> points = series.computeIfAbsent(instrumentId, k -> new ArrayDeque<>());
-        synchronized (points) {
-            points.addLast(new Point(timestampMillis, price));
-            long cutoff = timestampMillis - retentionMillis;
-            while (!points.isEmpty() && points.peekFirst().t() < cutoff) {
-                points.removeFirst();
-            }
-        }
-    }
-
-    /** Number of instruments with recorded history (for diagnostics). */
-    public int instrumentCount() {
-        return series.size();
-    }
-
-    /** Current point count for one instrument (for diagnostics). */
-    public int pointCount(String instrumentId) {
-        Deque<Point> points = series.get(instrumentId);
-        if (points == null) {
-            return 0;
-        }
-        synchronized (points) {
-            return points.size();
-        }
-    }
+    void record(String instrumentId, String price, long timestampMillis);
 
     /** Points at or after {@code sinceMillis}, oldest first. Empty if the instrument is unknown. */
-    public List<Point> since(String instrumentId, long sinceMillis) {
-        Deque<Point> points = series.get(instrumentId);
-        if (points == null) {
-            return List.of();
-        }
-        synchronized (points) {
-            List<Point> out = new ArrayList<>();
-            for (Point p : points) {
-                if (p.t() >= sinceMillis) {
-                    out.add(p);
-                }
-            }
-            return out;
-        }
-    }
+    List<Point> since(String instrumentId, long sinceMillis);
+
+    /** Number of instruments with recorded history (for diagnostics). */
+    int instrumentCount();
+
+    /** Current point count for one instrument (for diagnostics). */
+    int pointCount(String instrumentId);
 }

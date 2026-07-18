@@ -33,6 +33,7 @@ public final class UiGatewayRuntime implements AutoCloseable {
     private final String bootstrapServers;
     private final MarkState markState;
     private final MarkHistory markHistory;
+    private final long marksReplayWindowMillis;
     private final AttentionFeed feed;
     private final AttentionRules rules;
     private final SseBroadcaster sse;
@@ -41,10 +42,12 @@ public final class UiGatewayRuntime implements AutoCloseable {
     private volatile Thread consumerThread;
 
     public UiGatewayRuntime(String bootstrapServers, MarkState markState, MarkHistory markHistory,
-                            AttentionFeed feed, AttentionRules rules, SseBroadcaster sse) {
+                            long marksReplayWindowMillis, AttentionFeed feed, AttentionRules rules,
+                            SseBroadcaster sse) {
         this.bootstrapServers = bootstrapServers;
         this.markState = markState;
         this.markHistory = markHistory;
+        this.marksReplayWindowMillis = marksReplayWindowMillis;
         this.feed = feed;
         this.rules = rules;
         this.sse = sse;
@@ -63,11 +66,13 @@ public final class UiGatewayRuntime implements AutoCloseable {
     private void consumeLoop() {
         Properties props = new Properties();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        // UI state is derived and in-memory, so rebuild it from the log on every boot:
-        // ephemeral group (no committed offsets), md.marks replayed from now−retention so
-        // the price-history chart survives restarts (the marks are durable in the broker),
-        // ai.decisions from the end (old commentary isn't re-surfaced). Duplicate delivery
-        // is naturally idempotent here (last-value upsert by key) — invariant 8 by shape.
+        // UI state is derived, so rebuild it from the log on every boot: ephemeral group (no
+        // committed offsets). The price-history chart is now durable in LMDB (LmdbMarkHistory),
+        // so md.marks is replayed only over a short window to refresh the current-price snapshot
+        // (MarkState) — not the whole retention, which kept boot slow for no gain: this app is
+        // the sole producer of marks in every mode, so a restart never has "missed" marks to
+        // backfill. ai.decisions is read from the end (old commentary isn't re-surfaced).
+        // Duplicate delivery is naturally idempotent here (last-value upsert by key) — invariant 8.
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "ui-gateway-" + java.util.UUID.randomUUID());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
@@ -86,8 +91,8 @@ public final class UiGatewayRuntime implements AutoCloseable {
                             seekForReplay(consumer, partitions);
                         }
                     });
-            log.info("ui-gateway consuming {} (replaying last {}min) and {} from {}",
-                    Topics.resolved(Topics.MD_MARKS), markHistory.retentionMillis() / 60_000, Topics.resolved(Topics.AI_DECISIONS), bootstrapServers);
+            log.info("ui-gateway consuming {} (replaying last {}min to refresh snapshot; history durable in LMDB) and {} from {}",
+                    Topics.resolved(Topics.MD_MARKS), marksReplayWindowMillis / 60_000, Topics.resolved(Topics.AI_DECISIONS), bootstrapServers);
             while (running.get()) {
                 var records = consumer.poll(POLL);
                 boolean marksChanged = false;
@@ -121,7 +126,8 @@ public final class UiGatewayRuntime implements AutoCloseable {
         }
     }
 
-    /** md.marks → back to now−retention (rebuild the chart history); ai.decisions → end. */
+    /** md.marks → back a short replay window (refresh the current-price snapshot; history is
+     *  durable in LMDB); ai.decisions → end. */
     private void seekForReplay(KafkaConsumer<String, byte[]> consumer,
                                java.util.Collection<org.apache.kafka.common.TopicPartition> partitions) {
         var marks = partitions.stream().filter(p -> Topics.resolved(Topics.MD_MARKS).equals(p.topic())).toList();
@@ -132,7 +138,7 @@ public final class UiGatewayRuntime implements AutoCloseable {
         if (marks.isEmpty()) {
             return;
         }
-        long since = System.currentTimeMillis() - markHistory.retentionMillis();
+        long since = System.currentTimeMillis() - marksReplayWindowMillis;
         var query = new java.util.HashMap<org.apache.kafka.common.TopicPartition, Long>();
         marks.forEach(p -> query.put(p, since));
         var offsets = consumer.offsetsForTimes(query);
