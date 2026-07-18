@@ -64,6 +64,9 @@
   </div>
 </div>
 <main>
+  <div class="section-h">Market traffic <span class="muted" id="trafficAsOf" style="text-transform:none;letter-spacing:0"></span></div>
+  <div class="tiles" id="trafficTiles"></div>
+
   <div class="section-h">Model load <span class="muted" id="asof"></span></div>
   <div class="tiles" id="tiles"></div>
 
@@ -98,7 +101,32 @@
       : '<div class="muted" style="padding:14px">no inference calls yet — the model runs on a cadence once Ollama is up (see the app log line "LLM inference […]")</div>') + '</div>';
   }
 
-  async function refresh() { try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {} }
+  let lastTraffic = null;
+  async function loadTraffic() {
+    try {
+      const t = await (await fetch("/api/traffic")).json();
+      let rate = "—";
+      if (lastTraffic && t.timestampMillis > lastTraffic.timestampMillis) {
+        const dt = (t.timestampMillis - lastTraffic.timestampMillis) / 1000;
+        rate = Math.max(0, Math.round((t.ticksIn - lastTraffic.ticksIn) / dt)).toLocaleString() + "/s";
+      }
+      lastTraffic = t;
+      document.getElementById("trafficAsOf").textContent =
+        t.up ? "— " + esc(t.provider) + " · regime " + esc(t.regime) : "— feed down";
+      document.getElementById("trafficTiles").innerHTML =
+        tile("Ticks / s", `<span class="${t.up?'up':''}">${rate}</span>`) +
+        tile("Ticks in", (t.ticksIn||0).toLocaleString()) +
+        tile("Dropped", (t.ticksDropped||0).toLocaleString(), t.ticksDropped>0 ? "down" : "up") +
+        tile("Instruments", t.instruments||0) +
+        tile("Marks flushed", (t.marksFlushed||0).toLocaleString()) +
+        tile("Provider", `<span style="font-size:14px">${esc(t.provider)}</span>`);
+    } catch (e) {}
+  }
+
+  async function refresh() {
+    try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
+    loadTraffic();
+  }
   refresh();
   setInterval(refresh, 3000);
 </script>
