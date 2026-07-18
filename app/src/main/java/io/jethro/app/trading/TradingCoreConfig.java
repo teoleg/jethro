@@ -49,4 +49,13 @@ public class TradingCoreConfig {
         monitor.start();
         return monitor;
     }
+
+    /** Timestamped price/volume/news spike feed for the sim page (correlate to orders + logs). */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.trading", name = "enabled", havingValue = "true", matchIfMissing = true)
+    SpikeMonitor spikeMonitor(TradingCoreLifecycle tradingCore) {
+        var monitor = new SpikeMonitor(tradingCore, 40.0, 2.0, 1.3);
+        monitor.start();
+        return monitor;
+    }
 }

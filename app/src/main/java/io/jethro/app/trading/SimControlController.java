@@ -29,11 +29,37 @@ public final class SimControlController {
 
     private final ObjectProvider<TradingCoreLifecycle> tradingCore;
     private final ObjectProvider<RefDataRepository> refData;
+    private final ObjectProvider<SpikeMonitor> spikeMonitor;
 
     public SimControlController(ObjectProvider<TradingCoreLifecycle> tradingCore,
-                                ObjectProvider<RefDataRepository> refData) {
+                                ObjectProvider<RefDataRepository> refData,
+                                ObjectProvider<SpikeMonitor> spikeMonitor) {
         this.tradingCore = tradingCore;
         this.refData = refData;
+        this.spikeMonitor = spikeMonitor;
+    }
+
+    // ---- spike feed (timestamped; correlate to orders + logs) ----
+
+    /** One detected spike: wall-clock time, instrument + display name, type, magnitude, detail. */
+    public record SpikeDto(long atMillis, String instrumentId, String name, String type,
+                           double magnitude, String detail) {
+    }
+
+    /** Recent price/volume/news spikes, newest first — the "when did something happen" feed.
+     *  Not SIM-gated: read-only and meaningful in any mode. Empty when the monitor isn't running. */
+    @GetMapping("/api/sim/spikes")
+    public List<SpikeDto> spikes() {
+        SpikeMonitor monitor = spikeMonitor.getIfAvailable();
+        if (monitor == null) {
+            return List.of();
+        }
+        Map<String, String> names = instrumentNames();
+        return monitor.recent().stream()
+                .map(s -> new SpikeDto(s.atMillis(), s.instrumentId(),
+                        names.getOrDefault(s.instrumentId(), s.instrumentId()),
+                        s.type(), s.magnitude(), s.detail()))
+                .toList();
     }
 
     // ---- read ----

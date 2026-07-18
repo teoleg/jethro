@@ -37,7 +37,9 @@ class SimControlControllerTest {
         when(coreProvider.getIfAvailable()).thenReturn(core);
         ObjectProvider<RefDataRepository> refProvider = mock(ObjectProvider.class);
         when(refProvider.getIfAvailable()).thenReturn(null);
-        return new SimControlController(coreProvider, refProvider);
+        ObjectProvider<SpikeMonitor> spikeProvider = mock(ObjectProvider.class);
+        when(spikeProvider.getIfAvailable()).thenReturn(null);
+        return new SimControlController(coreProvider, refProvider, spikeProvider);
     }
 
     @Test
@@ -90,6 +92,13 @@ class SimControlControllerTest {
     }
 
     @Test
+    void spikeFeedIsEmptyWithoutAMonitor() {
+        Provenance.configure(FeedMode.SIM, "epoch-sim");
+        var controller = controller(new SimControl(1, List.of("ES")));
+        assertTrue(controller.spikes().isEmpty(), "no monitor wired → empty feed, not a failure");
+    }
+
+    @Test
     void newsShockRejectedOutsideSim() {
         Provenance.configure(FeedMode.LIVE, "epoch-live");
         var controller = controller(new SimControl(1, List.of("ES")));
@@ -128,7 +137,9 @@ class SimControlControllerTest {
         when(coreProvider.getIfAvailable()).thenReturn(core);
         ObjectProvider<RefDataRepository> refProvider = mock(ObjectProvider.class);
         when(refProvider.getIfAvailable()).thenReturn(null);
-        var controller = new SimControlController(coreProvider, refProvider);
+        ObjectProvider<SpikeMonitor> spikeProvider = mock(ObjectProvider.class);
+        when(spikeProvider.getIfAvailable()).thenReturn(null);
+        var controller = new SimControlController(coreProvider, refProvider, spikeProvider);
 
         var state = controller.news(new SimControlController.NewsRequest("AAPL", "BEAR", 0.02));
         assertTrue(state.enabled(), "a fired shock returns the fresh control state");
