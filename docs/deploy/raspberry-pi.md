@@ -122,11 +122,22 @@ HEAP=1g PROFILE=default ./scripts/run-local.sh   # override knobs
 
 The app logs to `logs/jethro-app.log` — follow it with `tail -f logs/jethro-app.log`.
 
-Stop the app **and** Docker services with `./scripts/stop-local.sh` (add `--volumes` to
-also wipe Postgres/Redpanda data). To wipe **everything** for a clean slate — app,
-Docker volumes, LMDB state (`data/`), and logs — use `./scripts/clean-local.sh`
-(add `--all` to also drop Gradle build outputs). Flyway re-runs all migrations on the
-next start.
+**Bounce one part without a full teardown** with `./scripts/svc.sh` — handy on a Pi where a
+restart is slow and you don't want to reload the model or re-init the DB:
+
+```bash
+./scripts/svc.sh restart app       # rebuild + restart the app; Ollama + Postgres keep running
+./scripts/svc.sh stop  ollama      # free the model's RAM without losing it (volume kept)
+./scripts/svc.sh start ollama      # bring it back — no re-pull
+./scripts/svc.sh status            # what's up
+```
+
+Data persists in named volumes (`pg-data`, `redpanda-data`, `ollama-models`), so a plain restart
+**keeps** your DB and pulled models. Stop the app **and** Docker services with
+`./scripts/stop-local.sh` (add `--volumes` to wipe Postgres/Redpanda data). To wipe **everything**
+for a clean slate — app, Docker volumes, LMDB state (`data/`), and logs — use
+`./scripts/clean-local.sh` (add `--all` to also drop Gradle build outputs). Flyway re-runs all
+migrations on the next start.
 
 **Tests no longer run in a local `build`.** `./gradlew build` (and the script's
 `:app:bootJar`) compile and package **without** running the unit/module test suite — that
@@ -181,6 +192,8 @@ docker compose ps                                  # wait for healthy
 
 # pull the small model once (~400 MB for 0.5b)
 docker exec jethro-ollama-1 ollama pull qwen2.5:0.5b
+# and the RAG embedding model (~275 MB) — a SEPARATE model from the chat one (ADR-0035)
+docker exec jethro-ollama-1 ollama pull nomic-embed-text
 # sanity-check the model alone before the app uses it:
 docker exec jethro-ollama-1 ollama run qwen2.5:0.5b "say hi in three words"
 ```

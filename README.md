@@ -137,11 +137,31 @@ runtime}`, `modules:{order, reference-data, ui-gateway, finops}`, `app` (assembl
 
 Requires Java 21 (Gradle toolchain) and Docker.
 
+**One command** builds the app, starts infra, pulls the models (chat + RAG embedding), and runs it:
+
+```bash
+./scripts/run-local.sh        # build + start Redpanda/Postgres/Ollama + pull models + run the app
+# open http://localhost:8080  ·  logs: logs/jethro-app.log
+```
+
+Manage the stack **per service** — bounce the app without disturbing the model or the DB:
+
+```bash
+scripts/svc.sh restart app         # rebuild + restart just the app; LLM + DB keep running
+scripts/svc.sh stop  app           # stop the app, leave everything else up
+scripts/svc.sh stop  ollama        # stop one container (its volume is kept — no re-pull)
+scripts/svc.sh status              # what's running
+scripts/stop-local.sh              # stop the app + infra (data volumes KEPT; --volumes to wipe)
+```
+
+Data persists in named volumes (`pg-data`, `redpanda-data`, `ollama-models`), so a restart keeps
+your books, fills, orders, topics, and pulled models. The raw path, if you prefer it by hand:
+
 ```bash
 docker compose up -d                                  # Redpanda + Postgres + Ollama
-docker exec jethro-ollama-1 ollama pull qwen2.5:3b    # once, ~2GB (enables the AI layer)
+docker compose exec -T ollama ollama pull qwen2.5:1.5b        # chat model (narration/hypotheses)
+docker compose exec -T ollama ollama pull nomic-embed-text    # RAG embeddings (ADR-0035)
 ./gradlew :app:bootRun                                # the single-JVM app (ADR-0015)
-# open http://localhost:8080
 ```
 
 ```bash
