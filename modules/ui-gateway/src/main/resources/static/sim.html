@@ -41,6 +41,8 @@
   .sname{font-size:18px;font-weight:700} .sid{color:var(--dim);font-size:11px}
   .scls{font-size:9.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line2);color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
   .price{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums} .price .chg{font-size:14px;margin-left:10px}
+  .quote{font-size:12.5px;color:var(--dim);font-variant-numeric:tabular-nums;display:flex;gap:14px;flex-wrap:wrap}
+  .quote b{color:var(--txt);font-weight:600} .quote .bid b{color:var(--up)} .quote .ask b{color:var(--down)}
   .up{color:var(--up)} .down{color:var(--down)} .warn{color:var(--warn)}
 
   /* fader bank + meter */
@@ -204,7 +206,9 @@
     const head=$("div","shead");
     head.append($("div","sname",esc(it.name||it.id)),$("div","sid mono",esc(it.id)),$("div","scls",esc(instrClass[it.id]||"—")));
     const price=$("div","price mono","—"); const chg=$("span","chg mono",""); price.append(chg);
-    ch.append(head,price);
+    const quote=$("div","quote mono",'<span class="bid">bid <b>—</b></span><span class="ask">ask <b>—</b></span><span class="last">last qty <b>—</b></span>');
+    const volline=$("div","quote mono",'<span>rel-vol <b>—</b></span><span>measured ADV <b>—</b></span>');
+    ch.append(head,price,quote,volline);
     const bank=$("div","bank");
     const meter=vu("activity");
     const fBp=fader({label:'BP range<b>move size</b>',value:volToF(it.volMultiplier),fmt:f=>"×"+fToVol(f).toFixed(2),
@@ -227,7 +231,8 @@
     const chart=$("button",null,"📈 history"); chart.onclick=()=>window.openChart&&window.openChart(it.id);
     btns.append(dn,zap,up,mute,chart); ch.append(btns);
     con.append(ch, masterStrip());
-    con._price=price; con._chg=chg; con._meter=meter; con._id=it.id; activeCh=con;
+    con._price=price; con._chg=chg; con._meter=meter; con._id=it.id;
+    con._quote=quote; con._volline=volline; activeCh=con;
     const row=$("div","simrow"); row.append(con, rateChartPanel());
     return row;
   }
@@ -314,12 +319,27 @@
   }catch(e){}}
 
   // ---- live price + VU ----
+  const szFmt=v=>{const n=+v;return n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(0)+"k":n.toFixed(0);};
+  const advFmt=v=>v==null?"—":"$"+(v>=1e9?(v/1e9).toFixed(2)+"B":v>=1e6?(v/1e6).toFixed(1)+"M":Math.round(v).toLocaleString());
   async function loadLive(){ if(view!=="inst"||!activeCh)return; try{
-    const depth=await (await fetch("/api/depth")).json(); const d=depth.find(x=>x.instrumentId===activeCh._id); if(!d)return;
+    const [depth,vol]=await Promise.all([
+      fetch("/api/depth").then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch("/api/volume").then(r=>r.ok?r.json():[]).catch(()=>[])]);
+    const d=depth.find(x=>x.instrumentId===activeCh._id); if(!d)return;
+    const px=v=>{const n=+v;return n>=1000?n.toFixed(1):n>=100?n.toFixed(2):n.toFixed(4);};
     const mid=(+d.bid + +d.ask)/2, prev=lastMid[activeCh._id]; lastMid[activeCh._id]=mid;
-    activeCh._price.firstChild.nodeValue=(mid>=1000?mid.toFixed(1):mid>=100?mid.toFixed(2):mid.toFixed(4))+" ";
+    activeCh._price.firstChild.nodeValue=px(mid)+" ";
     if(prev){const bps=(mid/prev-1)*10000; activeCh._chg.textContent=(bps>=0?"+":"")+bps.toFixed(0)+"bp";
       activeCh._chg.className="chg mono "+(bps>0.5?"up":bps<-0.5?"down":""); activeCh._meter.paint(clamp(Math.abs(bps)/60,0,1));}
+    activeCh._quote.innerHTML=
+      `<span class="bid">bid <b>${px(d.bid)}</b> ×${szFmt(d.bidSize)}</span>`+
+      `<span class="ask">ask <b>${px(d.ask)}</b> ×${szFmt(d.askSize)}</span>`+
+      `<span>spread <b>${((+d.ask - +d.bid)/mid*10000).toFixed(1)}bp</b></span>`;
+    const v=vol.find(x=>x.instrumentId===activeCh._id);
+    if(v) activeCh._volline.innerHTML=
+      `<span>rel-vol <b>${v.relativeVolume.toFixed(2)}×</b></span>`+
+      `<span>measured ADV <b>${advFmt(v.measuredAdvUsd)}</b></span>`+
+      `<span>prints <b>${(v.samples||0).toLocaleString()}</b></span>`;
   }catch(e){}}
 
   async function boot(){
