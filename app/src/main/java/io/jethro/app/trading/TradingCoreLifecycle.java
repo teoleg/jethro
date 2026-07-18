@@ -46,6 +46,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private volatile java.util.function.Supplier<String> regimeSource; // non-null only in sim mode
     private volatile java.util.function.LongSupplier simDayIndexSource; // correlated sim only
     private volatile io.jethro.trading.marketdata.sim.SimControl simControl; // ADR-0031: correlated sim only
+    private volatile long simTradesPerDay; // ADR-0032: per-instrument prints/day (0 when not sim) → measured ADV
     private volatile RealTreasuryCurve realCurve;     // non-null only when the live curve is active
     private volatile TreasuryCurveFetcher curveFetcher;
     private volatile String curveSource = "sim";      // "treasury-live" or "sim" (for the UI)
@@ -266,6 +267,10 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         long[] startPricesScaled = ids.stream()
                 .mapToLong(id -> Decimals.toScaledLong(properties.startPriceFor(id), Decimals.PRICE_SCALE))
                 .toArray();
+        // Each factor instrument prints once per tick, so its trades/day = ticks/day (ADR-0032):
+        // measured avg-trade-notional × this = measured ADV.
+        double tickSecondsForAdv = properties.simTickIntervalMillis() / 1_000.0;
+        this.simTradesPerDay = Math.round(properties.simSecondsPerDayOrDefault() / tickSecondsForAdv);
         if (properties.correlatedSimOrDefault()) {
             try {
                 FactorModelConfig calibration = SimCalibrationLoader.load(properties.simCalibrationPathOrNull());
@@ -355,6 +360,18 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
      *  (live/replay/legacy). The REST surface additionally gates on {@code feedMode == SIM}. */
     public io.jethro.trading.marketdata.sim.SimControl simControl() {
         return simControl;
+    }
+
+    /** Per-instrument trade prints per simulated day (ADR-0032), or 0 on a live feed — the
+     *  factor that turns {@link VolumeStats}'s avg trade notional into a daily ADV. */
+    public long simTradesPerDay() {
+        return simTradesPerDay;
+    }
+
+    /** Live traded-volume statistics (ADR-0032), or null before the runtime has started. */
+    public io.jethro.trading.runtime.VolumeStats volumeStats() {
+        var rt = runtime;
+        return rt != null ? rt.volumeStats() : null;
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'
