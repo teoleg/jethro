@@ -5,9 +5,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /**
  * Live status of the daily-return history the hedger's covariance is built from (ADR-0038): how
  * many days are on file, the latest day, how many instruments, whether that's enough to size a
- * hedge (≥ the covariance minimum), and — for the UI — whether/when it was seeded at boot. The
- * counts are read straight from {@code daily_close} so they're always the truth, not a cached
- * guess; the seed metadata is set once by {@link io.jethro.app.trading.SimHistorySeeder}.
+ * hedge (≥ the covariance minimum), and — for the UI — whether it seeded, is still trying, or
+ * FAILED (with why). The counts are read straight from {@code daily_close} so they're always the
+ * truth; the seed state is set by {@link io.jethro.app.trading.YahooHistorySeeder}.
  */
 public final class HistoryStatus {
 
@@ -16,25 +16,35 @@ public final class HistoryStatus {
 
     private final JdbcTemplate jdbc;
     private volatile long seededAtMillis; // 0 until a boot seed runs
-    private volatile String source = "live"; // live | sim-seed | existing
+    private volatile String source = "seeding";      // seeding | yahoo-history | existing | failed
+    private volatile String note = "history seed in progress…";
 
     public HistoryStatus(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
-    public void markSeeded(String source) {
+    public void markSeeded(String source, String note) {
         this.source = source;
+        this.note = note;
         this.seededAtMillis = System.currentTimeMillis();
     }
 
     /** Called when a boot found enough existing history and skipped seeding. */
     public void markExisting() {
         this.source = "existing";
+        this.note = "loaded from stored daily history";
+        this.seededAtMillis = System.currentTimeMillis();
+    }
+
+    /** Called when the seed could not fetch any usable history — an explicit error state. */
+    public void markFailed(String reason) {
+        this.source = "failed";
+        this.note = reason;
         this.seededAtMillis = System.currentTimeMillis();
     }
 
     public record Snapshot(long days, String latestDay, long instruments, boolean ready,
-                           String source, long seededAtMillis) {
+                           String source, String note, long seededAtMillis) {
     }
 
     public Snapshot snapshot() {
@@ -45,9 +55,9 @@ public final class HistoryStatus {
                     rs -> rs.next() && rs.getDate("d") != null ? rs.getDate("d").toString() : null);
             long d = days != null ? days : 0;
             return new Snapshot(d, latest, instruments != null ? instruments : 0,
-                    d >= READY_MIN_DAYS, source, seededAtMillis);
+                    d >= READY_MIN_DAYS, source, note, seededAtMillis);
         } catch (Exception e) {
-            return new Snapshot(0, null, 0, false, source, seededAtMillis);
+            return new Snapshot(0, null, 0, false, "unavailable", "persistence off", seededAtMillis);
         }
     }
 }

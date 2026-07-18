@@ -433,13 +433,21 @@
       const h = await (await fetch("/api/history/status")).json();
       const b = document.getElementById("histBadge");
       if (!b) return;
-      const when = h.seededAtMillis ? new Date(h.seededAtMillis).toLocaleTimeString() : "";
-      const src = h.source && h.source !== "live" ? " " + h.source : "";
-      b.textContent = h.ready ? `history ✓ ${h.days}d${src}` : `history warming ${h.days}/20d`;
-      b.style.color = h.ready ? "var(--up)" : "var(--warn)";
-      const how = h.source === "yahoo-history" ? ` · from Yahoo ${when}` : h.source === "existing" ? ` · loaded ${when}`
-        : h.source === "unavailable" ? " · persistence off" : " · accumulating live";
-      b.title = `covariance history: ${h.days} days · ${h.instruments} instruments · latest ${h.latestDay || "—"}${how}`;
+      if (h.ready) {
+        b.textContent = `history ✓ ${h.days}d`;
+        b.style.color = "var(--up)";
+      } else if (h.source === "failed") {
+        b.textContent = "history ✕ no data";
+        b.style.color = "var(--alert)";
+      } else if (h.source === "seeding") {
+        b.textContent = "history loading…";
+        b.style.color = "var(--warn)";
+      } else {
+        b.textContent = `history warming ${h.days}/20d`;
+        b.style.color = "var(--warn)";
+      }
+      b.title = `covariance history: ${h.days} days · ${h.instruments} instruments · latest ${h.latestDay || "—"}`
+        + (h.note ? ` · ${h.note}` : "");
     } catch (e) {}
   }
 

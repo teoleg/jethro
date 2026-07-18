@@ -88,13 +88,15 @@ public final class YahooHistorySeeder {
                 sleep(); // gentle spacing so Yahoo doesn't rate-limit the burst
             }
             if (names > 0 && rows > 0) {
-                status.markSeeded("yahoo-history");
+                status.markSeeded("yahoo-history", names + " names, " + rows + " days from Yahoo");
                 log.info("history: seeded {} names, {} daily_close rows from REAL Yahoo history — "
                         + "covariance grounded in real cross-asset relationships", names, rows);
             } else {
+                status.markFailed("Yahoo returned no data (rate-limited or offline) — no history loaded");
                 log.warn("history: Yahoo returned nothing usable — covariance will warm up from the live feed");
             }
         } catch (Exception e) {
+            status.markFailed("history seed error: " + e.getMessage());
             log.warn("history seed failed ({}) — covariance will warm up from the live feed", e.toString());
         }
     }

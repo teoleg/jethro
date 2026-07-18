@@ -20,6 +20,6 @@ public final class HistoryController {
     public HistoryStatus.Snapshot status() {
         HistoryStatus s = status.getIfAvailable();
         return s != null ? s.snapshot()
-                : new HistoryStatus.Snapshot(0, null, 0, false, "unavailable", 0);
+                : new HistoryStatus.Snapshot(0, null, 0, false, "unavailable", "persistence off", 0);
     }
 }
