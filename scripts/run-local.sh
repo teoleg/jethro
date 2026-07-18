@@ -17,7 +17,8 @@
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
 #            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:1.5b),
 #            PROVIDER (sim|yahoo|finnhub, default: yahoo), AUTONOMY (off|on, default: on),
-#            RAG (off|on, default: on). Set them once in local.env (see local.env.example).
+#            RAG (off|on, default: on). Set them once in local.env — a plain KEY=value file
+#            (copy local.env.example); command-line env still overrides it.
 #
 # AUTOEXEC  = the momentum STRATEGY auto-submits simulated orders (ADR-0019).
 # AUTONOMY  = the LLM's HYPOTHESES auto-execute, but only within the deterministic risk
@@ -27,10 +28,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Optional local config: copy local.env.example → local.env and set your knobs there once.
-# Command-line env still wins — the file uses := so it only fills what you didn't set.
-# shellcheck disable=SC1091
-[ -f local.env ] && . ./local.env
+# Optional local config: copy local.env.example → local.env, a plain KEY=value file.
+# Command-line env still wins (each key is applied only when it isn't already set).
+if [ -f local.env ]; then
+  while IFS='=' read -r k v; do
+    k="${k//[[:space:]]/}"; case "$k" in ''|\#*) continue;; esac
+    v="${v%$'\r'}"
+    [ -z "${!k:-}" ] && export "$k=$v"
+  done < local.env
+fi
 
 PROFILE="${PROFILE:-pi}"
 HEAP="${HEAP:-512m}"
