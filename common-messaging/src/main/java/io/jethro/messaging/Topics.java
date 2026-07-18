@@ -14,6 +14,16 @@ public final class Topics {
     public static final String AI_DECISIONS = "ai.decisions";
     public static final String COST_SNAPSHOTS = "cost.snapshots";
 
+    /**
+     * The mode-namespaced topic for this run (ADR-0029): {@code sim.md.marks}, {@code live.md.marks},
+     * etc. Sim, live and replay never share a topic, so their events can't aggregate in the log or
+     * any projection. Both producers and consumers resolve through here against the same
+     * {@link Provenance#mode()}, so they always meet on the same stream.
+     */
+    public static String resolved(String baseTopic) {
+        return Provenance.mode().name().toLowerCase() + "." + baseTopic;
+    }
+
     private Topics() {
     }
 }

@@ -45,6 +45,8 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private volatile MarketDataAdapter adapter;
     private volatile java.util.function.Supplier<String> regimeSource; // non-null only in sim mode
     private volatile java.util.function.LongSupplier simDayIndexSource; // correlated sim only
+    private volatile io.jethro.trading.marketdata.sim.SimControl simControl; // ADR-0031: correlated sim only
+    private volatile long simTradesPerDay; // ADR-0032: per-instrument prints/day (0 when not sim) → measured ADV
     private volatile RealTreasuryCurve realCurve;     // non-null only when the live curve is active
     private volatile TreasuryCurveFetcher curveFetcher;
     private volatile String curveSource = "sim";      // "treasury-live" or "sim" (for the UI)
@@ -265,6 +267,19 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         long[] startPricesScaled = ids.stream()
                 .mapToLong(id -> Decimals.toScaledLong(properties.startPriceFor(id), Decimals.PRICE_SCALE))
                 .toArray();
+        // Each factor instrument prints once per tick, so its trades/day = ticks/day (ADR-0032):
+        // measured avg-trade-notional × this = measured ADV.
+        double tickSecondsForAdv = properties.simTickIntervalMillis() / 1_000.0;
+        this.simTradesPerDay = Math.round(properties.simSecondsPerDayOrDefault() / tickSecondsForAdv);
+        if (properties.historicalSimEngine()) {
+            io.jethro.trading.marketdata.sim.HistoricalMarketDataAdapter historical =
+                    buildHistoricalAdapter(curveSim, ids, startPricesScaled);
+            if (historical != null) {
+                return historical;
+            }
+            log.error("sim-engine=historical but the snapshot could not be prepared — "
+                    + "falling back to the correlated factor engine");
+        }
         if (properties.correlatedSimOrDefault()) {
             try {
                 FactorModelConfig calibration = SimCalibrationLoader.load(properties.simCalibrationPathOrNull());
@@ -274,6 +289,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                         properties.simSecondsPerDayOrDefault(), quoteSpecSource());
                 this.regimeSource = () -> sim.regime().name();
                 this.simDayIndexSource = sim::simDayIndex;
+                this.simControl = sim.control();
                 log.info("SIM ENGINE: correlated factor model (ADR-0026) — {} instruments, {} regimes, "
                                 + "t(ν={}) tails, {}s per simulated trading day",
                         calibration.instruments().size(), calibration.regimes().size(),
@@ -298,6 +314,57 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()));
         this.regimeSource = () -> sim.regime().name();
         return sim;
+    }
+
+    /** Builds the history-anchored bootstrap adapter (ADR-0032), or null on failure (caller
+     *  falls back to the correlated engine). */
+    private io.jethro.trading.marketdata.sim.HistoricalMarketDataAdapter buildHistoricalAdapter(
+            CurveMarkSource curveSim, List<String> ids, long[] startPricesScaled) {
+        try {
+            io.jethro.trading.marketdata.sim.HistoricalSnapshot snapshot = loadOrSynthesizeSnapshot(ids);
+            var sim = new io.jethro.trading.marketdata.sim.HistoricalMarketDataAdapter(
+                    properties.simSeed(), snapshot, ids, startPricesScaled, curveSim,
+                    TimeUnit.MILLISECONDS.toNanos(properties.simTickIntervalMillis()),
+                    properties.simSecondsPerDayOrDefault(), properties.simBlockLengthOrDefault(),
+                    quoteSpecSource());
+            this.regimeSource = () -> sim.regime().name();
+            this.simDayIndexSource = sim::simDayIndex;
+            this.simControl = sim.control();
+            log.warn("SIM ENGINE: historical bootstrap (ADR-0032) over a {} snapshot — {} instruments, "
+                            + "mean block {}d, {}s per simulated day. {}",
+                    snapshot.source(), snapshot.instrumentIds().size(),
+                    properties.simBlockLengthOrDefault(), properties.simSecondsPerDayOrDefault(),
+                    snapshot.synthetic()
+                            ? "SYNTHETIC seed (labelled) — capture a real Yahoo history snapshot for genuine dynamics"
+                            : "real history");
+            return sim;
+        } catch (Exception e) {
+            log.error("failed to build the historical sim adapter: {}", e.toString());
+            return null;
+        }
+    }
+
+    /** The configured snapshot from disk, or a labelled synthetic seed so the engine still runs
+     *  offline/CI (ADR-0032). Synthetic uses the configured start prices + vols; a nominal ~$2B
+     *  base ADV per name (real magnitudes arrive with a real snapshot). */
+    private io.jethro.trading.marketdata.sim.HistoricalSnapshot loadOrSynthesizeSnapshot(List<String> ids)
+            throws Exception {
+        String path = properties.simSnapshotPathOrNull();
+        if (path != null) {
+            return HistoricalSnapshotLoader.load(java.nio.file.Path.of(path));
+        }
+        int n = ids.size();
+        double[] startPrices = new double[n];
+        double[] vols = new double[n];
+        long[] baseVols = new long[n];
+        for (int i = 0; i < n; i++) {
+            double px = Math.max(0.01, properties.startPriceFor(ids.get(i)).doubleValue());
+            startPrices[i] = px;
+            vols[i] = properties.annualVolFor(ids.get(i));
+            baseVols[i] = Math.max(1, Math.round(2_000_000_000.0 / px));
+        }
+        return io.jethro.trading.marketdata.sim.HistoricalSnapshot.synthetic(
+                properties.simSeed(), ids, startPrices, vols, baseVols, 1_000);
     }
 
     /**
@@ -347,6 +414,24 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
      *  session calendar keys to the TAPE's days, not wall time (ADR-0027). */
     public java.util.function.LongSupplier simDayIndexSource() {
         return simDayIndexSource;
+    }
+
+    /** The live sim control panel (ADR-0031), or null when the feed isn't the correlated sim
+     *  (live/replay/legacy). The REST surface additionally gates on {@code feedMode == SIM}. */
+    public io.jethro.trading.marketdata.sim.SimControl simControl() {
+        return simControl;
+    }
+
+    /** Per-instrument trade prints per simulated day (ADR-0032), or 0 on a live feed — the
+     *  factor that turns {@link VolumeStats}'s avg trade notional into a daily ADV. */
+    public long simTradesPerDay() {
+        return simTradesPerDay;
+    }
+
+    /** Live traded-volume statistics (ADR-0032), or null before the runtime has started. */
+    public io.jethro.trading.runtime.VolumeStats volumeStats() {
+        var rt = runtime;
+        return rt != null ? rt.volumeStats() : null;
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'

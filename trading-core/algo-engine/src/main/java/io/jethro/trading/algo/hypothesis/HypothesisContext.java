@@ -11,7 +11,14 @@ import java.util.Set;
  * hallucinated ticker is dropped, not traded.
  */
 public record HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
-                                List<PortfolioLine> portfolio, Set<String> tradableInstruments) {
+                                List<PortfolioLine> portfolio, Set<String> tradableInstruments,
+                                List<String> alreadyProposed) {
+
+    /** Without an {@code alreadyProposed} list (defaults to empty) — the pre-idempotency shape. */
+    public HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
+                             List<PortfolioLine> portfolio, Set<String> tradableInstruments) {
+        this(marks, narrative, portfolio, tradableInstruments, List.of());
+    }
 
     /**
      * A current price the model may reference (decimal as string), plus WHAT the instrument is —

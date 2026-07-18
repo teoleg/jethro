@@ -21,6 +21,7 @@ public final class TradingCoreRuntime implements AutoCloseable {
     private final TickRingBuffer buffer;
     private final MarkCache markCache;
     private final QuoteCache quoteCache = new QuoteCache();
+    private final VolumeStats volumeStats = new VolumeStats(); // ADR-0032: live traded volume/ADV
     private final LmdbStateStore stateStore; // nullable: runtime works without persistence
     private final TradingCoreStats stats;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -95,6 +96,9 @@ public final class TradingCoreRuntime implements AutoCloseable {
         TickRingBuffer.TickVisitor visitor = slot -> {
             markCache.update(slot.instrumentId(), slot.priceScaled(),
                     slot.providerTimestampMillis(), slot.ingestTimestampMillis(), source);
+            // ADR-0032: volume no longer dies at the buffer — feed the live ADV/relative-volume
+            // estimate (single writer, this loop thread).
+            volumeStats.record(slot.instrumentId(), slot.priceScaled(), slot.qtyScaled());
             stats.tickConsumed();
         };
         while (running.get()) {
@@ -130,6 +134,11 @@ public final class TradingCoreRuntime implements AutoCloseable {
 
     public QuoteCache quoteCache() {
         return quoteCache;
+    }
+
+    /** Live traded-volume statistics (ADR-0032) — measured ADV + relative volume per instrument. */
+    public VolumeStats volumeStats() {
+        return volumeStats;
     }
 
     public TradingCoreStats stats() {

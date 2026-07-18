@@ -4,6 +4,9 @@ name: Bake AMI
 # spawn a fresh instance from it in the same AWS account — replacing the previous one. The
 # Ollama model is baked in, so instances boot straight into a running stack with no downloads.
 on:
+  # Manual only. Auto-deploy-on-push was removed to stop AWS spend while the stack is
+  # still stabilising locally — run this by hand (Actions -> Bake AMI -> Run workflow)
+  # when you actually want a new image/instance.
   workflow_dispatch:
     inputs:
       launch:
@@ -62,7 +65,7 @@ jobs:
           packer init .
           packer build \
             -var region=${AWS_REGION} \
-            -var ai_model='${{ inputs.ai_model }}' \
+            -var ai_model='${{ inputs.ai_model || 'qwen2.5:1.5b' }}' \
             .
 
       - name: Read AMI id
@@ -73,11 +76,12 @@ jobs:
           echo "id=$AMI" >> "$GITHUB_OUTPUT"
           echo "Baked AMI: $AMI"
 
+      # Only when you explicitly ask for it (manual run, launch ON).
       - name: Spawn / replace instance
         if: ${{ inputs.launch }}
         env:
           AMI: ${{ steps.ami.outputs.id }}
-          TYPE: ${{ inputs.instance_type }}
+          TYPE: ${{ inputs.instance_type || 't3a.xlarge' }}
           SG: ${{ vars.JETHRO_SG_ID || 'sg-03e71c0481e7c16f4' }}   # default: jethro-sg (IP-locked, 8080/22); override with the JETHRO_SG_ID repo variable
           SUBNET: ${{ vars.JETHRO_SUBNET_ID }}          # optional; default subnet if empty
           PROFILE: ${{ vars.JETHRO_INSTANCE_PROFILE }}  # optional (SSM shell etc.)

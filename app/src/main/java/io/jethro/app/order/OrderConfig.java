@@ -49,10 +49,20 @@ public class OrderConfig {
      *  configured spread/fee, plus the impact inputs (ADV from refdata, measured daily vol —
      *  either missing means the impact model stays off for that name, disclosed). Without
      *  refdata an instrument gets the conservative EQUITY defaults — never free execution. */
+    /** Live measured ADV from the market path (ADR-0032) — the execution cost source prefers it
+     *  over the static config number, falling back when it isn't warm / on a live feed. */
+    @Bean
+    MeasuredAdvSource measuredAdvSource(
+            ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore,
+            ObjectProvider<InstrumentRefSource> refSource) {
+        return new MeasuredAdvSource(tradingCore, refSource.getIfAvailable());
+    }
+
     @Bean
     ExecutionCostSource executionCostSource(ExecutionProperties props,
                                             ObjectProvider<InstrumentRefSource> refSource,
-                                            ObjectProvider<io.jethro.app.risk.InstrumentVolSource> volSource) {
+                                            ObjectProvider<io.jethro.app.risk.InstrumentVolSource> volSource,
+                                            MeasuredAdvSource measuredAdv) {
         InstrumentRefSource refs = refSource.getIfAvailable();
         io.jethro.app.risk.InstrumentVolSource vols =
                 volSource.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE);
@@ -64,8 +74,12 @@ public class OrderConfig {
             BigDecimal spread = ref != null && ref.spreadBps() != null
                     ? ref.spreadBps() : props.spreadFor(assetClass);
             BigDecimal fee = props.feeFor(assetClass);
+            // ADR-0032: live measured ADV wins over the static refdata number; empty (cold/live)
+            // falls back to the configured adv_usd, so the impact model is never worse than before.
+            BigDecimal configAdv = ref != null ? ref.advUsd() : null;
+            BigDecimal adv = measuredAdv.advUsd(instrumentId).orElse(configAdv);
             return new ExecutionCostSource.Cost(spread, fee, "SWAP".equals(assetClass),
-                    ref != null ? ref.advUsd() : null,
+                    adv,
                     vols.dailyVol(instrumentId).orElse(null),
                     ref != null ? ref.multiplier() : null);
         };
@@ -127,6 +141,7 @@ public class OrderConfig {
 
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.kafka", name = "enabled", havingValue = "true", matchIfMissing = true)
+    @org.springframework.context.annotation.DependsOn({"schemaRegistry", "provenanceConfig"})
     OrderMarketDataConsumer orderMarketDataConsumer(KafkaConfig.JethroKafkaProperties properties,
                                                     LastPriceCache prices, OrderService orderService) {
         // onMark drives working-order matching (ADR-0025): unmarketable GTC LIMIT orders are

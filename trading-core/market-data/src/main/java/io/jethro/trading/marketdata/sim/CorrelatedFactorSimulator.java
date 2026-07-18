@@ -37,10 +37,12 @@ public final class CorrelatedFactorSimulator {
     private static final double TRADING_DAYS_PER_YEAR = 252.0;
     private static final long MIN_PRICE_SCALED = 10_000L; // 0.01 — no zero/negative prices
 
-    private final SplittableRandom random;
+    private SplittableRandom random;          // non-final: a live reseed (ADR-0031) swaps it
     private final FactorModelConfig cfg;
     private final double dtDays;
     private final double sqrtDtDays;
+    private final SimControl control;         // live dials (ADR-0031); identity-valued by default
+    private final long[] startPricesScaled;   // kept for a live reseed → reset to the seeded start
 
     // Per-regime precomputed state, indexed like cfg.regimes()
     private final double[][][] cholesky;      // [regime][][]
@@ -60,10 +62,21 @@ public final class CorrelatedFactorSimulator {
 
     public CorrelatedFactorSimulator(long seed, FactorModelConfig cfg, List<String> instrumentIds,
                                      long[] startPricesScaled, double tickSeconds, double simSecondsPerDay) {
+        this(seed, cfg, instrumentIds, startPricesScaled, tickSeconds, simSecondsPerDay,
+                new SimControl(1, instrumentIds));
+    }
+
+    /** With a live {@link SimControl} (ADR-0031): the panel's dials are read each tick. A
+     *  control left at its defaults produces the exact same seeded tape as the constructor above. */
+    public CorrelatedFactorSimulator(long seed, FactorModelConfig cfg, List<String> instrumentIds,
+                                     long[] startPricesScaled, double tickSeconds, double simSecondsPerDay,
+                                     SimControl control) {
         if (instrumentIds.size() != startPricesScaled.length) {
             throw new IllegalArgumentException("start prices must align with instruments");
         }
         this.random = new SplittableRandom(seed);
+        this.control = control;
+        this.startPricesScaled = startPricesScaled.clone();
         this.cfg = cfg;
         this.dtDays = tickSeconds / simSecondsPerDay;
         this.sqrtDtDays = Math.sqrt(dtDays);
@@ -94,11 +107,43 @@ public final class CorrelatedFactorSimulator {
         this.regimeIndex = Math.max(0, cfg.regimeIndex("CALM"));
     }
 
-    /** Advances one tick: regime transition, correlated factor draw, per-instrument returns. */
+    /** Advances one tick: regime transition, correlated factor draw, per-instrument returns.
+     *  First applies any pending live-control actions (ADR-0031): a reseed, one-shot price
+     *  nudges, and a forced regime; all default to no-ops so the seeded tape is unchanged. */
     public void nextTick() {
         shockSign = 0;
-        maybeTransitionRegime();
+        applyControlActions();
+        MarketRegime forced = control.regimeOverride();
+        if (forced != null) {
+            int idx = cfg.regimeIndex(forced.name());
+            if (idx >= 0) {
+                regimeIndex = idx;      // hold the forced regime; skip the Markov draw
+            } else {
+                maybeTransitionRegime(); // forced regime isn't configured — fall back to AUTO
+            }
+        } else {
+            maybeTransitionRegime();
+        }
         step(dtDays, sqrtDtDays);
+    }
+
+    /** Drains the control's one-shot actions before the tick evolves: reseed (fresh RNG +
+     *  reset to the seeded start prices) then per-instrument price nudges. Cheap and a no-op
+     *  when the panel is untouched. */
+    private void applyControlActions() {
+        long reseed = control.consumeReseed();
+        if (reseed != SimControl.NO_RESEED) {
+            random = new SplittableRandom(reseed);
+            for (int i = 0; i < ids.length; i++) {
+                price[i] = startPricesScaled[i] / 1_000_000.0;
+            }
+        }
+        for (int i = 0; i < ids.length; i++) {
+            double nudge = control.consumeNudge(i);
+            if (nudge != 0.0) {
+                price[i] = Math.max(MIN_PRICE_SCALED / 1_000_000.0, price[i] * (1.0 + nudge));
+            }
+        }
     }
 
     /**
@@ -140,8 +185,12 @@ public final class CorrelatedFactorSimulator {
         lastSlopeDelta = cfg.ratesSlopeVolBpPerDay() * 1e-4 * sqrtDDays * volMult * tScale * x[F_SLP];
 
         for (int i = 0; i < ids.length; i++) {
-            double idio = idioSigmaTick[i] * idioTimeScale * volMult * tScale * random.nextGaussian();
-            double r = betaEq[i] * fEq + betaUsd[i] * fUsd + idio;
+            // Live per-instrument dials (ADR-0031): volMultiplier scales this name's idiosyncratic
+            // vol, driftBias adds a per-tick log-drift. Both default to the identity (×1, +0), so an
+            // untouched panel leaves the return — and the RNG stream — bit-for-bit unchanged.
+            double ctlVol = control.volMultiplier(i);
+            double idio = idioSigmaTick[i] * idioTimeScale * volMult * ctlVol * tScale * random.nextGaussian();
+            double r = betaEq[i] * fEq + betaUsd[i] * fUsd + idio + control.driftBias(i);
             price[i] = price[i] * Math.exp(r);
         }
     }

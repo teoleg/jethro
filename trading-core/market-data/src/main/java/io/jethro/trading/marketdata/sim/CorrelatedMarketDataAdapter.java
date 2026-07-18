@@ -31,6 +31,7 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
     private final Quotes.QuoteSpec[] swapSpecs;
     private final long tickIntervalNanos;
     private final long ticksPerDay;                // 0 disables overnight gaps
+    private final SimControl control;              // live control panel (ADR-0031)
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
     private volatile long dayIndexV;               // completed simulated trading days
@@ -75,9 +76,18 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
         this.curveSim = curveSim;
         this.tickIntervalNanos = tickIntervalNanos;
         this.ticksPerDay = Math.round(simSecondsPerDay / (tickIntervalNanos / 1_000_000_000.0));
+        // The panel controls the factor-priced names (curve-linked futures/swaps derive from
+        // the rates factors, reachable via the regime/speed dials).
+        this.control = new SimControl(tickIntervalNanos, factor);
         this.sim = new CorrelatedFactorSimulator(seed, config, factor,
                 factorStarts.stream().mapToLong(Long::longValue).toArray(),
-                tickIntervalNanos / 1_000_000_000.0, simSecondsPerDay);
+                tickIntervalNanos / 1_000_000_000.0, simSecondsPerDay, control);
+    }
+
+    /** The live control panel (ADR-0031) — sim-only; the REST/UI surface mutating it is
+     *  hard-gated to {@code feedMode == SIM}. */
+    public SimControl control() {
+        return control;
     }
 
     private static Quotes.QuoteSpec[] specsFor(String[] ids, Quotes.QuoteSpecSource source) {
@@ -126,6 +136,11 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
     private void run(MarketDataListener listener) {
         long tickCount = 0;
         while (running.get()) {
+            // Live pause dial (ADR-0031): idle without advancing the tape or the day counter.
+            if (control.paused()) {
+                java.util.concurrent.locks.LockSupport.parkNanos(control.pausePollNanos());
+                continue;
+            }
             long now = System.currentTimeMillis();
             // Overnight gap at each simulated day boundary (ADR-0026/0027): one correlated
             // close→open jump between consecutive ticks; the curve consumes its rates deltas
@@ -143,7 +158,8 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
             sim.nextTick();
             for (int i = 0; i < factorIds.length; i++) {
                 long mid = sim.priceScaled(i);
-                listener.onTrade(factorIds[i], mid, sim.nextQuantityScaled(), now, now);
+                long qty = scaleVolume(sim.nextQuantityScaled(), control.volumeScale(i));
+                listener.onTrade(factorIds[i], mid, qty, now, now);
                 quote(listener, factorIds[i], factorSpecs[i], mid, now);
             }
             if (curveSim != null) {
@@ -169,8 +185,17 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
                     quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, now);
                 }
             }
-            java.util.concurrent.locks.LockSupport.parkNanos(tickIntervalNanos);
+            java.util.concurrent.locks.LockSupport.parkNanos(control.effectiveTickIntervalNanos());
         }
+    }
+
+    /** Applies the per-instrument volume dial (ADR-0031), keeping a minimum 1-unit trade so a
+     *  ×0 dial still prints a tape (volume 0 would look like a dropped tick). */
+    private static long scaleVolume(long quantityScaled, double scale) {
+        if (scale == 1.0) {
+            return quantityScaled;
+        }
+        return Math.max(1_000_000L, Math.round(quantityScaled * scale));
     }
 
     @Override

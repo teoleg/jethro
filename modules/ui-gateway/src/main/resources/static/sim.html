@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — sim control</title>
+<style>
+  :root { --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f; --warn:#e0a83d; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
+         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; } .hint { color:var(--dim); font-size:12px; }
+  main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; display:flex; align-items:center; gap:10px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:18px; }
+  .globals { display:flex; flex-wrap:wrap; gap:22px; align-items:flex-end; }
+  .field { display:flex; flex-direction:column; gap:6px; }
+  .field label { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
+  input[type=range] { width:180px; accent-color:var(--brand); }
+  input[type=number] { width:90px; background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt);
+    border-radius:8px; padding:6px 8px; font:13px/1 "SF Mono", ui-monospace, monospace; }
+  select { background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt); border-radius:8px; padding:7px 10px; font-size:13px; }
+  button { background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt); border-radius:8px;
+    padding:7px 12px; font-size:13px; cursor:pointer; }
+  button:hover { border-color:var(--brand); color:#fff; }
+  button.primary { background:rgba(91,140,255,.16); border-color:var(--brand); }
+  button.warn { border-color:var(--warn); color:var(--warn); }
+  .val { font-variant-numeric:tabular-nums; color:var(--txt); min-width:52px; display:inline-block; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:6px 10px; border-bottom:1px solid var(--line); }
+  th:first-child, td:first-child { text-align:left; }
+  tr:last-child td { border-bottom:0; }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .nudge-btns button { padding:4px 8px; font-size:12px; }
+  .stepper input { width:74px; }
+  .badge { font-size:10px; padding:2px 8px; border-radius:999px; letter-spacing:.06em; text-transform:uppercase; }
+  .badge.live { background:rgba(224,168,61,.16); color:var(--warn); border:1px solid rgba(224,168,61,.4); }
+  .badge.clean { background:rgba(53,192,122,.14); color:var(--up); border:1px solid rgba(53,192,122,.35); }
+  .muted { color:var(--dim); }
+  .notice { padding:40px 20px; text-align:center; color:var(--dim); }
+  .notice h2 { color:var(--txt); font-size:16px; margin-bottom:8px; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+      <a class="tab" href="/config.html">Config</a>
+      <a class="tab active" href="/sim.html">Sim</a>
+      <a class="tab" href="/backtest.html">Backtest</a>
+      <a class="tab" href="/ollama.html">Ops</a>
+    </nav>
+    <span class="spacer"></span>
+    <span id="statusBadge" class="hint">loading…</span>
+  </div>
+</div>
+<main>
+  <div id="content" class="notice muted">loading sim control…</div>
+  <div id="volumePanel"></div>
+</main>
+<script>
+  const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
+  const f2 = v => Number(v).toFixed(2);
+  const f4 = v => Number(v).toFixed(4);
+
+  async function post(url, body) {
+    const res = await fetch(url, { method:"POST", headers:{"content-type":"application/json"},
+      body: body==null ? null : JSON.stringify(body) });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  }
+
+  let state = null;
+
+  function render() {
+    const badge = document.getElementById("statusBadge");
+    if (!state || !state.enabled) {
+      badge.innerHTML = '<span class="badge clean">idle</span>';
+      document.getElementById("content").innerHTML =
+        '<div class="notice"><h2>Sim control is available only in SIM feed mode</h2>' +
+        '<div>The running feed is live or replay (or the legacy sim engine). ' +
+        'Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine to stage scenarios here.</div></div>';
+      return;
+    }
+    badge.innerHTML = state.active
+      ? '<span class="badge live">panel-driven · dials active</span>'
+      : '<span class="badge clean">seeded · untouched</span>';
+
+    const g = `
+      <div class="globals">
+        <div class="field">
+          <label>Speed × <span class="val mono" id="speedVal">${f2(state.speedMultiplier)}</span></label>
+          <input type="range" id="speed" min="0.1" max="20" step="0.1" value="${state.speedMultiplier}">
+        </div>
+        <div class="field">
+          <label>Feed</label>
+          <button id="pauseBtn" class="${state.paused?'warn':''}">${state.paused?'▶ Resume':'⏸ Pause'}</button>
+        </div>
+        <div class="field">
+          <label>Regime override</label>
+          <select id="regime">
+            ${state.regimes.concat().length ? '' : ''}
+            <option value="AUTO"${state.regimeOverride==='AUTO'?' selected':''}>AUTO (Markov)</option>
+            ${state.regimes.map(r=>`<option value="${r}"${state.regimeOverride===r?' selected':''}>${r}</option>`).join("")}
+          </select>
+        </div>
+        <div class="field">
+          <label>Determinism</label>
+          <div style="display:flex; gap:8px">
+            <button id="reseed">↻ Reseed</button>
+            <button id="reset" class="warn">Reset all dials</button>
+          </div>
+        </div>
+      </div>`;
+
+    const rows = state.instruments.map(it => `
+      <tr data-id="${esc(it.id)}">
+        <td><b>${esc(it.name)}</b><div class="muted mono" style="font-size:10px">${esc(it.id)}</div></td>
+        <td class="nudge-btns">
+          <button data-nudge="-0.02">−2%</button>
+          <button data-nudge="-0.005">−0.5%</button>
+          <button data-nudge="0.005">+0.5%</button>
+          <button data-nudge="0.02">+2%</button>
+        </td>
+        <td class="stepper"><input type="number" data-drift step="0.0005" value="${f4(it.driftBias)}"></td>
+        <td class="stepper"><input type="number" data-vol step="0.25" min="0" value="${f2(it.volMultiplier)}"></td>
+        <td class="stepper"><input type="number" data-volume step="0.5" min="0" value="${f2(it.volumeScale)}"></td>
+      </tr>`).join("");
+
+    document.getElementById("content").className = "";
+    document.getElementById("content").innerHTML = `
+      <div class="section-h">Global</div>
+      <div class="panel">${g}</div>
+      <div class="section-h">Per-instrument dials
+        <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
+          nudge = one-shot price bump · drift = per-tick log-drift · vol = idiosyncratic vol × · volume = trade-size ×</span></div>
+      <div class="panel">
+        <table>
+          <tr><th>instrument</th><th>nudge price</th><th>drift bias</th><th>vol ×</th><th>volume ×</th></tr>
+          ${rows}
+        </table>
+      </div>`;
+    wire();
+  }
+
+  function wire() {
+    const speed = document.getElementById("speed");
+    speed.oninput = () => document.getElementById("speedVal").textContent = f2(speed.value);
+    speed.onchange = async () => { state = await post("/api/sim/control/speed", { multiplier: Number(speed.value) }); render(); };
+    document.getElementById("pauseBtn").onclick = async () => {
+      state = await post("/api/sim/control/pause", { paused: !state.paused }); render(); };
+    document.getElementById("regime").onchange = async (e) => {
+      state = await post("/api/sim/control/regime", { regime: e.target.value }); render(); };
+    document.getElementById("reseed").onclick = async () => { state = await post("/api/sim/control/reseed", {}); render(); };
+    document.getElementById("reset").onclick = async () => { state = await post("/api/sim/control/reset", {}); render(); };
+
+    document.querySelectorAll("tr[data-id]").forEach(tr => {
+      const id = tr.getAttribute("data-id");
+      tr.querySelectorAll("button[data-nudge]").forEach(b =>
+        b.onclick = async () => { state = await post(`/api/sim/instrument/${encodeURIComponent(id)}/nudge`,
+          { value: Number(b.getAttribute("data-nudge")) }); render(); });
+      const send = (path, input) => async () => { state = await post(
+        `/api/sim/instrument/${encodeURIComponent(id)}/${path}`, { value: Number(input.value) }); render(); };
+      const drift = tr.querySelector("input[data-drift]");
+      const vol = tr.querySelector("input[data-vol]");
+      const volume = tr.querySelector("input[data-volume]");
+      drift.onchange = send("drift", drift);
+      vol.onchange = send("vol", vol);
+      volume.onchange = send("volume", volume);
+    });
+  }
+
+  async function load() {
+    try {
+      const res = await fetch("/api/sim/control");
+      if (res.status === 403) { state = { enabled:false }; render(); return; }
+      state = await res.json();
+      // Only re-render passively when the user isn't mid-edit (avoid clobbering focus).
+      if (!document.querySelector("input:focus, select:focus")) render();
+    } catch (e) {
+      document.getElementById("statusBadge").textContent = "sim control unavailable";
+    }
+  }
+
+  const advFmt = v => v==null ? '<span class="muted">config</span>'
+    : "$" + (v>=1e9 ? (v/1e9).toFixed(2)+"B" : v>=1e6 ? (v/1e6).toFixed(1)+"M" : Math.round(v).toLocaleString());
+  const relCls = r => r>=1.5 ? "up" : r<=0.6 ? "down" : "";
+
+  async function loadVolume() {
+    try {
+      const rows = await (await fetch("/api/volume")).json();
+      if (!rows.length) { document.getElementById("volumePanel").innerHTML = ""; return; }
+      const body = rows.map(r => `
+        <tr>
+          <td><b>${esc(r.name)}</b><div class="muted mono" style="font-size:10px">${esc(r.instrumentId)}</div></td>
+          <td class="mono">${advFmt(r.measuredAdvUsd)}</td>
+          <td class="mono" style="color:var(--${relCls(r.relativeVolume)||'txt'})">${r.relativeVolume.toFixed(2)}×</td>
+          <td class="mono muted">${r.samples.toLocaleString()}</td>
+        </tr>`).join("");
+      document.getElementById("volumePanel").innerHTML = `
+        <div class="section-h">Live volume &amp; liquidity
+          <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
+            measured ADV now drives the execution participation cap + impact (ADR-0032) · rel-vol = recent ÷ baseline</span></div>
+        <div class="panel"><table>
+          <tr><th>instrument</th><th>measured ADV</th><th>rel vol</th><th>samples</th></tr>
+          ${body}
+        </table></div>`;
+    } catch (e) { /* volume is best-effort context */ }
+  }
+
+  function tick() { load(); loadVolume(); }
+  tick();
+  setInterval(tick, 5000);
+</script>
+</body>
+</html>

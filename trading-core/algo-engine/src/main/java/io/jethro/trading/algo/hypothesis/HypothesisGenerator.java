@@ -70,6 +70,10 @@ public final class HypothesisGenerator {
             - Base each thesis on the narrative and marks. Prefer names with the strongest recent \
             move or a matching headline; aim to return at least one hypothesis when a headline is \
             clearly directional. Use [] only if truly nothing is actionable.
+            - IDEMPOTENCY: alreadyProposed lists calls already live from earlier cycles. Do NOT \
+            re-propose the same call (same instrument + direction) on the SAME news — only add a \
+            hypothesis when genuinely new information or a materially different reason justifies it. \
+            Repeating a live call on unchanged news is an error.
             - Output the JSON array only — no prose, no markdown fences.""";
 
     private final ModelInferenceClient client;
@@ -234,6 +238,8 @@ public final class HypothesisGenerator {
                         .setEventId(UUID.randomUUID().toString())
                         .setProviderTimestamp(now)
                         .setIngestTimestamp(now)
+                        .setFeedMode(io.jethro.messaging.Provenance.mode())
+                        .setSessionEpoch(io.jethro.messaging.Provenance.epoch())
                         .build())
                 .setDecisionId(UUID.randomUUID().toString())
                 .setModelId(result.modelId())
@@ -281,6 +287,12 @@ public final class HypothesisGenerator {
         }
         root.putArray("tradableInstruments").addAll(
                 context.tradableInstruments().stream().map(JSON.getNodeFactory()::textNode).toList());
+        // Calls already live (idempotency, ADR-0022 follow-up): the model must not re-propose the
+        // same instrument+direction on unchanged news — the deterministic guard drops it anyway.
+        if (context.alreadyProposed() != null && !context.alreadyProposed().isEmpty()) {
+            root.putArray("alreadyProposed").addAll(
+                    context.alreadyProposed().stream().map(JSON.getNodeFactory()::textNode).toList());
+        }
         return root.toString();
     }
 

@@ -56,6 +56,8 @@ public final class RiskSnapshotPublisher implements SmartLifecycle {
                             .setEventId(UUID.randomUUID().toString())
                             .setProviderTimestamp(ts)
                             .setIngestTimestamp(ts)
+                            .setFeedMode(io.jethro.messaging.Provenance.mode())
+                            .setSessionEpoch(io.jethro.messaging.Provenance.epoch())
                             .build())
                     .setBookId(book.key())
                     .setCurrency(book.currency())

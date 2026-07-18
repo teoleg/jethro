@@ -63,6 +63,8 @@ public final class KafkaOrderEventPublisher implements OrderEventPublisher {
                 .setEventId(eventId)
                 .setProviderTimestamp(now)
                 .setIngestTimestamp(now)
+                .setFeedMode(io.jethro.messaging.Provenance.mode())
+                .setSessionEpoch(io.jethro.messaging.Provenance.epoch())
                 .build();
     }
 }

@@ -23,11 +23,17 @@ public record TradingCoreProperties(
         Boolean simRegimes,
         /** Factor-based SOFR curve sim publishing USD.SOFR.* tenor marks; default true. */
         Boolean simCurve,
-        /** Sim engine (ADR-0026): "correlated" (cross-asset factor model, default) or "legacy"
-         *  (independent per-instrument walks — kept for A/B and old-tape tests). */
+        /** Sim engine: "correlated" (cross-asset factor model, default; ADR-0026), "historical"
+         *  (block bootstrap of a real OHLCV snapshot; ADR-0032), or "legacy" (independent walks). */
         String simEngine,
         /** Optional path to a sim-calibration.json overriding the checked-in default. */
         String simCalibrationPath,
+        /** Optional path to a historical OHLCV snapshot JSON (ADR-0032) for {@code simEngine=historical};
+         *  when absent, a labelled synthetic seed is generated so it still runs offline. */
+        String simSnapshotPath,
+        /** Mean bootstrap block length in days for {@code simEngine=historical} (default 5 — a
+         *  business week; longer preserves more autocorrelation, shorter mixes more). */
+        Double simBlockLength,
         /** Time compression: wall seconds per simulated trading day (default 120 — multi-day
          *  regimes play out in minutes). */
         Double simSecondsPerDay,
@@ -133,6 +139,18 @@ public record TradingCoreProperties(
 
     public boolean correlatedSimOrDefault() {
         return simEngine == null || simEngine.isBlank() || "correlated".equalsIgnoreCase(simEngine);
+    }
+
+    public boolean historicalSimEngine() {
+        return "historical".equalsIgnoreCase(simEngine);
+    }
+
+    public String simSnapshotPathOrNull() {
+        return simSnapshotPath != null && !simSnapshotPath.isBlank() ? simSnapshotPath : null;
+    }
+
+    public double simBlockLengthOrDefault() {
+        return simBlockLength != null && simBlockLength >= 1 ? simBlockLength : 5.0;
     }
 
     public String simCalibrationPathOrNull() {

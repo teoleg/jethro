@@ -59,7 +59,7 @@ public final class OrderMarketDataConsumer implements AutoCloseable {
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "order-marketdata");
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
         try (var consumer = new KafkaConsumer<>(props, new StringDeserializer(), new ByteArrayDeserializer())) {
-            consumer.subscribe(List.of(Topics.MD_MARKS));
+            consumer.subscribe(List.of(Topics.resolved(Topics.MD_MARKS)));
             while (running.get()) {
                 var records = consumer.poll(Duration.ofMillis(500));
                 for (var record : records) {

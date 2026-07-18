@@ -68,6 +68,9 @@ impact, constrains future work) requires an ADR **before** implementation. Use t
    consumer ships a duplicate-delivery test.
 7. AI never sits on the tick path; risk guardrails are deterministic code; every AI
    decision is an event on `ai.decisions`.
+8. Sim, live, and replay data are never aggregated across modes (ADR-0029): every event
+   carries `feedMode` (SIM/LIVE/REPLAY) + `sessionEpoch` in `EventMeta`; one mode per
+   session, and a sim↔live switch starts a new epoch/namespace rather than continuing.
 
 ## Code conventions
 
