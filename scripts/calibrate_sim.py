@@ -25,6 +25,8 @@ import json
 import math
 import statistics as st
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -52,12 +54,28 @@ UA = ("Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
 
+def _get_json(url, tries=5):
+    """GET with polite throttle + exponential backoff on Yahoo's 429 rate limiting."""
+    for attempt in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < tries - 1:
+                wait = 5 * (2 ** attempt)  # 5, 10, 20, 40s — Yahoo throttles bursts hard
+                print(f"  … 429 rate-limited, backing off {wait}s", file=sys.stderr)
+                time.sleep(wait)
+                continue
+            raise
+    raise RuntimeError("unreachable")
+
+
 def fetch_closes(sym):
     """Daily adjusted closes {YYYY-MM-DD: close} for a Yahoo symbol (last YEARS years)."""
     url = YAHOO.format(sym=urllib.parse.quote(sym), yrs=YEARS)
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        data = json.load(r)
+    time.sleep(1.5)  # trickle between symbols so we don't trip the rate limit in the first place
+    data = _get_json(url)
     chart = data.get("chart") or {}
     if not chart.get("result"):
         err = (chart.get("error") or {}).get("description", "no data")
