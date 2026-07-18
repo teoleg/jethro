@@ -47,6 +47,42 @@ public final class HypothesisMemory {
     private final double recallThreshold;
     private volatile boolean warnedUnavailable;
 
+    // Observability (ADR-0035): counters so the ops view can show whether RAG is actually working —
+    // how many chunks are indexed, the live embedding dimension, and the retrieval hit/miss rate.
+    private final java.util.concurrent.atomic.AtomicLong dedupChecks = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong dedupHits = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong recallQueries = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong recallHits = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong embedCalls = new java.util.concurrent.atomic.AtomicLong();
+    private final java.util.concurrent.atomic.AtomicLong embedFailures = new java.util.concurrent.atomic.AtomicLong();
+    private volatile int lastEmbeddingDim = -1; // dimension of the last successful embedding, -1 = none yet
+
+    /** RAG health for the ops view: is it on, the model + live embedding dimension, indexed chunk
+     *  counts, and the retrieval hit/miss counters (a hit = retrieval found a similar chunk). */
+    public record RagStats(boolean enabled, String modelId, int embeddingDim,
+                           int dedupChunks, int outcomeChunks,
+                           long dedupChecks, long dedupHits,
+                           long recallQueries, long recallHits,
+                           long embedCalls, long embedFailures,
+                           double dedupThreshold, double recallThreshold) {
+    }
+
+    public RagStats stats() {
+        String model = null;
+        if (embeddings != null) {
+            try {
+                model = embeddings.modelId();
+            } catch (RuntimeException ignore) {
+                // best-effort — the ops view shows model "unknown" rather than failing
+            }
+        }
+        return new RagStats(enabled(), model, lastEmbeddingDim,
+                dedupIndex != null ? dedupIndex.size() : 0,
+                outcomeIndex != null ? outcomeIndex.size() : 0,
+                dedupChecks.get(), dedupHits.get(), recallQueries.get(), recallHits.get(),
+                embedCalls.get(), embedFailures.get(), dedupThreshold, recallThreshold);
+    }
+
     public HypothesisMemory(EmbeddingClient embeddings, SemanticMemory<String> dedupIndex,
                             SemanticMemory<String> outcomeIndex, double dedupThreshold, double recallThreshold) {
         this.embeddings = embeddings;
@@ -65,7 +101,15 @@ public final class HypothesisMemory {
     /** True when this call is semantically near a recently fired one (same instrument+direction). */
     public boolean isSemanticDuplicate(Hypothesis h) {
         float[] v = embed(h.instrumentId() + " " + h.direction().name() + " " + h.thesis());
-        return v != null && dedupIndex.hasSimilar(v, dedupScope(h), dedupThreshold);
+        if (v == null) {
+            return false;
+        }
+        dedupChecks.incrementAndGet();
+        boolean hit = dedupIndex.hasSimilar(v, dedupScope(h), dedupThreshold);
+        if (hit) {
+            dedupHits.incrementAndGet();
+        }
+        return hit;
     }
 
     /** Records a fired call so later cycles can recognise a reworded repeat of it. */
@@ -106,7 +150,13 @@ public final class HypothesisMemory {
             if (v == null) {
                 continue;
             }
-            for (SemanticMemory.Match<String> m : outcomeIndex.nearest(v, item.instrumentId(), 2, recallThreshold)) {
+            recallQueries.incrementAndGet();
+            List<SemanticMemory.Match<String>> matches =
+                    outcomeIndex.nearest(v, item.instrumentId(), 2, recallThreshold);
+            if (!matches.isEmpty()) {
+                recallHits.incrementAndGet();
+            }
+            for (SemanticMemory.Match<String> m : matches) {
                 out.add(m.payload());
                 if (out.size() >= MAX_PAST_OUTCOMES) {
                     return new ArrayList<>(out);
@@ -122,9 +172,15 @@ public final class HypothesisMemory {
         if (!enabled()) {
             return null;
         }
+        embedCalls.incrementAndGet();
         try {
-            return embeddings.embed(text);
+            float[] v = embeddings.embed(text);
+            if (v != null && v.length > 0) {
+                lastEmbeddingDim = v.length;
+            }
+            return v;
         } catch (RuntimeException e) {
+            embedFailures.incrementAndGet();
             if (!warnedUnavailable) {
                 warnedUnavailable = true;
                 log.warn("RAG retrieval unavailable ({}) — falling back to the deterministic guard "

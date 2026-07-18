@@ -158,6 +158,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     public record DirectionBalance(int longs, int shorts, String skew) {
     }
 
+    /** RAG health for the ops view (ADR-0035): indexed chunks, embedding dim, hit/miss counters. */
+    public HypothesisMemory.RagStats ragStats() {
+        return memory.stats();
+    }
+
     public DirectionBalance directionBalance() {
         int longs = 0;
         int shorts = 0;

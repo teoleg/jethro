@@ -117,6 +117,51 @@ class HypothesisMemoryTest {
     }
 
     @Test
+    void statsExposeChunksDimensionAndHitMissCounters() {
+        var mem = memory(TOY);
+        // one indexed dedup chunk + one outcome chunk
+        var beat = h("AAPL", Side.BUY, "earnings beat drives upside");
+        mem.remember(beat);
+        mem.rememberOutcome("AAPL", "BUY", "earnings beat", "WIN", "1200");
+
+        // a dedup HIT (reworded beat) and a dedup MISS (a miss story)
+        assertTrue(mem.isSemanticDuplicate(h("AAPL", Side.BUY, "another beat, stay long")));
+        assertFalse(mem.isSemanticDuplicate(h("AAPL", Side.BUY, "guidance miss, fade")));
+        // a recall HIT (AAPL beat news) and a recall MISS (AAPL miss news — different embedding)
+        assertFalse(mem.recallSimilar(List.of(new NarrativeItem("n1", 0, NarrativeItem.Category.NEWS,
+                "AAPL", NarrativeItem.Sentiment.BULLISH, "AAPL beat again"))).isEmpty());
+        mem.recallSimilar(List.of(new NarrativeItem("n2", 0, NarrativeItem.Category.NEWS,
+                "AAPL", NarrativeItem.Sentiment.BEARISH, "AAPL miss")));
+
+        var s = mem.stats();
+        assertTrue(s.enabled());
+        assertEquals("toy", s.modelId());
+        assertEquals(3, s.embeddingDim(), "the toy embeds into 3 dims");
+        assertEquals(1, s.dedupChunks());
+        assertEquals(1, s.outcomeChunks());
+        assertEquals(2, s.dedupChecks());
+        assertEquals(1, s.dedupHits());
+        assertEquals(2, s.recallQueries());
+        assertEquals(1, s.recallHits());
+        assertTrue(s.embedCalls() > 0 && s.embedFailures() == 0);
+    }
+
+    @Test
+    void statsCountEmbeddingFailures() {
+        EmbeddingClient broken = new EmbeddingClient() {
+            @Override public String modelId() { return "broken"; }
+            @Override public float[] embed(String text) { throw new InferenceException("down"); }
+        };
+        var mem = memory(broken);
+        assertFalse(mem.isSemanticDuplicate(h("AAPL", Side.BUY, "beat"))); // degrades to not-a-dup
+        var s = mem.stats();
+        assertTrue(s.enabled(), "enabled by config even when the model is down");
+        assertEquals(-1, s.embeddingDim(), "no successful embedding yet");
+        assertTrue(s.embedFailures() >= 1);
+        assertEquals(0, s.dedupHits());
+    }
+
+    @Test
     void disabledMemoryIsANoOp() {
         assertFalse(HypothesisMemory.DISABLED.enabled());
         var call = h("AAPL", Side.BUY, "earnings beat");

@@ -68,6 +68,10 @@
   <div class="tiles" id="trafficTiles"></div>
   <div id="balanceLine" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
 
+  <div class="section-h">RAG retrieval <span class="muted" id="ragAsOf" style="text-transform:none;letter-spacing:0"></span></div>
+  <div class="tiles" id="ragTiles"></div>
+  <div id="ragHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
+
   <div class="section-h">Model load <span class="muted" id="asof"></span></div>
   <div class="tiles" id="tiles"></div>
 
@@ -135,10 +139,35 @@
     } catch (e) {}
   }
 
+  const pct = v => v == null ? "—" : (v * 100).toFixed(0) + "%";
+  async function loadRag() {
+    try {
+      const r = await (await fetch("/api/hypotheses/rag")).json();
+      const status = !r.enabled ? '<span class="down">off</span>'
+        : (r.embedFailures > 0 && r.embeddingDim < 0) ? '<span class="warn">degraded</span>'
+        : '<span class="up">on</span>';
+      document.getElementById("ragAsOf").textContent =
+        r.enabled ? "— semantic dedup + outcome memory (ADR-0035)" : "— disabled (jethro.rag.enabled=false)";
+      document.getElementById("ragTiles").innerHTML =
+        tile("Status", status) +
+        tile("Embed model", `<span style="font-size:14px">${esc(r.model || "—")}</span>`) +
+        tile("Embedding dim", r.embeddingDim > 0 ? r.embeddingDim : "—") +
+        tile("Chunks indexed", `${r.totalChunks} <span class="muted" style="font-size:11px">(${r.dedupChunks} dedup · ${r.outcomeChunks} outcome)</span>`) +
+        tile("Recall hit-rate", pct(r.recallHitRate), r.recallHitRate > 0 ? "up" : "") +
+        tile("Embed failures", r.embedFailures, r.embedFailures > 0 ? "down" : "up");
+      document.getElementById("ragHint").innerHTML = r.enabled
+        ? `dedup: ${r.dedupHits}/${r.dedupChecks} flagged (${pct(r.dedupHitRate)}) at ≥${r.dedupThreshold} cos · `
+          + `recall: ${r.recallHits}/${r.recallQueries} news queries hit past outcomes (${pct(r.recallHitRate)}) at ≥${r.recallThreshold} cos · `
+          + `${r.embedCalls} embeddings computed`
+        : "retrieval is off — theses fall back to the deterministic id/text de-dup guard; pull the embedding model and set jethro.rag.enabled=true";
+    } catch (e) {}
+  }
+
   async function refresh() {
     try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
     loadTraffic();
     loadBalance();
+    loadRag();
   }
   refresh();
   setInterval(refresh, 3000);
