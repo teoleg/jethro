@@ -14,11 +14,15 @@ factor, and spot FX — then estimates:
     signs, and computing correlations within each bucket,
   - the daily regime transition matrix from the observed day-to-day bucket sequence.
 
-Usage: run once with no data/history/ to get the download list, drop the CSVs there, re-run:
+Usage: run once with no data/history/ to get the download list, drop the CSVs there, then pass
+the OUTPUT PATH as an argument (writes atomically — a failed run never nukes the calibration):
 
-    python3 scripts/calibrate_sim.py > app/src/main/resources/sim-calibration.json
+    python3 scripts/calibrate_sim.py app/src/main/resources/sim-calibration.json
 
-(the platform itself never fetches at runtime — ADR-0009)
+Do NOT use `> file`: the shell truncates the file to empty BEFORE the script runs, so a failed
+fetch leaves an EMPTY calibration and the correlated sim engine can't load. (Restore a clobbered
+one with: git checkout app/src/main/resources/sim-calibration.json.) The platform itself never
+fetches at runtime — ADR-0009.
 
 Stdlib only. If a symbol fails to download the script keeps the hand-curated default
 for that piece and says so on stderr — it never emits a partially-broken file silently.
@@ -94,8 +98,8 @@ def print_data_help():
     for s in syms:
         print(f"  {s + '.csv':13s} https://stooq.com/q/d/l/?s={_stooq_symbol(s)}&i=d", file=sys.stderr)
     print("\n(Tip: for a longer window add &d1=20150101&d2=20251231 to each URL.)", file=sys.stderr)
-    print("Then re-run. Missing a few names only drops those specs (the rest still calibrate).\n",
-          file=sys.stderr)
+    print("Then: python3 scripts/calibrate_sim.py app/src/main/resources/sim-calibration.json\n"
+          "(missing a few names only drops those specs; the rest still calibrate).\n", file=sys.stderr)
 
 
 def returns(closes):
@@ -236,9 +240,22 @@ def main():
         "regimes": regimes_out,
         "transitionPerDay": transition,
     }
-    json.dump(out, sys.stdout, indent=2)
-    print(file=sys.stdout)
-    print(f"OK: calibrated {len(instruments)} instruments over {len(dates)} common days", file=sys.stderr)
+    text = json.dumps(out, indent=2) + "\n"
+    # Write ATOMICALLY to a path argument (temp + os.replace) so a run only ever REPLACES the
+    # calibration on success — never truncates it. (Redirecting with `> file` zeroes the file
+    # BEFORE the script runs, so a failed fetch there leaves an empty calibration and the
+    # correlated sim can't load. Prefer the path arg.) No arg → print to stdout as before.
+    if len(sys.argv) > 1:
+        out_path = sys.argv[1]
+        tmp = out_path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(text)
+        os.replace(tmp, out_path)
+        print(f"OK: wrote {out_path} — {len(instruments)} instruments over {len(dates)} common days",
+              file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+        print(f"OK: calibrated {len(instruments)} instruments over {len(dates)} common days", file=sys.stderr)
 
 
 if __name__ == "__main__":
