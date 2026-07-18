@@ -222,6 +222,7 @@
     const fSp=fader({label:'Rate<b>ticks/s ×</b>',value:spToF(state.speedMultiplier),cls:"",fmt:f=>"×"+fToSp(f).toFixed(1),
       onCommit:f=>post("/api/sim/control/speed",{multiplier:fToSp(f)}).then(s=>state=s)});
     const bank=$("div","bank"); bank.style.justifyContent="center"; bank.append(fSp.el); m.append(bank);
+    const rateStat=$("div","msub mono"); rateStat.id="rateStat"; rateStat.textContent="—"; m.append(rateStat);
     const reg=$("div","mrow"); const sel=$("select"); const auto=$("option",null,"AUTO");auto.value="AUTO";sel.append(auto);
     (state.regimes||[]).forEach(r=>{const o=$("option",null,r);o.value=r;sel.append(o);});
     sel.value=state.regimeOverride||"AUTO"; sel.onchange=()=>post("/api/sim/control/regime",{regime:sel.value}).then(s=>state=s);
@@ -290,6 +291,13 @@
       state=await r.json(); badge.textContent=state.active?"panel-driven":"seeded · untouched"; badge.className="badge "+(state.active?"live":"clean");
       try{ (await (await fetch("/api/instruments")).json()).forEach(i=>instrClass[i.instrumentId]=i.assetClass); }catch(e){}
       build(); loadLive(); setInterval(loadLive,1500);
+      // publisher telemetry: target vs MEASURED emit rate on the master strip
+      setInterval(async()=>{try{const s=await(await fetch("/api/sim/control")).json();
+        const el=document.getElementById("rateStat"); if(!el)return;
+        const late=(s.lateTicks||0)+(s.clockResyncs||0);
+        el.textContent=`target ${s.targetTicksPerSec.toFixed(1)}/s · achieving ${s.achievedTicksPerSec.toFixed(1)}/s`+(late?` · ${s.lateTicks} late/${s.clockResyncs} resync`:"");
+        el.style.color = s.achievedTicksPerSec < s.targetTicksPerSec*0.9 ? "var(--warn)" : "var(--dim)";
+      }catch(e){}},2000);
     }catch(e){document.getElementById("stage").innerHTML='<div class="notice">sim console unavailable</div>';}
   }
   boot();

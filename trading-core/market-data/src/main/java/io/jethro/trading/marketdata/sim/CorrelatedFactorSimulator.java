@@ -35,6 +35,8 @@ public final class CorrelatedFactorSimulator {
     private static final int F_USD = 3;
     private static final int FACTORS = 4;
     private static final double TRADING_DAYS_PER_YEAR = 252.0;
+    /** Default hard price band: a price stays within [start/4, start·4] for the session. */
+    public static final double DEFAULT_PRICE_BAND = 4.0;
     private static final long MIN_PRICE_SCALED = 10_000L; // 0.01 — no zero/negative prices
 
     private SplittableRandom random;          // non-final: a live reseed (ADR-0031) swaps it
@@ -54,6 +56,8 @@ public final class CorrelatedFactorSimulator {
     private final double[] betaUsd;
     private final double[] idioSigmaTick;     // per-tick idio vol (regime multiple applied later)
     private final double[] price;             // evolving price (double internally; long at the boundary)
+    private final double[] bandFloor;         // hard session band (reflecting) — see bound()
+    private final double[] bandCap;
 
     private int regimeIndex;
     private int shockSign;                    // -1 on a shock-entry tick, else 0
@@ -71,6 +75,19 @@ public final class CorrelatedFactorSimulator {
     public CorrelatedFactorSimulator(long seed, FactorModelConfig cfg, List<String> instrumentIds,
                                      long[] startPricesScaled, double tickSeconds, double simSecondsPerDay,
                                      SimControl control) {
+        this(seed, cfg, instrumentIds, startPricesScaled, tickSeconds, simSecondsPerDay, control,
+                DEFAULT_PRICE_BAND);
+    }
+
+    /**
+     * @param priceBandMultiple hard band on every price as a multiple of its session anchor
+     *        (start price): price stays within [start/B, start·B], enforced by REFLECTING the
+     *        overshoot back inside (tape stays continuous, never a wall-pin). A maxed drift fader
+     *        or stacked nudges therefore cannot run a price to absurdity. ≤ 1 disables.
+     */
+    public CorrelatedFactorSimulator(long seed, FactorModelConfig cfg, List<String> instrumentIds,
+                                     long[] startPricesScaled, double tickSeconds, double simSecondsPerDay,
+                                     SimControl control, double priceBandMultiple) {
         if (instrumentIds.size() != startPricesScaled.length) {
             throw new IllegalArgumentException("start prices must align with instruments");
         }
@@ -96,6 +113,9 @@ public final class CorrelatedFactorSimulator {
         this.idioSigmaTick = new double[n];
         this.price = new double[n];
         double rhoEqUsdCalm = baseEqUsdCorrelation();
+        this.bandFloor = new double[n];
+        this.bandCap = new double[n];
+        boolean banded = priceBandMultiple > 1.0;
         for (int i = 0; i < n; i++) {
             FactorModelConfig.InstrumentSpec spec = specFor(ids[i]);
             betaEq[i] = spec.betaEquity();
@@ -103,8 +123,27 @@ public final class CorrelatedFactorSimulator {
             idioSigmaTick[i] = idioSigmaAnnual(spec, rhoEqUsdCalm) / Math.sqrt(TRADING_DAYS_PER_YEAR) * sqrtDtDays
                     / 1.0; // per-tick, in return units
             price[i] = startPricesScaled[i] / 1_000_000.0;
+            bandFloor[i] = banded ? price[i] / priceBandMultiple : 0.0;
+            bandCap[i] = banded ? price[i] * priceBandMultiple : Double.MAX_VALUE;
         }
         this.regimeIndex = Math.max(0, cfg.regimeIndex("CALM"));
+    }
+
+    /**
+     * Enforces the session price band by reflection: an overshoot beyond the cap/floor folds back
+     * inside by the same distance in log space ({@code p → cap²/p}), so the tape stays continuous
+     * and mean-reverts off the wall instead of pinning to it. Deterministic — a pure function of
+     * the already-drawn price. A pathological multi-band overshoot clamps to the boundary.
+     */
+    private void bound(int i) {
+        double p = price[i];
+        if (p > bandCap[i]) {
+            p = bandCap[i] * bandCap[i] / p;
+            price[i] = Math.max(p, bandFloor[i]);
+        } else if (p < bandFloor[i] && bandFloor[i] > 0) {
+            p = bandFloor[i] * bandFloor[i] / p;
+            price[i] = Math.min(p, bandCap[i]);
+        }
     }
 
     /** Advances one tick: regime transition, correlated factor draw, per-instrument returns.
@@ -142,6 +181,7 @@ public final class CorrelatedFactorSimulator {
             double nudge = control.consumeNudge(i);
             if (nudge != 0.0) {
                 price[i] = Math.max(MIN_PRICE_SCALED / 1_000_000.0, price[i] * (1.0 + nudge));
+                bound(i);
             }
         }
     }
@@ -192,6 +232,7 @@ public final class CorrelatedFactorSimulator {
             double idio = idioSigmaTick[i] * idioTimeScale * volMult * ctlVol * tScale * random.nextGaussian();
             double r = betaEq[i] * fEq + betaUsd[i] * fUsd + idio + control.driftBias(i);
             price[i] = price[i] * Math.exp(r);
+            bound(i);
         }
     }
 
@@ -226,6 +267,7 @@ public final class CorrelatedFactorSimulator {
         shockSign = -1;
         for (int i = 0; i < ids.length; i++) {
             price[i] = price[i] * Math.exp(betaEq[i] * eqJump);
+            bound(i);
         }
         lastLevelDelta += lvlJump; // consumed by the curve on this tick
     }

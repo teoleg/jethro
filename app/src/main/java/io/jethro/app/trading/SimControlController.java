@@ -70,7 +70,9 @@ public final class SimControlController {
 
     public record ControlStateDto(boolean enabled, boolean active, double speedMultiplier,
                                   boolean paused, String regimeOverride, List<String> regimes,
-                                  List<InstrumentDialsDto> instruments) {
+                                  List<InstrumentDialsDto> instruments,
+                                  double targetTicksPerSec, double achievedTicksPerSec,
+                                  long lateTicks, long clockResyncs) {
     }
 
     @GetMapping("/api/sim/control")
@@ -83,9 +85,17 @@ public final class SimControlController {
                         control.volumeScaleFor(id)))
                 .toList();
         MarketRegime override = control.regimeOverride();
+        // Publisher telemetry (deadline clock): target vs MEASURED emit rate + overrun counters,
+        // so an over-ambitious speed dial shows the truth instead of silently under-delivering.
+        TradingCoreLifecycle core = tradingCore.getIfAvailable();
+        var clock = core != null ? core.simClockStats() : null;
         return new ControlStateDto(true, control.anyDialActive(), control.speedMultiplier(),
                 control.paused(), override == null ? "AUTO" : override.name(),
-                regimeNames(), instruments);
+                regimeNames(), instruments,
+                clock != null ? clock.targetTicksPerSecond() : 0,
+                clock != null ? clock.achievedTicksPerSecond() : 0,
+                clock != null ? clock.lateTicks() : 0,
+                clock != null ? clock.resyncs() : 0);
     }
 
     // ---- global dials ----

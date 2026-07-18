@@ -48,6 +48,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private volatile io.jethro.trading.marketdata.sim.SimControl simControl; // ADR-0031: correlated sim only
     private volatile long simTradesPerDay; // ADR-0032: per-instrument prints/day (0 when not sim) → measured ADV
     private volatile java.util.function.Supplier<io.jethro.trading.marketdata.sim.SimNewsEngine> simNewsSource; // ADR-0034
+    private volatile java.util.function.Supplier<io.jethro.trading.marketdata.sim.TickClock.Stats> simClockStats; // publisher telemetry
     private volatile RealTreasuryCurve realCurve;     // non-null only when the live curve is active
     private volatile TreasuryCurveFetcher curveFetcher;
     private volatile String curveSource = "sim";      // "treasury-live" or "sim" (for the UI)
@@ -291,6 +292,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 this.regimeSource = () -> sim.regime().name();
                 this.simDayIndexSource = sim::simDayIndex;
                 this.simControl = sim.control();
+                this.simClockStats = sim::clockStats;
                 // Steady baseline (default): pin CALM so the tape doesn't spontaneously lurch into
                 // VOLATILE/SHOCK regimes — you drive vol from the mixer. sim-regimes=true lets the
                 // Markov chain switch on its own; the mixer's regime dropdown overrides either way.
@@ -346,6 +348,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
             this.regimeSource = () -> sim.regime().name();
             this.simDayIndexSource = sim::simDayIndex;
             this.simControl = sim.control();
+            this.simClockStats = sim::clockStats;
             if (properties.simNewsEnabled()) {
                 sim.configureNews(properties.simSeed() + 7, newsPerTickProbability(), newsHorizonTicks());
                 this.simNewsSource = sim::newsEngine;
@@ -438,6 +441,13 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     /** The live sim control panel (ADR-0031), or null when the feed isn't the correlated sim
      *  (live/replay/legacy). The REST surface additionally gates on {@code feedMode == SIM}. */
+    /** Publisher telemetry (deadline clock): target vs achieved tick rate, late/resync counts.
+     *  Null when no sim engine is running. */
+    public io.jethro.trading.marketdata.sim.TickClock.Stats simClockStats() {
+        var src = simClockStats;
+        return src != null ? src.get() : null;
+    }
+
     public io.jethro.trading.marketdata.sim.SimControl simControl() {
         return simControl;
     }

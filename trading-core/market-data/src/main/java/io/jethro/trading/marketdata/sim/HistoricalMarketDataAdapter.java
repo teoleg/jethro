@@ -29,6 +29,7 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
     private final Quotes.QuoteSpec[] swapSpecs;
     private final long tickIntervalNanos;
     private final long ticksPerDay;                // >0: per-tick volume = daily / ticksPerDay
+    private final TickClock clock;                 // deadline pacing — see TickClock
     private final SimControl control;
     private volatile SimNewsEngine newsEngine;     // sim-generated news (ADR-0034); null = disabled
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -63,6 +64,7 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
         this.tickIntervalNanos = tickIntervalNanos;
         this.ticksPerDay = Math.round(simSecondsPerDay / (tickIntervalNanos / 1_000_000_000.0));
         this.control = new SimControl(tickIntervalNanos, factor);
+        this.clock = new TickClock(this.control::effectiveTickIntervalNanos);
         this.sim = new HistoricalBootstrapSimulator(seed, snapshot, factor,
                 factorStarts.stream().mapToLong(Long::longValue).toArray(), meanBlockLength, control);
     }
@@ -144,6 +146,7 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
         while (running.get()) {
             if (control.paused()) {
                 java.util.concurrent.locks.LockSupport.parkNanos(control.pausePollNanos());
+                clock.resync(); // a pause is not an overrun
                 continue;
             }
             // News shocks (ADR-0034): decay actives, then maybe fire a new one for this tick.
@@ -185,8 +188,13 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
                     quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, touchSize(1_000_000L), now);
                 }
             }
-            java.util.concurrent.locks.LockSupport.parkNanos(control.effectiveTickIntervalNanos());
+            clock.awaitNextTick(); // deadline pacing: work/jitter don't stretch the period
         }
+    }
+
+    /** Publisher telemetry (target vs achieved rate, late ticks, overrun resyncs). */
+    public TickClock.Stats clockStats() {
+        return clock.stats();
     }
 
     @Override

@@ -31,6 +31,7 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
     private final Quotes.QuoteSpec[] swapSpecs;
     private final long tickIntervalNanos;
     private final long ticksPerDay;                // 0 disables overnight gaps
+    private final TickClock clock;                 // deadline pacing — see TickClock
     private final SimControl control;              // live control panel (ADR-0031)
     private volatile SimNewsEngine newsEngine;     // sim-generated news (ADR-0034); null = disabled
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -80,6 +81,7 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
         // The panel controls the factor-priced names (curve-linked futures/swaps derive from
         // the rates factors, reachable via the regime/speed dials).
         this.control = new SimControl(tickIntervalNanos, factor);
+        this.clock = new TickClock(this.control::effectiveTickIntervalNanos);
         this.sim = new CorrelatedFactorSimulator(seed, config, factor,
                 factorStarts.stream().mapToLong(Long::longValue).toArray(),
                 tickIntervalNanos / 1_000_000_000.0, simSecondsPerDay, control);
@@ -161,6 +163,7 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
             // Live pause dial (ADR-0031): idle without advancing the tape or the day counter.
             if (control.paused()) {
                 java.util.concurrent.locks.LockSupport.parkNanos(control.pausePollNanos());
+                clock.resync(); // a pause is not an overrun — restart the schedule on resume
                 continue;
             }
             // News shocks (ADR-0034): decay active shocks, then maybe fire a new one — it applies
@@ -215,8 +218,13 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
                     quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, touchSize(1_000_000L), now);
                 }
             }
-            java.util.concurrent.locks.LockSupport.parkNanos(control.effectiveTickIntervalNanos());
+            clock.awaitNextTick(); // deadline pacing: work/jitter don't stretch the period
         }
+    }
+
+    /** Publisher telemetry (target vs achieved rate, late ticks, overrun resyncs). */
+    public TickClock.Stats clockStats() {
+        return clock.stats();
     }
 
     /** Applies the per-instrument volume dial (ADR-0031), keeping a minimum 1-unit trade so a
