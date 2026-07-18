@@ -16,7 +16,27 @@ risk/PnL per book, with a monitoring UI. Owner: Oleg (strong Java/C++, backend-f
 
 Any architecturally significant choice (hard to reverse, cross-service, cost/latency
 impact, constrains future work) requires an ADR **before** implementation. Use the
-`adr` skill. Small, local, reversible choices do not need ADRs — just make them.
+`adr` skill. Small, local, reversible choices do not need ADRs — just make them. A number
+that gates money, risk, or exposure is **not** small-and-local (see below), even when the
+code change is one line.
+
+## Risk & money parameters — no invented numbers
+
+Learned the hard way (a `$250k` hedge "cap" that was only a `@Value` default yet read in
+the UI as a rule; a `β=1.0` placeholder; a sped-up sim clock).
+
+- **Every parameter that gates money, risk, or exposure** — cap, threshold, floor, limit,
+  band, multiplier, target — must carry its source **in the same change**: an ADR number, a
+  cited market convention, or an explicit `PLACEHOLDER — Oleg to set`. Never present a
+  self-chosen default as an established rule. When a number is mine and arbitrary, say so in
+  the sentence that introduces it — do not let it harden into an assumed decision.
+- **Config provenance.** Every risk/money dial in `application.properties` (and equivalents)
+  gets a comment stating where the number came from.
+- **One concept per decision request.** When asking Oleg to decide, name the single policy
+  in play; never reuse a term (e.g. "target-flat") across two different mechanisms in the
+  same ask — an approval of one is not an approval of the other.
+- **This file is maintained, not static.** When Oleg corrects a decision, add the rule that
+  would have prevented it here in the same change, so the conventions compound.
 
 ## Stack (per ADRs — summary only)
 
