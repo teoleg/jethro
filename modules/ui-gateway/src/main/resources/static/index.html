@@ -147,7 +147,8 @@
     <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
     <div class="stats" id="stats"></div>
     <div class="section-h">Hedging <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic min-variance proxy hedge (ADR-0038): exposure vs cap, the sized hedge &amp; its math</span>
-      <span class="badge" id="hedgeMode" style="margin-left:8px" title="OFF / ADVISE / AUTO">—</span></div>
+      <span class="badge" id="hedgeMode" style="margin-left:8px" title="OFF / ADVISE / AUTO">—</span>
+      <span class="badge" id="histBadge" style="margin-left:6px" title="daily-return history the covariance is built from">hist —</span></div>
     <div class="panel pad"><div id="hedging" class="muted" style="padding:14px">loading…</div></div>
     <div class="section-h">By market</div>
     <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
@@ -426,6 +427,20 @@
   }
   async function loadHedging() { try { renderHedging(await (await fetch("/api/hedging")).json()); } catch (e) {} }
 
+  // history-loaded indicator: how many daily-return days back the covariance, and when seeded/loaded
+  async function loadHistory() {
+    try {
+      const h = await (await fetch("/api/history/status")).json();
+      const b = document.getElementById("histBadge");
+      if (!b) return;
+      const when = h.seededAtMillis ? new Date(h.seededAtMillis).toLocaleTimeString() : "";
+      b.textContent = `hist ${h.days}d` + (h.ready ? "" : " · warming");
+      b.style.color = h.ready ? "var(--up)" : "var(--warn)";
+      const how = h.source === "sim-seed" ? ` · seeded ${when}` : h.source === "existing" ? ` · loaded ${when}` : "";
+      b.title = `covariance history: ${h.days} days · ${h.instruments} instruments · latest ${h.latestDay || "—"}${how}`;
+    } catch (e) {}
+  }
+
   // ---- floating chat dock ----
   const chatDock = document.getElementById("chatDock");
   document.getElementById("chatFab").onclick = () => { chatDock.hidden = !chatDock.hidden; if (!chatDock.hidden) document.getElementById("chatinput").focus(); };
@@ -465,6 +480,7 @@
   loadHypotheses();
   loadQuant();
   loadHedging();
+  loadHistory();
   loadTicker();
   loadFeeds();
   loadIndicators();
@@ -475,6 +491,7 @@
   setInterval(loadHypotheses, 15000);
   setInterval(loadQuant, 5000);
   setInterval(loadHedging, 5000);
+  setInterval(loadHistory, 15000);
   const loadVar = () => fetch("/api/var").then(r => r.json()).then(v => { lastVar = v; }).catch(() => {});
   loadVar();
   setInterval(loadVar, 15000);
