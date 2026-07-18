@@ -391,8 +391,11 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     continue;
                 }
                 BigDecimal cap = limits.limitsFor(g.key()).maxLossPnl();
-                if (cap != null && cap.signum() > 0 && g.totalPnl().signum() < 0
-                        && g.totalPnl().negate().compareTo(cap) >= 0) {
+                // COMPREHENSIVE (actual loss incl. FX translation) — a loss cap guards real
+                // money, not the clean trading figure (ADR-0037).
+                BigDecimal loss = g.comprehensivePnl();
+                if (cap != null && cap.signum() > 0 && loss.signum() < 0
+                        && loss.negate().compareTo(cap) >= 0) {
                     flatten.add(g.key());
                 }
             }

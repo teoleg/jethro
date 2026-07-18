@@ -32,7 +32,7 @@ public final class RiskLimitEvaluator {
             check(breaches, book.key(), LimitBreach.Metric.NET_EXPOSURE,
                     book.netExposure().abs(), lim.maxNetExposure(), "");
             check(breaches, book.key(), LimitBreach.Metric.LOSS,
-                    loss(book.totalPnl()), lim.maxLossPnl(), "");
+                    loss(book.comprehensivePnl()), lim.maxLossPnl(), ""); // actual money incl. FX (ADR-0037)
         }
         // Per-instrument concentration within each book.
         for (PositionRisk p : risk.positions()) {
@@ -47,7 +47,7 @@ public final class RiskLimitEvaluator {
         check(breaches, FIRM, LimitBreach.Metric.NET_EXPOSURE,
                 risk.total().netExposure().abs(), firm.maxNetExposure(), "");
         check(breaches, FIRM, LimitBreach.Metric.LOSS,
-                loss(risk.total().totalPnl()), firm.maxLossPnl(), "");
+                loss(risk.total().comprehensivePnl()), firm.maxLossPnl(), ""); // actual money incl. FX (ADR-0037)
         return breaches;
     }
 

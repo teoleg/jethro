@@ -367,7 +367,8 @@ public class RiskConfig {
                 ? Math.max(5, Math.round(props.simSecondsPerDayOrDefault() / 10.0))
                 : 60;
         var recorder = new MarketHistoryRecorder(jdbc, core,
-                () -> projection.snapshot(System.currentTimeMillis()).total().totalPnl(),
+                // firm equity history = actual money incl. FX translation (ADR-0037)
+                () -> projection.snapshot(System.currentTimeMillis()).total().comprehensivePnl(),
                 cal != null ? cal::sessionDay : java.time.LocalDate::now, period);
         if (core != null) {
             recorder.start(); // trading off → nothing to record, never scheduled

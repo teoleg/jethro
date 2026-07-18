@@ -40,6 +40,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0034](0034-news-driven-sim-shocks.md) | News-driven sim shocks — news moves the tape (correlated volume surge + bp momentum) | Accepted |
 | [0035](0035-rag-for-ai-layer.md) | Retrieval-augmented context for the AI layer — local embeddings + pgvector | Accepted |
 | [0036](0036-ai-signal-balance.md) | AI signal balance — measure directional skew, feed it back to the model, never quota | Accepted |
+| [0037](0037-clean-vs-comprehensive-pnl.md) | Clean vs comprehensive P&L — lock realized FX at booking, break out translation | Proposed |
 
 ## Lifecycle
 

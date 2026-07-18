@@ -75,7 +75,7 @@ class SwapScenarioRevalTest {
         // 1 lot pay-fixed 5Y (the full-reval path ignores the DV01 multiplier and re-prices).
         var pos = new PositionRisk("MACRO", "USD_IRS_5Y", "SWAP", "USD",
                 BigDecimal.ONE, new BigDecimal("4.00"), new BigDecimal("4.45"), true, 0,
-                BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("45000"), new BigDecimal("45000"));
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("45000"), new BigDecimal("45000"));
 
         var results = engine.run(List.of(pos), fx);
         BigDecimal up = results.stream().filter(r -> r.id().equals("rates-up-100"))

@@ -23,7 +23,7 @@ class StrategyExitTest {
         BigDecimal q = new BigDecimal(qty);
         return new PositionRisk("ALPHA", "AAPL", assetClass, "USD", q,
                 new BigDecimal(avgCost), new BigDecimal(mark), hasMark, 0,
-                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO);
     }
 
     @Test

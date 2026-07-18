@@ -41,7 +41,7 @@ class ScenarioEngineTest {
         };
         BigDecimal net = q.multiply(m).multiply(mult);
         return new PositionRisk(book, instrument, assetClass, ccy, q, m, m, true, 0,
-                BigDecimal.ZERO, BigDecimal.ZERO, net, net.abs());
+                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, net, net.abs());
     }
 
     private static ScenarioEngine.ScenarioResult byId(List<ScenarioEngine.ScenarioResult> results, String id) {

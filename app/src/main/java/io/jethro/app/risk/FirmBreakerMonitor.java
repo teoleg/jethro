@@ -75,7 +75,9 @@ public final class FirmBreakerMonitor implements AutoCloseable {
     void checkOnce() {
         try {
             long now = System.currentTimeMillis();
-            BigDecimal total = projection.snapshot(now).total().totalPnl();
+            // COMPREHENSIVE (actual money incl. FX translation) — a drawdown breaker must trip
+            // on real book-value loss, not the clean trading figure (ADR-0037).
+            BigDecimal total = projection.snapshot(now).total().comprehensivePnl();
             if (total.compareTo(peak) > 0) {
                 peak = total;
             }

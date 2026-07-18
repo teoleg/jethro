@@ -119,7 +119,9 @@ public final class PreTradeGuardrail {
     private BigDecimal bookLoss(String bookId, long now) {
         for (ConsolidatedRisk.Group g : projection.snapshot(now).byBook()) {
             if (g.key().equals(bookId)) {
-                return g.totalPnl().signum() < 0 ? g.totalPnl().negate() : BigDecimal.ZERO;
+                // COMPREHENSIVE (actual loss incl. FX translation), not the clean figure (ADR-0037).
+                BigDecimal pnl = g.comprehensivePnl();
+                return pnl.signum() < 0 ? pnl.negate() : BigDecimal.ZERO;
             }
         }
         return BigDecimal.ZERO;
