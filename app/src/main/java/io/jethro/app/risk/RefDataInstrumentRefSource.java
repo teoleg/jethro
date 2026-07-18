@@ -47,7 +47,10 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
                     decimalAttribute(attrs, "mod_duration"),
                     decimalAttribute(attrs, "adv_usd"),
                     decimalAttribute(attrs, "notional_per_lot"),
-                    decimalAttribute(attrs, "spread_bps")));
+                    decimalAttribute(attrs, "spread_bps"),
+                    attrs.get("hedge_group"),
+                    attrs.get("hedge_proxy"),
+                    decimalAttribute(attrs, "hedge_beta")));
         }
         cache = next;
     }

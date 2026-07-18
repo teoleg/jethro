@@ -404,16 +404,21 @@
         : a.status === "WARMING" ? "var(--alert)" : "var(--dim)";
       let hedgeRow = "";
       if (a.hedgeQuantity !== null && a.hedgeQuantity !== undefined) {
-        const eff = a.effectiveness != null ? (a.effectiveness * 100).toFixed(0) + "%" : "—";
+        // STATISTICAL carries a measured ρ² + daily σ; STRUCTURAL asserts the beta (no ρ²/σ).
+        const evidence = a.effectiveness != null
+          ? `effectiveness ρ² <b>${(a.effectiveness * 100).toFixed(0)}%</b> · daily σ ${fmtUsd(a.grossSigmaUsd)} → ${fmtUsd(a.residualSigmaUsd)}`
+          : `<span class="muted">assigned β · effectiveness asserted, not measured</span>`;
         hedgeRow = `<div style="margin-top:6px;font-size:12px">
           <b class="${a.hedgeSide === "SELL" ? "down" : "up"}">${esc(a.hedgeSide)} ${esc(a.hedgeQuantity)} ${esc(a.proxyId)}</b>
-          <span class="muted">(${fmtUsd(a.hedgeNotionalUsd)})</span> · effectiveness ρ² <b>${eff}</b>
-          · daily σ ${fmtUsd(a.grossSigmaUsd)} → ${fmtUsd(a.residualSigmaUsd)}</div>`;
+          <span class="muted">(${fmtUsd(a.hedgeNotionalUsd)})</span> · ${evidence}</div>`;
       }
+      const tierBadge = (a.tier && a.tier !== "—")
+        ? `<span class="muted" style="font-size:10px;letter-spacing:.04em">${esc(a.tier)}</span>` : "";
       return `<div style="padding:8px 4px;border-bottom:1px solid var(--line)">
         <div style="display:flex;align-items:baseline;gap:8px">
           <b>${esc(a.axis)}</b>
           <span style="color:${statusColor};font-size:10px;letter-spacing:.06em">${esc(a.status)}</span>
+          ${tierBadge}
           <span class="muted" style="margin-left:auto;font-size:12px">${fmtUsd(a.netExposureUsd)} net → flat${a.effectiveness != null ? " · ρ² " + pct + "%" : ""}</span>
         </div>
         <div style="height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden">

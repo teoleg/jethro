@@ -99,9 +99,11 @@ public final class HedgeLifecycle {
                     && rf.find(id).map(r -> "EQUITY".equalsIgnoreCase(r.assetClass())).orElse(false);
             Function<String, Optional<BigDecimal>> priceOf = id ->
                     pc != null ? pc.lastPrice(new InstrumentId(id)) : Optional.empty();
+            Function<String, Optional<BigDecimal>> betaOf = id -> rf == null ? Optional.empty()
+                    : rf.find(id).map(io.jethro.trading.riskpnl.InstrumentRef::hedgeBeta).filter(b -> b != null);
 
             HedgeAdvisor.Snapshot snap = advisor.evaluate(
-                    vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf);
+                    vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf);
             long now = System.currentTimeMillis();
             for (HedgeAdvisor.Axis axis : snap.axes()) {
                 if (!axis.hedging() || !axis.hedgeRecommended() || axis.hedgeQuantity() == null

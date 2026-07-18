@@ -72,6 +72,35 @@ class HedgeMathTest {
     }
 
     @Test
+    void structuralBetaHedgeSizesFromAssignedBetasWithNoCovariance() {
+        // Long $380,000 AAPL (β 1.25) + long $125,000 NVDA (β 1.75), hedge with ES @ 5,450 × 50.
+        var s = HedgeMath.structuralBetaHedge(
+                Map.of("AAPL", new BigDecimal("380000"), "NVDA", new BigDecimal("125000")),
+                Map.of("AAPL", new BigDecimal("1.25"), "NVDA", new BigDecimal("1.75")),
+                "ES", new BigDecimal("5450"), new BigDecimal("50")).orElseThrow();
+        // systematic = 380,000·1.25 + 125,000·1.75 = 475,000 + 218,750 = $693,750.
+        assertEquals(0, new BigDecimal("693750.00").compareTo(s.systematicUsd()));
+        assertEquals(0, new BigDecimal("-693750.00").compareTo(s.hedgeNotionalUsd()), "hedge shorts the systematic");
+        // qty = −693,750 / (5,450 × 50 = 272,500) = −2.545872 ES.
+        assertEquals(0, new BigDecimal("-2.545872").compareTo(s.signedQuantity()));
+        assertTrue(s.signedQuantity().signum() < 0, "a long book SELLS the proxy");
+        // exposure-weighted beta = 693,750 / 505,000 = 1.3738.
+        assertEquals(0, new BigDecimal("1.3738").compareTo(s.weightedBeta()));
+    }
+
+    @Test
+    void structuralBetaHedgeSkipsNamesWithNoAssignedBeta() {
+        // Only AAPL has a beta; the unlabeled name doesn't contribute, and no beta at all → empty.
+        var s = HedgeMath.structuralBetaHedge(
+                Map.of("AAPL", new BigDecimal("380000"), "XYZ", new BigDecimal("500000")),
+                Map.of("AAPL", new BigDecimal("1.25")),
+                "ES", new BigDecimal("5450"), new BigDecimal("50")).orElseThrow();
+        assertEquals(0, new BigDecimal("475000.00").compareTo(s.systematicUsd()), "only AAPL counts");
+        assertTrue(HedgeMath.structuralBetaHedge(Map.of("XYZ", new BigDecimal("500000")),
+                Map.of(), "ES", new BigDecimal("5450"), new BigDecimal("50")).isEmpty());
+    }
+
+    @Test
     void fxHedgeSellsTheNetForeignValueDirectly() {
         // Long €150,000 worth (as USD), hedge in EUR/USD @ 1.085.
         var proposal = HedgeMath.fxHedge("EURUSD", new BigDecimal("150000"),

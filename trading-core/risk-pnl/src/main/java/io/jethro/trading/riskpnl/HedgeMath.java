@@ -122,6 +122,73 @@ public final class HedgeMath {
     }
 
     /**
+     * A structural beta-hedge sized from ASSIGNED fundamental betas — no return history (ADR-0040).
+     *
+     * @param proxyInstrumentId the index future hedged with (e.g. ES)
+     * @param signedQuantity    proxy quantity, signed: negative = SELL (short), positive = BUY
+     * @param hedgeNotionalUsd  signed USD notional of the hedge leg
+     * @param systematicUsd     the book's assigned-beta systematic exposure Σ βᵢ·Eᵢ (the thing hedged)
+     * @param weightedBeta      exposure-weighted average assigned beta, for display; null if net ≈ 0
+     * @param rationale         one line of the worked math for the UI/audit
+     */
+    public record StructuralHedge(String proxyInstrumentId, BigDecimal signedQuantity,
+                                  BigDecimal hedgeNotionalUsd, BigDecimal systematicUsd,
+                                  BigDecimal weightedBeta, String rationale) {
+    }
+
+    /**
+     * Structural (fundamental) equity beta-hedge (ADR-0040). Systematic exposure is the sum of each
+     * name's assigned beta times its USD exposure, {@code Σ βᵢ·Eᵢ}; the hedge shorts that notional in
+     * the proxy: {@code qty = −Σ βᵢ·Eᵢ / (price × multiplier)}. No covariance — so effectiveness is
+     * <em>asserted</em> by the assigned betas, never a measured ρ² (that distinction is the caller's
+     * to surface). This is the history-free floor under {@link #betaHedge}; names with no assigned
+     * beta simply don't contribute (they aren't structurally hedgeable yet).
+     *
+     * <p>Worked: long $380,000 AAPL (β 1.25) + long $125,000 NVDA (β 1.75) → systematic
+     * 380,000·1.25 + 125,000·1.75 = $693,750; ES @ 5,450 × 50 = $272,500/contract →
+     * short 693,750/272,500 = <b>2.545872 ES</b>.
+     *
+     * @return empty when the proxy price/multiplier is missing or non-positive, or no name carries
+     *         both an assigned beta and a non-zero exposure (nothing to hedge).
+     */
+    public static Optional<StructuralHedge> structuralBetaHedge(Map<String, BigDecimal> equityExposuresUsd,
+                                                                Map<String, BigDecimal> assignedBetas,
+                                                                String proxyId, BigDecimal proxyPrice,
+                                                                BigDecimal proxyMultiplier) {
+        if (proxyId == null || proxyPrice == null || proxyPrice.signum() <= 0
+                || proxyMultiplier == null || proxyMultiplier.signum() <= 0) {
+            return Optional.empty();
+        }
+        BigDecimal systematic = BigDecimal.ZERO;
+        BigDecimal netExposure = BigDecimal.ZERO;
+        boolean any = false;
+        for (var e : equityExposuresUsd.entrySet()) {
+            BigDecimal beta = assignedBetas.get(e.getKey());
+            BigDecimal eUsd = e.getValue();
+            if (beta == null || eUsd == null || eUsd.signum() == 0) {
+                continue; // no assigned beta or no exposure → not part of the structural hedge
+            }
+            systematic = systematic.add(beta.multiply(eUsd));
+            netExposure = netExposure.add(eUsd);
+            any = true;
+        }
+        if (!any || systematic.signum() == 0) {
+            return Optional.empty();
+        }
+        BigDecimal hedgeNotional = systematic.negate();
+        BigDecimal qty = hedgeNotional.divide(proxyPrice.multiply(proxyMultiplier), 6, RoundingMode.HALF_EVEN);
+        BigDecimal weightedBeta = netExposure.signum() == 0 ? null
+                : systematic.divide(netExposure, 4, RoundingMode.HALF_EVEN);
+        String side = qty.signum() < 0 ? "SELL" : "BUY";
+        String rationale = String.format(
+                "structural β-hedge %s: Σβ·E = %s systematic → %s %s %s (assigned betas, no covariance)",
+                proxyId, systematic.setScale(2, RoundingMode.HALF_UP).toPlainString(), side,
+                qty.abs().toPlainString(), proxyId);
+        return Optional.of(new StructuralHedge(proxyId, qty, hedgeNotional.setScale(2, RoundingMode.HALF_UP),
+                systematic.setScale(2, RoundingMode.HALF_UP), weightedBeta, rationale));
+    }
+
+    /**
      * Structural FX hedge: sell the book's net foreign value in the pair (ρ² ≡ 1 — the pair is
      * the exposure). {@code netForeignValueUsd} is the book's non-USD value expressed in USD
      * (positive = long the foreign currency); the hedge shorts that many USD of the XXXUSD pair.

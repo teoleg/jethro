@@ -60,7 +60,11 @@ public final class HedgeController {
         Function<String, Optional<BigDecimal>> priceOf = id ->
                 pc != null ? pc.lastPrice(new InstrumentId(id)) : Optional.empty();
 
-        return advisor.evaluate(cov, exposures, isEquity, priceOf);
+        Function<String, Optional<BigDecimal>> betaOf = id -> rf == null ? Optional.empty()
+                : rf.find(id).map(io.jethro.trading.riskpnl.InstrumentRef::hedgeBeta)
+                        .filter(b -> b != null);
+
+        return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf);
     }
 
     public record ModeRequest(String mode) {

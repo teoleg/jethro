@@ -1,6 +1,6 @@
 # ADR-0040: Structural sector hedging — a history-free fundamental floor under the statistical hedge
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-18
 - **Deciders:** Oleg
 - **Tags:** risk, hedging, quant, refdata
