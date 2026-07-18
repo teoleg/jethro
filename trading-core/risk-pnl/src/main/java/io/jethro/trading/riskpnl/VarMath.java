@@ -79,10 +79,15 @@ public final class VarMath {
         }
         java.util.Arrays.sort(pnl); // ascending: worst loss first
 
+        // Honest labeling (ADR-0041): below 100 observations, ⌊0.01·K⌋ = 0 — the "99% quantile"
+        // is literally the sample's worst day. Say so rather than let it read as calibrated.
+        String note = days.size() < 100
+                ? "VaR99 = worst observed day (window " + days.size() + " < 100) — indicative only"
+                : null;
         return new VarResult(
                 lossAt(pnl, 0.05), tailMean(pnl, 0.05), lossAt(pnl, 0.01),
                 days.size(), coveredExp.setScale(2, RoundingMode.HALF_UP),
-                skippedExp.setScale(2, RoundingMode.HALF_UP), null);
+                skippedExp.setScale(2, RoundingMode.HALF_UP), note);
     }
 
     /** −pnl at the ⌊α·K⌋-th ascending index, floored at 0 (a gain quantile is zero risk). */

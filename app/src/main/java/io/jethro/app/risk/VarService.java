@@ -42,7 +42,11 @@ import java.util.function.Supplier;
  */
 public final class VarService {
 
-    static final int WINDOW_DAYS = 60;
+    /** 250 trading days ≈ 1 year — the Basel/FRTB convention (ADR-0041; was 60). Usable early
+     *  because the real-history seed fills daily_close; accrual alone would take a year. */
+    static final int WINDOW_DAYS = 250;
+    /** Calendar-day fetch reach for the window: 250 trading days span ~365 calendar + holiday margin. */
+    private static final int FETCH_CALENDAR_DAYS = 380;
     static final int MIN_OBSERVATIONS = 20;
     /** Synthetic-leg key prefix: exposure is DV01 (USD/bp), "return" is Δbp. */
     static final String DV01_PREFIX = "dv01:";
@@ -209,7 +213,7 @@ public final class VarService {
                 """, rs -> {
             closes.computeIfAbsent(rs.getObject("day", LocalDate.class), d -> new LinkedHashMap<>())
                     .put(rs.getString("instrument"), rs.getBigDecimal("close").doubleValue());
-        }, WINDOW_DAYS + 30); // fetch margin over the window for holiday gaps
+        }, FETCH_CALENDAR_DAYS); // trading-day window needs a calendar-day reach + holiday margin
 
         List<LocalDate> days = new ArrayList<>(closes.keySet());
         List<VarMath.DayVector> vectors = new ArrayList<>();

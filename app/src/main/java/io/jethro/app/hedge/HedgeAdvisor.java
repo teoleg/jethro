@@ -54,15 +54,18 @@ public final class HedgeAdvisor {
     private final BigDecimal rebalanceFloorUsd;
     private final BigDecimal minTradeNotionalUsd;
     private final double effectivenessFloor;
+    private final int minCovarianceDays;
     private final String equityProxyId;
     private final BigDecimal equityProxyMultiplier;
 
     public HedgeAdvisor(Mode mode, BigDecimal rebalanceFloorUsd, BigDecimal minTradeNotionalUsd,
-                        double effectivenessFloor, String equityProxyId, BigDecimal equityProxyMultiplier) {
+                        double effectivenessFloor, int minCovarianceDays,
+                        String equityProxyId, BigDecimal equityProxyMultiplier) {
         this.mode = mode;
         this.rebalanceFloorUsd = rebalanceFloorUsd == null ? BigDecimal.ZERO : rebalanceFloorUsd.abs();
         this.minTradeNotionalUsd = minTradeNotionalUsd == null ? BigDecimal.ZERO : minTradeNotionalUsd.abs();
         this.effectivenessFloor = effectivenessFloor;
+        this.minCovarianceDays = Math.max(2, minCovarianceDays);
         this.equityProxyId = equityProxyId;
         this.equityProxyMultiplier = equityProxyMultiplier;
     }
@@ -189,8 +192,11 @@ public final class HedgeAdvisor {
     private Target sizeTarget(Map<String, BigDecimal> equityExposures,
                               Optional<CovMath.Covariance> covariance, BigDecimal proxyPrice,
                               Function<String, Optional<BigDecimal>> betaOf) {
-        Optional<HedgeMath.HedgeProposal> statistical = covariance.flatMap(cov ->
-                HedgeMath.betaHedge(cov, equityExposures, equityProxyId, proxyPrice,
+        // ADR-0041: a covariance below the min-days gate is too seed-heavy to size real money —
+        // the structural tier carries the book until the estimate has earned trust.
+        Optional<HedgeMath.HedgeProposal> statistical = covariance
+                .filter(cov -> cov.observations() >= minCovarianceDays)
+                .flatMap(cov -> HedgeMath.betaHedge(cov, equityExposures, equityProxyId, proxyPrice,
                         equityProxyMultiplier, effectivenessFloor));
         if (statistical.isPresent() && statistical.get().recommended()) {
             var p = statistical.get();

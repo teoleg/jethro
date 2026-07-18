@@ -29,9 +29,10 @@ class HedgeAdvisorTest {
     }
 
     private static HedgeAdvisor advisor(HedgeAdvisor.Mode mode, String rebalanceFloorUsd) {
-        // min-trade $10k (ADR-0039); ES multiplier 50.
+        // min-trade $10k (ADR-0039); min-covariance 40d (ADR-0041; the fixture cov has 60 obs);
+        // ES multiplier 50.
         return new HedgeAdvisor(mode, new BigDecimal(rebalanceFloorUsd), new BigDecimal("10000"),
-                0.25, "ES", new BigDecimal("50"));
+                0.25, 40, "ES", new BigDecimal("50"));
     }
 
     private static final java.util.function.Predicate<String> IS_EQUITY = "STOCK"::equals;
@@ -120,6 +121,20 @@ class HedgeAdvisorTest {
         assertEquals("SELL", axis.hedgeSide());
         assertNull(axis.effectiveness(), "structural effectiveness is asserted, never a measured ρ²");
         assertEquals(0, new BigDecimal("2.285714").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void seedHeavyCovarianceYieldsToTheStructuralTier() {
+        // Only 25 observations — under the 40-day ADR-0041 gate: the estimate is still too
+        // seed-heavy to size real money, so the assigned-beta structural tier carries the book.
+        var thin = new CovMath.Covariance(cov().instruments(), cov().sigma(), 25);
+        var axis = advisor(HedgeAdvisor.Mode.AUTO, "0")
+                .evaluate(Optional.of(thin), LONG_1M, IS_EQUITY, ES_AT_5600, STOCK_BETA_1_2, NONE_HELD)
+                .axes().get(0);
+        assertTrue(axis.hedging());
+        assertEquals("STRUCTURAL", axis.tier(), "statistical gated below 40 obs");
+        // structural target: −1.2M/280k = −4.285714 ES.
+        assertEquals(0, new BigDecimal("4.285714").compareTo(axis.hedgeQuantity()));
     }
 
     @Test

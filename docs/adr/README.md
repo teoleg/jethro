@@ -44,6 +44,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0038](0038-minimum-variance-proxy-hedging.md) | Minimum-variance proxy hedging — beta to index futures, DV01 to Treasury futures, direct FX | Proposed |
 | [0039](0039-hedge-lifecycle-band-triggers.md) | Hedge lifecycle — always-flat deterministic hedging, advisory-first | Proposed |
 | [0040](0040-structural-sector-hedging.md) | Structural sector hedging — a history-free fundamental floor under the statistical hedge | Accepted |
+| [0041](0041-estimation-rigor.md) | Estimation rigor — covariance burn-in, par-curve bootstrap, honest VaR windows | Accepted |
 
 ## Lifecycle
 

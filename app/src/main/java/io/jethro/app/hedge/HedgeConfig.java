@@ -22,10 +22,12 @@ public class HedgeConfig {
             @Value("${jethro.hedge.equity-rebalance-floor-usd:0}") BigDecimal rebalanceFloorUsd,
             @Value("${jethro.hedge.min-trade-notional-usd:10000}") BigDecimal minTradeNotionalUsd,
             @Value("${jethro.hedge.effectiveness-floor:0.25}") double effectivenessFloor,
+            @Value("${jethro.hedge.min-covariance-days:40}") int minCovarianceDays,
             @Value("${jethro.hedge.equity-proxy:ES}") String equityProxy,
             @Value("${jethro.hedge.equity-proxy-multiplier:50}") BigDecimal equityProxyMultiplier) {
         return new HedgeAdvisor(HedgeAdvisor.Mode.valueOf(mode.trim().toUpperCase(java.util.Locale.ROOT)),
-                rebalanceFloorUsd, minTradeNotionalUsd, effectivenessFloor, equityProxy, equityProxyMultiplier);
+                rebalanceFloorUsd, minTradeNotionalUsd, effectivenessFloor, minCovarianceDays,
+                equityProxy, equityProxyMultiplier);
     }
 
     /** AUTO-hedge executor (ADR-0039): submits the hedge DELTA in AUTO mode, sim-gated. The hedge
