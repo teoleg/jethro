@@ -64,6 +64,14 @@
   </div>
 </div>
 <main>
+  <div class="section-h">Diagnostics export <span class="muted" style="text-transform:none;letter-spacing:0">— one .xlsx: P&amp;L by book, positions, fills+fees, TCA, AI outcomes, hedge orders</span></div>
+  <div class="panel" style="padding:14px;margin-bottom:16px">
+    <a id="exportBtn" href="/api/export/diagnostics.xlsx" download
+       style="display:inline-block;padding:9px 16px;border-radius:8px;background:var(--brand,#5b8cff);
+              color:#fff;text-decoration:none;font-size:13px;font-weight:600">⬇ Export to Excel</a>
+    <span class="muted" style="margin-left:12px;font-size:12px">downloads the current diagnostics workbook to attach for review</span>
+  </div>
+
   <div class="section-h">Market traffic <span class="muted" id="trafficAsOf" style="text-transform:none;letter-spacing:0"></span></div>
   <div class="tiles" id="trafficTiles"></div>
   <div id="balanceLine" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
