@@ -94,4 +94,15 @@ decided **separately** so none is lost inside "the sim work":
 
 This ADR delivers only: the OHLCV snapshot + loader (seed checked in, refreshed from Yahoo),
 `HistoricalBootstrapSimulator`, selectable as an engine, with the factor model retained for
-tests/offline and the SimControl panel (ADR-0031) overlaying it. Status: **awaiting accept**.
+tests/offline and the SimControl panel (ADR-0031) overlaying it.
+
+## Implementation status (2026-07-18) — built
+
+- `HistoricalSnapshot` + `HistoricalBootstrapSimulator` (stationary block bootstrap; a test proves
+  it reproduces the source return dispersion), `HistoricalMarketDataAdapter` (real per-tick volume,
+  curve alongside), wired as `jethro.trading.sim-engine=historical` with a labelled synthetic seed
+  fallback so it runs offline. Correlated stays the default.
+- **Real snapshot capture** — `YahooHistoryClient` + `SnapshotCapture` align each instrument on the
+  intersection of trading days and write the snapshot JSON; `POST /api/sim/snapshot/fetch` (and a
+  button on `/sim.html`) capture 5y of real daily history, flipping the synthetic seed to genuine
+  dynamics. Run it on a box with Yahoo access; CI/offline use the seed.

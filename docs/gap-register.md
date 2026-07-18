@@ -8,7 +8,7 @@ Status: `shipped` · `in progress` · `needs ADR` · `planned` (ADR accepted, no
 
 | # | Thread | Scope (what it is — and is NOT) | Home | Status |
 |---|--------|--------------------------------|------|--------|
-| G1 | Sim price realism | The sim ENGINE only: history-anchored block bootstrap so prices behave like the market. NOT volume-in-algos, NOT depth, NOT news coupling. | ADR-0032 | needs ADR (accept) → then build |
+| G1 | Sim price realism | The sim ENGINE only: history-anchored block bootstrap so prices behave like the market. NOT volume-in-algos, NOT depth, NOT news coupling. | ADR-0032 | shipped (engine + adapter + wiring + Yahoo snapshot capture) |
 | G2 | Volume live through the pipeline | Traded volume no longer dropped at the ring buffer; measured ADV drives execution cap + impact. | commit (ADR-0032 P1) | shipped |
 | G3 | Volume & depth in the ALGORITHMS | Signals/sizing consume flow: relative-volume confirmation, liquidity-aware sizing. Distinct from G1 (that's price generation). | ADR-0033 (to write) | needs ADR |
 | G4 | Order-book depth modelled | `onQuote` gains sizes; synthesized depth-at-touch from real volume; depth-aware fills. No real L2 feed exists. | ADR-0033 (with G3) | needs ADR |

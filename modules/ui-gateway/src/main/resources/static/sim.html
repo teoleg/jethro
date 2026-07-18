@@ -74,6 +74,7 @@
 <main>
   <div id="content" class="notice muted">loading sim control…</div>
   <div id="volumePanel"></div>
+  <div id="snapshotPanel"></div>
 </main>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
@@ -225,7 +226,44 @@
     } catch (e) { /* volume is best-effort context */ }
   }
 
-  function tick() { load(); loadVolume(); }
+  let capturing = false;
+  async function loadSnapshot() {
+    try {
+      const s = await (await fetch("/api/sim/snapshot")).json();
+      const btn = capturing
+        ? '<button disabled>capturing… (pulling 5y from Yahoo)</button>'
+        : '<button id="captureBtn" class="primary">Capture real history from Yahoo</button>';
+      document.getElementById("snapshotPanel").innerHTML = `
+        <div class="section-h">Historical snapshot (ADR-0032)</div>
+        <div class="panel">
+          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+            ${btn}
+            <span class="mono muted" style="font-size:12px">${esc(s.path)}</span>
+            <span class="badge ${s.exists?'clean':''}">${s.exists?'snapshot present':'no snapshot — using synthetic seed'}</span>
+            ${s.engineActive?'<span class="badge live">historical engine active</span>':''}
+          </div>
+          <div class="muted" style="font-size:11px;margin-top:8px">${esc(s.hint)}</div>
+        </div>`;
+      const b = document.getElementById("captureBtn");
+      if (b) b.onclick = capture;
+    } catch (e) { /* best-effort */ }
+  }
+  async function capture() {
+    capturing = true; loadSnapshot();
+    try {
+      const res = await fetch("/api/sim/snapshot/fetch", { method:"POST" });
+      const body = await res.json();
+      capturing = false;
+      if (res.ok) {
+        alert(`Captured ${body.instruments} instruments × ${body.days} common days →\n${body.path}\n\nSet jethro.trading.sim-engine=historical and sim-snapshot-path to that file, then restart.`);
+      } else {
+        alert("Capture failed: " + (body.message || res.status));
+      }
+    } catch (e) { capturing = false; alert("Capture failed: " + e); }
+    loadSnapshot();
+  }
+
+  function tick() { load(); loadVolume(); loadSnapshot(); }
   tick();
   setInterval(tick, 5000);
 </script>
