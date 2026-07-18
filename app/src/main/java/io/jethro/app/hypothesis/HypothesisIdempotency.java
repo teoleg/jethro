@@ -14,22 +14,19 @@ import java.util.stream.Collectors;
  * once a per-instrument autonomy cooldown lapses, re-trades it. That is the "reacts on the same
  * news multiple times" bug.
  *
- * <p>The floor is deterministic (invariant 7): a trigger is keyed by the NEWS that drove it —
- * {@code instrument | direction | sorted source-news ids} — so the same news never fires twice;
- * genuinely new news (a new id) is a new key and fires once. When the model gives no sources we
- * fall back to a normalized keyword signature of the thesis, which collapses rewordings of the
- * same story. Entries expire after a window so a recurring theme can legitimately re-trigger
- * later. The model is separately told the live calls (context {@code alreadyProposed}) so it
- * stops proposing them at all — the guard is the backstop, the prompt is the assist.
+ * <p>The floor is deterministic (invariant 7), keyed by the NEWS that drove the call:
+ * {@code instrument | direction | sorted source-news ids}. That is the reliable mechanism — the
+ * model is prompted to cite the narrative ids it used, so the same news never fires twice and
+ * genuinely new news (a new id) fires once. When the model omits sources, the fallback is the
+ * NORMALIZED thesis text, which only collapses near-identical repeats; recognising a *reworded*
+ * same-story call is a semantic judgement, left to the model (told the live calls via context
+ * {@code alreadyProposed}, with a prompt rule not to repeat them). Deterministic guard as the
+ * backstop, the model as the assist. Entries expire after a window so a recurring theme can
+ * legitimately re-trigger later.
  */
 final class HypothesisIdempotency {
 
     private static final int CAP = 4_000;
-    /** Words too generic to distinguish one story from another — dropped from the signature. */
-    private static final java.util.Set<String> STOP = java.util.Set.of(
-            "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "at", "by",
-            "is", "are", "be", "as", "its", "it", "this", "that", "from", "into", "supports",
-            "support", "long", "short", "buy", "sell", "trade", "position", "view", "price");
 
     private final long windowMillis;
     private final Map<String, Long> firedAt = new LinkedHashMap<>(); // key → first-fired millis
@@ -73,15 +70,12 @@ final class HypothesisIdempotency {
         return h.instrumentId() + "|" + h.direction().name() + "|" + signature;
     }
 
-    /** Order-independent significant-keyword bag of a thesis — reworded repeats hash the same. */
+    /** Normalized thesis text (case/punctuation/whitespace-folded) — catches near-identical
+     *  repeats only; a genuinely reworded same-story call is the model's job to suppress. */
     static String thesisSignature(String thesis) {
         if (thesis == null || thesis.isBlank()) {
             return "";
         }
-        return java.util.Arrays.stream(thesis.toLowerCase(Locale.ROOT).split("[^a-z0-9]+"))
-                .filter(w -> w.length() > 2 && !STOP.contains(w))
-                .distinct()
-                .sorted()
-                .collect(Collectors.joining(" "));
+        return thesis.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim();
     }
 }

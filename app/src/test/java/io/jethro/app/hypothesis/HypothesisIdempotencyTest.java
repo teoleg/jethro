@@ -60,12 +60,13 @@ class HypothesisIdempotencyTest {
     }
 
     @Test
-    void noSourcesFallsBackToThesisKeywordSignature() {
+    void noSourcesFallsBackToNormalizedThesisText() {
         var guard = new HypothesisIdempotency(WINDOW);
         guard.markFired(h("EURUSD", Side.SELL, "Dollar strength pressures the euro."), 0);
-        // Reworded, same keywords, no sources → same signature → duplicate.
-        assertTrue(guard.isDuplicate(h("EURUSD", Side.SELL, "The euro is pressured by dollar strength."), 60_000));
-        // A different reason (different keywords) → distinct signature → fires.
+        // Same thesis, only case/punctuation/whitespace differ → the same call.
+        assertTrue(guard.isDuplicate(h("EURUSD", Side.SELL, "dollar   strength pressures the euro"), 60_000));
+        // A different thesis → a distinct trigger (semantic rewordings are the model's job, not
+        // the deterministic floor's — the guard keys on source-news ids when the model cites them).
         assertFalse(guard.isDuplicate(h("EURUSD", Side.SELL, "ECB dovish surprise widens the rate gap."), 60_000));
     }
 
