@@ -56,6 +56,11 @@ if [ "$COMPONENT" = "all" ] || [ "$COMPONENT" = "ollama" ]; then
   MODEL="${MODEL:-qwen2.5:1.5b}"
   echo "==> Ensuring Ollama model present: $MODEL"
   $COMPOSE exec -T ollama ollama pull "$MODEL" || echo "WARN: model pull failed; app will retry at generation time"
+  # RAG (ADR-0035) needs a SEPARATE embedding model — ensure it too (no-op once present).
+  EMBED_MODEL="$(grep -E '^JETHRO_RAG_MODEL=' deploy/.env | cut -d= -f2-)"
+  EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}"
+  echo "==> Ensuring RAG embedding model present: $EMBED_MODEL"
+  $COMPOSE exec -T ollama ollama pull "$EMBED_MODEL" || echo "WARN: embed pull failed; RAG degrades to the deterministic guard"
 fi
 
 echo "==> Waiting for the app to report healthy"

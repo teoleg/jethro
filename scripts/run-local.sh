@@ -31,6 +31,8 @@ HEAP="${HEAP:-512m}"
 AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:1.5b}" # 1.5b fits a Pi (frees ~1.5GB + CPU vs 3b, so you stay out of swap).
                                # MODEL=qwen2.5:3b for better text on an 8GB+ box; :0.5b for very tight RAM.
+RAG="${RAG:-on}"               # on = RAG retrieval (ADR-0035); needs the embedding model below.
+EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}" # RAG embeddings (~275MB); the chat MODEL can't embed.
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
 PROVIDER="${PROVIDER:-yahoo}"  # sim | yahoo (delayed, ADR-0023) | finnhub (real-time WS, ADR-0024)
@@ -78,11 +80,18 @@ if ! wait_for "Redpanda" 90 docker compose exec -T redpanda rpk cluster health -
   echo "     docker compose exec redpanda rpk cluster health"
 fi
 
-AI_ARGS=(--jethro.ai.enabled=false)
+AI_ARGS=(--jethro.ai.enabled=false --jethro.rag.enabled=false) # no Ollama ⇒ no RAG either
 if [ "$AI" = "on" ]; then
   echo "==> Pulling model $MODEL (first run downloads it)…"
   docker compose exec -T ollama ollama pull "$MODEL"
   AI_ARGS=(--jethro.ai.model="$MODEL")
+  if [ "$RAG" != "off" ] && [ -n "$EMBED_MODEL" ]; then
+    echo "==> Pulling embedding model $EMBED_MODEL for RAG (ADR-0035; the chat model can't embed)…"
+    docker compose exec -T ollama ollama pull "$EMBED_MODEL" \
+      || echo "   WARN: embed pull failed — RAG degrades to the deterministic guard until it's present"
+  else
+    AI_ARGS+=(--jethro.rag.enabled=false)
+  fi
 fi
 
 EXTRA_ARGS=()

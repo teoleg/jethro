@@ -16,6 +16,7 @@ fi
 
 export JETHRO_TRADING_PROVIDER="${JETHRO_TRADING_PROVIDER:-sim}"
 export JETHRO_AI_MODEL="${JETHRO_AI_MODEL:-qwen2.5:1.5b}"
+export JETHRO_RAG_MODEL="${JETHRO_RAG_MODEL:-nomic-embed-text}" # RAG embeddings (ADR-0035)
 
 echo "==> Building the app and starting the stack (redpanda, postgres, ollama, app)"
 docker compose -f docker-compose.yml -f deploy/quickstart.override.yml --profile app up -d --build

@@ -7,6 +7,7 @@
 set -euo pipefail
 
 AI_MODEL="${AI_MODEL:-qwen2.5:1.5b}"
+EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}" # RAG embeddings (ADR-0035); baked so RAG works on boot
 export DEBIAN_FRONTEND=noninteractive
 
 echo "==> Installing Docker"
@@ -25,13 +26,16 @@ echo "==> Building the app image and pulling base images"
 $COMPOSE --profile app build
 $COMPOSE pull redpanda postgres ollama
 
-echo "==> Baking the Ollama model ($AI_MODEL) into the image"
+echo "==> Baking the Ollama models ($AI_MODEL + $EMBED_MODEL) into the image"
 sudo docker compose up -d ollama
 for i in $(seq 1 20); do
   if sudo docker compose exec -T ollama ollama list >/dev/null 2>&1; then break; fi
   sleep 3
 done
 sudo docker compose exec -T ollama ollama pull "$AI_MODEL"
+# The embedding model is a SEPARATE download from the chat model — RAG (ADR-0035) needs it, so
+# bake it too; the instance boots with retrieval ready, no runtime pull.
+[ -n "$EMBED_MODEL" ] && sudo docker compose exec -T ollama ollama pull "$EMBED_MODEL"
 sudo docker compose down
 
 echo "==> Installing the boot-time systemd unit"
