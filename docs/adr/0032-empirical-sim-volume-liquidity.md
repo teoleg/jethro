@@ -1,4 +1,7 @@
-# ADR-0032: History-anchored market simulation with first-class volume and liquidity
+# ADR-0032: History-anchored market simulation (sim price engine)
+
+> **Scope narrowed** — this is the sim *price engine* only (gap-register G1). Volume-in-algos +
+> depth are ADR-0033, news→tape coupling ADR-0034, RAG ADR-0035. See the Scope section below.
 
 - **Status:** Proposed
 - **Date:** 2026-07-18
@@ -77,35 +80,18 @@ it re-buries the gap you flagged — the point is for the *algos* to use flow. R
   ADRs; depends on ADR-0025 (execution/ADV), ADR-0026 (retained engine), ADR-0029 (SIM
   provenance), ADR-0031 (control panel overlays the new engine).
 
-## Implementation plan (phased — sim capability paired with its algo consumer)
+## Scope (narrowed — see `docs/gap-register.md`)
 
-Each phase is independently shippable, CI-green, and pairs a **sim** change with the **consumer**
-that makes it meaningful. Guiding rule: never add an algo feature the sim can't exercise.
+This ADR is the **sim price ENGINE** decision (G1): the history-anchored block bootstrap. It was
+briefly over-scoped with a P1–P5 plan that folded in unrelated threads; those are now tracked and
+decided **separately** so none is lost inside "the sim work":
 
-- **P1 — Real volume through the pipeline.** Sim: OHLCV snapshot loader + a checked-in seed
-  snapshot for the core universe; the sim emits **real (bootstrapped) volume** per tick and a
-  live **ADV** derived from it. Consumer: execution reads live ADV (participation cap + √-impact
-  become data-driven, not a config constant); a `VolumeStats` service exposes rolling ADV/relative-
-  volume. *Ships the data path; nothing downstream breaks.*
-- **P2 — History-anchored engine.** Sim: `HistoricalBootstrapSimulator` (stationary block
-  bootstrap over real cross-sectional return+volume vectors), selectable as provider/engine;
-  factor engine retained for tests/offline. Consumer: backtest (ADR-0027) can run on the
-  empirical tape; SimControl overlays it. *Realistic dynamics.*
-- **P3 — Depth at the touch.** Sim: synthesize bid/ask **sizes** from real volume + spread;
-  `onQuote` gains sizes; a `MarketDepth` view. Consumer: **liquidity-aware sizing** (cap size vs
-  live depth/ADV) and a depth-aware fill nuance in the sim executor. *Liquidity becomes real.*
-- **P4 — Flow in the alpha.** Consumer: **relative-volume confirmation** in momentum/mean-
-  reversion (discount a move on thin volume), volume features into the hypothesis/AI layer.
-  Sim already emits the volume that makes this testable. *Closes the "algos ignore flow" gap.*
-- **P5 — News drives the tape.** Today the narrative feed and the price/volume sim are
-  independent — news is text to the LLM, it moves nothing. Couple them: a (sim) news item for an
-  instrument injects a **correlated shock** — a bp-momentum move in the headline's direction AND
-  a **volume surge** (real markets move *because of* flow) — sized by the item's sentiment/
-  magnitude and faded over a short horizon. This makes the news→momentum→volume correlation real,
-  so a volume-confirmed signal (P4) and the hypothesis layer have a genuine signal to find, not a
-  coincidence. Gated to SIM (never fabricates moves on a live tape); overlays the SimControl panel
-  as a "fire a news shock" action. *The unifying realism piece.*
+- **Volume live through the pipeline** (G2) — already shipped (measured ADV drives execution). It
+  needed no new engine, so it landed ahead of this ADR; kept here only as the reason ADV is real.
+- **Volume & depth consumed by the algorithms / synthesized depth** (G3/G4) — **ADR-0033**.
+- **News → tape coupling** (news drives a correlated volume surge + bp momentum) (G5) — **ADR-0034**.
+- **RAG for the AI layer** (G8) — **ADR-0035**.
 
-Status: P1 shipped. (Separately, the ADR-0022 hypothesis layer now de-dups triggers on the same
-news — deterministic news-id/thesis-signature guard + the live calls fed back to the model — so a
-headline sitting in the narrative window no longer re-fires the same call every cycle.)
+This ADR delivers only: the OHLCV snapshot + loader (seed checked in, refreshed from Yahoo),
+`HistoricalBootstrapSimulator`, selectable as an engine, with the factor model retained for
+tests/offline and the SimControl panel (ADR-0031) overlaying it. Status: **awaiting accept**.

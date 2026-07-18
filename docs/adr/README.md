@@ -35,7 +35,8 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0029](0029-runtime-feed-switching.md) | Runtime feed switching and hard sim/live/replay data separation | Accepted |
 | [0030](0030-schema-registry-serde.md) | Schema-registry serde — writer-schema resolution on the wire | Accepted |
 | [0031](0031-sim-control-panel.md) | Sim control panel — live UI dials over the simulator for model testing | Accepted |
-| [0032](0032-empirical-sim-volume-liquidity.md) | History-anchored market simulation with first-class volume and liquidity | Proposed |
+| [0032](0032-empirical-sim-volume-liquidity.md) | History-anchored market simulation (sim price engine) | Proposed |
+| [0035](0035-rag-for-ai-layer.md) | Retrieval-augmented context for the AI layer — local embeddings + pgvector | Proposed |
 
 ## Lifecycle
 
