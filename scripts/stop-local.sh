@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Stop the background app started by run-local.sh and the Docker infrastructure.
-# Add --volumes to also wipe Postgres/Redpanda data (or use clean-local.sh for a full wipe).
+# Data now persists in named volumes (pg-data, redpanda-data, ollama-models), so a plain stop
+# KEEPS your DB + model across restarts. Add --volumes to wipe them (or use clean-local.sh).
+# To bounce only part of the stack (e.g. restart the app, leave LLM + DB up), use scripts/svc.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
