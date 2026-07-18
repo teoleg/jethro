@@ -42,9 +42,12 @@ class TickClockTest {
         }
         long elapsed = t.now - start;
         // Naive sleep-after-work would need 100 × (100+30+1)ms = 13.1s. Deadline scheduling
-        // absorbs work+jitter: 100 ticks in ~10s (one trailing jitter allowed).
-        assertTrue(elapsed <= 100 * 100 * MS + 5 * MS,
-                "period stretched: " + elapsed / MS + "ms for 100 ticks");
+        // absorbs work+jitter so the period does NOT accumulate: 100 ticks land in ~100 intervals
+        // (~10s), aside from a one-time startup offset — the FIRST tick's work is baked into the
+        // initial deadline (awaitNextTick fixes it after that tick's work) plus a trailing jitter.
+        // The assertion that matters is "well under the 13.1s accumulating bound", not to the ms.
+        assertTrue(elapsed <= 100 * 100 * MS + 100 * MS,
+                "period stretched (work accumulated): " + elapsed / MS + "ms for 100 ticks");
         assertEquals(0, clock.stats().lateTicks());
         assertEquals(0, clock.stats().resyncs());
     }
