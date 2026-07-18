@@ -44,12 +44,27 @@ EQ_FACTOR = "spy.us"
 REGIMES = ["CALM", "TREND_UP", "TREND_DOWN", "RISK_OFF", "INFLATION_SHOCK"]
 
 
+# Stooq 404s / blocks the default urllib User-Agent ("Python-urllib/..."); a browser UA is
+# the usual fix. It also rate-limits by IP with a plain-text "Exceeded the daily hits limit"
+# body (HTTP 200, not an error code) — surface that clearly instead of parsing it as CSV.
+UA = ("Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+
+
 def fetch_closes(sym):
     url = STOOQ.format(sym=sym)
-    with urllib.request.urlopen(url, timeout=30) as r:
-        text = r.read().decode()
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/csv,*/*"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        text = r.read().decode("utf-8", "replace")
+    low = text.lower()
+    if "exceeded the daily hits limit" in low:
+        raise RuntimeError(f"stooq rate-limited this IP for {sym} — retry later or from another host")
+    if "<html" in low or "Close" not in text.splitlines()[0]:
+        raise RuntimeError(f"stooq returned no CSV for {sym} (blocked/moved?): {text[:80]!r}")
     rows = list(csv.DictReader(io.StringIO(text)))
-    closes = [(row["Date"], float(row["Close"])) for row in rows if row.get("Close") not in (None, "", "0")]
+    closes = [(row["Date"], float(row["Close"])) for row in rows if row.get("Close") not in (None, "", "0", "N/A")]
+    if not closes:
+        raise RuntimeError(f"stooq CSV for {sym} had no usable closes")
     n = min(len(closes), YEARS * 252)
     return dict(closes[-n:])
 
