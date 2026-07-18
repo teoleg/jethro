@@ -68,9 +68,10 @@ public final class OllamaEmbeddingClient implements EmbeddingClient {
         if (response.statusCode() != 200) {
             // Surface Ollama's own reason (e.g. "model 'nomic-embed-text' not found, try pulling it
             // first") so the ops view says WHY, not just that it failed.
-            String body = response.body();
-            String reason = body == null || body.isBlank() ? ""
-                    : " — " + (body.length() > 200 ? body.substring(0, 200) : body).replaceAll("\\s+", " ").trim();
+            String errorBody = response.body();
+            String reason = errorBody == null || errorBody.isBlank() ? ""
+                    : " — " + (errorBody.length() > 200 ? errorBody.substring(0, 200) : errorBody)
+                            .replaceAll("\\s+", " ").trim();
             throw new InferenceException("ollama embeddings HTTP " + response.statusCode() + reason);
         }
         return parseEmbedding(response.body());
