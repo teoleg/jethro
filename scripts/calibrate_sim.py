@@ -21,6 +21,7 @@ Stdlib only. If a symbol fails to download the script keeps the hand-curated def
 for that piece and says so on stderr — it never emits a partially-broken file silently.
 """
 import datetime
+import http.cookiejar
 import json
 import math
 import statistics as st
@@ -54,16 +55,35 @@ UA = ("Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
 
+_OPENER = None
+
+
+def _opener():
+    """A cookie-bearing opener. Yahoo's data API 429s ANONYMOUS requests — it wants the session
+    cookie a browser gets on first visit — so prime one from finance.yahoo.com and reuse it. This
+    (not backoff) is what actually clears the 429; the cookie is set for .yahoo.com, so it carries
+    to query1.finance.yahoo.com."""
+    global _OPENER
+    if _OPENER is None:
+        op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        op.addheaders = [("User-Agent", UA), ("Accept", "text/html,application/json,*/*")]
+        try:
+            op.open("https://finance.yahoo.com/quote/SPY", timeout=30).read(4096)
+        except Exception as e:
+            print(f"  … cookie prime failed ({e}); trying the API anyway", file=sys.stderr)
+        _OPENER = op
+    return _OPENER
+
+
 def _get_json(url, tries=5):
-    """GET with polite throttle + exponential backoff on Yahoo's 429 rate limiting."""
+    """GET JSON with the session cookie, plus backoff on any residual 429."""
     for attempt in range(tries):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=30) as r:
+            with _opener().open(url, timeout=30) as r:
                 return json.load(r)
         except urllib.error.HTTPError as e:
             if e.code == 429 and attempt < tries - 1:
-                wait = 5 * (2 ** attempt)  # 5, 10, 20, 40s — Yahoo throttles bursts hard
+                wait = 5 * (2 ** attempt)  # 5, 10, 20, 40s
                 print(f"  … 429 rate-limited, backing off {wait}s", file=sys.stderr)
                 time.sleep(wait)
                 continue
