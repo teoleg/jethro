@@ -1,6 +1,6 @@
 # ADR-0035: Retrieval-augmented context for the AI layer
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-18
 - **Deciders:** Oleg
 - **Tags:** ai, hypothesis, data, retrieval
@@ -68,3 +68,15 @@ volume comfortably; revisit if the corpus outgrows it.
 - **Follow-ups:** gap-register G8; slice 1 = dedup, slice 2 = outcome memory; ties to G9 (signal
   balance) since retrieved counter-examples may reduce one-sidedness. Depends on ADR-0022 (hypothesis
   layer), ADR-0016 (local SLM tier), ADR-0005 (Postgres).
+
+## Implementation status (2026-07-18)
+
+- **Slice 1 (semantic de-dup) built.** `EmbeddingClient` SPI + `OllamaEmbeddingClient`
+  (`/api/embeddings`); `SemanticMemory<T>` in-process cosine index (bounded, scoped); `HypothesisMemory`
+  embeds each fired call's thesis and flags a reworded same-story repeat, layered ON TOP of the
+  deterministic id/text guard. **Off by default** (`jethro.rag.enabled`, default false) so CI/offline
+  without an embedding model is unaffected; best-effort — any embedding failure degrades silently to
+  the deterministic guard. Enable with `ollama pull nomic-embed-text` + `jethro.rag.enabled=true`.
+- **Deferred:** slice 2 (retrieve past theses+outcomes into the prompt — needs a query strategy);
+  **pgvector durability** (slice 1 is in-memory, so the corpus resets on restart — fine for a session,
+  the durable index is the follow-up).

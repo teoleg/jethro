@@ -36,11 +36,31 @@ import java.util.Map;
  * has no hypotheses (the market path never depends on the model, invariant 7).
  */
 @Configuration
-@EnableConfigurationProperties(HypothesisProperties.class)
+@EnableConfigurationProperties({HypothesisProperties.class, RagProperties.class})
 @ConditionalOnProperty(prefix = "jethro.hypothesis", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class HypothesisConfig {
 
     private static final Logger log = LoggerFactory.getLogger(HypothesisConfig.class);
+
+    /** Semantic hypothesis de-dup (ADR-0035) — off unless jethro.rag.enabled and an embedding
+     *  model is reachable; the DISABLED no-op otherwise, so the deterministic guard stands alone. */
+    @Bean
+    HypothesisMemory hypothesisMemory(RagProperties rag,
+                                      ObjectProvider<io.jethro.app.ai.AiProperties> aiProps) {
+        if (!rag.enabledOrDefault()) {
+            return HypothesisMemory.DISABLED;
+        }
+        var ai = aiProps.getIfAvailable();
+        String baseUrl = ai != null ? ai.baseUrl() : rag.ollamaBaseUrlOrDefault();
+        var client = new io.jethro.trading.algo.inference.OllamaEmbeddingClient(
+                baseUrl, rag.modelOrDefault(), Duration.ofSeconds(rag.timeoutSecondsOrDefault()));
+        log.warn("RAG: semantic hypothesis de-dup ON (ADR-0035) — embeddings via {} at {}, "
+                        + "dedup cosine ≥ {}. Advisory only; the deterministic guard stays the floor.",
+                rag.modelOrDefault(), baseUrl, rag.dedupThresholdOrDefault());
+        return new HypothesisMemory(client,
+                new io.jethro.trading.algo.inference.SemanticMemory<>(rag.memoryCapacityOrDefault()),
+                rag.dedupThresholdOrDefault());
+    }
 
     @Bean
     HypothesisEvaluator hypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
@@ -111,7 +131,8 @@ public class HypothesisConfig {
                                             ObjectProvider<OrderService> orderService,
                                             HypothesisRecordStore recordStore,
                                             io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch,
-                                            ObjectProvider<RefDataRepository> refData) {
+                                            ObjectProvider<RefDataRepository> refData,
+                                            HypothesisMemory hypothesisMemory) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
         // the broker is wired — every hypothesis-generation run is an audited AiDecision.
         DecisionSink sink = decision -> {
@@ -130,7 +151,7 @@ public class HypothesisConfig {
         InstrumentNameSource names = rd != null ? InstrumentNameSource.from(rd) : InstrumentNameSource.NONE;
         return new HypothesisLifecycle(generator, evaluator, narrativeFeed, backtest,
                 tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable(), recordStore,
-                tradingHaltSwitch, names);
+                tradingHaltSwitch, names, hypothesisMemory);
     }
 
     @Bean

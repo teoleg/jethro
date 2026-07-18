@@ -63,6 +63,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private final OrderService orderService; // nullable: null → human-in-loop only
     private final HypothesisRecordStore recordStore;
     private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
+    private final HypothesisMemory memory; // semantic de-dup (ADR-0035); DISABLED when RAG is off
 
     private static final int EXECUTED_CAP = 50;
     private static final int LEDGER_CAP = 60;
@@ -90,8 +91,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                                HypothesisProperties props, OrderService orderService,
                                HypothesisRecordStore recordStore,
                                io.jethro.app.risk.TradingHaltSwitch halt,
-                               InstrumentNameSource names) {
+                               InstrumentNameSource names, HypothesisMemory memory) {
         this.generator = generator;
+        this.memory = memory != null ? memory : HypothesisMemory.DISABLED;
         this.evaluator = evaluator;
         this.narrativeFeed = narrativeFeed;
         this.backtest = backtest;
@@ -312,11 +314,15 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             List<HypothesisEvaluator.Evaluated> fresh = new ArrayList<>(evaluated.size());
             int suppressed = 0;
             for (HypothesisEvaluator.Evaluated e : evaluated) {
-                if (idempotency.isDuplicate(e.hypothesis(), now)) {
+                // Deterministic floor (news id / text) + semantic layer (ADR-0035): the same story
+                // reworded across sources is still a repeat. Semantic is best-effort — off/failed,
+                // isSemanticDuplicate is false and the deterministic guard governs.
+                if (idempotency.isDuplicate(e.hypothesis(), now) || memory.isSemanticDuplicate(e.hypothesis())) {
                     suppressed++;
                     continue;
                 }
                 idempotency.markFired(e.hypothesis(), now); // also de-dups within this cycle
+                memory.remember(e.hypothesis());
                 fresh.add(e);
             }
             Set<String> autoTraded = runAutonomy(fresh, now);
