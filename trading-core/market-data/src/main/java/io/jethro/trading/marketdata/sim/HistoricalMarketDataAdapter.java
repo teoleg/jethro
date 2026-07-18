@@ -101,10 +101,18 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
         return specs;
     }
 
+    /** A few ticks of typical trade size rest at the touch — synthesized depth (ADR-0033). */
+    private static final long DEPTH_TICKS = 5;
+
+    private static long touchSize(long qtyScaled) {
+        return Math.max(1_000_000L, qtyScaled * DEPTH_TICKS);
+    }
+
     private static void quote(MarketDataListener listener, String id, Quotes.QuoteSpec spec,
-                              long midScaled, long now) {
+                              long midScaled, long sizeScaled, long now) {
         if (spec != null) {
-            listener.onQuote(id, Quotes.bidScaled(midScaled, spec), Quotes.askScaled(midScaled, spec), now, now);
+            listener.onQuote(id, Quotes.bidScaled(midScaled, spec), Quotes.askScaled(midScaled, spec),
+                    sizeScaled, sizeScaled, now, now);
         }
     }
 
@@ -154,14 +162,14 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
                 long mid = sim.priceScaled(i);
                 long qty = perTickQtyScaled(sim.currentDailyVolume(i), control.volumeScale(i));
                 listener.onTrade(factorIds[i], mid, qty, now, now);
-                quote(listener, factorIds[i], factorSpecs[i], mid, now);
+                quote(listener, factorIds[i], factorSpecs[i], mid, touchSize(qty), now);
             }
             if (curveSim != null) {
                 curveSim.step(); // the curve runs on its own seedable walk under this engine
                 for (int i = 0; i < linkedIds.length; i++) {
                     long mid = curveSim.linkedPriceScaled(linkedIds[i]);
                     listener.onTrade(linkedIds[i], mid, 1_000_000L, now, now);
-                    quote(listener, linkedIds[i], linkedSpecs[i], mid, now);
+                    quote(listener, linkedIds[i], linkedSpecs[i], mid, touchSize(1_000_000L), now);
                 }
                 for (int t = 0; t < CurveMarkSource.TENOR_IDS.length; t++) {
                     listener.onTrade(CurveMarkSource.TENOR_IDS[t],
@@ -174,7 +182,7 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
                 for (int s = 0; s < CurveMarkSource.SWAP_IDS.length; s++) {
                     long mid = curveSim.swapParScaledPercent(s);
                     listener.onTrade(CurveMarkSource.SWAP_IDS[s], mid, 1_000_000L, now, now);
-                    quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, now);
+                    quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, touchSize(1_000_000L), now);
                 }
             }
             java.util.concurrent.locks.LockSupport.parkNanos(control.effectiveTickIntervalNanos());

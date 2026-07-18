@@ -57,6 +57,17 @@ carries volume; the neutral default keeps the harness honest meanwhile (a stated
   be disclosed and revisited when the backtest tape carries volume; synthesized depth is a model,
   not a book, and must read as such; another dial (`volumeConfirmMin`) to calibrate — too high mutes
   the strategy, so it ships conservative and measured on the strategy-activity view.
-- **Follow-ups:** G4 synthesized depth through `onQuote` + a depth-aware fill refinement; volume as a
-  feature in the hypothesis/AI layer; once the backtest tape has volume, gate it there too. Depends
-  on ADR-0032 (volume/ADV), ADR-0025 (execution), ADR-0018/0027 (strategy harness).
+- **Follow-ups:** a full L2 depth-walk fill model (behind a real depth feed); volume as a feature in
+  the hypothesis/AI layer; once the backtest tape has volume, gate it there too. Depends on ADR-0032
+  (volume/ADV), ADR-0025 (execution), ADR-0018/0027 (strategy harness).
+
+## Implementation status (2026-07-18) — built
+
+- **G3 flow-aware algos.** `Strategy.Observation.relativeVolume` (default 1.0 neutral) gates momentum
+  + mean-reversion on participation; the strategy caps order notional at a fraction of live measured
+  ADV. Backtest unchanged (neutral default) — the live-vs-backtest asymmetry is disclosed.
+- **G4 synthesized depth.** `MarketDataListener.onQuote` gains bid/ask **sizes** (backward-compatible
+  default); the sim adapters synthesize depth-at-touch from the trade volume (≈5 ticks of size);
+  `QuoteCache` carries it; `/api/depth` + the sim page surface the top-of-book book. **Fill-side
+  liquidity stays the ADR-0025 √-impact model** (finite liquidity already priced) — a full L2
+  depth-walk is deferred to a real depth feed, so we don't double-count.

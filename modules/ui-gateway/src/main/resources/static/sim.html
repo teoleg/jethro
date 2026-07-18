@@ -204,23 +204,32 @@
     : "$" + (v>=1e9 ? (v/1e9).toFixed(2)+"B" : v>=1e6 ? (v/1e6).toFixed(1)+"M" : Math.round(v).toLocaleString());
   const relCls = r => r>=1.5 ? "up" : r<=0.6 ? "down" : "";
 
+  const szFmt = v => { const n = Number(v); return n>=1e6 ? (n/1e6).toFixed(1)+"M" : n>=1e3 ? (n/1e3).toFixed(0)+"k" : n.toFixed(0); };
+
   async function loadVolume() {
     try {
-      const rows = await (await fetch("/api/volume")).json();
+      const [rows, depth] = await Promise.all([
+        (await fetch("/api/volume")).json(),
+        fetch("/api/depth").then(r => r.ok ? r.json() : []).catch(() => [])]);
       if (!rows.length) { document.getElementById("volumePanel").innerHTML = ""; return; }
-      const body = rows.map(r => `
+      const byId = {}; depth.forEach(d => byId[d.instrumentId] = d);
+      const body = rows.map(r => {
+        const d = byId[r.instrumentId];
+        const book = d ? `${szFmt(d.bidSize)} @ ${Number(d.bid).toFixed(2)} / ${Number(d.ask).toFixed(2)} @ ${szFmt(d.askSize)}` : '<span class="muted">—</span>';
+        return `
         <tr>
           <td><b>${esc(r.name)}</b><div class="muted mono" style="font-size:10px">${esc(r.instrumentId)}</div></td>
           <td class="mono">${advFmt(r.measuredAdvUsd)}</td>
           <td class="mono" style="color:var(--${relCls(r.relativeVolume)||'txt'})">${r.relativeVolume.toFixed(2)}×</td>
+          <td class="mono muted" style="font-size:11px">${book}</td>
           <td class="mono muted">${r.samples.toLocaleString()}</td>
-        </tr>`).join("");
+        </tr>`; }).join("");
       document.getElementById("volumePanel").innerHTML = `
         <div class="section-h">Live volume &amp; liquidity
           <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
-            measured ADV now drives the execution participation cap + impact (ADR-0032) · rel-vol = recent ÷ baseline</span></div>
+            measured ADV drives execution + sizing (ADR-0032/0033) · rel-vol = recent ÷ baseline · book = synthesized top-of-book (ADR-0033)</span></div>
         <div class="panel"><table>
-          <tr><th>instrument</th><th>measured ADV</th><th>rel vol</th><th>samples</th></tr>
+          <tr><th>instrument</th><th>measured ADV</th><th>rel vol</th><th>bid size @ px / px @ ask size</th><th>samples</th></tr>
           ${body}
         </table></div>`;
     } catch (e) { /* volume is best-effort context */ }
