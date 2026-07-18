@@ -57,7 +57,10 @@ public final class HistoryStatus {
             return new Snapshot(d, latest, instruments != null ? instruments : 0,
                     d >= READY_MIN_DAYS, source, note, seededAtMillis);
         } catch (Exception e) {
-            return new Snapshot(0, null, 0, false, "unavailable", "persistence off", seededAtMillis);
+            // Don't guess "persistence off": surface the real reason (e.g. the daily_close table
+            // isn't there yet) so the UI badge shows a true error instead of a vague "warming".
+            return new Snapshot(0, null, 0, false, "unavailable",
+                    "history unavailable: " + e.getMessage(), seededAtMillis);
         }
     }
 }

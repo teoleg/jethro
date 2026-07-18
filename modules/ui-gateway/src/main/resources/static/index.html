@@ -439,10 +439,14 @@
       } else if (h.source === "failed") {
         b.textContent = "history ✕ no data";
         b.style.color = "var(--alert)";
+      } else if (h.source === "unavailable") {
+        b.textContent = "history ✕ unavailable"; // DB/table error or persistence off — see tooltip
+        b.style.color = "var(--alert)";
       } else if (h.source === "seeding") {
         b.textContent = "history loading…";
         b.style.color = "var(--warn)";
       } else {
+        // A real source (yahoo-history / existing) but still short of the 20-day minimum.
         b.textContent = `history warming ${h.days}/20d`;
         b.style.color = "var(--warn)";
       }
