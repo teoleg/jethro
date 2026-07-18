@@ -43,16 +43,14 @@ public final class HedgeAdvisor {
     private final double effectivenessFloor;
     private final String equityProxyId;
     private final BigDecimal equityProxyMultiplier;
-    private final BigDecimal fallbackBeta;
 
     public HedgeAdvisor(Mode mode, BigDecimal equityCapUsd, double effectivenessFloor,
-                        String equityProxyId, BigDecimal equityProxyMultiplier, BigDecimal fallbackBeta) {
+                        String equityProxyId, BigDecimal equityProxyMultiplier) {
         this.mode = mode;
         this.equityCapUsd = equityCapUsd;
         this.effectivenessFloor = effectivenessFloor;
         this.equityProxyId = equityProxyId;
         this.equityProxyMultiplier = equityProxyMultiplier;
-        this.fallbackBeta = fallbackBeta;
     }
 
     public Mode mode() {
@@ -93,18 +91,18 @@ public final class HedgeAdvisor {
                             + money(equityCapUsd) + " cap, no hedge needed");
         } else {
             Optional<BigDecimal> proxyPrice = priceOf.apply(equityProxyId);
-            if (proxyPrice.isEmpty()) {
-                axis = plain(net, utilization, true,
-                        "cap breached, but no " + equityProxyId + " price yet — cannot size a hedge");
+            if (covariance.isEmpty() || proxyPrice.isEmpty()) {
+                axis = plain(net, utilization, true, covariance.isEmpty()
+                        ? "cap breached, but the covariance is still warming up — cannot size a hedge yet"
+                        : "cap breached, but no " + equityProxyId + " price yet — cannot size a hedge");
             } else {
-                // Measured min-variance ratio when the EWMA covariance is ready; otherwise hedge
-                // NOW at an assumed beta (provisional) and refine to the measured ρ² once history
-                // accrues — a desk hedges the exposure immediately, it doesn't wait days for a matrix.
-                Optional<HedgeMath.HedgeProposal> p = covariance
-                        .flatMap(cov -> HedgeMath.betaHedge(cov, equityExposures, equityProxyId,
-                                proxyPrice.get(), equityProxyMultiplier, effectivenessFloor));
+                Optional<HedgeMath.HedgeProposal> p = HedgeMath.betaHedge(
+                        covariance.get(), equityExposures, equityProxyId,
+                        proxyPrice.get(), equityProxyMultiplier, effectivenessFloor);
                 axis = p.map(hp -> sized(net, utilization, hp))
-                        .orElse(provisional(net, utilization, proxyPrice.get()));
+                        .orElse(plain(net, utilization, true,
+                                "cap breached, but " + equityProxyId
+                                        + " is not in the covariance window yet — cannot size a hedge"));
             }
         }
         String note = mode == Mode.AUTO
@@ -119,22 +117,6 @@ public final class HedgeAdvisor {
                 utilization, true, p.recommended(), side, p.signedQuantity().abs(),
                 p.hedgeNotionalUsd().abs(), p.effectiveness(), p.grossSigmaUsd(), p.residualSigmaUsd(),
                 p.recommended() ? "HEDGE" : "REDUCE", p.rationale());
-    }
-
-    /** Immediate hedge at the assumed beta, before the covariance is ready: notional = −net·β,
-     *  effectiveness unknown (shown provisional). Refines to the measured ρ² once history accrues. */
-    private Axis provisional(BigDecimal net, double utilization, BigDecimal proxyPrice) {
-        BigDecimal hedgeNotional = net.multiply(fallbackBeta).negate();
-        BigDecimal perContract = proxyPrice.multiply(equityProxyMultiplier);
-        BigDecimal qty = perContract.signum() > 0
-                ? hedgeNotional.divide(perContract, 6, RoundingMode.HALF_EVEN) : BigDecimal.ZERO;
-        String side = qty.signum() < 0 ? "SELL" : "BUY";
-        String rationale = "provisional hedge β=" + fallbackBeta.stripTrailingZeros().toPlainString()
-                + " (EWMA covariance still warming up): " + side + " " + qty.abs().toPlainString() + " "
-                + equityProxyId + " ≈ " + money(hedgeNotional.abs()) + " — refines to the measured ρ² once history accrues";
-        return new Axis("EQUITY", equityProxyId, net.setScale(2, RoundingMode.HALF_UP), equityCapUsd,
-                utilization, true, qty.signum() != 0, side, qty.abs(), hedgeNotional.abs().setScale(2, RoundingMode.HALF_UP),
-                null, null, null, "HEDGE~", rationale);
     }
 
     private Axis plain(BigDecimal net, double utilization, boolean breached, String status) {
