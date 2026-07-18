@@ -64,13 +64,13 @@ public final class AutonomyEnvelope {
 
         BigDecimal notionalPerUnit = e.price().multiply(multiplier);
         if (track.scoredOutcomes() < cfg.minTrackRecordOrDefault()) {
-            // PROBATION: resize down to the probation notional so the record can build.
-            BigDecimal qty = e.quantity().min(
-                    cfg.probationOrderNotionalOrDefault().divide(notionalPerUnit, 0, RoundingMode.DOWN));
-            if (qty.signum() <= 0) {
-                return Decision.no("probation size " + cfg.probationOrderNotionalOrDefault().toPlainString()
-                        + " cannot buy one unit of " + e.hypothesis().instrumentId());
-            }
+            // PROBATION: resize down to the probation notional so the record can build — but you
+            // cannot trade less than ONE unit of a contract, so a high-multiplier name (ZN/ES)
+            // trades the 1-unit minimum rather than nothing. Otherwise those names sit in probation
+            // forever, never executing, never scoring an outcome — autonomy deadlocked.
+            BigDecimal affordable = cfg.probationOrderNotionalOrDefault()
+                    .divide(notionalPerUnit, 0, RoundingMode.DOWN);
+            BigDecimal qty = e.quantity().min(affordable.max(BigDecimal.ONE));
             return Decision.yes(qty, true);
         }
         if (track.outcomePnl().signum() <= 0) {

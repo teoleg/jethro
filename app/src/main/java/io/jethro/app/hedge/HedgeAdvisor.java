@@ -106,7 +106,7 @@ public final class HedgeAdvisor {
             }
         }
         String note = mode == Mode.AUTO
-                ? "AUTO — proposals auto-submit under the sim gate + risk envelope (execution wiring is the next increment)"
+                ? "AUTO — a breached, recommended axis auto-submits its hedge (sim-gated, ADR-0019)"
                 : "ADVISE — proposals surface here; execute from the ticket";
         return new Snapshot(mode.name(), covariance.isPresent(), List.of(axis), note);
     }

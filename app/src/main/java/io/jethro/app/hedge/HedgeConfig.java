@@ -1,5 +1,11 @@
 package io.jethro.app.hedge;
 
+import io.jethro.app.risk.TradingHaltSwitch;
+import io.jethro.app.risk.VarService;
+import io.jethro.order.LastPriceCache;
+import io.jethro.order.OrderService;
+import io.jethro.trading.riskpnl.InstrumentRefSource;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,4 +26,19 @@ public class HedgeConfig {
         return new HedgeAdvisor(HedgeAdvisor.Mode.valueOf(mode.trim().toUpperCase(java.util.Locale.ROOT)),
                 equityCapUsd, effectivenessFloor, equityProxy, equityProxyMultiplier);
     }
+
+    /** AUTO-hedge executor (ADR-0039): submits the sized hedge in AUTO mode, sim-gated. */
+    @Bean(destroyMethod = "stop")
+    HedgeLifecycle hedgeLifecycle(HedgeAdvisor advisor, ObjectProvider<VarService> varService,
+                                  ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
+                                  ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
+                                  @Value("${jethro.hedge.book:MACRO}") String hedgeBook,
+                                  @Value("${jethro.hedge.cooldown-seconds:60}") long cooldownSeconds,
+                                  @Value("${jethro.hedge.interval-seconds:5}") long intervalSeconds) {
+        var lifecycle = new HedgeLifecycle(advisor, varService, refs, prices, orderService, haltSwitch,
+                hedgeBook, cooldownSeconds, intervalSeconds);
+        lifecycle.start();
+        return lifecycle;
+    }
 }
+

@@ -86,13 +86,15 @@ class AutonomyEnvelopeTest {
     }
 
     @Test
-    void probationThatCannotAffordOneUnitSaysSo() {
-        // 1 ES = 5450 × 50 = 272,500 per unit ≫ 2500 probation → no order, explicit reason.
+    void probationTradesTheOneUnitMinimumWhenItCannotAffordMore() {
+        // 1 ES = 5450 × 50 = 272,500 per unit ≫ 2500 probation. You can't trade a fraction of a
+        // contract, so probation trades the 1-unit minimum rather than deadlocking on the name.
         var e = new HypothesisEvaluator.Evaluated(hyp(Hypothesis.Conviction.HIGH),
                 HypothesisEvaluator.Verdict.ADMISSIBLE, "AI",
-                BigDecimal.ONE, new BigDecimal("5450"), "ok", null);
+                new BigDecimal("3"), new BigDecimal("5450"), "ok", null);
         var d = env("MEDIUM", List.of()).decide(e, new BigDecimal("50"), NO_RECORD);
-        assertFalse(d.allowed());
-        assertTrue(d.reason().contains("cannot buy one unit"));
+        assertTrue(d.allowed(), "probation must still execute the 1-unit minimum, not reject");
+        assertEquals(0, BigDecimal.ONE.compareTo(d.quantity()), "sized to the 1-unit floor");
+        assertTrue(d.probation(), "still flagged probation");
     }
 }
