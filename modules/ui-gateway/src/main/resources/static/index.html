@@ -400,8 +400,9 @@
       const util = Math.max(0, Math.min(1, a.utilization || 0)); // bar = hedge effectiveness ρ²
       const pct = Math.round((a.effectiveness != null ? a.effectiveness : 0) * 100);
       const barColor = a.status === "REDUCE" ? "var(--warn)" : a.hedging ? "var(--brand)" : "var(--up)";
-      const statusColor = a.status === "HEDGE" ? "var(--brand)" : a.status === "REDUCE" ? "var(--warn)"
-        : a.status === "WARMING" ? "var(--alert)" : "var(--dim)";
+      const statusColor = (a.status === "HEDGE" || a.status === "UNWIND") ? "var(--brand)"
+        : a.status === "REDUCE" ? "var(--warn)" : a.status === "WARMING" ? "var(--alert)"
+        : a.status === "ON-TARGET" ? "var(--up)" : "var(--dim)";
       let hedgeRow = "";
       if (a.hedgeQuantity !== null && a.hedgeQuantity !== undefined) {
         // STATISTICAL carries a measured ρ² + daily σ; STRUCTURAL asserts the beta (no ρ²/σ).
@@ -411,6 +412,13 @@
         hedgeRow = `<div style="margin-top:6px;font-size:12px">
           <b class="${a.hedgeSide === "SELL" ? "down" : "up"}">${esc(a.hedgeSide)} ${esc(a.hedgeQuantity)} ${esc(a.proxyId)}</b>
           <span class="muted">(${fmtUsd(a.hedgeNotionalUsd)})</span> · ${evidence}</div>`;
+      }
+      // Held vs target: the hedge actually on (HEDGE book) and where the advisor wants it.
+      let heldRow = "";
+      if (a.heldProxyQty !== null && a.heldProxyQty !== undefined) {
+        const tgt = a.targetProxyQty !== null && a.targetProxyQty !== undefined ? a.targetProxyQty : "—";
+        heldRow = `<div class="muted" style="font-size:11px;margin-top:4px">held <b>${esc(a.heldProxyQty)}</b>
+          → target <b>${esc(tgt)}</b> ${esc(a.proxyId)} · the order is the delta</div>`;
       }
       const tierBadge = (a.tier && a.tier !== "—")
         ? `<span class="muted" style="font-size:10px;letter-spacing:.04em">${esc(a.tier)}</span>` : "";
@@ -424,6 +432,7 @@
         <div style="height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden">
           <div style="height:100%;width:${Math.round(Math.min(1, util) * 100)}%;background:${barColor}"></div></div>
         ${hedgeRow}
+        ${heldRow}
         <div class="muted" style="font-size:11px;margin-top:5px">${esc(a.rationale || "")}</div>
       </div>`;
     }).join("") : '<div class="muted" style="padding:12px">no hedgeable exposure yet — take an equity position to see the hedge</div>';

@@ -44,6 +44,7 @@ public final class HedgeLifecycle {
     private final ObjectProvider<LastPriceCache> prices;
     private final ObjectProvider<OrderService> orderService;
     private final ObjectProvider<TradingHaltSwitch> haltSwitch;
+    private final ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection;
     private final String hedgeBook;
     private final long cooldownMillis;
     private final long intervalSeconds;
@@ -53,6 +54,7 @@ public final class HedgeLifecycle {
     public HedgeLifecycle(HedgeAdvisor advisor, ObjectProvider<VarService> varService,
                           ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                           ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
+                          ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
                           String hedgeBook, long cooldownSeconds, long intervalSeconds) {
         this.advisor = advisor;
         this.varService = varService;
@@ -60,6 +62,7 @@ public final class HedgeLifecycle {
         this.prices = prices;
         this.orderService = orderService;
         this.haltSwitch = haltSwitch;
+        this.projection = projection;
         this.hedgeBook = hedgeBook;
         this.cooldownMillis = cooldownSeconds * 1_000;
         this.intervalSeconds = intervalSeconds;
@@ -101,9 +104,17 @@ public final class HedgeLifecycle {
                     pc != null ? pc.lastPrice(new InstrumentId(id)) : Optional.empty();
             Function<String, Optional<BigDecimal>> betaOf = id -> rf == null ? Optional.empty()
                     : rf.find(id).map(io.jethro.trading.riskpnl.InstrumentRef::hedgeBeta).filter(b -> b != null);
+            // The held hedge (ADR-0039's h): the HEDGE book's proxy position. Without this
+            // feedback the loop re-submits the full hedge every cooldown (review P1-1) — so if
+            // the projection isn't available, we cannot know what we hold and must not trade.
+            var proj = projection.getIfAvailable();
+            if (proj == null) {
+                return;
+            }
+            BigDecimal held = proj.positionQuantity(hedgeBook, advisor.equityProxyId());
 
             HedgeAdvisor.Snapshot snap = advisor.evaluate(
-                    vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf);
+                    vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf, held);
             long now = System.currentTimeMillis();
             for (HedgeAdvisor.Axis axis : snap.axes()) {
                 if (!axis.hedging() || !axis.hedgeRecommended() || axis.hedgeQuantity() == null

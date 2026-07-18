@@ -33,13 +33,20 @@ public final class HedgeController {
     private final ObjectProvider<VarService> varService;
     private final ObjectProvider<InstrumentRefSource> refs;
     private final ObjectProvider<LastPriceCache> prices;
+    private final ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection;
+    private final String hedgeBook;
 
     public HedgeController(HedgeAdvisor advisor, ObjectProvider<VarService> varService,
-                           ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices) {
+                           ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
+                           ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
+                           @org.springframework.beans.factory.annotation.Value("${jethro.hedge.book:HEDGE}")
+                           String hedgeBook) {
         this.advisor = advisor;
         this.varService = varService;
         this.refs = refs;
         this.prices = prices;
+        this.projection = projection;
+        this.hedgeBook = hedgeBook;
     }
 
     @GetMapping("/api/hedging")
@@ -64,7 +71,11 @@ public final class HedgeController {
                 : rf.find(id).map(io.jethro.trading.riskpnl.InstrumentRef::hedgeBeta)
                         .filter(b -> b != null);
 
-        return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf);
+        var proj = projection.getIfAvailable();
+        BigDecimal held = proj != null
+                ? proj.positionQuantity(hedgeBook, advisor.equityProxyId()) : BigDecimal.ZERO;
+
+        return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf, held);
     }
 
     public record ModeRequest(String mode) {

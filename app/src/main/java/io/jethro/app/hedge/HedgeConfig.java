@@ -20,23 +20,27 @@ public class HedgeConfig {
     HedgeAdvisor hedgeAdvisor(
             @Value("${jethro.hedge.mode:ADVISE}") String mode,
             @Value("${jethro.hedge.equity-rebalance-floor-usd:0}") BigDecimal rebalanceFloorUsd,
+            @Value("${jethro.hedge.min-trade-notional-usd:10000}") BigDecimal minTradeNotionalUsd,
             @Value("${jethro.hedge.effectiveness-floor:0.25}") double effectivenessFloor,
             @Value("${jethro.hedge.equity-proxy:ES}") String equityProxy,
             @Value("${jethro.hedge.equity-proxy-multiplier:50}") BigDecimal equityProxyMultiplier) {
         return new HedgeAdvisor(HedgeAdvisor.Mode.valueOf(mode.trim().toUpperCase(java.util.Locale.ROOT)),
-                rebalanceFloorUsd, effectivenessFloor, equityProxy, equityProxyMultiplier);
+                rebalanceFloorUsd, minTradeNotionalUsd, effectivenessFloor, equityProxy, equityProxyMultiplier);
     }
 
-    /** AUTO-hedge executor (ADR-0039): submits the sized hedge in AUTO mode, sim-gated. */
+    /** AUTO-hedge executor (ADR-0039): submits the hedge DELTA in AUTO mode, sim-gated. The hedge
+     *  trades in its own dedicated book (default HEDGE) so its position is unambiguous feedback
+     *  for the advisor and never collides with the strategy's own futures (which route to MACRO). */
     @Bean(destroyMethod = "stop")
     HedgeLifecycle hedgeLifecycle(HedgeAdvisor advisor, ObjectProvider<VarService> varService,
                                   ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                                   ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
-                                  @Value("${jethro.hedge.book:MACRO}") String hedgeBook,
+                                  ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
+                                  @Value("${jethro.hedge.book:HEDGE}") String hedgeBook,
                                   @Value("${jethro.hedge.cooldown-seconds:60}") long cooldownSeconds,
                                   @Value("${jethro.hedge.interval-seconds:5}") long intervalSeconds) {
         var lifecycle = new HedgeLifecycle(advisor, varService, refs, prices, orderService, haltSwitch,
-                hedgeBook, cooldownSeconds, intervalSeconds);
+                projection, hedgeBook, cooldownSeconds, intervalSeconds);
         lifecycle.start();
         return lifecycle;
     }
