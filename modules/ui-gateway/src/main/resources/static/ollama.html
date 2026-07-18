@@ -155,11 +155,15 @@
         tile("Chunks indexed", `${r.totalChunks} <span class="muted" style="font-size:11px">(${r.dedupChunks} dedup · ${r.outcomeChunks} outcome)</span>`) +
         tile("Recall hit-rate", pct(r.recallHitRate), r.recallHitRate > 0 ? "up" : "") +
         tile("Embed failures", r.embedFailures, r.embedFailures > 0 ? "down" : "up");
-      document.getElementById("ragHint").innerHTML = r.enabled
-        ? `dedup: ${r.dedupHits}/${r.dedupChecks} flagged (${pct(r.dedupHitRate)}) at ≥${r.dedupThreshold} cos · `
+      const failing = r.enabled && r.embeddingDim < 0 && r.embedFailures > 0;
+      document.getElementById("ragHint").innerHTML = !r.enabled
+        ? "retrieval is off — theses fall back to the deterministic id/text de-dup guard; pull the embedding model and set jethro.rag.enabled=true"
+        : failing
+        ? `<span class="down">embeddings failing</span> — ${r.embedFailures} errors. Last: <span class="mono">${esc(r.lastEmbedError || "unknown")}</span>. `
+          + `If it says the model isn't found, run <span class="mono">ollama pull ${esc(r.model||"nomic-embed-text")}</span> on the Ollama host.`
+        : `dedup: ${r.dedupHits}/${r.dedupChecks} flagged (${pct(r.dedupHitRate)}) at ≥${r.dedupThreshold} cos · `
           + `recall: ${r.recallHits}/${r.recallQueries} news queries hit past outcomes (${pct(r.recallHitRate)}) at ≥${r.recallThreshold} cos · `
-          + `${r.embedCalls} embeddings computed`
-        : "retrieval is off — theses fall back to the deterministic id/text de-dup guard; pull the embedding model and set jethro.rag.enabled=true";
+          + `${r.embedCalls} embeddings computed`;
     } catch (e) {}
   }
 

@@ -66,7 +66,12 @@ public final class OllamaEmbeddingClient implements EmbeddingClient {
             throw new InferenceException("interrupted waiting for ollama embedding", e);
         }
         if (response.statusCode() != 200) {
-            throw new InferenceException("ollama embeddings returned HTTP " + response.statusCode());
+            // Surface Ollama's own reason (e.g. "model 'nomic-embed-text' not found, try pulling it
+            // first") so the ops view says WHY, not just that it failed.
+            String body = response.body();
+            String reason = body == null || body.isBlank() ? ""
+                    : " — " + (body.length() > 200 ? body.substring(0, 200) : body).replaceAll("\\s+", " ").trim();
+            throw new InferenceException("ollama embeddings HTTP " + response.statusCode() + reason);
         }
         return parseEmbedding(response.body());
     }

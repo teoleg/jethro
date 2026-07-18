@@ -45,7 +45,7 @@ public final class HypothesisController {
                          int dedupChunks, int outcomeChunks, int totalChunks,
                          long dedupChecks, long dedupHits, Double dedupHitRate,
                          long recallQueries, long recallHits, Double recallHitRate,
-                         long embedCalls, long embedFailures,
+                         long embedCalls, long embedFailures, String lastEmbedError,
                          double dedupThreshold, double recallThreshold) {
     }
 
@@ -104,7 +104,7 @@ public final class HypothesisController {
     public RagDto rag() {
         HypothesisLifecycle live = lifecycle.getIfAvailable();
         if (live == null) {
-            return new RagDto(false, null, -1, 0, 0, 0, 0, 0, null, 0, 0, null, 0, 0, 0, 0);
+            return new RagDto(false, null, -1, 0, 0, 0, 0, 0, null, 0, 0, null, 0, 0, "", 0, 0);
         }
         var s = live.ragStats();
         Double dedupRate = s.dedupChecks() == 0 ? null
@@ -115,7 +115,7 @@ public final class HypothesisController {
                 s.dedupChunks(), s.outcomeChunks(), s.dedupChunks() + s.outcomeChunks(),
                 s.dedupChecks(), s.dedupHits(), dedupRate,
                 s.recallQueries(), s.recallHits(), recallRate,
-                s.embedCalls(), s.embedFailures(), s.dedupThreshold(), s.recallThreshold());
+                s.embedCalls(), s.embedFailures(), s.lastEmbedError(), s.dedupThreshold(), s.recallThreshold());
     }
 
     @GetMapping("/api/hypotheses")

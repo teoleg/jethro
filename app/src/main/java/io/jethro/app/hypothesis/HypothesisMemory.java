@@ -56,6 +56,7 @@ public final class HypothesisMemory {
     private final java.util.concurrent.atomic.AtomicLong embedCalls = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong embedFailures = new java.util.concurrent.atomic.AtomicLong();
     private volatile int lastEmbeddingDim = -1; // dimension of the last successful embedding, -1 = none yet
+    private volatile String lastEmbedError = ""; // the most recent embed failure reason, for the ops view
     // Back off when the embedder is failing (e.g. the model isn't pulled): after a run of failures,
     // stop calling Ollama for a cooldown so RAG can't hammer a sick/absent model every cycle.
     private static final int EMBED_FAIL_THRESHOLD = 4;
@@ -70,7 +71,7 @@ public final class HypothesisMemory {
                            int dedupChunks, int outcomeChunks,
                            long dedupChecks, long dedupHits,
                            long recallQueries, long recallHits,
-                           long embedCalls, long embedFailures,
+                           long embedCalls, long embedFailures, String lastEmbedError,
                            double dedupThreshold, double recallThreshold) {
     }
 
@@ -87,7 +88,7 @@ public final class HypothesisMemory {
                 dedupIndex != null ? dedupIndex.size() : 0,
                 outcomeIndex != null ? outcomeIndex.size() : 0,
                 dedupChecks.get(), dedupHits.get(), recallQueries.get(), recallHits.get(),
-                embedCalls.get(), embedFailures.get(), dedupThreshold, recallThreshold);
+                embedCalls.get(), embedFailures.get(), lastEmbedError, dedupThreshold, recallThreshold);
     }
 
     public HypothesisMemory(EmbeddingClient embeddings, SemanticMemory<String> dedupIndex,
@@ -192,6 +193,7 @@ public final class HypothesisMemory {
             return v;
         } catch (RuntimeException e) {
             embedFailures.incrementAndGet();
+            lastEmbedError = e.getMessage();
             if (consecutiveEmbedFailures.incrementAndGet() >= EMBED_FAIL_THRESHOLD) {
                 embedCooldownUntilMillis = System.currentTimeMillis() + EMBED_COOLDOWN_MILLIS;
             }
