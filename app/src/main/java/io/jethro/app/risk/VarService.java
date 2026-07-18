@@ -108,6 +108,18 @@ public final class VarService {
                         .map(java.math.BigDecimal::valueOf));
     }
 
+    /** The current EWMA covariance (30s cached), for the hedge advisor (ADR-0038). Empty during
+     *  warm-up (fewer than {@code MIN_OBSERVATIONS} covered days). */
+    public Optional<CovMath.Covariance> covarianceSnapshot() {
+        return covariance();
+    }
+
+    /** USD exposures per instrument (price-quoted names at net exposure; swap legs as DV01 under
+     *  {@link #DV01_PREFIX}) — the hedge advisor filters these by asset class. */
+    public Map<String, BigDecimal> exposuresUsd() {
+        return measurableExposures();
+    }
+
     /** USD exposures of the measurable positions (incl. swap DV01 legs) — shared input. */
     private Map<String, BigDecimal> measurableExposures() {
         ConsolidatedRisk snapshot = projection.snapshot(System.currentTimeMillis());
