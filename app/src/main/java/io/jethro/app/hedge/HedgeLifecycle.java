@@ -45,6 +45,7 @@ public final class HedgeLifecycle {
     private final ObjectProvider<OrderService> orderService;
     private final ObjectProvider<TradingHaltSwitch> haltSwitch;
     private final ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection;
+    private final ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore;
     private final String hedgeBook;
     private final long cooldownMillis;
     private final long intervalSeconds;
@@ -55,6 +56,7 @@ public final class HedgeLifecycle {
                           ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                           ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
                           ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
+                          ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore,
                           String hedgeBook, long cooldownSeconds, long intervalSeconds) {
         this.advisor = advisor;
         this.varService = varService;
@@ -63,6 +65,7 @@ public final class HedgeLifecycle {
         this.orderService = orderService;
         this.haltSwitch = haltSwitch;
         this.projection = projection;
+        this.tradingCore = tradingCore;
         this.hedgeBook = hedgeBook;
         this.cooldownMillis = cooldownSeconds * 1_000;
         this.intervalSeconds = intervalSeconds;
@@ -104,17 +107,24 @@ public final class HedgeLifecycle {
                     pc != null ? pc.lastPrice(new InstrumentId(id)) : Optional.empty();
             Function<String, Optional<BigDecimal>> betaOf = id -> rf == null ? Optional.empty()
                     : rf.find(id).map(io.jethro.trading.riskpnl.InstrumentRef::hedgeBeta).filter(b -> b != null);
-            // The held hedge (ADR-0039's h): the HEDGE book's proxy position. Without this
+            // The held hedge (ADR-0039's h): the HEDGE book's position per proxy. Without this
             // feedback the loop re-submits the full hedge every cooldown (review P1-1) — so if
             // the projection isn't available, we cannot know what we hold and must not trade.
             var proj = projection.getIfAvailable();
             if (proj == null) {
                 return;
             }
-            BigDecimal held = proj.positionQuantity(hedgeBook, advisor.equityProxyId());
+            Map<String, BigDecimal> held = new java.util.HashMap<>();
+            for (String proxy : advisor.proxyUniverse()) {
+                held.put(proxy, proj.positionQuantity(hedgeBook, proxy));
+            }
+            // ADR-0042 tradability gate: a quarantined proxy is in no shape to trade.
+            java.util.Set<String> quarantined = quarantined();
+            Predicate<String> tradable = id -> !quarantined.contains(id);
 
             HedgeAdvisor.Snapshot snap = advisor.evaluate(
-                    vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf, held);
+                    vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf,
+                    held, tradable);
             long now = System.currentTimeMillis();
             for (HedgeAdvisor.Axis axis : snap.axes()) {
                 if (!axis.hedging() || !axis.hedgeRecommended() || axis.hedgeQuantity() == null
@@ -136,6 +146,24 @@ public final class HedgeLifecycle {
             }
         } catch (Exception e) {
             log.warn("auto-hedge cycle failed: {}", e.getMessage());
+        }
+    }
+
+    /** Instruments currently mark-quarantined (possible corporate action / bad print) — never
+     *  hedged into or out of on suspect data (ADR-0042; same rule as the ADR-0039 breaker). */
+    private java.util.Set<String> quarantined() {
+        try {
+            var core = tradingCore.getIfAvailable();
+            if (core == null || core.runtime() == null) {
+                return java.util.Set.of();
+            }
+            java.util.Set<String> out = new java.util.HashSet<>();
+            for (var q : core.runtime().markCache().quarantined()) {
+                out.add(q.instrumentId());
+            }
+            return out;
+        } catch (RuntimeException e) {
+            return java.util.Set.of(); // quarantine info unavailable — price gate still applies
         }
     }
 

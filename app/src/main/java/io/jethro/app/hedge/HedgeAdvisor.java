@@ -5,6 +5,9 @@ import io.jethro.trading.riskpnl.HedgeMath;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,18 +18,21 @@ import java.util.stream.Collectors;
 /**
  * Hedge advisor (ADR-0039): turns live exposures into per-axis hedge proposals. The book is kept
  * <b>target-flat</b> — any net equity exposure is hedged back to zero, not run naked up to a cap.
- * Firm-level for v1 (per-book is the ADR target — a follow-up). The EQUITY axis is live now: sum
- * the book's single-name equity USD exposure and size the index-future TARGET hedge
- * ({@link HedgeMath}) in two tiers (ADR-0040): the STATISTICAL min-variance hedge when the
- * covariance is ready and the measured ρ² clears the floor, otherwise the STRUCTURAL hedge from
- * assigned fundamental betas — so the book is hedged even with no return history.
+ * Firm-level for v1 (per-book is the ADR target — a follow-up).
  *
- * <p><b>The proposal is a DELTA, not the full hedge</b> (ADR-0039's {@code net = e + h}): the
- * advisor takes the hedge book's CURRENT proxy position and proposes {@code target − held}.
- * On-target books propose nothing; a book whose equities go flat gets its residual hedge UNWOUND
- * (no underlying → no hedge). A delta smaller than the ADR-0039 min-trade notional ($10k) is
- * suppressed as churn — without this feedback, AUTO would re-submit the full hedge every cooldown
- * and compound the position without bound (2026-07-18 math review, P1-1).
+ * <p><b>Proxy selection (ADR-0042):</b> each cycle the equity proxy is chosen from the candidate
+ * list — tradable candidates only (live price, not quarantined), highest measured ρ² wins
+ * (per-candidate multiplier from refdata), with a switch-hysteresis margin so a held proxy isn't
+ * flipped on estimation noise. No candidate clearing the statistical gate (ADR-0038 ρ² floor +
+ * ADR-0041 min-covariance-days) → the STRUCTURAL tier (ADR-0040, assigned betas vs the configured
+ * proxy) carries the book.
+ *
+ * <p><b>The proposal is a DELTA, not the full hedge</b> (ADR-0039's {@code net = e + h}): per-proxy
+ * targets are the selected proxy's sized target and ZERO for every other held proxy; the cycle
+ * executes the largest delta above the ADR-0039 min-trade notional — so on-target books propose
+ * nothing, flat books unwind their residual hedge, and a proxy switch unwinds the old instrument
+ * before building the new. Without this feedback, AUTO re-submits the full hedge every cooldown
+ * and compounds the position without bound (2026-07-18 math review, P1-1).
  *
  * <p>Pure evaluation — all live state is passed in, so the whole decision is unit-testable and,
  * being deterministic, reproducible from the same inputs (invariant 7). Mode is OFF/ADVISE/AUTO;
@@ -36,9 +42,10 @@ public final class HedgeAdvisor {
 
     public enum Mode { OFF, ADVISE, AUTO }
 
-    /** One hedge axis: the pure exposure, held/target hedge, and (when acting) the sized DELTA.
-     *  {@code tier} is STATISTICAL (ADR-0038, measured ρ²), STRUCTURAL (ADR-0040, assigned beta,
-     *  effectiveness asserted so {@code effectiveness} is null), or "—" when not sizing. */
+    /** One hedge axis: the pure exposure, held/target hedge, and (when acting) the sized DELTA on
+     *  {@code proxyId} (the instrument being traded this cycle — selected, or an old proxy being
+     *  unwound). {@code tier} is STATISTICAL (measured ρ²), STRUCTURAL (assigned beta,
+     *  {@code effectiveness} null — asserted, never a fake ρ²), or "—" when not sizing. */
     public record Axis(String axis, String proxyId, BigDecimal netExposureUsd, BigDecimal floorUsd,
                        double utilization, boolean hedging, boolean hedgeRecommended,
                        String hedgeSide, BigDecimal hedgeQuantity, BigDecimal hedgeNotionalUsd,
@@ -55,19 +62,32 @@ public final class HedgeAdvisor {
     private final BigDecimal minTradeNotionalUsd;
     private final double effectivenessFloor;
     private final int minCovarianceDays;
-    private final String equityProxyId;
-    private final BigDecimal equityProxyMultiplier;
+    private final List<String> proxyCandidates;
+    private final double proxySwitchMargin;
+    private final String structuralProxyId;
+    private final Function<String, Optional<BigDecimal>> multiplierOf;
 
+    /**
+     * @param proxyCandidates    equity proxies evaluated each cycle (ADR-0042), e.g. [ES, NQ]
+     * @param proxySwitchMargin  ρ² edge a challenger needs over the HELD proxy to switch
+     * @param structuralProxyId  the proxy assigned betas are quoted against (structural tier)
+     * @param multiplierOf       contract multiplier per proxy (refdata; config fallback wired
+     *                           by the caller)
+     */
     public HedgeAdvisor(Mode mode, BigDecimal rebalanceFloorUsd, BigDecimal minTradeNotionalUsd,
                         double effectivenessFloor, int minCovarianceDays,
-                        String equityProxyId, BigDecimal equityProxyMultiplier) {
+                        List<String> proxyCandidates, double proxySwitchMargin,
+                        String structuralProxyId, Function<String, Optional<BigDecimal>> multiplierOf) {
         this.mode = mode;
         this.rebalanceFloorUsd = rebalanceFloorUsd == null ? BigDecimal.ZERO : rebalanceFloorUsd.abs();
         this.minTradeNotionalUsd = minTradeNotionalUsd == null ? BigDecimal.ZERO : minTradeNotionalUsd.abs();
         this.effectivenessFloor = effectivenessFloor;
         this.minCovarianceDays = Math.max(2, minCovarianceDays);
-        this.equityProxyId = equityProxyId;
-        this.equityProxyMultiplier = equityProxyMultiplier;
+        this.proxyCandidates = proxyCandidates == null || proxyCandidates.isEmpty()
+                ? List.of(structuralProxyId) : List.copyOf(proxyCandidates);
+        this.proxySwitchMargin = Math.max(0, proxySwitchMargin);
+        this.structuralProxyId = structuralProxyId;
+        this.multiplierOf = multiplierOf;
     }
 
     public Mode mode() {
@@ -78,154 +98,274 @@ public final class HedgeAdvisor {
         this.mode = mode;
     }
 
-    /** The configured equity hedge proxy (e.g. ES) — callers read the held position of THIS id. */
-    public String equityProxyId() {
-        return equityProxyId;
+    /** Every proxy the advisor may hold or trade — callers read held positions for THESE ids. */
+    public List<String> proxyUniverse() {
+        List<String> ids = new ArrayList<>(proxyCandidates);
+        if (!ids.contains(structuralProxyId)) {
+            ids.add(structuralProxyId);
+        }
+        return ids;
     }
 
-    /** The sized target from whichever tier could produce one this cycle. */
-    private record Target(BigDecimal signedQty, String tier, Double effectiveness,
+    /** One tradable candidate with its market inputs. */
+    private record Candidate(String id, BigDecimal price, BigDecimal multiplier) {
+    }
+
+    /** The sized target on a chosen proxy from whichever tier could produce one. */
+    private record Target(Candidate proxy, BigDecimal signedQty, String tier, Double effectiveness,
                           BigDecimal grossSigmaUsd, BigDecimal residualSigmaUsd, String rationale) {
     }
 
     /**
      * Evaluate the equity hedge axis from live inputs.
      *
-     * @param covariance the EWMA return covariance (empty during warm-up)
+     * @param covariance  the EWMA return covariance (empty during warm-up)
      * @param exposuresUsd USD exposure per instrument (firm)
-     * @param isEquity     true for single-name equities (the axis members; NOT the index proxy)
-     * @param priceOf      current price of an instrument (for the proxy)
-     * @param betaOf       assigned fundamental beta of an instrument (ADR-0040 structural tier)
-     * @param heldProxyQty the hedge book's CURRENT signed proxy position (negative = short) —
-     *                     the {@code h} in ADR-0039's {@code net = e + h}; the proposal is the delta
+     * @param isEquity    true for single-name equities (the axis members; NOT index proxies)
+     * @param priceOf     current price of an instrument
+     * @param betaOf      assigned fundamental beta (ADR-0040 structural tier)
+     * @param heldByProxy the hedge book's CURRENT signed position per proxy (ADR-0039's h)
+     * @param tradable    false = the instrument is in no shape to trade (stale/quarantined) —
+     *                    it is neither selected nor unwound this cycle (ADR-0042 gate)
      */
     public Snapshot evaluate(Optional<CovMath.Covariance> covariance,
                              Map<String, BigDecimal> exposuresUsd,
                              Predicate<String> isEquity,
                              Function<String, Optional<BigDecimal>> priceOf,
                              Function<String, Optional<BigDecimal>> betaOf,
-                             BigDecimal heldProxyQty) {
+                             Map<String, BigDecimal> heldByProxy,
+                             Predicate<String> tradable) {
         Map<String, BigDecimal> equityExposures = exposuresUsd.entrySet().stream()
                 .filter(e -> isEquity.test(e.getKey()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         BigDecimal net = equityExposures.values().stream()
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal held = heldProxyQty == null ? BigDecimal.ZERO : heldProxyQty;
+        Map<String, BigDecimal> held = heldByProxy == null ? Map.of() : heldByProxy;
 
-        Axis axis;
-        if (mode == Mode.OFF) {
-            axis = idle(net, held, "OFF", "hedging OFF for this axis");
-        } else {
-            Optional<BigDecimal> proxyPrice = priceOf.apply(equityProxyId);
-            if (proxyPrice.isEmpty()) {
-                axis = idle(net, held, "WARMING", "no " + equityProxyId
-                        + " price yet — cannot size or adjust the hedge");
-            } else {
-                axis = act(net, held, equityExposures, covariance, proxyPrice.get(), betaOf);
-            }
-        }
+        Axis axis = mode == Mode.OFF
+                ? idle(net, held, "OFF", "hedging OFF for this axis")
+                : act(net, held, equityExposures, covariance, priceOf, betaOf, tradable);
         String note = mode == Mode.AUTO
                 ? "AUTO — the book is held target-flat: the hedge DELTA (target − held) auto-submits (sim-gated, ADR-0019)"
                 : "ADVISE — the sized hedge-to-flat surfaces here; execute from the ticket";
         return new Snapshot(mode.name(), covariance.isPresent(), List.of(axis), note);
     }
 
-    /**
-     * Target-then-delta (the P1-1 fix): compute the signed TARGET proxy quantity from the pure
-     * equity book (zero when |net| is inside the rebalance floor — which drives the unwind of any
-     * residual hedge), then propose {@code target − held}. Deltas under the min-trade notional are
-     * suppressed (ADR-0039 churn guard) and reported as on-target.
-     */
-    private Axis act(BigDecimal net, BigDecimal held, Map<String, BigDecimal> equityExposures,
-                     Optional<CovMath.Covariance> covariance, BigDecimal proxyPrice,
-                     Function<String, Optional<BigDecimal>> betaOf) {
+    private Axis act(BigDecimal net, Map<String, BigDecimal> held,
+                     Map<String, BigDecimal> equityExposures, Optional<CovMath.Covariance> covariance,
+                     Function<String, Optional<BigDecimal>> priceOf,
+                     Function<String, Optional<BigDecimal>> betaOf, Predicate<String> tradable) {
+        List<Candidate> candidates = candidates(priceOf, tradable);
         boolean flatTarget = net.abs().compareTo(rebalanceFloorUsd) <= 0;
         Target target;
         if (flatTarget) {
-            target = new Target(BigDecimal.ZERO, "—", null, null, null,
-                    "net equity |" + money(net) + "| ≤ " + money(rebalanceFloorUsd)
-                            + " floor — target hedge is zero");
+            Candidate anchor = candidates.isEmpty() ? null : incumbentOr(candidates, held, candidates.get(0));
+            target = anchor == null ? null
+                    : new Target(anchor, BigDecimal.ZERO, "—", null, null, null,
+                            "net equity |" + money(net) + "| ≤ " + money(rebalanceFloorUsd)
+                                    + " floor — target hedge is zero");
         } else {
-            target = sizeTarget(equityExposures, covariance, proxyPrice, betaOf);
-            if (target == null) {
-                return idle(net, held, "WARMING", "net equity " + money(net) + " to hedge, but neither "
-                        + "a ready covariance nor assigned betas — cannot size a target yet"
-                        + (held.signum() != 0 ? " (holding " + plain(held) + " " + equityProxyId + ")" : ""));
+            target = sizeTarget(equityExposures, covariance, candidates, priceOf, betaOf, held);
+        }
+        if (target == null) {
+            return idle(net, held, "WARMING", "net equity " + money(net) + " to hedge, but no "
+                    + "tradable proxy can be sized yet (price/covariance/betas missing)"
+                    + heldNote(held));
+        }
+        if (target.signedQty() == null) {
+            return idle(net, held, "REDUCE", target.rationale());
+        }
+
+        // Per-proxy targets: the chosen proxy gets the sized target; every other held proxy
+        // targets zero. Execute the largest delta above the min-trade notional (one order per
+        // cycle — a switch unwinds the old proxy before the new one builds).
+        Map<String, BigDecimal> targets = new LinkedHashMap<>();
+        targets.put(target.proxy().id(), target.signedQty());
+        held.forEach((proxy, qty) -> targets.putIfAbsent(proxy, BigDecimal.ZERO));
+
+        String bestProxy = null;
+        BigDecimal bestDelta = null;
+        BigDecimal bestNotional = null;
+        Candidate bestCandidate = null;
+        for (var e : targets.entrySet()) {
+            BigDecimal have = held.getOrDefault(e.getKey(), BigDecimal.ZERO);
+            BigDecimal delta = e.getValue().subtract(have);
+            if (delta.signum() == 0 || !tradable.test(e.getKey())) {
+                continue; // never trade an untradable instrument — not even to unwind (ADR-0042)
             }
-            if (target.signedQty() == null) {
-                // Statistical tier sized it but ρ² is below the floor and no structural fallback:
-                // the honest desk call is to REDUCE the position, not pretend the proxy hedges it.
-                return idle(net, held, "REDUCE", target.rationale());
+            Candidate c = e.getKey().equals(target.proxy().id()) ? target.proxy()
+                    : candidate(e.getKey(), priceOf);
+            if (c == null) {
+                continue;
+            }
+            BigDecimal notional = delta.abs().multiply(c.price()).multiply(c.multiplier());
+            if (bestNotional == null || notional.compareTo(bestNotional) > 0) {
+                bestProxy = e.getKey();
+                bestDelta = delta;
+                bestNotional = notional;
+                bestCandidate = c;
             }
         }
-        BigDecimal delta = target.signedQty().subtract(held);
-        BigDecimal deltaNotional = delta.abs().multiply(proxyPrice).multiply(equityProxyMultiplier);
-        String heldVsTarget = "held " + plain(held) + " → target " + plain(target.signedQty())
-                + " " + equityProxyId;
-        if (delta.signum() == 0 || deltaNotional.compareTo(minTradeNotionalUsd) < 0) {
-            String status = target.signedQty().signum() == 0 && held.signum() == 0 ? "FLAT" : "ON-TARGET";
-            return new Axis("EQUITY", equityProxyId, money(net), rebalanceFloorUsd,
+
+        BigDecimal heldSelected = held.getOrDefault(target.proxy().id(), BigDecimal.ZERO);
+        String heldVsTarget = "held " + plain(heldSelected) + " → target " + plain(target.signedQty())
+                + " " + target.proxy().id();
+        if (bestProxy == null || bestNotional.compareTo(minTradeNotionalUsd) < 0) {
+            String status = target.signedQty().signum() == 0 && allFlat(held) ? "FLAT" : "ON-TARGET";
+            return new Axis("EQUITY", target.proxy().id(), money(net), rebalanceFloorUsd,
                     eff(target), false, false, null, null, null,
                     target.effectiveness(), target.grossSigmaUsd(), target.residualSigmaUsd(),
-                    plain(held), plain(target.signedQty()), status, target.tier(),
-                    heldVsTarget + " — delta " + money(deltaNotional)
-                            + " under the " + money(minTradeNotionalUsd) + " min trade, holding");
+                    plain(heldSelected), plain(target.signedQty()), status, target.tier(),
+                    heldVsTarget + " — largest delta under the " + money(minTradeNotionalUsd)
+                            + " min trade, holding");
         }
-        String side = delta.signum() < 0 ? "SELL" : "BUY";
-        String status = target.signedQty().signum() == 0 ? "UNWIND" : "HEDGE";
-        return new Axis("EQUITY", equityProxyId, money(net), rebalanceFloorUsd,
-                eff(target), true, true, side, delta.abs(),
-                delta.abs().multiply(proxyPrice).multiply(equityProxyMultiplier).setScale(2, RoundingMode.HALF_UP),
+        boolean unwindingOther = !bestProxy.equals(target.proxy().id());
+        String side = bestDelta.signum() < 0 ? "SELL" : "BUY";
+        String status = unwindingOther || target.signedQty().signum() == 0 ? "UNWIND" : "HEDGE";
+        String story = unwindingOther
+                ? "unwinding " + plain(held.getOrDefault(bestProxy, BigDecimal.ZERO)) + " " + bestProxy
+                        + " before building the " + target.proxy().id() + " hedge · " + target.rationale()
+                : heldVsTarget + " → " + side + " " + plain(bestDelta.abs()) + " · " + target.rationale();
+        return new Axis("EQUITY", bestProxy, money(net), rebalanceFloorUsd,
+                eff(target), true, true, side, bestDelta.abs(),
+                bestNotional.setScale(2, RoundingMode.HALF_UP),
                 target.effectiveness(), target.grossSigmaUsd(), target.residualSigmaUsd(),
-                plain(held), plain(target.signedQty()), status, target.tier(),
-                heldVsTarget + " → " + side + " " + plain(delta.abs()) + " · " + target.rationale());
+                plain(held.getOrDefault(bestProxy, BigDecimal.ZERO)),
+                plain(targets.get(bestProxy)), status, target.tier(), story);
     }
 
     /**
-     * The signed target proxy quantity for the pure equity book — STATISTICAL (measured β̂/ρ²,
-     * ADR-0038) when the covariance is ready and clears the effectiveness floor, else STRUCTURAL
-     * (assigned betas, ADR-0040). Effectiveness/tier are judged on the PURE book, never the
-     * residual after hedging (a well-hedged residual is ~uncorrelated with the proxy by
-     * construction — judging it would flap the tiers). Null = cannot size; a Target with null
+     * ADR-0042 selection: statistical per-candidate (highest ρ² clearing the floor + the
+     * ADR-0041 covariance gate), with switch hysteresis versus the currently-held proxy;
+     * structural fallback on the configured proxy. Null = cannot size at all; Target with null
      * quantity = sized but below the ρ² floor with no structural fallback (REDUCE).
      */
     private Target sizeTarget(Map<String, BigDecimal> equityExposures,
-                              Optional<CovMath.Covariance> covariance, BigDecimal proxyPrice,
-                              Function<String, Optional<BigDecimal>> betaOf) {
-        // ADR-0041: a covariance below the min-days gate is too seed-heavy to size real money —
-        // the structural tier carries the book until the estimate has earned trust.
-        Optional<HedgeMath.HedgeProposal> statistical = covariance
-                .filter(cov -> cov.observations() >= minCovarianceDays)
-                .flatMap(cov -> HedgeMath.betaHedge(cov, equityExposures, equityProxyId, proxyPrice,
-                        equityProxyMultiplier, effectivenessFloor));
-        if (statistical.isPresent() && statistical.get().recommended()) {
-            var p = statistical.get();
-            return new Target(p.signedQuantity(), "STATISTICAL", p.effectiveness(),
-                    p.grossSigmaUsd(), p.residualSigmaUsd(), p.rationale());
+                              Optional<CovMath.Covariance> covariance, List<Candidate> candidates,
+                              Function<String, Optional<BigDecimal>> priceOf,
+                              Function<String, Optional<BigDecimal>> betaOf,
+                              Map<String, BigDecimal> held) {
+        Map<String, HedgeMath.HedgeProposal> passing = new LinkedHashMap<>();
+        Optional<HedgeMath.HedgeProposal> anyStatistical = Optional.empty();
+        if (covariance.isPresent() && covariance.get().observations() >= minCovarianceDays) {
+            for (Candidate c : candidates) {
+                Optional<HedgeMath.HedgeProposal> p = HedgeMath.betaHedge(covariance.get(),
+                        equityExposures, c.id(), c.price(), c.multiplier(), effectivenessFloor);
+                if (p.isPresent()) {
+                    anyStatistical = p;
+                    if (p.get().recommended()) {
+                        passing.put(c.id(), p.get());
+                    }
+                }
+            }
         }
-        Map<String, BigDecimal> betas = new java.util.HashMap<>();
-        for (String id : equityExposures.keySet()) {
-            betaOf.apply(id).ifPresent(b -> betas.put(id, b));
+        if (!passing.isEmpty()) {
+            String bestId = passing.entrySet().stream()
+                    .max(Map.Entry.comparingByValue(
+                            java.util.Comparator.comparingDouble(HedgeMath.HedgeProposal::effectiveness)))
+                    .orElseThrow().getKey();
+            // Switch hysteresis: keep a held proxy unless the challenger's ρ² beats it by the margin.
+            String incumbent = incumbentId(held);
+            String chosen = bestId;
+            if (incumbent != null && !incumbent.equals(bestId) && passing.containsKey(incumbent)
+                    && passing.get(bestId).effectiveness()
+                            - passing.get(incumbent).effectiveness() < proxySwitchMargin) {
+                chosen = incumbent;
+            }
+            HedgeMath.HedgeProposal p = passing.get(chosen);
+            Candidate c = candidates.stream().filter(x -> x.id().equals(p.proxyInstrumentId()))
+                    .findFirst().orElseThrow();
+            String comparison = passing.size() > 1
+                    ? passing.entrySet().stream()
+                            .map(e -> e.getKey() + " ρ²=" + String.format("%.2f", e.getValue().effectiveness()))
+                            .collect(Collectors.joining(" vs ")) + " → " + chosen + " · "
+                    : "";
+            return new Target(c, p.signedQuantity(), "STATISTICAL", p.effectiveness(),
+                    p.grossSigmaUsd(), p.residualSigmaUsd(), comparison + p.rationale());
         }
-        Optional<HedgeMath.StructuralHedge> structural = HedgeMath.structuralBetaHedge(
-                equityExposures, betas, equityProxyId, proxyPrice, equityProxyMultiplier);
-        if (structural.isPresent()) {
-            return new Target(structural.get().signedQuantity(), "STRUCTURAL", null, null, null,
-                    structural.get().rationale());
+        // Structural fallback on the configured proxy (assigned betas are quoted against it).
+        Candidate structural = candidates.stream()
+                .filter(c -> c.id().equals(structuralProxyId)).findFirst()
+                .orElse(candidate(structuralProxyId, priceOf));
+        if (structural != null) {
+            Map<String, BigDecimal> betas = new HashMap<>();
+            for (String id : equityExposures.keySet()) {
+                betaOf.apply(id).ifPresent(b -> betas.put(id, b));
+            }
+            Optional<HedgeMath.StructuralHedge> s = HedgeMath.structuralBetaHedge(
+                    equityExposures, betas, structural.id(), structural.price(), structural.multiplier());
+            if (s.isPresent()) {
+                return new Target(structural, s.get().signedQuantity(), "STRUCTURAL", null, null, null,
+                        s.get().rationale());
+            }
         }
-        if (statistical.isPresent()) {
-            return new Target(null, "STATISTICAL", statistical.get().effectiveness(),
-                    statistical.get().grossSigmaUsd(), statistical.get().residualSigmaUsd(),
-                    statistical.get().rationale());
+        if (anyStatistical.isPresent()) {
+            var p = anyStatistical.get();
+            Candidate c = candidates.stream().filter(x -> x.id().equals(p.proxyInstrumentId()))
+                    .findFirst().orElse(null);
+            if (c != null) {
+                return new Target(c, null, "STATISTICAL", p.effectiveness(),
+                        p.grossSigmaUsd(), p.residualSigmaUsd(), p.rationale());
+            }
         }
         return null;
     }
 
+    /** Tradable candidates with a live price and a known multiplier, in configured order. */
+    private List<Candidate> candidates(Function<String, Optional<BigDecimal>> priceOf,
+                                       Predicate<String> tradable) {
+        List<Candidate> out = new ArrayList<>();
+        for (String id : proxyCandidates) {
+            if (!tradable.test(id)) {
+                continue;
+            }
+            Candidate c = candidate(id, priceOf);
+            if (c != null) {
+                out.add(c);
+            }
+        }
+        return out;
+    }
+
+    private Candidate candidate(String id, Function<String, Optional<BigDecimal>> priceOf) {
+        BigDecimal price = priceOf.apply(id).orElse(null);
+        BigDecimal mult = multiplierOf.apply(id).orElse(null);
+        return price == null || price.signum() <= 0 || mult == null || mult.signum() <= 0
+                ? null : new Candidate(id, price, mult);
+    }
+
+    /** The proxy currently held (largest |position|), or null when flat everywhere. */
+    private static String incumbentId(Map<String, BigDecimal> held) {
+        return held.entrySet().stream()
+                .filter(e -> e.getValue() != null && e.getValue().signum() != 0)
+                .max(Map.Entry.comparingByValue(java.util.Comparator.comparing(BigDecimal::abs)))
+                .map(Map.Entry::getKey).orElse(null);
+    }
+
+    private static Candidate incumbentOr(List<Candidate> candidates, Map<String, BigDecimal> held,
+                                         Candidate fallback) {
+        String incumbent = incumbentId(held);
+        return candidates.stream().filter(c -> c.id().equals(incumbent)).findFirst().orElse(fallback);
+    }
+
+    private static boolean allFlat(Map<String, BigDecimal> held) {
+        return held.values().stream().allMatch(q -> q == null || q.signum() == 0);
+    }
+
+    private static String heldNote(Map<String, BigDecimal> held) {
+        String s = held.entrySet().stream().filter(e -> e.getValue().signum() != 0)
+                .map(e -> plain(e.getValue()) + " " + e.getKey())
+                .collect(Collectors.joining(", "));
+        return s.isEmpty() ? "" : " (holding " + s + ")";
+    }
+
     /** Nothing to trade this cycle (OFF, warming, or reduce-don't-hedge). Held is still shown. */
-    private Axis idle(BigDecimal net, BigDecimal held, String status, String rationale) {
-        return new Axis("EQUITY", equityProxyId, money(net), rebalanceFloorUsd,
-                0.0, false, false, null, null, null, null, null, null,
-                plain(held), null, status, "—", rationale);
+    private Axis idle(BigDecimal net, Map<String, BigDecimal> held, String status, String rationale) {
+        String incumbent = incumbentId(held);
+        BigDecimal heldQty = incumbent == null ? BigDecimal.ZERO : held.get(incumbent);
+        return new Axis("EQUITY", incumbent != null ? incumbent : structuralProxyId, money(net),
+                rebalanceFloorUsd, 0.0, false, false, null, null, null, null, null, null,
+                plain(heldQty), null, status, "—", rationale);
     }
 
     private static double eff(Target t) {

@@ -72,10 +72,15 @@ public final class HedgeController {
                         .filter(b -> b != null);
 
         var proj = projection.getIfAvailable();
-        BigDecimal held = proj != null
-                ? proj.positionQuantity(hedgeBook, advisor.equityProxyId()) : BigDecimal.ZERO;
+        Map<String, BigDecimal> held = new java.util.HashMap<>();
+        for (String proxy : advisor.proxyUniverse()) {
+            held.put(proxy, proj != null
+                    ? proj.positionQuantity(hedgeBook, proxy) : BigDecimal.ZERO);
+        }
 
-        return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf, held);
+        // The panel is read-only, so the price gate suffices here; the executing lifecycle also
+        // applies the quarantine gate (ADR-0042).
+        return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf, held, id -> true);
     }
 
     public record ModeRequest(String mode) {

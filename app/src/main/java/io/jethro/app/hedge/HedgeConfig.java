@@ -18,16 +18,29 @@ public class HedgeConfig {
 
     @Bean
     HedgeAdvisor hedgeAdvisor(
+            ObjectProvider<InstrumentRefSource> refs,
             @Value("${jethro.hedge.mode:ADVISE}") String mode,
             @Value("${jethro.hedge.equity-rebalance-floor-usd:0}") BigDecimal rebalanceFloorUsd,
             @Value("${jethro.hedge.min-trade-notional-usd:10000}") BigDecimal minTradeNotionalUsd,
             @Value("${jethro.hedge.effectiveness-floor:0.25}") double effectivenessFloor,
             @Value("${jethro.hedge.min-covariance-days:40}") int minCovarianceDays,
+            @Value("${jethro.hedge.equity-proxy-candidates:ES,NQ}") java.util.List<String> proxyCandidates,
+            @Value("${jethro.hedge.proxy-switch-margin:0.10}") double proxySwitchMargin,
             @Value("${jethro.hedge.equity-proxy:ES}") String equityProxy,
             @Value("${jethro.hedge.equity-proxy-multiplier:50}") BigDecimal equityProxyMultiplier) {
+        // Contract multiplier per candidate from refdata; the configured proxy keeps its config
+        // fallback so the advisor works before refdata loads.
+        java.util.function.Function<String, java.util.Optional<BigDecimal>> multiplierOf = id -> {
+            InstrumentRefSource rf = refs.getIfAvailable();
+            java.util.Optional<BigDecimal> fromRef = rf == null ? java.util.Optional.empty()
+                    : rf.find(id).map(io.jethro.trading.riskpnl.InstrumentRef::multiplier);
+            return fromRef.isPresent() ? fromRef
+                    : id.equals(equityProxy) ? java.util.Optional.of(equityProxyMultiplier)
+                    : java.util.Optional.empty();
+        };
         return new HedgeAdvisor(HedgeAdvisor.Mode.valueOf(mode.trim().toUpperCase(java.util.Locale.ROOT)),
                 rebalanceFloorUsd, minTradeNotionalUsd, effectivenessFloor, minCovarianceDays,
-                equityProxy, equityProxyMultiplier);
+                proxyCandidates, proxySwitchMargin, equityProxy, multiplierOf);
     }
 
     /** AUTO-hedge executor (ADR-0039): submits the hedge DELTA in AUTO mode, sim-gated. The hedge
@@ -38,11 +51,12 @@ public class HedgeConfig {
                                   ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                                   ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
                                   ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
+                                  ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore,
                                   @Value("${jethro.hedge.book:HEDGE}") String hedgeBook,
                                   @Value("${jethro.hedge.cooldown-seconds:60}") long cooldownSeconds,
                                   @Value("${jethro.hedge.interval-seconds:5}") long intervalSeconds) {
         var lifecycle = new HedgeLifecycle(advisor, varService, refs, prices, orderService, haltSwitch,
-                projection, hedgeBook, cooldownSeconds, intervalSeconds);
+                projection, tradingCore, hedgeBook, cooldownSeconds, intervalSeconds);
         lifecycle.start();
         return lifecycle;
     }
