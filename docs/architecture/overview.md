@@ -98,6 +98,11 @@ mode:
 | `/risk/:bookId` | per-book PnL (realized/unrealized), exposures, shocks | `risk.snapshots` |
 | `/costs` | spend by service vs budget, burn rate, live LLM token spend, running resources | `cost.snapshots` (infra ~24h lag; LLM spend live) |
 
+The landing page also carries two deterministic right-column panels beside the attention feed:
+the **Strategy actions** log (momentum entries/exits with reasons) and the **Hedging** panel
+(ADR-0038/0039) — per-axis exposure vs cap, the sized minimum-variance proxy hedge and its worked
+math (`h* = Cov(book, r_F)/Var(r_F)`, effectiveness ρ²), served from `/api/hedging`.
+
 ## Data flow invariants
 
 1. External symbology never crosses the market-data module boundary (ADR-0009); enforced

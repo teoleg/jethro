@@ -41,6 +41,14 @@ before any real-money broker (ADR-0015).
 **Sizing.** Volatility-targeted and covariance-aware; conviction never multiplies size (the AI
 proposes direction only — numbers are the quant layer's).
 
+**Hedging (ADR-0038/0039, advisory v1).** A deterministic **minimum-variance proxy hedge**: it
+sums the book's single-name equity exposure and, when it breaches a cap (the target-flat deadband),
+sizes the index-future (ES) hedge that removes the most variance — `h* = Cov(book, r_F)/Var(r_F)`
+off the EWMA covariance — carrying its measured **effectiveness ρ²**, so a weak proxy is flagged
+*reduce, don't hedge* rather than dressed up. Surfaced on the landing page with the worked math
+(exposure vs cap, sized hedge, daily σ before→after). DV01-neutral rates + FX axes, AUTO
+execution, and the firm-breaker one-shot de-risk are the next increments.
+
 **Session & corporate actions.** A tick-counted sim calendar and a live-feed session calendar
 (exchange holidays, 17:00-ET futures roll, closing-auction marks); a **corporate-action / bad-print
 guard** quarantines implausible mark jumps until an operator clears them (survives restart).
@@ -73,6 +81,9 @@ fully ours, deterministic (seedable), and controllable.
   gated to `feedMode == SIM`; untouched, the sim reproduces its seeded tape bit-for-bit.
 - **Real volume through the pipeline** (ADR-0032) — traded volume drives a live measured ADV and a
   relative-volume signal, surfaced on `/sim.html` and the Ops screen and consumed by execution.
+  Volume **surges with the regime and clusters with volatility** (a stress regime trades ~3× the
+  calm baseline and a big-move tick prints heavier), so a regime change visibly changes the *shape
+  of traffic*, not just price variance — swaps trade with real volume too, not a frozen lot.
 - **Provider abstraction** (ADR-0009) — the identical pipeline runs the **sim**, **Yahoo** (free,
   delayed, dev/demo), and **Finnhub** (free real-time equities WS) feeds.
 - **Hard mode separation** (ADR-0029) — every event carries `feedMode` (SIM/LIVE/REPLAY) +
@@ -157,6 +168,12 @@ scripts/stop-local.sh              # stop the app + infra (data volumes KEPT; --
 Set your defaults once instead of typing them each start — `cp local.env.example local.env` and
 edit (`PROVIDER=sim`, `AUTONOMY=off`, `MODEL=…`); it's gitignored, and command-line env still wins
 (`PROVIDER=yahoo ./scripts/svc.sh restart app`). Full knob list is in `local.env.example`.
+
+> **Profiles override `application.properties`.** `run-local.sh` defaults to `PROFILE=pi`, so
+> `application-pi.properties` wins on any key it sets — notably `jethro.trading.sim-instruments`.
+> When you add an instrument, add it to **both** `application.properties` and
+> `application-pi.properties`, or the Pi/default run keeps ticking the old universe while refdata
+> already knows the new name.
 
 Data persists in named volumes (`pg-data`, `redpanda-data`, `ollama-models`), so a restart keeps
 your books, fills, orders, topics, and pulled models. The raw path, if you prefer it by hand:
