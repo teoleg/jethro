@@ -18,7 +18,7 @@ Status: `shipped` · `in progress` · `needs ADR` · `planned` (ADR accepted, no
 | G8 | RAG for the AI layer | Retrieval so the model detects same-event news semantically (dedup across rewordings/sources) and grounds theses in past events/outcomes. Advisory only, never a number into risk (invariant 7). | ADR-0035 (to write) | needs ADR |
 | G9 | AI signal quality: balance | Hypotheses skew one-sided ("unbalanced"). Separate from dedup (G6): a directional-balance / calibration concern in generation + conviction stats. | needs ADR | open |
 | G10 | Sim control panel | Live UI dials over the sim for scenario staging. | ADR-0031 | shipped |
-| G11 | README refresh | Bring the top-level README in line with the current architecture/build. | commit | open |
+| G11 | README refresh | Bring the top-level README in line with the current architecture/build. | commit | shipped |
 
 ## Notes
 
