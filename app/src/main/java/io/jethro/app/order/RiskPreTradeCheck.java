@@ -24,4 +24,9 @@ public final class RiskPreTradeCheck implements PreTradeCheck {
                 .map(Decision::reject)
                 .orElseGet(Decision::approve);
     }
+
+    @Override
+    public boolean reducesRisk(BookId bookId, InstrumentId instrumentId, BigDecimal signedQuantity) {
+        return guardrail.reducesRisk(bookId.value(), instrumentId.value(), signedQuantity);
+    }
 }

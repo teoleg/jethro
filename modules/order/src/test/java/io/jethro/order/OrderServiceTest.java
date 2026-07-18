@@ -229,4 +229,85 @@ class OrderServiceTest {
         assertSame(Side.SELL, result.side());
         assertEquals(new InstrumentId("AAPL"), result.instrumentId());
     }
+
+    // ---- ADV participation cap: auto-slice risk-adders, exempt risk-reducers (ADR-0025) ----
+
+    /** A small measured ADV so an ordinary order trips the 2% participation cap (spread/fee 0
+     *  so slices fill exactly at the mid — the arithmetic stays about the cap, not costs). */
+    private static ExecutionCostSource advCosts(String advUsd) {
+        return instrumentId -> new ExecutionCostSource.Cost(
+                BigDecimal.ZERO, BigDecimal.ZERO, false, new BigDecimal(advUsd), null, null);
+    }
+
+    /** Approves every order; reports {@code reducesRisk} to steer the exit exemption. */
+    private static PreTradeCheck approving(boolean reducesRisk) {
+        return new PreTradeCheck() {
+            @Override
+            public Decision check(io.jethro.domain.BookId b, InstrumentId i, BigDecimal q) {
+                return Decision.approve();
+            }
+
+            @Override
+            public boolean reducesRisk(io.jethro.domain.BookId b, InstrumentId i, BigDecimal q) {
+                return reducesRisk;
+            }
+        };
+    }
+
+    @Test
+    void riskAddingOrderOverTheAdvCapIsSlicedNotRejected() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        // cap = 2% × $1,000,000 = $20,000 → max 20000/150 = 133.333333 units per slice.
+        var executor = new SimulatedExecutor(advCosts("1000000"), new BigDecimal("0.02"));
+        var svc = new OrderService(store, executor, prices, publisher, approving(false));
+
+        Order parent = svc.submit(market("idem-slice", Side.BUY, "500")); // needs ceil(500/133.33)=4
+
+        assertEquals(OrderStatus.CANCELLED, parent.status(), "the parent is replaced by its slices");
+        assertTrue(parent.status().isTerminal(), "a sliced parent is done, not left working");
+        assertTrue(store.fills.size() > 1, "the order executed as multiple child slices");
+    }
+
+    @Test
+    void slicedChildrenStayWithinTheCapAndSumToTheParentQuantity() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        var executor = new SimulatedExecutor(advCosts("1000000"), new BigDecimal("0.02"));
+        var svc = new OrderService(store, executor, prices, publisher, approving(false));
+
+        svc.submit(market("idem-slice2", Side.BUY, "500"));
+
+        assertEquals(4, store.fills.size(), "four child slices each fill");
+        BigDecimal maxQty = new BigDecimal("133.333333");
+        BigDecimal total = BigDecimal.ZERO;
+        for (Fill f : store.fills) {
+            assertTrue(f.quantity().compareTo(maxQty) <= 0, "slice within the cap: " + f.quantity());
+            total = total.add(f.quantity());
+        }
+        assertEquals(0, new BigDecimal("500").compareTo(total), "slices sum to the parent quantity");
+    }
+
+    @Test
+    void riskReducingExitIsNeverCappedEvenOverAdv() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        var executor = new SimulatedExecutor(advCosts("1000000"), new BigDecimal("0.02"));
+        var svc = new OrderService(store, executor, prices, publisher, approving(true)); // an exit
+
+        Order result = svc.submit(market("idem-exit", Side.SELL, "500"));
+
+        assertEquals(OrderStatus.FILLED, result.status(), "an exit routes at full size, uncapped");
+        assertEquals(1, store.fills.size(), "one fill — never sliced");
+        assertEquals(0, new BigDecimal("500").compareTo(store.fills.get(0).quantity()));
+    }
+
+    @Test
+    void anOrderTooLargeForTheDaysVolumeIsRejectedNotSlicedIntoThousands() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        var executor = new SimulatedExecutor(advCosts("1000000"), new BigDecimal("0.02"));
+        var svc = new OrderService(store, executor, prices, publisher, approving(false));
+
+        Order parent = svc.submit(market("idem-huge", Side.BUY, "1000000")); // ~7,500 slices
+
+        assertEquals(OrderStatus.REJECTED, parent.status(), "too big for the day's volume — rejected");
+        assertTrue(store.fills.isEmpty(), "nothing fills when the order can't be sliced sanely");
+    }
 }

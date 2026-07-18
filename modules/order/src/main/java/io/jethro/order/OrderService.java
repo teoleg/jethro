@@ -11,7 +11,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -99,35 +101,42 @@ public final class OrderService {
         }
         publisher.publishOrderEvent(order, null);
 
-        // Deterministic pre-trade risk gate (ADR-0018): reject before routing if the
-        // order would push the book over an exposure limit.
+        // ADV participation cap (ADR-0025 + auto-slicer): a risk-ADDING order that would be an
+        // outsized fraction of the day's volume is SPLIT into child slices rather than rejected;
+        // a risk-REDUCING exit is never capped (a desk must always be able to get out of a
+        // position, whatever the day's volume). The deterministic pre-trade exposure gate
+        // (ADR-0018) runs per routed order inside {@link #routeApproveAndFill}.
+        BigDecimal preMark = prices.lastPrice(order.instrumentId()).orElse(null);
+        BigDecimal signedQty = order.side().signed(order.quantity());
+        if (executor.participationRejection(order, preMark).isPresent()
+                && !preTradeCheck.reducesRisk(order.bookId(), order.instrumentId(), signedQty)) {
+            return sliceOverCap(order, preMark);
+        }
+        return routeApproveAndFill(order, preMark);
+    }
+
+    /**
+     * Routes an already-inserted order through the deterministic pre-trade exposure gate
+     * (ADR-0018) and execution. Shared by the normal submit path and by every child slice.
+     * @return the order after the attempt: FILLED, REJECTED, CANCELLED (IOC), or working.
+     */
+    private Order routeApproveAndFill(Order order, BigDecimal preMark) {
         PreTradeCheck.Decision gate = preTradeCheck.check(
                 order.bookId(), order.instrumentId(), order.side().signed(order.quantity()));
         if (!gate.approved()) {
             return transition(order, OrderStatus.REJECTED, gate.reason());
         }
-
-        // ADV participation cap (ADR-0025): a MARKET/LIMIT order that would be an outsized
-        // fraction of the day's volume is rejected with the reason, never silently worked.
-        BigDecimal preMark = prices.lastPrice(order.instrumentId()).orElse(null);
-        Optional<String> participation = executor.participationRejection(order, preMark);
-        if (participation.isPresent()) {
-            return transition(order, OrderStatus.REJECTED, participation.get());
-        }
-
         order = transition(order, OrderStatus.ROUTED, null);
         if (preMark != null) {
             // TCA arrival/decision price (ADR-0025): captured BEFORE any fill, so a worked
             // LIMIT that fills much later still measures against what the desk saw at submit.
             store.recordArrivalPrice(order.orderId(), preMark);
         }
-
-        BigDecimal mark = preMark;
-        Order filled = tryFill(order, mark);
+        Order filled = tryFill(order, preMark);
         if (filled != null) {
             return filled;
         }
-        if (mark == null) {
+        if (preMark == null) {
             return transition(order, OrderStatus.REJECTED,
                     "no market data for " + order.instrumentId().value());
         }
@@ -138,6 +147,59 @@ public final class OrderService {
         }
         indexAdd(order);
         return order;
+    }
+
+    /** The most child slices one over-cap order may be split into before it's simply rejected
+     *  as too large for the day's volume — bounds a tiny measured ADV from spawning thousands. */
+    private static final int MAX_SLICES = 50;
+
+    /**
+     * Splits a risk-adding order that exceeds the ADV participation cap into child slices, each
+     * at or below the cap, and routes every one (ADR-0025 auto-slicer). The parent order is
+     * CANCELLED with its child ids in the reason; each child carries {@code parent_order_id}
+     * back to the parent and shows as a "split" order. Rejected only when a single minimum slice
+     * still can't fit the cap, or it would take more than {@value #MAX_SLICES} slices — in which
+     * case the order is genuinely too big for the day's volume, said plainly.
+     */
+    private Order sliceOverCap(Order parent, BigDecimal preMark) {
+        Optional<BigDecimal> maxQtyOpt = executor.maxQuantityUnderCap(parent, preMark);
+        if (maxQtyOpt.isEmpty()) {
+            return transition(parent, OrderStatus.REJECTED,
+                    "exceeds the ADV participation cap and cannot be sliced");
+        }
+        BigDecimal maxQty = maxQtyOpt.get();
+        BigDecimal total = parent.quantity();
+        BigDecimal sliceCount = total.divide(maxQty, 0, RoundingMode.CEILING);
+        if (sliceCount.compareTo(BigDecimal.valueOf(MAX_SLICES)) > 0) {
+            return transition(parent, OrderStatus.REJECTED,
+                    "too large for the day's volume — would need " + sliceCount.toBigInteger()
+                            + " slices to fit the ADV cap (max " + MAX_SLICES + ")");
+        }
+        int n = sliceCount.intValue();
+        List<String> childIds = new ArrayList<>(n);
+        BigDecimal remaining = total;
+        for (int i = 0; i < n; i++) {
+            BigDecimal qty = remaining.min(maxQty);
+            remaining = remaining.subtract(qty);
+            Order child = new Order(
+                    "ord-" + UUID.randomUUID(),
+                    parent.idempotencyKey() + ":slice:" + i,
+                    parent.bookId(), parent.instrumentId(), parent.side(), parent.type(), qty,
+                    parent.limitPrice(), parent.timeInForce(), OrderStatus.NEW, Instant.now());
+            if (store.insertChildIfAbsent(child, parent.orderId(), Instant.now())) {
+                publisher.publishOrderEvent(child, null);
+                routeApproveAndFill(child, preMark);
+                childIds.add(child.orderId());
+            } else {
+                // Idempotency race (parent command resubmitted mid-slice) — reuse the winner.
+                store.findByIdempotencyKey(child.idempotencyKey())
+                        .ifPresent(existing -> childIds.add(existing.orderId()));
+            }
+        }
+        log.info("sliced {} {} {} into {} child order(s) to fit the ADV cap",
+                parent.side(), total.toPlainString(), parent.instrumentId().value(), n);
+        return transition(parent, OrderStatus.CANCELLED,
+                "split into " + n + " slices to fit the ADV cap: " + String.join(", ", childIds));
     }
 
     /**
