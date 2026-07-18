@@ -28,6 +28,28 @@ class MomentumStrategyTest {
         return last;
     }
 
+    private static List<TradeSignal> feedSeriesVol(MomentumStrategy s, double relVol, String... prices) {
+        List<TradeSignal> last = List.of();
+        for (String p : prices) {
+            last = s.evaluate(List.of(new MomentumStrategy.Observation("AAPL", new BigDecimal(p), false, relVol)));
+        }
+        return last;
+    }
+
+    @Test
+    void volumeConfirmationGatesThinBreakouts() {
+        // The worked-example jump (z ≈ 1.0) clears 0.95σ; require relativeVolume ≥ 0.8 to confirm.
+        var gated = new MomentumStrategy(4, 0.95, new BigDecimal("2"), 0.8);
+        assertTrue(feedSeriesVol(gated, 0.3, "100", "100", "100", "100", "102").isEmpty(),
+                "a breakout on thin volume (0.3×) is discarded");
+        var confirmed = new MomentumStrategy(4, 0.95, new BigDecimal("2"), 0.8);
+        assertEquals(1, feedSeriesVol(confirmed, 1.5, "100", "100", "100", "100", "102").size(),
+                "the same move with participation (1.5×) fires");
+        // Neutral default (relativeVolume 1.0, gate 0) is unaffected — the backtest path.
+        var ungated = new MomentumStrategy(4, 0.95, new BigDecimal("2"));
+        assertEquals(1, feedSeries(ungated, "100", "100", "100", "100", "102").size());
+    }
+
     @Test
     void noSignalUntilTheWindowIsFull() {
         var s = new MomentumStrategy(4, 1.0, new BigDecimal("2"));

@@ -17,7 +17,15 @@ public interface Strategy {
     /** Short algo name for logs/UI (e.g. "momentum", "mean-reversion"). */
     String name();
 
-    /** One instrument's current mark for the strategy to consider. */
-    record Observation(String instrumentId, BigDecimal price, boolean stale) {
+    /**
+     * One instrument's current mark for the strategy to consider, plus {@code relativeVolume} —
+     * recent ÷ baseline traded volume (ADR-0033), &gt;1 a surge, &lt;1 thin. Defaults to 1.0
+     * (neutral) via the 3-arg constructor, so a caller without volume (the backtest tape) leaves
+     * volume-confirmation a no-op.
+     */
+    record Observation(String instrumentId, BigDecimal price, boolean stale, double relativeVolume) {
+        public Observation(String instrumentId, BigDecimal price, boolean stale) {
+            this(instrumentId, price, stale, 1.0);
+        }
     }
 }

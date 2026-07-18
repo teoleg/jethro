@@ -58,6 +58,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
     private final io.jethro.app.risk.InstrumentVolSource vols; // measured daily vol (sizing)
     private final io.jethro.app.risk.PortfolioCorrelationSource correlations; // covariance-aware sizing
+    private final io.jethro.app.order.MeasuredAdvSource measuredAdv; // nullable: live ADV for the liquidity cap (ADR-0033)
 
     private static final int ACTIVITY_CAP = 50;
     private final java.util.Deque<StrategyActivity> activity = new java.util.ArrayDeque<>(); // newest first
@@ -82,8 +83,10 @@ public final class StrategyLifecycle implements SmartLifecycle {
                              StrategyProperties props, OrderService orderService,
                              io.jethro.app.risk.TradingHaltSwitch halt,
                              io.jethro.app.risk.InstrumentVolSource vols,
-                             io.jethro.app.risk.PortfolioCorrelationSource correlations) {
+                             io.jethro.app.risk.PortfolioCorrelationSource correlations,
+                             io.jethro.app.order.MeasuredAdvSource measuredAdv) {
         this.strategy = strategy;
+        this.measuredAdv = measuredAdv;
         this.tradingCore = tradingCore;
         this.refs = refs;
         this.guardrail = guardrail;
@@ -131,8 +134,12 @@ public final class StrategyLifecycle implements SmartLifecycle {
             }
             List<Strategy.Observation> observations = new ArrayList<>();
             int stale = 0;
+            var volumeStats = runtime.volumeStats(); // ADR-0033: relative volume for signal confirmation
             for (var mark : runtime.markCache().snapshot()) {
-                observations.add(new Strategy.Observation(mark.instrumentId(), mark.price(), mark.stale()));
+                double relativeVolume = volumeStats != null
+                        ? volumeStats.relativeVolume(mark.instrumentId()) : 1.0;
+                observations.add(new Strategy.Observation(
+                        mark.instrumentId(), mark.price(), mark.stale(), relativeVolume));
                 if (mark.stale()) {
                     stale++;
                 }
@@ -304,6 +311,19 @@ public final class StrategyLifecycle implements SmartLifecycle {
         }
         // Regime scale on top: risk-off in VOLATILE/RISK_OFF/INFLATION_SHOCK.
         notionalTarget = notionalTarget.multiply(regimeScale);
+        // Liquidity cap (ADR-0033): never size above a small fraction of the instrument's live
+        // measured ADV — below the execution participation cap, so the sized order passes. Only
+        // when measured ADV exists (warm sim / not a live feed); vol/notional caps stand otherwise.
+        if (measuredAdv != null) {
+            var advUsd = measuredAdv.advUsd(signal.instrumentId());
+            if (advUsd.isPresent()) {
+                BigDecimal liquidityCap = advUsd.get()
+                        .multiply(BigDecimal.valueOf(props.liquidityCapAdvFractionOrDefault()));
+                if (liquidityCap.signum() > 0 && notionalTarget.compareTo(liquidityCap) > 0) {
+                    notionalTarget = liquidityCap;
+                }
+            }
+        }
         BigDecimal qty = notionalTarget.divide(notionalPerUnit, 0, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             // Cap is per asset class: one Treasury contract (~$110k) is a legitimate order

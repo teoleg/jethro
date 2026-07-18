@@ -36,6 +36,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0030](0030-schema-registry-serde.md) | Schema-registry serde — writer-schema resolution on the wire | Accepted |
 | [0031](0031-sim-control-panel.md) | Sim control panel — live UI dials over the simulator for model testing | Accepted |
 | [0032](0032-empirical-sim-volume-liquidity.md) | History-anchored market simulation (sim price engine) | Accepted |
+| [0033](0033-flow-aware-algos-and-depth.md) | Flow-aware algorithms (volume confirmation + liquidity sizing) and synthesized depth | Accepted |
 | [0034](0034-news-driven-sim-shocks.md) | News-driven sim shocks — news moves the tape (correlated volume surge + bp momentum) | Accepted |
 | [0035](0035-rag-for-ai-layer.md) | Retrieval-augmented context for the AI layer — local embeddings + pgvector | Accepted |
 

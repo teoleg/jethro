@@ -29,12 +29,13 @@ public class StrategyConfig {
      *  drive the same lifecycle/guardrails/harness through the Strategy port. */
     @Bean
     io.jethro.trading.algo.strategy.Strategy tradingStrategy(StrategyProperties props) {
+        double volumeConfirm = props.volumeConfirmMinOrDefault(); // ADR-0033: participation gate
         if ("mean-reversion".equals(props.algoOrDefault())) {
             return new io.jethro.trading.algo.strategy.MeanReversionStrategy(
-                    props.lookback(), props.thresholdSigmasOrDefault(), props.minSignalBpsOrDefault());
+                    props.lookback(), props.thresholdSigmasOrDefault(), props.minSignalBpsOrDefault(), volumeConfirm);
         }
         return new MomentumStrategy(props.lookback(), props.thresholdSigmasOrDefault(),
-                props.minSignalBpsOrDefault());
+                props.minSignalBpsOrDefault(), volumeConfirm);
     }
 
     @Bean
@@ -45,13 +46,16 @@ public class StrategyConfig {
                                         ObjectProvider<OrderService> orderService,
                                         io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch,
                                         ObjectProvider<io.jethro.app.risk.InstrumentVolSource> vols,
-                                        ObjectProvider<io.jethro.app.risk.PortfolioCorrelationSource> correlations) {
+                                        ObjectProvider<io.jethro.app.risk.PortfolioCorrelationSource> correlations,
+                                        ObjectProvider<io.jethro.app.order.MeasuredAdvSource> measuredAdv) {
         // OrderService present only when persistence is on; without it the strategy is
         // suggestion-only even if auto-execute is set. Measured vol likewise — fixed-notional
-        // sizing until the daily history accrues.
+        // sizing until the daily history accrues. MeasuredAdvSource (ADR-0033) is the live ADV the
+        // liquidity cap sizes against; absent → no liquidity cap (falls back to vol/notional caps).
         return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, risk, limits, feed, sse, props,
                 orderService.getIfAvailable(), tradingHaltSwitch,
                 vols.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE),
-                correlations.getIfAvailable(() -> io.jethro.app.risk.PortfolioCorrelationSource.NONE));
+                correlations.getIfAvailable(() -> io.jethro.app.risk.PortfolioCorrelationSource.NONE),
+                measuredAdv.getIfAvailable());
     }
 }

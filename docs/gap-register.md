@@ -10,8 +10,8 @@ Status: `shipped` · `in progress` · `needs ADR` · `planned` (ADR accepted, no
 |---|--------|--------------------------------|------|--------|
 | G1 | Sim price realism | The sim ENGINE only: history-anchored block bootstrap so prices behave like the market. NOT volume-in-algos, NOT depth, NOT news coupling. | ADR-0032 | shipped (engine + adapter + wiring + Yahoo snapshot capture) |
 | G2 | Volume live through the pipeline | Traded volume no longer dropped at the ring buffer; measured ADV drives execution cap + impact. | commit (ADR-0032 P1) | shipped |
-| G3 | Volume & depth in the ALGORITHMS | Signals/sizing consume flow: relative-volume confirmation, liquidity-aware sizing. Distinct from G1 (that's price generation). | ADR-0033 (to write) | needs ADR |
-| G4 | Order-book depth modelled | `onQuote` gains sizes; synthesized depth-at-touch from real volume; depth-aware fills. No real L2 feed exists. | ADR-0033 (with G3) | needs ADR |
+| G3 | Volume in the ALGORITHMS | Signals/sizing consume flow: relative-volume confirmation, liquidity-aware sizing. Distinct from G1 (that's price generation). | ADR-0033 | shipped (volume-confirmation gate + measured-ADV liquidity cap) |
+| G4 | Order-book depth modelled | `onQuote` gains sizes; synthesized depth-at-touch from real volume; depth-aware fills. No real L2 feed exists. | ADR-0033 | needs build (next slice) |
 | G5 | News → tape coupling | A (sim) news item injects a CORRELATED shock: bp-momentum move + volume surge, faded over a horizon. Makes news↔price↔volume real. SIM-gated. | ADR-0034 | shipped (tape coupling + model reads the news that moved it) |
 | G6 | Hypothesis idempotency | Same news must not re-fire a hypothesis; deterministic news-id/text guard + model told the live calls. | ADR-0022 follow-up | shipped |
 | G7 | Ops screen traffic state | Feed throughput (ticks/s, drops, marks, instruments) on the Ops page + `/api/traffic`. | commit | shipped |

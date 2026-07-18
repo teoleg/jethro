@@ -35,14 +35,23 @@ public final class MomentumStrategy implements Strategy {
     private final int lookback;
     private final double thresholdSigmas;
     private final BigDecimal minSignalBps;
+    private final double volumeConfirmMin; // ADR-0033: require relativeVolume ≥ this; 0 disables
     private final Map<String, Deque<BigDecimal>> history = new HashMap<>();
 
-    /**
-     * @param lookback        number of returns in the window (window = lookback+1 prices).
-     * @param thresholdSigmas z-score at which a signal fires (e.g. 2.5).
-     * @param minSignalBps    minimum absolute move, in bps, for any signal.
-     */
+    /** Without volume confirmation (the backtest/legacy shape) — gate disabled. */
     public MomentumStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps) {
+        this(lookback, thresholdSigmas, minSignalBps, 0.0);
+    }
+
+    /**
+     * @param lookback         number of returns in the window (window = lookback+1 prices).
+     * @param thresholdSigmas  z-score at which a signal fires (e.g. 2.5).
+     * @param minSignalBps     minimum absolute move, in bps, for any signal.
+     * @param volumeConfirmMin minimum relativeVolume for a signal to fire (ADR-0033) — a breakout
+     *                         on thinner participation is discarded; 0 disables the gate.
+     */
+    public MomentumStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps,
+                            double volumeConfirmMin) {
         if (lookback < 2) {
             throw new IllegalArgumentException("lookback must be >= 2");
         }
@@ -52,6 +61,7 @@ public final class MomentumStrategy implements Strategy {
         this.lookback = lookback;
         this.thresholdSigmas = thresholdSigmas;
         this.minSignalBps = minSignalBps;
+        this.volumeConfirmMin = Math.max(0.0, volumeConfirmMin);
     }
 
     /** Feeds one observation snapshot and returns any signals it triggers. */
@@ -76,6 +86,12 @@ public final class MomentumStrategy implements Strategy {
                     .multiply(BigDecimal.valueOf(10_000));
             if (changeBps.abs().compareTo(minSignalBps) < 0) {
                 continue; // below the dust floor regardless of z
+            }
+            // Volume confirmation (ADR-0033): only act on a move the market participated in — a
+            // breakout on thin volume is discarded. Neutral (relativeVolume 1.0) always passes, so
+            // a caller without volume (the backtest) is unaffected.
+            if (volumeConfirmMin > 0 && obs.relativeVolume() < volumeConfirmMin) {
+                continue;
             }
 
             double z = windowZScore(window);
