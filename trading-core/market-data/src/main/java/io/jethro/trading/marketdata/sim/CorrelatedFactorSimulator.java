@@ -58,6 +58,8 @@ public final class CorrelatedFactorSimulator {
     private final double[] price;             // evolving price (double internally; long at the boundary)
     private final double[] bandFloor;         // hard session band (reflecting) — see bound()
     private final double[] bandCap;
+    private final double[] lastAbsReturn;     // |return| this tick — volume clusters with it
+    private final double[] emaAbsReturn;      // slow baseline of |return|; the clustering normalizer
 
     private int regimeIndex;
     private int shockSign;                    // -1 on a shock-entry tick, else 0
@@ -115,6 +117,8 @@ public final class CorrelatedFactorSimulator {
         double rhoEqUsdCalm = baseEqUsdCorrelation();
         this.bandFloor = new double[n];
         this.bandCap = new double[n];
+        this.lastAbsReturn = new double[n];
+        this.emaAbsReturn = new double[n];
         boolean banded = priceBandMultiple > 1.0;
         for (int i = 0; i < n; i++) {
             FactorModelConfig.InstrumentSpec spec = specFor(ids[i]);
@@ -125,6 +129,10 @@ public final class CorrelatedFactorSimulator {
             price[i] = startPricesScaled[i] / 1_000_000.0;
             bandFloor[i] = banded ? price[i] / priceBandMultiple : 0.0;
             bandCap[i] = banded ? price[i] * priceBandMultiple : Double.MAX_VALUE;
+            // Seed the volume-clustering baseline at the name's typical per-tick move, so the
+            // first ticks aren't mis-scaled before the EWMA warms up.
+            lastAbsReturn[i] = idioSigmaTick[i];
+            emaAbsReturn[i] = idioSigmaTick[i];
         }
         this.regimeIndex = Math.max(0, cfg.regimeIndex("CALM"));
     }
@@ -233,8 +241,22 @@ public final class CorrelatedFactorSimulator {
             double r = betaEq[i] * fEq + betaUsd[i] * fUsd + idio + control.driftBias(i);
             price[i] = price[i] * Math.exp(r);
             bound(i);
+            recordReturnForVolume(i, r);
         }
     }
+
+    /** Tracks this tick's move magnitude so volume can cluster with it: a big-move tick prints
+     *  heavier than the name's recent normal (volume follows volatility), and the slow EWMA is
+     *  the normalizer that keeps the effect relative per instrument, not absolute. */
+    private void recordReturnForVolume(int i, double r) {
+        double absR = Math.abs(r);
+        lastAbsReturn[i] = absR;
+        emaAbsReturn[i] = (1.0 - VOL_EMA_ALPHA) * emaAbsReturn[i] + VOL_EMA_ALPHA * absR;
+    }
+
+    private static final double VOL_EMA_ALPHA = 0.02;   // slow |return| baseline (the normalizer)
+    private static final double VOL_CLUSTER_CAP = 8.0;  // one tick prints at most 8× its name's normal
+    private static final double VOL_CLUSTER_FLOOR = 0.25;
 
     /** Regime switch check; entering a shock regime applies a one-tick correlated gap. */
     private void maybeTransitionRegime() {
@@ -266,8 +288,10 @@ public final class CorrelatedFactorSimulator {
     private void gap(double eqJump, double lvlJump) {
         shockSign = -1;
         for (int i = 0; i < ids.length; i++) {
-            price[i] = price[i] * Math.exp(betaEq[i] * eqJump);
+            double r = betaEq[i] * eqJump;
+            price[i] = price[i] * Math.exp(r);
             bound(i);
+            recordReturnForVolume(i, r); // a shock gap is a big-move tick — volume surges with it
         }
         lastLevelDelta += lvlJump; // consumed by the curve on this tick
     }
@@ -313,9 +337,43 @@ public final class CorrelatedFactorSimulator {
         return lastSlopeDelta;
     }
 
-    /** Deterministic pseudo-random trade quantity: 1..1000 whole units, scaled 1e-6. */
+    /**
+     * Regime-aware trade size (no per-instrument volatility term) for curve/linked instruments:
+     * the base draw amplified by the current regime's activity — stress regimes trade heavier.
+     * For factor names use {@link #nextQuantityScaled(int)} so volume also clusters with the move.
+     */
     public long nextQuantityScaled() {
-        return (random.nextInt(1000) + 1) * 1_000_000L;
+        return scaledQuantity(baseQuantityDraw(), regimeVolumeMultiple(), 1.0);
+    }
+
+    /**
+     * Regime- AND volatility-aware trade size for factor instrument {@code i}. The base draw is
+     * amplified by the regime's activity and by how large THIS tick's move was versus the name's
+     * recent normal — so a big-move tick prints heavier (volume follows volatility) and stress
+     * regimes trade heavier overall. This coupling is the "shape of traffic" that a regime change
+     * makes visible on the tape, not just a change in price variance. Draws exactly one random,
+     * like the no-arg form, so the deterministic RNG stream is unchanged.
+     */
+    public long nextQuantityScaled(int instrumentIndex) {
+        double norm = emaAbsReturn[instrumentIndex] > 1e-12
+                ? lastAbsReturn[instrumentIndex] / emaAbsReturn[instrumentIndex] : 1.0;
+        double cluster = Math.min(VOL_CLUSTER_CAP, Math.max(VOL_CLUSTER_FLOOR, norm));
+        return scaledQuantity(baseQuantityDraw(), regimeVolumeMultiple(), cluster);
+    }
+
+    private long baseQuantityDraw() {
+        return random.nextInt(1000) + 1; // 1..1000 whole units, BEFORE regime/vol amplification
+    }
+
+    /** The current regime's activity multiple, reused as the volume surge factor — a 3× vol
+     *  stress regime trades ~3× the calm baseline, the stylized volume-in-stress behaviour. */
+    private double regimeVolumeMultiple() {
+        return cfg.regimes().get(regimeIndex).volMultiple();
+    }
+
+    private static long scaledQuantity(long base, double regimeAmp, double clusterAmp) {
+        long qty = Math.round(base * regimeAmp * clusterAmp);
+        return Math.max(1L, qty) * 1_000_000L;
     }
 
     // ---- calibration plumbing ----

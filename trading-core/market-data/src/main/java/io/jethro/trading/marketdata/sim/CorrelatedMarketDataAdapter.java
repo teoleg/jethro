@@ -190,7 +190,7 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
             sim.nextTick();
             for (int i = 0; i < factorIds.length; i++) {
                 long mid = sim.priceScaled(i);
-                long qty = scaleVolume(sim.nextQuantityScaled(), control.volumeScale(i));
+                long qty = scaleVolume(sim.nextQuantityScaled(i), control.volumeScale(i));
                 listener.onTrade(factorIds[i], mid, qty, now, now);
                 quote(listener, factorIds[i], factorSpecs[i], mid, touchSize(qty), now);
             }
