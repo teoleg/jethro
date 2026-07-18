@@ -16,7 +16,7 @@ Status: `shipped` · `in progress` · `needs ADR` · `planned` (ADR accepted, no
 | G6 | Hypothesis idempotency | Same news must not re-fire a hypothesis; deterministic news-id/text guard + model told the live calls. | ADR-0022 follow-up | shipped |
 | G7 | Ops screen traffic state | Feed throughput (ticks/s, drops, marks, instruments) on the Ops page + `/api/traffic`. | commit | shipped |
 | G8 | RAG for the AI layer | Retrieval so the model detects same-event news semantically (dedup across rewordings/sources) and grounds theses in past events/outcomes. Advisory only, never a number into risk (invariant 7). | ADR-0035 | shipped (semantic dedup + outcome memory; durable via boot re-embed; pgvector deferred, scale-only) |
-| G9 | AI signal quality: balance | Hypotheses skew one-sided ("unbalanced"). Separate from dedup (G6): a directional-balance / calibration concern in generation + conviction stats. | needs ADR | open |
+| G9 | AI signal quality: balance | Hypotheses skew one-sided ("unbalanced"). Separate from dedup (G6): a directional-balance / calibration concern in generation + conviction stats. | ADR-0036 | shipped (measure skew + feed it back to the model; never a quota) |
 | G10 | Sim control panel | Live UI dials over the sim for scenario staging. | ADR-0031 | shipped |
 | G11 | README refresh | Bring the top-level README in line with the current architecture/build. | commit | shipped |
 

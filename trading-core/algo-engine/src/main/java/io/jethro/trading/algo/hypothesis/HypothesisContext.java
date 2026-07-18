@@ -12,19 +12,27 @@ import java.util.Set;
  */
 public record HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
                                 List<PortfolioLine> portfolio, Set<String> tradableInstruments,
-                                List<String> alreadyProposed, List<String> pastOutcomes) {
+                                List<String> alreadyProposed, List<String> pastOutcomes,
+                                String directionBalance) {
 
-    /** Without idempotency/RAG lists (both default empty) — the original shape. */
+    /** Without idempotency/RAG/balance context (all default empty) — the original shape. */
     public HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
                              List<PortfolioLine> portfolio, Set<String> tradableInstruments) {
-        this(marks, narrative, portfolio, tradableInstruments, List.of(), List.of());
+        this(marks, narrative, portfolio, tradableInstruments, List.of(), List.of(), "");
     }
 
     /** With the live calls (idempotency) but no recalled outcomes — the pre-RAG-memory shape. */
     public HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
                              List<PortfolioLine> portfolio, Set<String> tradableInstruments,
                              List<String> alreadyProposed) {
-        this(marks, narrative, portfolio, tradableInstruments, alreadyProposed, List.of());
+        this(marks, narrative, portfolio, tradableInstruments, alreadyProposed, List.of(), "");
+    }
+
+    /** With idempotency + outcome memory but no balance line — the pre-ADR-0036 shape. */
+    public HypothesisContext(List<MarkView> marks, List<NarrativeItem> narrative,
+                             List<PortfolioLine> portfolio, Set<String> tradableInstruments,
+                             List<String> alreadyProposed, List<String> pastOutcomes) {
+        this(marks, narrative, portfolio, tradableInstruments, alreadyProposed, pastOutcomes, "");
     }
 
     /**

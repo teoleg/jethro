@@ -153,6 +153,33 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         }
     }
 
+    /** The recent directional mix of LIVE (not-yet-scored) calls (ADR-0036) — surfaced and fed
+     *  back to the model so it self-corrects a one-sided book. Descriptive, never a risk limit. */
+    public record DirectionBalance(int longs, int shorts, String skew) {
+    }
+
+    public DirectionBalance directionBalance() {
+        int longs = 0;
+        int shorts = 0;
+        for (HypothesisEvent e : ledger()) {
+            if (e.outcome() != null) {
+                continue; // scored/closed — not a live call
+            }
+            if ("BUY".equals(e.direction())) {
+                longs++;
+            } else if ("SELL".equals(e.direction())) {
+                shorts++;
+            }
+        }
+        return new DirectionBalance(longs, shorts, HypothesisBalance.skew(longs, shorts));
+    }
+
+    /** The balance line fed to the model (ADR-0036), or "" when there are too few calls to matter. */
+    private String directionBalanceForPrompt() {
+        DirectionBalance b = directionBalance();
+        return HypothesisBalance.promptLine(b.longs(), b.shorts());
+    }
+
     /** Records/updates a hypothesis in the ledger: same (instrument, thesis) updates in place
      *  (keeping its first-seen time); a new thesis is a new event; identical repeats don't pile up. */
     private void updateLedger(List<HypothesisEvaluator.Evaluated> evaluated, Set<String> autoTraded, long now) {
@@ -304,7 +331,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 // news, retrieved semantically — empty/no-op when RAG is off.
                 hypotheses = generator.generate(new HypothesisContext(
                         markViews, narrative, portfolio, tradable,
-                        activeCallsForPrompt(), memory.recallSimilar(narrative)));
+                        activeCallsForPrompt(), memory.recallSimilar(narrative), directionBalanceForPrompt()));
                 consecutiveFailures.set(0);
             } catch (InferenceException e) {
                 long failures = consecutiveFailures.incrementAndGet();

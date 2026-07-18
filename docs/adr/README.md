@@ -39,6 +39,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0033](0033-flow-aware-algos-and-depth.md) | Flow-aware algorithms (volume confirmation + liquidity sizing) and synthesized depth | Accepted |
 | [0034](0034-news-driven-sim-shocks.md) | News-driven sim shocks — news moves the tape (correlated volume surge + bp momentum) | Accepted |
 | [0035](0035-rag-for-ai-layer.md) | Retrieval-augmented context for the AI layer — local embeddings + pgvector | Accepted |
+| [0036](0036-ai-signal-balance.md) | AI signal balance — measure directional skew, feed it back to the model, never quota | Accepted |
 
 ## Lifecycle
 

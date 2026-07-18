@@ -35,6 +35,10 @@ public final class HypothesisController {
                            double hitRate, String outcomePnl) {
     }
 
+    /** The recent directional skew of live calls (ADR-0036) — descriptive, not a risk limit. */
+    public record BalanceDto(int longs, int shorts, String skew) {
+    }
+
     private final ObjectProvider<HypothesisLifecycle> lifecycle;
 
     public HypothesisController(ObjectProvider<HypothesisLifecycle> lifecycle) {
@@ -71,6 +75,17 @@ public final class HypothesisController {
             return new StatsDto(s.conviction(), s.total(), s.open(), s.wins(), s.losses(), s.flat(),
                     Math.round(hitRate * 1000) / 1000.0, s.outcomePnl().toPlainString());
         }).toList();
+    }
+
+    /** The live long/short balance of proposed calls (ADR-0036) — surfaces the model's skew. */
+    @GetMapping("/api/hypotheses/balance")
+    public BalanceDto balance() {
+        HypothesisLifecycle live = lifecycle.getIfAvailable();
+        if (live == null) {
+            return new BalanceDto(0, 0, "balanced");
+        }
+        var b = live.directionBalance();
+        return new BalanceDto(b.longs(), b.shorts(), b.skew());
     }
 
     @GetMapping("/api/hypotheses")
