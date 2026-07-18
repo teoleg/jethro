@@ -214,8 +214,13 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
                 }
                 for (int s = 0; s < CurveMarkSource.SWAP_IDS.length; s++) {
                     long mid = curveSim.swapParScaledPercent(s);
-                    listener.onTrade(CurveMarkSource.SWAP_IDS[s], mid, 1_000_000L, now, now);
-                    quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, touchSize(1_000_000L), now);
+                    // Swaps are tradeable instruments, not curve reference points — give them a
+                    // real regime-aware traded size so the tape prints varying volume like every
+                    // other name, instead of a frozen 1-lot that reads as "not trading". (The SOFR
+                    // zero / TSY par rows above stay at 1: those are curve LEVELS, not an order book.)
+                    long sqty = sim.nextQuantityScaled();
+                    listener.onTrade(CurveMarkSource.SWAP_IDS[s], mid, sqty, now, now);
+                    quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, touchSize(sqty), now);
                 }
             }
             clock.awaitNextTick(); // deadline pacing: work/jitter don't stretch the period
