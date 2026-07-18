@@ -35,7 +35,7 @@
     box-shadow:0 24px 60px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.03);padding:16px;display:flex;gap:16px;align-items:stretch;overflow-x:auto}
   .strip{background:linear-gradient(180deg,var(--strip),#171b23);border:1px solid var(--line);border-radius:12px;
     padding:14px;display:flex;flex-direction:column;gap:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
-  .channel{flex:1;min-width:520px}
+  .channel{min-width:420px}
   .master{width:230px;background:linear-gradient(180deg,#1f232c,#161a22)}
   .shead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
   .sname{font-size:18px;font-weight:700} .sid{color:var(--dim);font-size:11px}
@@ -77,6 +77,20 @@
   .mtitle{font-size:12px;font-weight:700;letter-spacing:.06em} .msub{font-size:9px;color:var(--dim)}
   .mrow{display:flex;flex-direction:column;gap:6px;width:100%}
   .mlbl{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+
+  /* console + live rate graph side by side */
+  .simrow{display:flex;gap:16px;align-items:stretch;flex-wrap:wrap}
+  .simrow .console{flex:0 1 auto}
+  .ratechart{flex:1;min-width:340px;background:var(--bg2);border:1px solid var(--line);border-radius:16px;
+    padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+  .ratechart h4{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .ratechart .now{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+  .ratechart .now small{font-size:12px;color:var(--dim);font-weight:400;margin-left:8px}
+  .ratechart .plot{flex:1;min-height:180px}
+  .ratechart svg{width:100%;height:100%;display:block}
+  .ratechart .ach{fill:none;stroke:var(--teal);stroke-width:1.8}
+  .ratechart .tgt{fill:none;stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4}
+  .ratechart .fill2{fill:rgba(72,211,196,.08)}
 
   /* charts */
   .rangebar{display:flex;gap:6px;align-items:center;margin-bottom:14px}
@@ -214,7 +228,33 @@
     btns.append(dn,zap,up,mute,chart); ch.append(btns);
     con.append(ch, masterStrip());
     con._price=price; con._chg=chg; con._meter=meter; con._id=it.id; activeCh=con;
-    return con;
+    const row=$("div","simrow"); row.append(con, rateChartPanel());
+    return row;
+  }
+
+  // ---- live tick-rate graph (publisher telemetry): achieved vs target, last 2 minutes ----
+  const rateHist=[]; // {t, ach, tgt}
+  function rateChartPanel(){
+    const p=$("div","ratechart");
+    p.append($("h4",null,"Tick rate — live"),
+             $("div","now mono",'<span id="rateNow">—</span><small id="rateTgt"></small>'),
+             $("div","plot",'<div id="ratePlot"></div>'));
+    drawRate();
+    return p;
+  }
+  function drawRate(){
+    const el=document.getElementById("ratePlot"); if(!el)return;
+    if(rateHist.length<2){el.innerHTML='<div class="muted" style="padding:60px 0;text-align:center;font-size:11px">collecting… move the Rate fader and watch</div>';return;}
+    const W=520,H=200,pl=34,pr=8,pt=10,pb=18;
+    const pts=rateHist.slice(-120);
+    const t0=pts[0].t,t1=pts[pts.length-1].t||(t0+1);
+    const top=Math.max(...pts.map(p=>Math.max(p.ach,p.tgt)),1)*1.15;
+    const X=t=>pl+(t1===t0?0:(t-t0)/(t1-t0))*(W-pl-pr);
+    const Y=v=>H-pb-(v/top)*(H-pt-pb);
+    const line=k=>pts.map((p,i)=>`${i?"L":"M"}${X(p.t).toFixed(1)},${Y(p[k]).toFixed(1)}`).join(" ");
+    const area=`M${X(t0).toFixed(1)},${H-pb} `+pts.map(p=>`L${X(p.t).toFixed(1)},${Y(p.ach).toFixed(1)}`).join(" ")+` L${X(t1).toFixed(1)},${H-pb} Z`;
+    const gy=[top/1.15, top/2].map(v=>`<line x1="${pl}" y1="${Y(v).toFixed(1)}" x2="${W-pr}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${pl-6}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end" fill="var(--dim)" font-size="9">${v.toFixed(0)}</text>`).join("");
+    el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${gy}<path class="fill2" d="${area}"/><path class="tgt" d="${line('tgt')}"/><path class="ach" d="${line('ach')}"/></svg>`;
   }
   function masterStrip(){
     const m=$("div","strip master");
@@ -291,13 +331,19 @@
       state=await r.json(); badge.textContent=state.active?"panel-driven":"seeded · untouched"; badge.className="badge "+(state.active?"live":"clean");
       try{ (await (await fetch("/api/instruments")).json()).forEach(i=>instrClass[i.instrumentId]=i.assetClass); }catch(e){}
       build(); loadLive(); setInterval(loadLive,1500);
-      // publisher telemetry: target vs MEASURED emit rate on the master strip
+      // publisher telemetry (1s): master-strip readout + the live tick-rate graph
       setInterval(async()=>{try{const s=await(await fetch("/api/sim/control")).json();
-        const el=document.getElementById("rateStat"); if(!el)return;
-        const late=(s.lateTicks||0)+(s.clockResyncs||0);
-        el.textContent=`target ${s.targetTicksPerSec.toFixed(1)}/s · achieving ${s.achievedTicksPerSec.toFixed(1)}/s`+(late?` · ${s.lateTicks} late/${s.clockResyncs} resync`:"");
-        el.style.color = s.achievedTicksPerSec < s.targetTicksPerSec*0.9 ? "var(--warn)" : "var(--dim)";
-      }catch(e){}},2000);
+        rateHist.push({t:Date.now(),ach:s.achievedTicksPerSec||0,tgt:s.targetTicksPerSec||0});
+        while(rateHist.length>240)rateHist.shift();
+        const el=document.getElementById("rateStat");
+        if(el){const late=(s.lateTicks||0)+(s.clockResyncs||0);
+          el.textContent=`target ${s.targetTicksPerSec.toFixed(1)}/s · achieving ${s.achievedTicksPerSec.toFixed(1)}/s`+(late?` · ${s.lateTicks} late/${s.clockResyncs} resync`:"");
+          el.style.color = s.achievedTicksPerSec < s.targetTicksPerSec*0.9 ? "var(--warn)" : "var(--dim)";}
+        const now=document.getElementById("rateNow"), tgt=document.getElementById("rateTgt");
+        if(now){now.textContent=(s.achievedTicksPerSec||0).toFixed(1)+"/s";
+          tgt.textContent="target "+(s.targetTicksPerSec||0).toFixed(1)+"/s";}
+        drawRate();
+      }catch(e){}},1000);
     }catch(e){document.getElementById("stage").innerHTML='<div class="notice">sim console unavailable</div>';}
   }
   boot();
