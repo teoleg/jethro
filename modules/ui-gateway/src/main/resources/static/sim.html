@@ -3,378 +3,314 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>jethro — sim control</title>
+<title>jethro — sim console</title>
 <style>
-  :root { --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
-    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f; --warn:#e0a83d; }
-  * { box-sizing:border-box; margin:0; }
-  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
-         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
-  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
-  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
-  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
-  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
-  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
-  .tabs { display:flex; gap:4px; margin-left:8px; }
-  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; }
-  .tab:hover { color:var(--txt); background:var(--surface); }
-  .tab.active { color:var(--txt); background:var(--surface-2); }
-  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
-  .spacer { flex:1; } .hint { color:var(--dim); font-size:12px; }
-  main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
-  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; display:flex; align-items:center; gap:10px; }
-  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:18px; }
-  .globals { display:flex; flex-wrap:wrap; gap:22px; align-items:flex-end; }
-  .field { display:flex; flex-direction:column; gap:6px; }
-  .field label { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
-  input[type=range] { width:180px; accent-color:var(--brand); }
-  input[type=number] { width:90px; background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt);
-    border-radius:8px; padding:6px 8px; font:13px/1 "SF Mono", ui-monospace, monospace; }
-  select { background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt); border-radius:8px; padding:7px 10px; font-size:13px; }
-  button { background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt); border-radius:8px;
-    padding:7px 12px; font-size:13px; cursor:pointer; }
-  button:hover { border-color:var(--brand); color:#fff; }
-  button.primary { background:rgba(91,140,255,.16); border-color:var(--brand); }
-  button.warn { border-color:var(--warn); color:var(--warn); }
-  .val { font-variant-numeric:tabular-nums; color:var(--txt); min-width:52px; display:inline-block; }
-  table { width:100%; border-collapse:collapse; font-size:12.5px; }
-  th, td { text-align:right; padding:6px 10px; border-bottom:1px solid var(--line); }
-  th:first-child, td:first-child { text-align:left; }
-  tr:last-child td { border-bottom:0; }
-  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
-  .nudge-btns button { padding:4px 8px; font-size:12px; }
-  .stepper input { width:74px; }
-  .badge { font-size:10px; padding:2px 8px; border-radius:999px; letter-spacing:.06em; text-transform:uppercase; }
-  .badge.live { background:rgba(224,168,61,.16); color:var(--warn); border:1px solid rgba(224,168,61,.4); }
-  .badge.clean { background:rgba(53,192,122,.14); color:var(--up); border:1px solid rgba(53,192,122,.35); }
-  .muted { color:var(--dim); }
-  .notice { padding:40px 20px; text-align:center; color:var(--dim); }
-  .notice h2 { color:var(--txt); font-size:16px; margin-bottom:8px; }
-  .help { color:var(--dim); font-size:12px; margin:2px 2px 14px; line-height:1.6; }
-  .help b { color:var(--txt); font-weight:600; }
-  /* spike feed */
-  .feed { max-height:280px; overflow-y:auto; }
-  .ev { display:flex; align-items:center; gap:12px; padding:7px 4px; border-bottom:1px solid var(--line); font-size:13px; }
-  .ev:last-child { border-bottom:0; }
-  .ev .t { font-variant-numeric:tabular-nums; color:var(--dim); font-family:"SF Mono",ui-monospace,monospace; font-size:12px; white-space:nowrap; }
-  .ev .who { font-weight:600; min-width:118px; }
-  .ev .who .id { color:var(--dim); font-weight:400; font-size:11px; }
-  .ev .d { color:var(--dim); flex:1; }
-  .tag { font-size:10px; padding:2px 8px; border-radius:999px; letter-spacing:.05em; text-transform:uppercase; font-weight:600; white-space:nowrap; }
-  .tag.price { background:rgba(91,140,255,.16); color:var(--brand); border:1px solid rgba(91,140,255,.4); }
-  .tag.volume { background:rgba(224,168,61,.16); color:var(--warn); border:1px solid rgba(224,168,61,.4); }
-  .tag.news { background:rgba(53,192,122,.14); color:var(--up); border:1px solid rgba(53,192,122,.35); }
-  .mag { font-variant-numeric:tabular-nums; font-family:"SF Mono",ui-monospace,monospace; font-weight:600; }
+  :root{
+    --body:#101218; --panel:#171a22; --strip:#1d212b; --rail:#0c0e13; --slot:#0a0c10;
+    --ink:#e9ecf4; --dim:#828b9e; --edge:#2a2f3c; --edge2:#39404f;
+    --amber:#e6a23f; --teal:#48d3c4; --grn:#3ecf8e; --red:#f0553f; --blue:#5b8cff; --brand:#5b8cff;
+  }
+  *{box-sizing:border-box;margin:0}
+  html,body{height:100%}
+  body{background:radial-gradient(900px 500px at 12% -8%,rgba(72,211,196,.06),transparent 60%),
+      radial-gradient(900px 500px at 88% -8%,rgba(230,162,63,.06),transparent 60%),var(--body);
+    color:var(--ink);font:13px/1.5 ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;user-select:none}
+  .mono{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+  .lbl{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+  /* topbar */
+  .topbar{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);background:rgba(16,18,24,.72);border-bottom:1px solid var(--edge)}
+  .bar{display:flex;align-items:center;gap:18px;padding:0 20px;height:54px;max-width:1900px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:.2em;font-size:14px}
+  .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .tabs{display:flex;gap:3px}
+  .tab{padding:7px 12px;border-radius:8px;color:var(--dim);text-decoration:none;font-size:12.5px;font-weight:500}
+  .tab:hover{color:var(--ink);background:var(--strip)} .tab.active{color:var(--ink);background:var(--strip);position:relative}
+  .tab.active::after{content:"";position:absolute;left:12px;right:12px;bottom:-1px;height:2px;border-radius:2px;background:var(--teal)}
+  .spacer{flex:1} .badge{font-size:10px;padding:2px 9px;border-radius:999px;border:1px solid var(--edge2);color:var(--dim)}
+  .badge.live{color:var(--amber);border-color:var(--amber)} .badge.clean{color:var(--grn);border-color:var(--grn)}
+  main{max-width:1900px;margin:0 auto;padding:16px 20px 40px}
+  .help{color:var(--dim);font-size:12px;margin:2px 2px 14px;line-height:1.5;max-width:900px}
+  .help b{color:var(--ink)}
+
+  .console{background:linear-gradient(180deg,#191d26,#141821);border:1px solid var(--edge);border-radius:16px;
+    box-shadow:0 24px 60px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.03);padding:14px;overflow-x:auto}
+  .rack{display:flex;gap:14px;align-items:stretch;min-width:max-content}
+  .section{display:flex;gap:10px;padding:10px;border-radius:12px;background:rgba(255,255,255,.012);border:1px solid var(--edge)}
+  .section-tab{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--dim);display:flex;align-items:center;justify-content:center}
+  .eq .section-tab{color:var(--teal)} .fx .section-tab{color:var(--amber)} .rt .section-tab{color:var(--blue)}
+
+  .strip{width:80px;background:linear-gradient(180deg,var(--strip),#171b23);border:1px solid var(--edge);border-radius:10px;
+    padding:9px 8px 10px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+  .strip.bus{width:94px;background:linear-gradient(180deg,#1a2330,#141a24);border-color:#26424a}
+  .strip.masterstrip{width:118px;background:linear-gradient(180deg,#1f232c,#161a22)}
+  .name{font-weight:700;font-size:12px;text-align:center;line-height:1.05}
+  .sub{font-size:9px;color:var(--dim);text-align:center;margin-top:-4px}
+  .bus .name{color:var(--teal)} .fx .bus .name{color:var(--amber)} .rt .bus .name{color:var(--blue)}
+  .knobrow{display:flex;gap:10px;justify-content:center;width:100%}
+  .knobwrap{display:flex;flex-direction:column;align-items:center;gap:3px}
+  .knob{width:34px;height:34px;border-radius:50%;position:relative;cursor:ns-resize;
+    background:radial-gradient(circle at 50% 34%,#2b313d,#161a22 70%);border:1px solid #333a48;
+    box-shadow:0 2px 4px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.05);touch-action:none}
+  .knob::after{content:"";position:absolute;left:50%;top:5px;width:2px;height:11px;border-radius:2px;background:var(--amber);
+    transform-origin:50% 12px;transform:translateX(-50%) rotate(var(--ang,0deg));box-shadow:0 0 6px rgba(230,162,63,.6)}
+  .knob.teal::after{background:var(--teal);box-shadow:0 0 6px rgba(72,211,196,.6)}
+  .kval{font-size:9px;color:var(--dim)}
+  .fadergroup{display:flex;gap:9px;align-items:stretch;height:184px;margin:2px 0}
+  .fader{position:relative;width:26px;background:var(--slot);border:1px solid #262c38;border-radius:7px;cursor:ns-resize;
+    box-shadow:inset 0 2px 6px rgba(0,0,0,.6);touch-action:none}
+  .fader .fill{position:absolute;left:0;right:0;bottom:0;border-radius:0 0 6px 6px;background:linear-gradient(180deg,rgba(230,162,63,.35),rgba(230,162,63,.08))}
+  .bus .fader .fill{background:linear-gradient(180deg,rgba(72,211,196,.4),rgba(72,211,196,.08))}
+  .masterstrip .fader .fill{background:linear-gradient(180deg,rgba(91,140,255,.4),rgba(91,140,255,.08))}
+  .thumb{position:absolute;left:-5px;right:-5px;height:16px;border-radius:4px;background:linear-gradient(180deg,#3a4150,#232833);
+    border:1px solid #454d5e;box-shadow:0 3px 6px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12)}
+  .thumb::before{content:"";position:absolute;left:4px;right:4px;top:50%;height:2px;transform:translateY(-50%);background:var(--amber);border-radius:2px;opacity:.85}
+  .bus .thumb::before{background:var(--teal)} .masterstrip .thumb::before{background:var(--blue)}
+  .ghost{position:absolute;left:-7px;right:-7px;height:12px;border-radius:3px;border:1px dashed rgba(72,211,196,.55);pointer-events:none;opacity:0;transition:opacity .2s}
+  .linked .ghost{opacity:.9}
+  .meter{width:14px;display:flex;flex-direction:column-reverse;gap:2px;padding:2px;border-radius:6px;background:var(--slot);border:1px solid #242a35}
+  .seg{flex:1;border-radius:2px;background:#20262f}
+  .seg.on{background:var(--grn);box-shadow:0 0 5px rgba(62,207,142,.7)}
+  .seg.on.mid{background:var(--amber);box-shadow:0 0 5px rgba(230,162,63,.7)}
+  .seg.on.hot{background:var(--red);box-shadow:0 0 6px rgba(240,85,63,.8)}
+  .readout{display:flex;flex-direction:column;align-items:center;gap:0}
+  .px{font-size:12.5px;font-weight:600} .chg{font-size:10px}
+  .up{color:var(--grn)} .down{color:var(--red)} .warn{color:var(--amber)}
+  .row{display:flex;gap:5px;width:100%}
+  .btn{flex:1;font-size:11px;padding:5px 0;border-radius:6px;border:1px solid #333a48;background:#20252f;color:var(--dim);cursor:pointer;font-weight:600}
+  .btn:hover{color:var(--ink);border-color:#48505f} .btn:active{transform:translateY(1px)}
+  .btn.zap{color:var(--amber)} .tg{flex:1;font-size:9.5px;padding:5px 0;border-radius:6px;border:1px solid #333a48;background:#191d25;color:var(--dim);cursor:pointer;text-align:center;letter-spacing:.06em;font-weight:700}
+  .tg.on{background:rgba(240,85,63,.16);border-color:var(--red);color:var(--red)}
+  select{background:#191d25;border:1px solid #333a48;color:var(--ink);border-radius:7px;padding:6px 8px;font-size:11px;width:100%;cursor:pointer}
+  .transport{display:flex;flex-direction:column;gap:6px;width:100%}
+  .big{font-size:11px;padding:7px 0} .big.on{background:rgba(72,211,196,.16);border-color:var(--teal);color:var(--teal)}
+  /* event tape */
+  .tape{margin-top:12px;display:flex;align-items:center;gap:14px;background:var(--rail);border:1px solid var(--edge);border-radius:10px;padding:8px 12px;overflow:hidden}
+  .tp-lbl{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);white-space:nowrap;display:flex;align-items:center;gap:7px}
+  .tp-lbl::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--red);animation:blink 1.4s infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .tp-flow{flex:1;overflow-x:auto;height:20px} .tp-track{white-space:nowrap;display:flex;gap:26px}
+  .ev{font-size:11.5px;display:inline-flex;gap:8px;align-items:baseline}
+  .ev .t{color:var(--dim)} .pill{font-size:9px;padding:1px 7px;border-radius:999px;letter-spacing:.05em;font-weight:700}
+  .pill.price{background:rgba(91,140,255,.16);color:var(--blue)} .pill.volume{background:rgba(230,162,63,.16);color:var(--amber)} .pill.news{background:rgba(62,207,142,.16);color:var(--grn)}
+  .notice{padding:48px 20px;text-align:center;color:var(--dim)} .notice h2{color:var(--ink);font-size:16px;margin-bottom:8px}
+  footer{margin-top:10px;color:var(--dim);font-size:10.5px;text-align:center}
+  @media (prefers-reduced-motion:reduce){.tp-lbl::before{animation:none}}
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="bar">
-    <span class="brand"><span class="dot"></span>JETHRO</span>
-    <nav class="tabs">
-      <a class="tab" href="/">Overview</a>
-      <a class="tab" href="/markets.html">Markets</a>
-      <a class="tab" href="/rates.html">Rates</a>
-      <a class="tab" href="/books.html">Books</a>
-      <a class="tab" href="/orders.html">Orders</a>
-      <a class="tab" href="/config.html">Config</a>
-      <a class="tab active" href="/sim.html">Sim</a>
-      <a class="tab" href="/backtest.html">Backtest</a>
-      <a class="tab" href="/ollama.html">Ops</a>
-    </nav>
-    <span class="spacer"></span>
-    <span id="statusBadge" class="hint">loading…</span>
-  </div>
-</div>
+<div class="topbar"><div class="bar">
+  <span class="brand"><span class="dot"></span>JETHRO</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Overview</a><a class="tab" href="/markets.html">Markets</a>
+    <a class="tab" href="/books.html">Books</a><a class="tab" href="/orders.html">Orders</a>
+    <a class="tab active" href="/sim.html">Sim</a><a class="tab" href="/ollama.html">Ops</a>
+  </nav>
+  <span class="spacer"></span><span id="statusBadge" class="badge">loading…</span>
+</div></div>
 <main>
   <div class="help">
-    This page is the sim's cockpit. <b>Spike feed</b> (top) is the timeline of what just happened —
-    price jumps, volume surges, news — each stamped with the wall-clock time so you can match it to
-    an order or a log line. <b>Live readout</b> shows what the sim is emitting right now (price, volume,
-    book). <b>Controls</b> below change the sim. Everything here is SIM-only.
+    Grab a <b>fader</b> to set an instrument's signal (volatility); the <b>knob</b> above steers its drift.
+    Push a <b>bus</b> (teal / amber / blue) and every channel it feeds moves with it. Meters and the
+    <b>event tape</b> below show what the tape is emitting, live, with timestamps you can match to orders and logs.
   </div>
-
-  <div class="section-h">Spike feed
-    <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
-      newest first · time is wall-clock (matches logs &amp; order timestamps) · <span id="spikeCount"></span></span></div>
-  <div class="panel"><div id="spikeFeed" class="feed muted">watching for spikes…</div></div>
-
-  <div id="content" class="notice muted">loading sim control…</div>
-  <div id="volumePanel"></div>
-  <div id="snapshotPanel"></div>
+  <div id="stage"><div class="notice">connecting to the sim…</div></div>
+  <div class="tape"><div class="tp-lbl">Event tape</div><div class="tp-flow"><div class="tp-track mono" id="tape"></div></div></div>
+  <footer id="foot"></footer>
 </main>
 <script>
-  const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
-  const f2 = v => Number(v).toFixed(2);
-  const f4 = v => Number(v).toFixed(4);
+(() => {
+  const $=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+  const esc=s=>{const d=document.createElement("span");d.textContent=s??"";return d.innerHTML;};
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  async function post(url,body){const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:body==null?null:JSON.stringify(body)});if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}
 
-  async function post(url, body) {
-    const res = await fetch(url, { method:"POST", headers:{"content-type":"application/json"},
-      body: body==null ? null : JSON.stringify(body) });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return res.json();
+  // instrument → factor bus (matches the sim's EQ/USD/RATES factor structure)
+  const busOf=id=>{ if(/^.{3}USD$/.test(id))return"USD"; if(/IRS|SWAP|^Z[NFBT]$|^UB$|^TN$|_IRS_/.test(id))return"RT"; return"EQ"; };
+  const BUS={EQ:{label:"EQUITY",cls:"eq",beta:1.0},USD:{label:"USD",cls:"fx",beta:.85},RT:{label:"RATES",cls:"rt",beta:.7}};
+  // value mappings ↔ SimControl dials
+  const volToF=v=>clamp(v/3,0,1),        fToVol=f=>+(f*3).toFixed(3);
+  const drToK =d=>clamp(d/0.006,-1,1),   kToDr=k=>+(k*0.006).toFixed(5);
+  const qToK  =v=>clamp(Math.log2(Math.max(v,.01)),-1,1), kToQ=k=>+Math.pow(2,k).toFixed(3);
+  const spToF =s=>clamp(Math.log(s/0.1)/Math.log(200),0,1), fToSp=f=>+(0.1*Math.pow(200,f)).toFixed(2);
+
+  let chans=[], buses={}, master={}, state=null;
+
+  // ---- widgets ----
+  function knob(label,val,teal,onCommit){
+    const wrap=$("div","knobwrap"),k=$("div","knob"+(teal?" teal":"")),v=$("div","kval mono");
+    wrap.append(k,$("div","lbl",label),v);
+    const paint=x=>{k.style.setProperty("--ang",(x*135)+"deg");v.textContent=(x>=0?"+":"")+x.toFixed(2);};
+    let cur=clamp(val,-1,1),drag=false,y0=0,v0=0;
+    const setVisual=x=>{cur=clamp(x,-1,1);paint(cur);};
+    k.addEventListener("pointerdown",e=>{drag=true;y0=e.clientY;v0=cur;k.setPointerCapture(e.pointerId);});
+    k.addEventListener("pointermove",e=>{if(drag)setVisual(v0-(e.clientY-y0)/90);});
+    k.addEventListener("pointerup",()=>{if(drag){drag=false;onCommit&&onCommit(cur);}});
+    k.addEventListener("dblclick",()=>{setVisual(0);onCommit&&onCommit(0);});
+    setVisual(cur);
+    return {el:wrap,setVisual,value:()=>cur};
   }
-
-  let state = null;
-
-  function render() {
-    const badge = document.getElementById("statusBadge");
-    if (!state || !state.enabled) {
-      badge.innerHTML = '<span class="badge clean">idle</span>';
-      document.getElementById("content").innerHTML =
-        '<div class="notice"><h2>Sim control is available only in SIM feed mode</h2>' +
-        '<div>The running feed is live or replay (or the legacy sim engine). ' +
-        'Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine to stage scenarios here.</div></div>';
-      return;
-    }
-    badge.innerHTML = state.active
-      ? '<span class="badge live">panel-driven · dials active</span>'
-      : '<span class="badge clean">seeded · untouched</span>';
-
-    const g = `
-      <div class="globals">
-        <div class="field">
-          <label>Speed × <span class="val mono" id="speedVal">${f2(state.speedMultiplier)}</span></label>
-          <input type="range" id="speed" min="0.1" max="20" step="0.1" value="${state.speedMultiplier}">
-        </div>
-        <div class="field">
-          <label>Feed</label>
-          <button id="pauseBtn" class="${state.paused?'warn':''}">${state.paused?'▶ Resume':'⏸ Pause'}</button>
-        </div>
-        <div class="field">
-          <label>Regime override</label>
-          <select id="regime">
-            ${state.regimes.concat().length ? '' : ''}
-            <option value="AUTO"${state.regimeOverride==='AUTO'?' selected':''}>AUTO (Markov)</option>
-            ${state.regimes.map(r=>`<option value="${r}"${state.regimeOverride===r?' selected':''}>${r}</option>`).join("")}
-          </select>
-        </div>
-        <div class="field">
-          <label>Determinism</label>
-          <div style="display:flex; gap:8px">
-            <button id="reseed">↻ Reseed</button>
-            <button id="reset" class="warn">Reset all dials</button>
-          </div>
-        </div>
-      </div>`;
-
-    const rows = state.instruments.map(it => `
-      <tr data-id="${esc(it.id)}">
-        <td><b>${esc(it.name)}</b><div class="muted mono" style="font-size:10px">${esc(it.id)}</div></td>
-        <td class="nudge-btns">
-          <button data-nudge="-0.02">−2%</button>
-          <button data-nudge="-0.005">−0.5%</button>
-          <button data-nudge="0.005">+0.5%</button>
-          <button data-nudge="0.02">+2%</button>
-        </td>
-        <td class="stepper"><input type="number" data-drift step="0.0005" value="${f4(it.driftBias)}"></td>
-        <td class="stepper"><input type="number" data-vol step="0.25" min="0" value="${f2(it.volMultiplier)}"></td>
-        <td class="stepper"><input type="number" data-volume step="0.5" min="0" value="${f2(it.volumeScale)}"></td>
-      </tr>`).join("");
-
-    document.getElementById("content").className = "";
-    document.getElementById("content").innerHTML = `
-      <div class="section-h">Controls — global</div>
-      <div class="panel">${g}</div>
-      <div class="section-h">Controls — per-instrument dials
-        <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
-          nudge = one-shot price bump · drift = per-tick log-drift · vol = idiosyncratic vol × · volume = trade-size × · changes show up in the Spike feed</span></div>
-      <div class="panel">
-        <table>
-          <tr><th>instrument</th><th>nudge price</th><th>drift bias</th><th>vol ×</th><th>volume ×</th></tr>
-          ${rows}
-        </table>
-      </div>
-      <div class="section-h">News shock (ADR-0034)
-        <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
-          fires a correlated event — repricing jump + decaying momentum + volume surge — and a headline the model reads</span></div>
-      <div class="panel">
-        <div class="globals">
-          <div class="field">
-            <label>Instrument</label>
-            <select id="newsInstrument">
-              ${state.instruments.map(it=>`<option value="${esc(it.id)}">${esc(it.name)} (${esc(it.id)})</option>`).join("")}
-            </select>
-          </div>
-          <div class="field">
-            <label>Magnitude % <span class="val mono" id="newsMagVal">1.50</span></label>
-            <input type="range" id="newsMag" min="0.5" max="3.0" step="0.1" value="1.5">
-          </div>
-          <div class="field">
-            <label>Fire</label>
-            <div style="display:flex; gap:8px">
-              <button id="newsBull" class="primary">▲ Bullish</button>
-              <button id="newsBear" class="warn">▼ Bearish</button>
-            </div>
-          </div>
-          <div class="field">
-            <label>&nbsp;</label>
-            <span class="muted mono" id="newsStatus" style="font-size:12px"></span>
-          </div>
-        </div>
-      </div>`;
-    wire();
+  function faderMeter(val,kind,onCommit){
+    const g=$("div","fadergroup"),fader=$("div","fader"),fill=$("div","fill"),ghost=$("div","ghost"),thumb=$("div","thumb");
+    fader.append(fill,ghost,thumb);
+    const meter=$("div","meter"),segs=[];for(let i=0;i<16;i++){const s=$("div","seg");meter.append(s);segs.push(s);}
+    g.append(fader,meter);
+    let cur=clamp(val,0,1);
+    const place=x=>{const h=fader.clientHeight||184,y=(1-x)*(h-16);thumb.style.top=y+"px";fill.style.height=(h-y-8)+"px";};
+    const setVisual=x=>{cur=clamp(x,0,1);place(cur);};
+    let drag=false;const fromY=e=>{const r=fader.getBoundingClientRect();return 1-clamp((e.clientY-r.top-8)/(r.height-16),0,1);};
+    fader.addEventListener("pointerdown",e=>{drag=true;fader.setPointerCapture(e.pointerId);setVisual(fromY(e));});
+    fader.addEventListener("pointermove",e=>{if(drag)setVisual(fromY(e));});
+    fader.addEventListener("pointerup",()=>{if(drag){drag=false;onCommit&&onCommit(cur);}});
+    requestAnimationFrame(()=>place(cur));
+    return {group:g,segs,setVisual,value:()=>cur,setGhost:x=>{const h=fader.clientHeight||184;ghost.style.top=((1-clamp(x,0,1))*(h-16)+2)+"px";},link:on=>fader.parentElement.classList.toggle("linked",on)};
   }
+  const paintMeter=(segs,level)=>{const on=Math.round(clamp(level,0,1)*segs.length);segs.forEach((s,i)=>s.className="seg"+(i<on?" on"+(i>=segs.length-3?" hot":i>=segs.length*.6?" mid":""):""));};
 
-  function wire() {
-    const speed = document.getElementById("speed");
-    speed.oninput = () => document.getElementById("speedVal").textContent = f2(speed.value);
-    speed.onchange = async () => { state = await post("/api/sim/control/speed", { multiplier: Number(speed.value) }); render(); };
-    document.getElementById("pauseBtn").onclick = async () => {
-      state = await post("/api/sim/control/pause", { paused: !state.paused }); render(); };
-    document.getElementById("regime").onchange = async (e) => {
-      state = await post("/api/sim/control/regime", { regime: e.target.value }); render(); };
-    document.getElementById("reseed").onclick = async () => { state = await post("/api/sim/control/reseed", {}); render(); };
-    document.getElementById("reset").onclick = async () => { state = await post("/api/sim/control/reset", {}); render(); };
-
-    const newsMag = document.getElementById("newsMag");
-    newsMag.oninput = () => document.getElementById("newsMagVal").textContent = f2(newsMag.value);
-    const fireNews = async (direction) => {
-      const id = document.getElementById("newsInstrument").value;
-      const magnitude = Number(newsMag.value) / 100;
-      const status = document.getElementById("newsStatus");
-      try {
-        state = await post("/api/sim/news", { instrumentId: id, direction, magnitude });
-        status.textContent = `fired ${direction.toLowerCase()} on ${id}`;
-        render();
-      } catch (e) { status.textContent = "fire failed (" + e.message + ")"; }
-    };
-    document.getElementById("newsBull").onclick = () => fireNews("BULL");
-    document.getElementById("newsBear").onclick = () => fireNews("BEAR");
-
-    document.querySelectorAll("tr[data-id]").forEach(tr => {
-      const id = tr.getAttribute("data-id");
-      tr.querySelectorAll("button[data-nudge]").forEach(b =>
-        b.onclick = async () => { state = await post(`/api/sim/instrument/${encodeURIComponent(id)}/nudge`,
-          { value: Number(b.getAttribute("data-nudge")) }); render(); });
-      const send = (path, input) => async () => { state = await post(
-        `/api/sim/instrument/${encodeURIComponent(id)}/${path}`, { value: Number(input.value) }); render(); };
-      const drift = tr.querySelector("input[data-drift]");
-      const vol = tr.querySelector("input[data-vol]");
-      const volume = tr.querySelector("input[data-volume]");
-      drift.onchange = send("drift", drift);
-      vol.onchange = send("vol", vol);
-      volume.onchange = send("volume", volume);
+  // ---- build ----
+  function build(){
+    const stage=document.getElementById("stage");
+    const rack=$("div","rack");
+    // group instruments
+    const groups={EQ:[],USD:[],RT:[]};
+    state.instruments.forEach(it=>groups[busOf(it.id)].push(it));
+    chans=[]; buses={};
+    ["EQ","USD","RT"].forEach(bk=>{
+      if(!groups[bk].length)return;
+      const meta=BUS[bk],sec=$("div","section "+meta.cls);
+      sec.append($("div","section-tab",meta.label));
+      // bus strip
+      const bstrip=$("div","strip bus");
+      bstrip.append($("div","name",meta.label),$("div","sub","factor bus"));
+      const members=()=>chans.filter(c=>c.bus===bk);
+      const bknob=knob("drift",0,true,k=>members().forEach(c=>{const d=kToDr(k);c.knobDrift.setVisual(k);c.drift=d;post(`/api/sim/instrument/${encodeURIComponent(c.id)}/drift`,{value:d});}));
+      const br=$("div","knobrow");br.append(bknob.el);bstrip.append(br);
+      const bfm=faderMeter(.35,"bus",f=>members().forEach(c=>{const v=fToVol(f)*meta.beta;c.fader.setVisual(volToF(v));c.vol=v;post(`/api/sim/instrument/${encodeURIComponent(c.id)}/vol`,{value:v});}));
+      bstrip.append(bfm.group,$("div","lbl","energy"));
+      buses[bk]={fm:bfm,meterGet:()=>{const m=members();return m.length?m.reduce((a,c)=>a+(c.act||0),0)/m.length:0;}};
+      sec.append(bstrip);
+      // channels
+      groups[bk].forEach(it=>sec.append(channel(it,bk)));
+      rack.append(sec);
     });
+    rack.append(masterStrip());
+    stage.innerHTML=""; stage.append(rack);
   }
 
-  async function load() {
-    try {
-      const res = await fetch("/api/sim/control");
-      if (res.status === 403) { state = { enabled:false }; render(); return; }
-      state = await res.json();
-      // Only re-render passively when the user isn't mid-edit (avoid clobbering focus).
-      if (!document.querySelector("input:focus, select:focus")) render();
-    } catch (e) {
-      document.getElementById("statusBadge").textContent = "sim control unavailable";
-    }
+  function channel(it,bk){
+    const strip=$("div","strip");
+    strip.append($("div","name",it.name||it.id),$("div","sub mono",it.id));
+    const ro=$("div","readout"),px=$("div","px mono","—"),chg=$("div","chg mono","");ro.append(px,chg);strip.append(ro);
+    const c={id:it.id,bus:bk,vol:it.volMultiplier,drift:it.driftBias,px:null,act:0,muted:false,prevVol:it.volMultiplier,_px:px,_chg:chg,_strip:strip};
+    const kr=$("div","knobrow");
+    const kDrift=knob("drift",drToK(it.driftBias),false,k=>{const d=kToDr(k);c.drift=d;post(`/api/sim/instrument/${encodeURIComponent(it.id)}/drift`,{value:d});});
+    const kQty=knob("qty",qToK(it.volumeScale),false,k=>post(`/api/sim/instrument/${encodeURIComponent(it.id)}/volume`,{value:kToQ(k)}));
+    kr.append(kDrift.el,kQty.el);strip.append(kr);
+    const fm=faderMeter(volToF(it.volMultiplier),"",f=>{c.vol=fToVol(f);post(`/api/sim/instrument/${encodeURIComponent(it.id)}/vol`,{value:c.vol});});
+    strip.append(fm.group,$("div","lbl","vol"));
+    const nudge=$("div","row");
+    const bd=$("button","btn","−"),zap=$("button","btn zap","⚡"),bu=$("button","btn","+");
+    bd.onclick=()=>post(`/api/sim/instrument/${encodeURIComponent(it.id)}/nudge`,{value:-0.004});
+    bu.onclick=()=>post(`/api/sim/instrument/${encodeURIComponent(it.id)}/nudge`,{value:0.004});
+    zap.title="fire a news shock in the drift direction";
+    zap.onclick=()=>post("/api/sim/news",{instrumentId:it.id,direction:kDrift.value()>=0?"BULL":"BEAR",magnitude:0.015}).catch(()=>{});
+    nudge.append(bd,zap,bu);strip.append(nudge);
+    const trow=$("div","row"),mute=$("div","tg","MUTE");
+    mute.onclick=()=>{c.muted=!c.muted;mute.classList.toggle("on",c.muted);
+      if(c.muted){c.prevVol=c.vol;c.vol=0;fm.setVisual(0);post(`/api/sim/instrument/${encodeURIComponent(it.id)}/vol`,{value:0});}
+      else{c.vol=c.prevVol||1;fm.setVisual(volToF(c.vol));post(`/api/sim/instrument/${encodeURIComponent(it.id)}/vol`,{value:c.vol});}};
+    trow.append(mute);strip.append(trow);
+    c.fader=fm; c.knobDrift=kDrift; c.meter=fm;
+    chans.push(c);
+    return strip;
   }
 
-  const advFmt = v => v==null ? '<span class="muted">config</span>'
-    : "$" + (v>=1e9 ? (v/1e9).toFixed(2)+"B" : v>=1e6 ? (v/1e6).toFixed(1)+"M" : Math.round(v).toLocaleString());
-  const relCls = r => r>=1.5 ? "up" : r<=0.6 ? "down" : "";
-
-  const szFmt = v => { const n = Number(v); return n>=1e6 ? (n/1e6).toFixed(1)+"M" : n>=1e3 ? (n/1e3).toFixed(0)+"k" : n.toFixed(0); };
-
-  async function loadVolume() {
-    try {
-      const [rows, depth] = await Promise.all([
-        (await fetch("/api/volume")).json(),
-        fetch("/api/depth").then(r => r.ok ? r.json() : []).catch(() => [])]);
-      if (!rows.length) { document.getElementById("volumePanel").innerHTML = ""; return; }
-      const byId = {}; depth.forEach(d => byId[d.instrumentId] = d);
-      const body = rows.map(r => {
-        const d = byId[r.instrumentId];
-        const mid = d ? (Number(d.bid) + Number(d.ask)) / 2 : null;
-        const book = d ? `${szFmt(d.bidSize)} @ ${Number(d.bid).toFixed(2)} / ${Number(d.ask).toFixed(2)} @ ${szFmt(d.askSize)}` : '<span class="muted">—</span>';
-        return `
-        <tr>
-          <td><b>${esc(r.name)}</b><div class="muted mono" style="font-size:10px">${esc(r.instrumentId)}</div></td>
-          <td class="mono">${mid != null ? mid.toFixed(2) : '<span class="muted">—</span>'}</td>
-          <td class="mono">${advFmt(r.measuredAdvUsd)}</td>
-          <td class="mono" style="color:var(--${relCls(r.relativeVolume)||'txt'})">${r.relativeVolume.toFixed(2)}×</td>
-          <td class="mono muted" style="font-size:11px">${book}</td>
-          <td class="mono muted">${r.samples.toLocaleString()}</td>
-        </tr>`; }).join("");
-      document.getElementById("volumePanel").innerHTML = `
-        <div class="section-h">Live readout — what the sim is emitting
-          <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
-            price = book mid · rel-vol ≥1.5 hot / ≤0.6 thin · measured ADV drives execution + sizing (ADR-0032/0033) · book = synthesized top-of-book</span></div>
-        <div class="panel"><table>
-          <tr><th>instrument</th><th>price</th><th>measured ADV</th><th>rel vol</th><th>bid size @ px / px @ ask size</th><th>samples</th></tr>
-          ${body}
-        </table></div>`;
-    } catch (e) { /* volume is best-effort context */ }
+  function masterStrip(){
+    const sec=$("div","section master");sec.append($("div","section-tab","MASTER"));
+    const strip=$("div","strip masterstrip");strip.append($("div","name","MASTER"),$("div","sub","session"));
+    const tp=$("div","transport");
+    const sel=$("select");(state.regimes||[]).forEach(r=>{const o=$("option",null,r);o.value=r;sel.append(o);});
+    const auto=$("option",null,"AUTO");auto.value="AUTO";sel.insertBefore(auto,sel.firstChild);
+    sel.value=state.regimeOverride||"AUTO"; sel.onchange=()=>post("/api/sim/control/regime",{regime:sel.value}).then(s=>state=s);
+    const pause=$("button","btn big"+(state.paused?" on":""),state.paused?"▶ RESUME":"⏸ PAUSE");
+    pause.onclick=()=>post("/api/sim/control/pause",{paused:!state.paused}).then(s=>{state=s;pause.classList.toggle("on",s.paused);pause.textContent=s.paused?"▶ RESUME":"⏸ PAUSE";});
+    const reseed=$("button","btn big","↻ RESEED");reseed.onclick=()=>post("/api/sim/control/reseed",{}).then(s=>state=s);
+    const snap=$("button","btn big","⤓ CAPTURE");snap.onclick=async()=>{snap.textContent="capturing…";snap.disabled=true;
+      try{const res=await fetch("/api/sim/snapshot/fetch",{method:"POST"});const b=await res.json();
+        alert(res.ok?("Captured "+(b.instruments||"?")+" instruments × "+(b.days||"?")+" days →\n"+(b.path||"")):("Capture failed: "+(b.message||res.status)));}
+      catch(e){alert("Capture failed: "+e);}
+      finally{snap.textContent="⤓ CAPTURE";snap.disabled=false;}};
+    tp.append($("div","lbl","regime"),sel,pause,reseed,snap);strip.append(tp);
+    const fm=faderMeter(spToF(state.speedMultiplier),"masterstrip",f=>post("/api/sim/control/speed",{multiplier:fToSp(f)}).then(s=>state=s));
+    strip.append(fm.group,$("div","lbl","speed ×"));
+    master={fm}; sec.append(strip);return sec;
   }
 
-  let capturing = false;
-  async function loadSnapshot() {
-    try {
-      const s = await (await fetch("/api/sim/snapshot")).json();
-      const btn = capturing
-        ? '<button disabled>capturing… (pulling 5y from Yahoo)</button>'
-        : '<button id="captureBtn" class="primary">Capture real history from Yahoo</button>';
-      document.getElementById("snapshotPanel").innerHTML = `
-        <div class="section-h">Historical snapshot (ADR-0032)</div>
-        <div class="panel">
-          <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-            ${btn}
-            <span class="mono muted" style="font-size:12px">${esc(s.path)}</span>
-            <span class="badge ${s.exists?'clean':''}">${s.exists?'snapshot present':'no snapshot — using synthetic seed'}</span>
-            ${s.engineActive?'<span class="badge live">historical engine active</span>':''}
-          </div>
-          <div class="muted" style="font-size:11px;margin-top:8px">${esc(s.hint)}</div>
-        </div>`;
-      const b = document.getElementById("captureBtn");
-      if (b) b.onclick = capture;
-    } catch (e) { /* best-effort */ }
+  // ---- live data ----
+  async function loadLive(){
+    try{
+      const [depth,vol]=await Promise.all([
+        fetch("/api/depth").then(r=>r.ok?r.json():[]).catch(()=>[]),
+        fetch("/api/volume").then(r=>r.ok?r.json():[]).catch(()=>[])]);
+      const mid={},rel={};
+      depth.forEach(d=>mid[d.instrumentId]=(+d.bid + +d.ask)/2);
+      vol.forEach(v=>rel[v.instrumentId]=v.relativeVolume);
+      chans.forEach(c=>{
+        const m=mid[c.id];
+        if(m!=null){ let bps=0; if(c.px!=null&&c.px>0)bps=(m/c.px-1)*10000; c.px=m;
+          c._px.textContent=m>=1000?m.toFixed(1):m>=100?m.toFixed(2):m>=10?m.toFixed(3):m.toFixed(4);
+          c._chg.textContent=(bps>=0?"+":"")+bps.toFixed(0)+"bp";
+          c._chg.className="chg mono "+(bps>0.5?"up":bps<-0.5?"down":"");
+          c.pAct=clamp(Math.abs(bps)/50,0,1); }
+        const r=rel[c.id]; c.vAct=r!=null?clamp((r-1)/2,0,1):0;
+        c.link=Math.abs((buses[c.bus]?.fm.value()??0)-0.5)>0.15;
+      });
+    }catch(e){}
   }
-  async function capture() {
-    capturing = true; loadSnapshot();
-    try {
-      const res = await fetch("/api/sim/snapshot/fetch", { method:"POST" });
-      const body = await res.json();
-      capturing = false;
-      if (res.ok) {
-        alert(`Captured ${body.instruments} instruments × ${body.days} common days →\n${body.path}\n\nSet jethro.trading.sim-engine=historical and sim-snapshot-path to that file, then restart.`);
-      } else {
-        alert("Capture failed: " + (body.message || res.status));
-      }
-    } catch (e) { capturing = false; alert("Capture failed: " + e); }
-    loadSnapshot();
+  let tapeSeen="";
+  async function loadSpikes(){
+    try{
+      const s=await(await fetch("/api/sim/spikes")).json();
+      const track=document.getElementById("tape");
+      if(!s.length){track.innerHTML='<span class="ev"><span class="t">—</span> no spikes yet — push a bus or fire ⚡</span>';return;}
+      track.innerHTML=s.slice(0,18).map(e=>{
+        const t=new Date(e.atMillis).toLocaleTimeString([],{hour12:false})+"."+String(e.atMillis%1000).padStart(3,"0");
+        return `<span class="ev"><span class="t">${t}</span><span class="pill ${e.type.toLowerCase()}">${esc(e.type)}</span><b>${esc(e.name||e.instrumentId)}</b><span>${esc(e.detail)}</span></span>`;
+      }).join("");
+    }catch(e){}
   }
 
-  const spikeTag = t => `<span class="tag ${t.toLowerCase()}">${esc(t)}</span>`;
-  const spikeMag = s => {
-    if (s.type === "PRICE") return (s.magnitude >= 0 ? "+" : "") + s.magnitude.toFixed(0) + "bps";
-    if (s.type === "VOLUME") return s.magnitude.toFixed(1) + "×";
-    return s.magnitude >= 0 ? "▲ bull" : "▼ bear";
-  };
-  const spikeCls = s => s.type === "PRICE" ? (s.magnitude >= 0 ? "up" : "down")
-    : s.type === "NEWS" ? (s.magnitude >= 0 ? "up" : "down") : "warn";
-  async function loadSpikes() {
-    try {
-      const spikes = await (await fetch("/api/sim/spikes")).json();
-      const el = document.getElementById("spikeFeed");
-      document.getElementById("spikeCount").textContent = spikes.length ? spikes.length + " recent" : "";
-      if (!spikes.length) { el.className = "feed muted"; el.textContent = "no spikes yet — fire a news shock below, or wait for the tape to move"; return; }
-      el.className = "feed";
-      el.innerHTML = spikes.map(s => {
-        const time = new Date(s.atMillis).toLocaleTimeString([], { hour12:false }) +
-          "." + String(s.atMillis % 1000).padStart(3, "0");
-        return `<div class="ev">
-          <span class="t">${time}</span>
-          ${spikeTag(s.type)}
-          <span class="who">${esc(s.name)}<span class="id"> ${esc(s.instrumentId)}</span></span>
-          <span class="mag ${spikeCls(s)}">${spikeMag(s)}</span>
-          <span class="d">${esc(s.detail)}</span>
-        </div>`; }).join("");
-    } catch (e) {}
+  // ---- animate meters ----
+  function frame(){
+    chans.forEach(c=>{const target=Math.max(c.pAct||0,c.vAct||0);c.act=(c.act||0)*0.82+target*0.18;
+      if(c.meter){paintMeter(c.meter.segs,c.act);
+        if(c.link)c.meter.setGhost(clamp(c.vol/3 + ((buses[c.bus]?.fm.value()??.5)-.5)*.6,0,1));
+        c.meter.link&&c.meter.link(c.link);}});
+    Object.values(buses).forEach(b=>paintMeter(b.fm.segs,b.meterGet()));
+    if(master.fm){const avg=chans.length?chans.reduce((a,c)=>a+c.act,0)/chans.length:0;paintMeter(master.fm.segs,clamp(avg*1.5,0,1));}
+    requestAnimationFrame(frame);
   }
 
-  function tick() { load(); loadVolume(); loadSnapshot(); loadSpikes(); }
-  tick();
-  setInterval(tick, 3000);
+  async function boot(){
+    const badge=document.getElementById("statusBadge");
+    try{
+      const r=await fetch("/api/sim/control");
+      if(r.status===403){badge.textContent="idle";badge.className="badge clean";
+        document.getElementById("stage").innerHTML='<div class="notice"><h2>The console is live only in SIM feed mode</h2><div>Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine to mix the tape here.</div></div>';return;}
+      state=await r.json();
+      badge.textContent=state.active?"panel-driven":"seeded · untouched";badge.className="badge "+(state.active?"live":"clean");
+      build();
+      document.getElementById("foot").innerHTML='faders → <span class="mono">SimControl</span> drift/vol/volume · buses move their group together · ⚡ fires a sim news shock · tape = <span class="mono">/api/sim/spikes</span>';
+      requestAnimationFrame(frame);
+      loadLive();loadSpikes();
+      setInterval(()=>{loadLive();loadSpikes();},1500);
+      // refresh the panel-driven badge occasionally
+      setInterval(async()=>{try{const s=await(await fetch("/api/sim/control")).json();badge.textContent=s.active?"panel-driven":"seeded · untouched";badge.className="badge "+(s.active?"live":"clean");}catch(e){}},4000);
+    }catch(e){document.getElementById("stage").innerHTML='<div class="notice">sim console unavailable</div>';}
+  }
+  boot();
+})();
 </script>
 </body>
 </html>
