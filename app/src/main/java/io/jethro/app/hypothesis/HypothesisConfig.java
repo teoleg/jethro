@@ -83,7 +83,8 @@ public class HypothesisConfig {
     @Bean
     NarrativeFeed narrativeFeed(HypothesisProperties props, TradingCoreProperties trading,
                                 io.jethro.app.trading.FinnhubRateLimiter rateLimiter,
-                                ObjectProvider<RefDataRepository> refData) {
+                                ObjectProvider<RefDataRepository> refData,
+                                ObjectProvider<TradingCoreLifecycle> tradingCore) {
         String token = trading.finnhubTokenOrEmpty();
         if (!token.isEmpty()) {
             Map<String, String> names = finnhubNewsSymbols(refData.getIfAvailable());
@@ -92,6 +93,16 @@ public class HypothesisConfig {
                     props.narrativeRefreshSecondsOrDefault());
             var client = new FinnhubNewsClient(token, Duration.ofSeconds(10), rateLimiter);
             return new FinnhubNarrativeFeed(client, names, props.narrativeRefreshSecondsOrDefault() * 1_000);
+        }
+        // Pure-sim with news enabled: the model reads the sim's OWN headlines — the ones that moved
+        // the tape (ADR-0034), so news→price is causal, not a coincidence.
+        TradingCoreLifecycle core = tradingCore.getIfAvailable();
+        if (trading.simNewsEnabled() && core != null) {
+            var rd = refData.getIfAvailable();
+            InstrumentNameSource names = rd != null ? InstrumentNameSource.from(rd) : InstrumentNameSource.NONE;
+            log.warn("NARRATIVE: the model reads the sim's own generated news (ADR-0034) — the headlines "
+                    + "that moved the tape.");
+            return new SimEngineNarrativeFeed(core, names);
         }
         return new SimNarrativeFeed(props.narrativeSeedOrDefault());
     }

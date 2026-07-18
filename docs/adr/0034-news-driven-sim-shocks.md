@@ -62,3 +62,15 @@ any volume signal train on a coincidence. Rejected.
 - **Follow-ups:** a manual "fire a news shock" control on `/sim.html` (ADR-0031 overlay); richer
   headline templates; once G3/G4 land, volume-confirmed signals consume the surge. Depends on
   ADR-0031 (SimControl), ADR-0026/0032 (engines), ADR-0029 (`feedMode` gate).
+
+## Implementation status (2026-07-18) — built
+
+- **Tape coupling.** `SimControl.fireNewsShock` (repricing jump via the nudge queue + decaying
+  momentum drift + decaying volume surge, aged by `onTick()`), folded into the existing drift/volume
+  dials so both engines get it unchanged; `SimNewsEngine` (seedable) generates events from the
+  adapter tick loop. Gated to the pure-sim provider (`simNewsEnabled`) — never a live tape. Config:
+  `sim-news-per-day` (default 4), `sim-news-horizon-seconds` (default 20).
+- **Model sees the news.** `SimEngineNarrativeFeed` surfaces the generated headlines (with display
+  names + sentiment) to the hypothesis layer in pure-sim mode, so the model reads the very headline
+  that moved the tape — news→price→volume is now causal and the model closes the loop.
+- Untouched (news-free) runs are bit-for-bit the old seeded tape; every path is tested.
