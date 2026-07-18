@@ -154,6 +154,10 @@ scripts/svc.sh status              # what's running
 scripts/stop-local.sh              # stop the app + infra (data volumes KEPT; --volumes to wipe)
 ```
 
+Set your defaults once instead of typing them each start — `cp local.env.example local.env` and
+edit (`PROVIDER=sim`, `AUTONOMY=off`, `MODEL=…`); it's gitignored, and command-line env still wins
+(`PROVIDER=yahoo ./scripts/svc.sh restart app`). Full knob list is in `local.env.example`.
+
 Data persists in named volumes (`pg-data`, `redpanda-data`, `ollama-models`), so a restart keeps
 your books, fills, orders, topics, and pulled models. The raw path, if you prefer it by hand:
 
