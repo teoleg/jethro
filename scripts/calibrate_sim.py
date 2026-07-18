@@ -79,16 +79,22 @@ def fetch_closes(sym):
     return {d: closes[d] for d in dates}
 
 
+def _stooq_symbol(s):
+    """Stooq ticker: US listings take a .us suffix; FX pairs are the bare pair, lowercased."""
+    return s.lower() if s in ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD") else s.lower() + ".us"
+
+
 def print_data_help():
     syms = needed_symbols()
-    print(f"\nNo history found. Put {len(syms)} daily-CSV files (≥{YEARS}y each) in:\n  "
-          + os.path.normpath(HISTORY_DIR), file=sys.stderr)
-    print("\nDownload each once from a browser (Yahoo: open the link, range 5Y, 'Download'):",
+    outdir = os.path.normpath(HISTORY_DIR)
+    print(f"\nNo history found. Put {len(syms)} daily-CSV files (≥{YEARS}y each) in:\n  {outdir}",
           file=sys.stderr)
+    print("\nStooq downloads free with NO login — open each link in a browser (it saves a CSV),\n"
+          "then rename it to the name shown on the left:", file=sys.stderr)
     for s in syms:
-        q = s + "=X" if s in ("EURUSD", "GBPUSD", "USDJPY", "AUDUSD") else s
-        print(f"  {s + '.csv':13s} https://finance.yahoo.com/quote/{q}/history", file=sys.stderr)
-    print("\nThen re-run. Missing a few names only drops those specs (the rest still calibrate).\n",
+        print(f"  {s + '.csv':13s} https://stooq.com/q/d/l/?s={_stooq_symbol(s)}&i=d", file=sys.stderr)
+    print("\n(Tip: for a longer window add &d1=20150101&d2=20251231 to each URL.)", file=sys.stderr)
+    print("Then re-run. Missing a few names only drops those specs (the rest still calibrate).\n",
           file=sys.stderr)
 
 
