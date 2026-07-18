@@ -104,6 +104,30 @@ class MomentumStrategyTest {
     }
 
     @Test
+    void baselineSigmasReadsTheJumpHonestlyWhileInWindowZStaysTame() {
+        // Warm the slow vol baseline on tiny ±2bp oscillation, THEN a 5% jump. The in-window z is
+        // damped because the jump inflates its own window σ; the baseline (vol as it was BEFORE the
+        // jump) reports the move for what it is — many σ vs normal. Firing is unchanged (window z).
+        var s = new MomentumStrategy(4, 0.95, new BigDecimal("2"));
+        List<TradeSignal> out = List.of();
+        for (int i = 0; i < 40; i++) {
+            out = s.evaluate(List.of(obs(i % 2 == 0 ? "100.00" : "100.02"))); // calm: ±~2bp returns
+        }
+        assertTrue(out.isEmpty(), "no signal on calm oscillation below threshold");
+        List<TradeSignal> jump = s.evaluate(List.of(obs("105.00"))); // ~+5% news-scale jump
+        assertEquals(1, jump.size());
+        TradeSignal sig = jump.get(0);
+        assertEquals(Side.BUY, sig.side());
+        assertTrue(sig.baselineSigmas() > 40,
+                "vs the pre-jump baseline the move is many σ, got " + sig.baselineSigmas());
+        assertTrue(Math.abs(sig.zScore()) < 5,
+                "the in-window z is damped by the jump's own vol, got " + sig.zScore());
+        assertTrue(sig.baselineSigmas() > 10 * Math.abs(sig.zScore()),
+                "the baseline reading must be far more extreme than the in-window one");
+        assertTrue(sig.rationale().contains("vs normal"), sig.rationale());
+    }
+
+    @Test
     void staleMarksAreIgnored() {
         var s = new MomentumStrategy(2, 0.5, new BigDecimal("0"));
         for (int i = 0; i < 5; i++) {

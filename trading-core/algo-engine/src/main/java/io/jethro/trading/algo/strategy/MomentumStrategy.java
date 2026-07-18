@@ -36,7 +36,32 @@ public final class MomentumStrategy implements Strategy {
     private final double thresholdSigmas;
     private final BigDecimal minSignalBps;
     private final double volumeConfirmMin; // ADR-0033: require relativeVolume ≥ this; 0 disables
+    private final double baselineLambda;   // EWMA decay for the slow vol baseline (halflife = lookback)
     private final Map<String, Deque<BigDecimal>> history = new HashMap<>();
+    private final Map<String, Baseline> baselines = new HashMap<>();
+
+    /** A slow EWMA of squared returns — the instrument's "normal" per-return vol, updated with a
+     *  one-tick lag so a move is scored against the vol that prevailed BEFORE it (not the vol its
+     *  own spike inflates). Halflife = lookback returns, so it spans ~one window and recovers over
+     *  the next. Purely a reporting baseline; it never changes which signals fire. */
+    private static final class Baseline {
+        private double var;
+        private long n;
+
+        double variance() {
+            return var;
+        }
+
+        boolean ready(long lookback) {
+            return n >= lookback;
+        }
+
+        void update(double r, double lambda) {
+            double r2 = r * r;
+            var = n == 0 ? r2 : lambda * var + (1.0 - lambda) * r2;
+            n++;
+        }
+    }
 
     /** Without volume confirmation (the backtest/legacy shape) — gate disabled. */
     public MomentumStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps) {
@@ -62,6 +87,7 @@ public final class MomentumStrategy implements Strategy {
         this.thresholdSigmas = thresholdSigmas;
         this.minSignalBps = minSignalBps;
         this.volumeConfirmMin = Math.max(0.0, volumeConfirmMin);
+        this.baselineLambda = Math.exp(-Math.log(2.0) / lookback); // halflife = lookback returns
     }
 
     /** Feeds one observation snapshot and returns any signals it triggers. */
@@ -73,9 +99,24 @@ public final class MomentumStrategy implements Strategy {
                 continue; // don't trade off a stale mark
             }
             Deque<BigDecimal> window = history.computeIfAbsent(obs.instrumentId(), k -> new ArrayDeque<>());
+            BigDecimal previousPrice = window.peekLast();
             window.addLast(obs.price());
             while (window.size() > lookback + 1) {
                 window.removeFirst();
+            }
+            // Update the slow vol baseline from THIS tick's return, but capture its pre-update state
+            // first: a move is scored against the vol that prevailed BEFORE it (one-tick lag), so a
+            // spike does not inflate the very σ it is measured against. Warms up on every tick,
+            // including before the window is full.
+            Baseline baseline = baselines.computeIfAbsent(obs.instrumentId(), k -> new Baseline());
+            double baselineVarBefore = baseline.variance();
+            boolean baselineReady = baseline.ready(lookback);
+            if (previousPrice != null) {
+                double p0 = previousPrice.doubleValue();
+                double p1 = obs.price().doubleValue();
+                if (p0 > 0 && p1 > 0) {
+                    baseline.update(Math.log(p1 / p0), baselineLambda);
+                }
             }
             if (window.size() < lookback + 1) {
                 continue; // not enough history yet
@@ -94,14 +135,34 @@ public final class MomentumStrategy implements Strategy {
                 continue;
             }
 
+            double move = windowMove(window);
             double z = windowZScore(window);
+            // Honest reading: the same move vs the slow baseline vol (reporting only). Until the
+            // baseline is warm (or degenerate), fall back to the in-window z so it never misleads.
+            double baselineZ = baselineReady && baselineVarBefore > 0
+                    ? move / (Math.sqrt(baselineVarBefore) * Math.sqrt(lookback))
+                    : z;
             if (z >= thresholdSigmas) {
-                signals.add(new TradeSignal(obs.instrumentId(), Side.BUY, reference, obs.price(), changeBps, z));
+                signals.add(new TradeSignal(obs.instrumentId(), Side.BUY, reference, obs.price(), changeBps, z, baselineZ));
             } else if (z <= -thresholdSigmas) {
-                signals.add(new TradeSignal(obs.instrumentId(), Side.SELL, reference, obs.price(), changeBps, z));
+                signals.add(new TradeSignal(obs.instrumentId(), Side.SELL, reference, obs.price(), changeBps, z, baselineZ));
             }
         }
         return signals;
+    }
+
+    /** Signed log-move over the window (Σ returns = ln(last/first) by telescoping). */
+    private static double windowMove(Deque<BigDecimal> window) {
+        double previous = Double.NaN;
+        double move = 0.0;
+        for (BigDecimal p : window) {
+            double price = p.doubleValue();
+            if (!Double.isNaN(previous) && previous > 0 && price > 0) {
+                move += Math.log(price / previous);
+            }
+            previous = price;
+        }
+        return move;
     }
 
     /** Signed z: window log-move divided by (per-return σ · √lookback); ±∞ for a steady trend. */

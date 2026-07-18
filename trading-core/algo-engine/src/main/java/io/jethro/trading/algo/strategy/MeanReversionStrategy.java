@@ -34,7 +34,7 @@ public final class MeanReversionStrategy implements Strategy {
         return detector.evaluate(observations).stream()
                 .map(s -> new TradeSignal(s.instrumentId(),
                         s.side() == Side.BUY ? Side.SELL : Side.BUY,
-                        s.referencePrice(), s.price(), s.changeBps(), s.zScore(), name()))
+                        s.referencePrice(), s.price(), s.changeBps(), s.zScore(), s.baselineSigmas(), name()))
                 .toList();
     }
 
