@@ -5,291 +5,299 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jethro — sim console</title>
 <style>
-  :root{
-    --body:#101218; --panel:#171a22; --strip:#1d212b; --rail:#0c0e13; --slot:#0a0c10;
-    --ink:#e9ecf4; --dim:#828b9e; --edge:#2a2f3c; --edge2:#39404f;
-    --amber:#e6a23f; --teal:#48d3c4; --grn:#3ecf8e; --red:#f0553f; --blue:#5b8cff; --brand:#5b8cff;
-  }
+  :root{ --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f; --warn:#e0a83d; --teal:#48d3c4; }
   *{box-sizing:border-box;margin:0}
-  html,body{height:100%}
-  body{background:radial-gradient(900px 500px at 12% -8%,rgba(72,211,196,.06),transparent 60%),
-      radial-gradient(900px 500px at 88% -8%,rgba(230,162,63,.06),transparent 60%),var(--body);
-    color:var(--ink);font:13px/1.5 ui-sans-serif,-apple-system,"Segoe UI",system-ui,sans-serif;
-    -webkit-font-smoothing:antialiased;user-select:none}
-  .mono{font-family:"SF Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
-  .lbl{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
-  /* topbar */
-  .topbar{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);background:rgba(16,18,24,.72);border-bottom:1px solid var(--edge)}
-  .bar{display:flex;align-items:center;gap:18px;padding:0 20px;height:54px;max-width:1900px;margin:0 auto}
+  body{background:var(--bg);color:var(--txt);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;user-select:none}
+  .mono{font-variant-numeric:tabular-nums;font-family:"SF Mono",ui-monospace,Menlo,monospace}
+  .topbar{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);background:rgba(10,13,19,.72);border-bottom:1px solid var(--line)}
+  .bar{display:flex;align-items:center;gap:18px;padding:0 22px;height:54px;max-width:1500px;margin:0 auto}
   .brand{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:.2em;font-size:14px}
   .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
-  .tabs{display:flex;gap:3px}
-  .tab{padding:7px 12px;border-radius:8px;color:var(--dim);text-decoration:none;font-size:12.5px;font-weight:500}
-  .tab:hover{color:var(--ink);background:var(--strip)} .tab.active{color:var(--ink);background:var(--strip);position:relative}
-  .tab.active::after{content:"";position:absolute;left:12px;right:12px;bottom:-1px;height:2px;border-radius:2px;background:var(--teal)}
-  .spacer{flex:1} .badge{font-size:10px;padding:2px 9px;border-radius:999px;border:1px solid var(--edge2);color:var(--dim)}
-  .badge.live{color:var(--amber);border-color:var(--amber)} .badge.clean{color:var(--grn);border-color:var(--grn)}
-  main{max-width:1900px;margin:0 auto;padding:16px 20px 40px}
-  .help{color:var(--dim);font-size:12px;margin:2px 2px 14px;line-height:1.5;max-width:900px}
-  .help b{color:var(--ink)}
+  .nav{display:flex;gap:3px} .nav a{padding:7px 12px;border-radius:8px;color:var(--dim);text-decoration:none;font-size:12.5px}
+  .nav a:hover{color:var(--txt);background:var(--surface)} .nav a.active{color:var(--txt);background:var(--surface-2)}
+  .spacer{flex:1} .badge{font-size:10px;padding:2px 9px;border-radius:999px;border:1px solid var(--line-2);color:var(--dim)}
+  .badge.live{color:var(--warn);border-color:var(--warn)} .badge.clean{color:var(--up);border-color:var(--up)}
+  main{max-width:1500px;margin:0 auto;padding:16px 22px 40px}
 
-  .console{background:linear-gradient(180deg,#191d26,#141821);border:1px solid var(--edge);border-radius:16px;
-    box-shadow:0 24px 60px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.03);padding:14px;overflow-x:auto}
-  .rack{display:flex;gap:14px;align-items:stretch;min-width:max-content}
-  .section{display:flex;gap:10px;padding:10px;border-radius:12px;background:rgba(255,255,255,.012);border:1px solid var(--edge)}
-  .section-tab{writing-mode:vertical-rl;transform:rotate(180deg);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;
-    color:var(--dim);display:flex;align-items:center;justify-content:center}
-  .eq .section-tab{color:var(--teal)} .fx .section-tab{color:var(--amber)} .rt .section-tab{color:var(--blue)}
+  /* global control bar */
+  .globals{display:flex;flex-wrap:wrap;align-items:center;gap:18px;background:var(--surface);border:1px solid var(--line);
+    border-radius:12px;padding:12px 16px;margin-bottom:16px}
+  .gctl{display:flex;flex-direction:column;gap:4px;min-width:150px}
+  .gctl .lbl{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+  .gctl .lbl b{color:var(--txt);font-variant-numeric:tabular-nums}
+  select,button{background:var(--surface-2);border:1px solid var(--line-2);color:var(--txt);border-radius:8px;padding:7px 11px;font-size:13px;cursor:pointer}
+  button:hover{border-color:var(--brand)} button.warn{border-color:var(--warn);color:var(--warn)} button.on{background:rgba(224,168,61,.16)}
 
-  .strip{width:80px;background:linear-gradient(180deg,var(--strip),#171b23);border:1px solid var(--edge);border-radius:10px;
-    padding:9px 8px 10px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
-  .strip.bus{width:94px;background:linear-gradient(180deg,#1a2330,#141a24);border-color:#26424a}
-  .strip.masterstrip{width:118px;background:linear-gradient(180deg,#1f232c,#161a22)}
-  .name{font-weight:700;font-size:12px;text-align:center;line-height:1.05}
-  .sub{font-size:9px;color:var(--dim);text-align:center;margin-top:-4px}
-  .bus .name{color:var(--teal)} .fx .bus .name{color:var(--amber)} .rt .bus .name{color:var(--blue)}
-  .knobrow{display:flex;gap:10px;justify-content:center;width:100%}
-  .knobwrap{display:flex;flex-direction:column;align-items:center;gap:3px}
-  .knob{width:34px;height:34px;border-radius:50%;position:relative;cursor:ns-resize;
-    background:radial-gradient(circle at 50% 34%,#2b313d,#161a22 70%);border:1px solid #333a48;
-    box-shadow:0 2px 4px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.05);touch-action:none}
-  .knob::after{content:"";position:absolute;left:50%;top:5px;width:2px;height:11px;border-radius:2px;background:var(--amber);
-    transform-origin:50% 12px;transform:translateX(-50%) rotate(var(--ang,0deg));box-shadow:0 0 6px rgba(230,162,63,.6)}
-  .knob.teal::after{background:var(--teal);box-shadow:0 0 6px rgba(72,211,196,.6)}
-  .kval{font-size:9px;color:var(--dim)}
-  .fadergroup{display:flex;gap:9px;align-items:stretch;height:184px;margin:2px 0}
-  .fader{position:relative;width:26px;background:var(--slot);border:1px solid #262c38;border-radius:7px;cursor:ns-resize;
-    box-shadow:inset 0 2px 6px rgba(0,0,0,.6);touch-action:none}
-  .fader .fill{position:absolute;left:0;right:0;bottom:0;border-radius:0 0 6px 6px;background:linear-gradient(180deg,rgba(230,162,63,.35),rgba(230,162,63,.08))}
-  .bus .fader .fill{background:linear-gradient(180deg,rgba(72,211,196,.4),rgba(72,211,196,.08))}
-  .masterstrip .fader .fill{background:linear-gradient(180deg,rgba(91,140,255,.4),rgba(91,140,255,.08))}
-  .thumb{position:absolute;left:-5px;right:-5px;height:16px;border-radius:4px;background:linear-gradient(180deg,#3a4150,#232833);
-    border:1px solid #454d5e;box-shadow:0 3px 6px rgba(0,0,0,.5),inset 0 1px 0 rgba(255,255,255,.12)}
-  .thumb::before{content:"";position:absolute;left:4px;right:4px;top:50%;height:2px;transform:translateY(-50%);background:var(--amber);border-radius:2px;opacity:.85}
-  .bus .thumb::before{background:var(--teal)} .masterstrip .thumb::before{background:var(--blue)}
-  .ghost{position:absolute;left:-7px;right:-7px;height:12px;border-radius:3px;border:1px dashed rgba(72,211,196,.55);pointer-events:none;opacity:0;transition:opacity .2s}
-  .linked .ghost{opacity:.9}
-  .meter{width:14px;display:flex;flex-direction:column-reverse;gap:2px;padding:2px;border-radius:6px;background:var(--slot);border:1px solid #242a35}
-  .seg{flex:1;border-radius:2px;background:#20262f}
-  .seg.on{background:var(--grn);box-shadow:0 0 5px rgba(62,207,142,.7)}
-  .seg.on.mid{background:var(--amber);box-shadow:0 0 5px rgba(230,162,63,.7)}
-  .seg.on.hot{background:var(--red);box-shadow:0 0 6px rgba(240,85,63,.8)}
-  .readout{display:flex;flex-direction:column;align-items:center;gap:0}
-  .px{font-size:12.5px;font-weight:600} .chg{font-size:10px}
-  .up{color:var(--grn)} .down{color:var(--red)} .warn{color:var(--amber)}
-  .row{display:flex;gap:5px;width:100%}
-  .btn{flex:1;font-size:11px;padding:5px 0;border-radius:6px;border:1px solid #333a48;background:#20252f;color:var(--dim);cursor:pointer;font-weight:600}
-  .btn:hover{color:var(--ink);border-color:#48505f} .btn:active{transform:translateY(1px)}
-  .btn.zap{color:var(--amber)} .tg{flex:1;font-size:9.5px;padding:5px 0;border-radius:6px;border:1px solid #333a48;background:#191d25;color:var(--dim);cursor:pointer;text-align:center;letter-spacing:.06em;font-weight:700}
-  .tg.on{background:rgba(240,85,63,.16);border-color:var(--red);color:var(--red)}
-  select{background:#191d25;border:1px solid #333a48;color:var(--ink);border-radius:7px;padding:6px 8px;font-size:11px;width:100%;cursor:pointer}
-  .transport{display:flex;flex-direction:column;gap:6px;width:100%}
-  .big{font-size:11px;padding:7px 0} .big.on{background:rgba(72,211,196,.16);border-color:var(--teal);color:var(--teal)}
-  /* event tape */
-  .tape{margin-top:12px;display:flex;align-items:center;gap:14px;background:var(--rail);border:1px solid var(--edge);border-radius:10px;padding:8px 12px;overflow:hidden}
-  .tp-lbl{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);white-space:nowrap;display:flex;align-items:center;gap:7px}
-  .tp-lbl::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--red);animation:blink 1.4s infinite}
-  @keyframes blink{50%{opacity:.25}}
-  .tp-flow{flex:1;overflow-x:auto;height:20px} .tp-track{white-space:nowrap;display:flex;gap:26px}
-  .ev{font-size:11.5px;display:inline-flex;gap:8px;align-items:baseline}
-  .ev .t{color:var(--dim)} .pill{font-size:9px;padding:1px 7px;border-radius:999px;letter-spacing:.05em;font-weight:700}
-  .pill.price{background:rgba(91,140,255,.16);color:var(--blue)} .pill.volume{background:rgba(230,162,63,.16);color:var(--amber)} .pill.news{background:rgba(62,207,142,.16);color:var(--grn)}
-  .notice{padding:48px 20px;text-align:center;color:var(--dim)} .notice h2{color:var(--ink);font-size:16px;margin-bottom:8px}
-  footer{margin-top:10px;color:var(--dim);font-size:10.5px;text-align:center}
-  @media (prefers-reduced-motion:reduce){.tp-lbl::before{animation:none}}
+  /* tabs */
+  .tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--line);padding-bottom:10px}
+  .tabgroup{display:flex;align-items:center;gap:6px}
+  .tabgroup .glabel{font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:0 2px 0 8px}
+  .tab{padding:7px 13px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--dim);
+    font-size:13px;font-weight:600;cursor:pointer}
+  .tab:hover{color:var(--txt)} .tab.active{color:#fff;background:var(--surface-2);border-color:var(--brand)}
+  .tab.charts.active{border-color:var(--teal)}
+
+  /* instrument panel */
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:20px 22px}
+  .ihead{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:6px}
+  .iname{font-size:20px;font-weight:700} .iid{color:var(--dim);font-size:12px} .icls{font-size:10px;padding:2px 9px;border-radius:999px;border:1px solid var(--line-2);color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .price{font-size:34px;font-weight:700;font-variant-numeric:tabular-nums;margin:6px 0} .price .chg{font-size:15px;margin-left:10px}
+  .up{color:var(--up)} .down{color:var(--down)} .warn{color:var(--warn)}
+  .meterbar{height:12px;border-radius:6px;background:var(--surface-2);overflow:hidden;border:1px solid var(--line);margin:8px 0 22px}
+  .meterbar > i{display:block;height:100%;width:0;border-radius:6px;background:linear-gradient(90deg,var(--up),var(--warn) 70%,var(--down));transition:width .15s}
+
+  .sliders{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:22px 40px}
+  .sl{display:flex;flex-direction:column;gap:8px}
+  .sl .row{display:flex;justify-content:space-between;align-items:baseline}
+  .sl .name{font-size:13px;font-weight:600} .sl .val{font-variant-numeric:tabular-nums;color:var(--teal);font-family:"SF Mono",ui-monospace,monospace;font-size:13px}
+  .sl .hint{font-size:11px;color:var(--dim)}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:6px;background:var(--surface-2);border:1px solid var(--line-2);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:6px;cursor:grab;
+    background:linear-gradient(180deg,#3a4150,#232833);border:1px solid #4a5568;box-shadow:0 2px 5px rgba(0,0,0,.5)}
+  input[type=range]::-moz-range-thumb{width:22px;height:22px;border-radius:6px;cursor:grab;background:#333a48;border:1px solid #4a5568}
+  input[type=range]:active::-webkit-slider-thumb{cursor:grabbing;border-color:var(--brand)}
+  .btnrow{display:flex;gap:8px;margin-top:22px;flex-wrap:wrap}
+  .btnrow button{padding:9px 16px} .btnrow .zap{color:var(--warn);border-color:var(--warn)}
+  .btnrow .mute.on{background:rgba(240,85,63,.16);border-color:var(--down);color:var(--down)}
+
+  /* charts tab */
+  .rangebar{display:flex;gap:6px;align-items:center;margin-bottom:16px}
+  .rangebar .lbl{font-size:11px;color:var(--dim);margin-right:4px}
+  .rangebar button{padding:5px 12px;border-radius:999px;font-size:12px}
+  .rangebar button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .card h4{font-size:13px;margin-bottom:2px;display:flex;justify-content:space-between;align-items:baseline}
+  .card h4 .c{font-size:12px;font-weight:400}
+  .card svg{width:100%;height:120px;display:block} .card svg .line{fill:none;stroke:var(--brand);stroke-width:1.6}
+  .card svg .area{fill:rgba(91,140,255,.10);stroke:none} .card .empty{color:var(--dim);font-size:11px;padding:38px 0;text-align:center}
+
+  /* events */
+  .events{margin-top:16px} .events h4{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .ev{display:flex;gap:12px;align-items:baseline;padding:6px 2px;border-bottom:1px solid var(--line);font-size:13px}
+  .ev:last-child{border:0} .ev .t{color:var(--dim);font-family:"SF Mono",ui-monospace,monospace;font-size:12px;white-space:nowrap}
+  .ev .pill{font-size:9px;padding:1px 7px;border-radius:999px;font-weight:700}
+  .pill.price{background:rgba(91,140,255,.16);color:var(--brand)} .pill.volume{background:rgba(224,168,61,.16);color:var(--warn)} .pill.news{background:rgba(53,192,122,.14);color:var(--up)}
+  .notice{padding:48px 20px;text-align:center;color:var(--dim)} .notice h2{color:var(--txt);font-size:16px;margin-bottom:8px}
+  .help{color:var(--dim);font-size:12px;margin:2px 2px 14px}
 </style>
 </head>
 <body>
 <div class="topbar"><div class="bar">
   <span class="brand"><span class="dot"></span>JETHRO</span>
-  <nav class="tabs">
-    <a class="tab" href="/">Overview</a><a class="tab" href="/markets.html">Markets</a>
-    <a class="tab" href="/books.html">Books</a><a class="tab" href="/orders.html">Orders</a>
-    <a class="tab active" href="/sim.html">Sim</a><a class="tab" href="/ollama.html">Ops</a>
+  <nav class="nav">
+    <a href="/">Overview</a><a href="/markets.html">Markets</a><a href="/books.html">Books</a>
+    <a href="/orders.html">Orders</a><a class="active" href="/sim.html">Sim</a><a href="/ollama.html">Ops</a>
   </nav>
   <span class="spacer"></span><span id="statusBadge" class="badge">loading…</span>
 </div></div>
 <main>
-  <div class="help">
-    Grab a <b>fader</b> to set an instrument's signal (volatility); the <b>knob</b> above steers its drift.
-    Push a <b>bus</b> (teal / amber / blue) and every channel it feeds moves with it. Meters and the
-    <b>event tape</b> below show what the tape is emitting, live, with timestamps you can match to orders and logs.
-  </div>
   <div id="stage"><div class="notice">connecting to the sim…</div></div>
-  <div class="tape"><div class="tp-lbl">Event tape</div><div class="tp-flow"><div class="tp-track mono" id="tape"></div></div></div>
-  <footer id="foot"></footer>
 </main>
+<script src="/chart.js"></script>
 <script>
 (() => {
   const $=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
   const esc=s=>{const d=document.createElement("span");d.textContent=s??"";return d.innerHTML;};
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-  async function post(url,body){const r=await fetch(url,{method:"POST",headers:{"content-type":"application/json"},body:body==null?null:JSON.stringify(body)});if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}
+  async function post(u,b){const r=await fetch(u,{method:"POST",headers:{"content-type":"application/json"},body:b==null?null:JSON.stringify(b)});if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}
+  const enc=encodeURIComponent;
 
-  // instrument → factor bus (matches the sim's EQ/USD/RATES factor structure)
-  const busOf=id=>{ if(/^.{3}USD$/.test(id))return"USD"; if(/IRS|SWAP|^Z[NFBT]$|^UB$|^TN$|_IRS_/.test(id))return"RT"; return"EQ"; };
-  const BUS={EQ:{label:"EQUITY",cls:"eq",beta:1.0},USD:{label:"USD",cls:"fx",beta:.85},RT:{label:"RATES",cls:"rt",beta:.7}};
   // value mappings ↔ SimControl dials
-  const volToF=v=>clamp(v/3,0,1),        fToVol=f=>+(f*3).toFixed(3);
-  const drToK =d=>clamp(d/0.006,-1,1),   kToDr=k=>+(k*0.006).toFixed(5);
-  const qToK  =v=>clamp(Math.log2(Math.max(v,.01)),-1,1), kToQ=k=>+Math.pow(2,k).toFixed(3);
-  const spToF =s=>clamp(Math.log(s/0.1)/Math.log(200),0,1), fToSp=f=>+(0.1*Math.pow(200,f)).toFixed(2);
+  const volToF=v=>clamp(v,0,3),        fToVol=f=>+(+f).toFixed(2);          // bp-range = vol multiplier
+  const drToF=d=>clamp(d/0.006,-1,1),  fToDr=f=>+(f*0.006).toFixed(5);      // drift bias
+  const qToF =v=>clamp(v,0,3),         fToQ=f=>+(+f).toFixed(2);            // volume scale
+  const spToF=s=>clamp(Math.log(s/0.1)/Math.log(200),0,1), fToSp=f=>+(0.1*Math.pow(200,f)).toFixed(2);
 
-  let chans=[], buses={}, master={}, state=null;
+  let state=null, instrClass={}, current=null, view="inst", chartMinutes=15, chartTimer=null;
 
-  // ---- widgets ----
-  function knob(label,val,teal,onCommit){
-    const wrap=$("div","knobwrap"),k=$("div","knob"+(teal?" teal":"")),v=$("div","kval mono");
-    wrap.append(k,$("div","lbl",label),v);
-    const paint=x=>{k.style.setProperty("--ang",(x*135)+"deg");v.textContent=(x>=0?"+":"")+x.toFixed(2);};
-    let cur=clamp(val,-1,1),drag=false,y0=0,v0=0;
-    const setVisual=x=>{cur=clamp(x,-1,1);paint(cur);};
-    k.addEventListener("pointerdown",e=>{drag=true;y0=e.clientY;v0=cur;k.setPointerCapture(e.pointerId);});
-    k.addEventListener("pointermove",e=>{if(drag)setVisual(v0-(e.clientY-y0)/90);});
-    k.addEventListener("pointerup",()=>{if(drag){drag=false;onCommit&&onCommit(cur);}});
-    k.addEventListener("dblclick",()=>{setVisual(0);onCommit&&onCommit(0);});
-    setVisual(cur);
-    return {el:wrap,setVisual,value:()=>cur};
+  // ---- slider widget (a moving handle, not a knob) ----
+  function slider({name,hint,min,max,step,value,fmt,onCommit}){
+    const wrap=$("div","sl");
+    const row=$("div","row"); const nm=$("div","name",name); const val=$("div","val");
+    row.append(nm,val); wrap.append(row);
+    const inp=document.createElement("input"); inp.type="range"; inp.min=min; inp.max=max; inp.step=step; inp.value=value;
+    wrap.append(inp);
+    if(hint) wrap.append($("div","hint",hint));
+    const show=()=>val.textContent=fmt(+inp.value);
+    inp.addEventListener("input",show);
+    inp.addEventListener("change",()=>onCommit(+inp.value));
+    show();
+    return {el:wrap, set:v=>{inp.value=v;show();}};
   }
-  function faderMeter(val,kind,onCommit){
-    const g=$("div","fadergroup"),fader=$("div","fader"),fill=$("div","fill"),ghost=$("div","ghost"),thumb=$("div","thumb");
-    fader.append(fill,ghost,thumb);
-    const meter=$("div","meter"),segs=[];for(let i=0;i<16;i++){const s=$("div","seg");meter.append(s);segs.push(s);}
-    g.append(fader,meter);
-    let cur=clamp(val,0,1);
-    const place=x=>{const h=fader.clientHeight||184,y=(1-x)*(h-16);thumb.style.top=y+"px";fill.style.height=(h-y-8)+"px";};
-    const setVisual=x=>{cur=clamp(x,0,1);place(cur);};
-    let drag=false;const fromY=e=>{const r=fader.getBoundingClientRect();return 1-clamp((e.clientY-r.top-8)/(r.height-16),0,1);};
-    fader.addEventListener("pointerdown",e=>{drag=true;fader.setPointerCapture(e.pointerId);setVisual(fromY(e));});
-    fader.addEventListener("pointermove",e=>{if(drag)setVisual(fromY(e));});
-    fader.addEventListener("pointerup",()=>{if(drag){drag=false;onCommit&&onCommit(cur);}});
-    requestAnimationFrame(()=>place(cur));
-    return {group:g,segs,setVisual,value:()=>cur,setGhost:x=>{const h=fader.clientHeight||184;ghost.style.top=((1-clamp(x,0,1))*(h-16)+2)+"px";},link:on=>fader.parentElement.classList.toggle("linked",on)};
-  }
-  const paintMeter=(segs,level)=>{const on=Math.round(clamp(level,0,1)*segs.length);segs.forEach((s,i)=>s.className="seg"+(i<on?" on"+(i>=segs.length-3?" hot":i>=segs.length*.6?" mid":""):""));};
 
   // ---- build ----
   function build(){
     const stage=document.getElementById("stage");
-    const rack=$("div","rack");
-    // group instruments
-    const groups={EQ:[],USD:[],RT:[]};
-    state.instruments.forEach(it=>groups[busOf(it.id)].push(it));
-    chans=[]; buses={};
-    ["EQ","USD","RT"].forEach(bk=>{
-      if(!groups[bk].length)return;
-      const meta=BUS[bk],sec=$("div","section "+meta.cls);
-      sec.append($("div","section-tab",meta.label));
-      // bus strip
-      const bstrip=$("div","strip bus");
-      bstrip.append($("div","name",meta.label),$("div","sub","factor bus"));
-      const members=()=>chans.filter(c=>c.bus===bk);
-      const bknob=knob("drift",0,true,k=>members().forEach(c=>{const d=kToDr(k);c.knobDrift.setVisual(k);c.drift=d;post(`/api/sim/instrument/${encodeURIComponent(c.id)}/drift`,{value:d});}));
-      const br=$("div","knobrow");br.append(bknob.el);bstrip.append(br);
-      const bfm=faderMeter(.35,"bus",f=>members().forEach(c=>{const v=fToVol(f)*meta.beta;c.fader.setVisual(volToF(v));c.vol=v;post(`/api/sim/instrument/${encodeURIComponent(c.id)}/vol`,{value:v});}));
-      bstrip.append(bfm.group,$("div","lbl","energy"));
-      buses[bk]={fm:bfm,meterGet:()=>{const m=members();return m.length?m.reduce((a,c)=>a+(c.act||0),0)/m.length:0;}};
-      sec.append(bstrip);
-      // channels
-      groups[bk].forEach(it=>sec.append(channel(it,bk)));
-      rack.append(sec);
-    });
-    rack.append(masterStrip());
-    stage.innerHTML=""; stage.append(rack);
+    stage.innerHTML="";
+    stage.append(globalBar(), tabBar(), $("div","",'<div id="content"></div>'));
+    if(!current && state.instruments.length) current=state.instruments[0].id;
+    renderView();
   }
 
-  function channel(it,bk){
-    const strip=$("div","strip");
-    strip.append($("div","name",it.name||it.id),$("div","sub mono",it.id));
-    const ro=$("div","readout"),px=$("div","px mono","—"),chg=$("div","chg mono","");ro.append(px,chg);strip.append(ro);
-    const c={id:it.id,bus:bk,vol:it.volMultiplier,drift:it.driftBias,px:null,act:0,muted:false,prevVol:it.volMultiplier,_px:px,_chg:chg,_strip:strip};
-    const kr=$("div","knobrow");
-    const kDrift=knob("drift",drToK(it.driftBias),false,k=>{const d=kToDr(k);c.drift=d;post(`/api/sim/instrument/${encodeURIComponent(it.id)}/drift`,{value:d});});
-    const kQty=knob("qty",qToK(it.volumeScale),false,k=>post(`/api/sim/instrument/${encodeURIComponent(it.id)}/volume`,{value:kToQ(k)}));
-    kr.append(kDrift.el,kQty.el);strip.append(kr);
-    const fm=faderMeter(volToF(it.volMultiplier),"",f=>{c.vol=fToVol(f);post(`/api/sim/instrument/${encodeURIComponent(it.id)}/vol`,{value:c.vol});});
-    strip.append(fm.group,$("div","lbl","vol"));
-    const nudge=$("div","row");
-    const bd=$("button","btn","−"),zap=$("button","btn zap","⚡"),bu=$("button","btn","+");
-    bd.onclick=()=>post(`/api/sim/instrument/${encodeURIComponent(it.id)}/nudge`,{value:-0.004});
-    bu.onclick=()=>post(`/api/sim/instrument/${encodeURIComponent(it.id)}/nudge`,{value:0.004});
-    zap.title="fire a news shock in the drift direction";
-    zap.onclick=()=>post("/api/sim/news",{instrumentId:it.id,direction:kDrift.value()>=0?"BULL":"BEAR",magnitude:0.015}).catch(()=>{});
-    nudge.append(bd,zap,bu);strip.append(nudge);
-    const trow=$("div","row"),mute=$("div","tg","MUTE");
-    mute.onclick=()=>{c.muted=!c.muted;mute.classList.toggle("on",c.muted);
-      if(c.muted){c.prevVol=c.vol;c.vol=0;fm.setVisual(0);post(`/api/sim/instrument/${encodeURIComponent(it.id)}/vol`,{value:0});}
-      else{c.vol=c.prevVol||1;fm.setVisual(volToF(c.vol));post(`/api/sim/instrument/${encodeURIComponent(it.id)}/vol`,{value:c.vol});}};
-    trow.append(mute);strip.append(trow);
-    c.fader=fm; c.knobDrift=kDrift; c.meter=fm;
-    chans.push(c);
-    return strip;
-  }
-
-  function masterStrip(){
-    const sec=$("div","section master");sec.append($("div","section-tab","MASTER"));
-    const strip=$("div","strip masterstrip");strip.append($("div","name","MASTER"),$("div","sub","session"));
-    const tp=$("div","transport");
-    const sel=$("select");(state.regimes||[]).forEach(r=>{const o=$("option",null,r);o.value=r;sel.append(o);});
-    const auto=$("option",null,"AUTO");auto.value="AUTO";sel.insertBefore(auto,sel.firstChild);
+  function globalBar(){
+    const g=$("div","globals");
+    // publish frequency (global speed)
+    const spd=slider({name:"Publish rate", hint:"how often the sim emits ticks (× speed)", min:0,max:1,step:0.01,
+      value:spToF(state.speedMultiplier), fmt:f=>"× "+fToSp(f), onCommit:f=>post("/api/sim/control/speed",{multiplier:fToSp(f)}).then(s=>state=s)});
+    spd.el.style.minWidth="240px";
+    const regime=$("div","gctl");
+    const sel=$("select"); const auto=$("option",null,"AUTO");auto.value="AUTO";sel.append(auto);
+    (state.regimes||[]).forEach(r=>{const o=$("option",null,r);o.value=r;sel.append(o);});
     sel.value=state.regimeOverride||"AUTO"; sel.onchange=()=>post("/api/sim/control/regime",{regime:sel.value}).then(s=>state=s);
-    const pause=$("button","btn big"+(state.paused?" on":""),state.paused?"▶ RESUME":"⏸ PAUSE");
-    pause.onclick=()=>post("/api/sim/control/pause",{paused:!state.paused}).then(s=>{state=s;pause.classList.toggle("on",s.paused);pause.textContent=s.paused?"▶ RESUME":"⏸ PAUSE";});
-    const reseed=$("button","btn big","↻ RESEED");reseed.onclick=()=>post("/api/sim/control/reseed",{}).then(s=>state=s);
-    const snap=$("button","btn big","⤓ CAPTURE");snap.onclick=async()=>{snap.textContent="capturing…";snap.disabled=true;
-      try{const res=await fetch("/api/sim/snapshot/fetch",{method:"POST"});const b=await res.json();
-        alert(res.ok?("Captured "+(b.instruments||"?")+" instruments × "+(b.days||"?")+" days →\n"+(b.path||"")):("Capture failed: "+(b.message||res.status)));}
-      catch(e){alert("Capture failed: "+e);}
-      finally{snap.textContent="⤓ CAPTURE";snap.disabled=false;}};
-    tp.append($("div","lbl","regime"),sel,pause,reseed,snap);strip.append(tp);
-    const fm=faderMeter(spToF(state.speedMultiplier),"masterstrip",f=>post("/api/sim/control/speed",{multiplier:fToSp(f)}).then(s=>state=s));
-    strip.append(fm.group,$("div","lbl","speed ×"));
-    master={fm}; sec.append(strip);return sec;
+    regime.append($("div","lbl","Regime"),sel);
+    const btns=$("div","gctl");
+    const brow=$("div"); brow.style.display="flex"; brow.style.gap="8px";
+    const pause=$("button",state.paused?"warn on":"", state.paused?"▶ Resume":"⏸ Pause");
+    pause.onclick=()=>post("/api/sim/control/pause",{paused:!state.paused}).then(s=>{state=s;build();});
+    const reseed=$("button",null,"↻ Reseed"); reseed.onclick=()=>post("/api/sim/control/reseed",{}).then(s=>state=s);
+    const reset=$("button","warn","Reset dials"); reset.onclick=()=>post("/api/sim/control/reset",{}).then(s=>{state=s;build();});
+    brow.append(pause,reseed,reset);
+    btns.append($("div","lbl","Session"),brow);
+    g.append(spd.el,regime,btns);
+    return g;
   }
 
-  // ---- live data ----
-  async function loadLive(){
-    try{
-      const [depth,vol]=await Promise.all([
-        fetch("/api/depth").then(r=>r.ok?r.json():[]).catch(()=>[]),
-        fetch("/api/volume").then(r=>r.ok?r.json():[]).catch(()=>[])]);
-      const mid={},rel={};
-      depth.forEach(d=>mid[d.instrumentId]=(+d.bid + +d.ask)/2);
-      vol.forEach(v=>rel[v.instrumentId]=v.relativeVolume);
-      chans.forEach(c=>{
-        const m=mid[c.id];
-        if(m!=null){ let bps=0; if(c.px!=null&&c.px>0)bps=(m/c.px-1)*10000; c.px=m;
-          c._px.textContent=m>=1000?m.toFixed(1):m>=100?m.toFixed(2):m>=10?m.toFixed(3):m.toFixed(4);
-          c._chg.textContent=(bps>=0?"+":"")+bps.toFixed(0)+"bp";
-          c._chg.className="chg mono "+(bps>0.5?"up":bps<-0.5?"down":"");
-          c.pAct=clamp(Math.abs(bps)/50,0,1); }
-        const r=rel[c.id]; c.vAct=r!=null?clamp((r-1)/2,0,1):0;
-        c.link=Math.abs((buses[c.bus]?.fm.value()??0)-0.5)>0.15;
+  function tabBar(){
+    const bar=$("div","tabs");
+    // group instruments by asset class (same breakdown as Markets)
+    const groups={};
+    state.instruments.forEach(it=>{const c=instrClass[it.id]||"OTHER";(groups[c]=groups[c]||[]).push(it);});
+    Object.keys(groups).sort().forEach(cls=>{
+      const grp=$("div","tabgroup"); grp.append($("span","glabel",cls));
+      groups[cls].forEach(it=>{
+        const t=$("button","tab"+(view==="inst"&&current===it.id?" active":""), esc(it.name||it.id));
+        t.onclick=()=>{view="inst";current=it.id;renderView();};
+        grp.append(t);
       });
-    }catch(e){}
+      bar.append(grp);
+    });
+    const ct=$("button","tab charts"+(view==="charts"?" active":""),"📈 Charts");
+    ct.onclick=()=>{view="charts";renderView();};
+    bar.append(ct);
+    return bar;
   }
-  let tapeSeen="";
-  async function loadSpikes(){
-    try{
-      const s=await(await fetch("/api/sim/spikes")).json();
-      const track=document.getElementById("tape");
-      if(!s.length){track.innerHTML='<span class="ev"><span class="t">—</span> no spikes yet — push a bus or fire ⚡</span>';return;}
-      track.innerHTML=s.slice(0,18).map(e=>{
-        const t=new Date(e.atMillis).toLocaleTimeString([],{hour12:false})+"."+String(e.atMillis%1000).padStart(3,"0");
-        return `<span class="ev"><span class="t">${t}</span><span class="pill ${e.type.toLowerCase()}">${esc(e.type)}</span><b>${esc(e.name||e.instrumentId)}</b><span>${esc(e.detail)}</span></span>`;
+
+  function renderView(){
+    const old=document.querySelector(".tabs"); if(old) old.replaceWith(tabBar()); // refresh active state
+    const c=document.getElementById("content");
+    if(chartTimer){clearInterval(chartTimer);chartTimer=null;}
+    if(view==="charts"){ c.innerHTML=""; c.append(chartsPanel()); return; }
+    activePanel=null; c.innerHTML=""; c.append(instrPanel(state.instruments.find(i=>i.id===current)));
+  }
+
+  // ---- one instrument ----
+  function instrPanel(it){
+    if(!it) return $("div","notice","pick an instrument");
+    const p=$("div","panel");
+    const head=$("div","ihead");
+    head.append($("div","iname",esc(it.name||it.id)), $("div","iid mono",esc(it.id)), $("div","icls",esc(instrClass[it.id]||"—")));
+    const price=$("div","price mono","—"); const chg=$("span","chg mono",""); price.append(chg);
+    const meter=$("div","meterbar"); const mfill=$("i"); meter.append(mfill);
+    p.append(head,price,meter);
+
+    const sliders=$("div","sliders");
+    const sBp=slider({name:"BP range (move size)", hint:"idiosyncratic volatility × — bigger = wider bp swings per tick",
+      min:0,max:3,step:0.05,value:volToF(it.volMultiplier),fmt:f=>"× "+f.toFixed(2),
+      onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/vol`,{value:fToVol(f)}).then(()=>it.volMultiplier=fToVol(f))});
+    const sDr=slider({name:"Drift (trend)", hint:"per-tick directional bias — left = down, right = up",
+      min:-1,max:1,step:0.02,value:drToF(it.driftBias),fmt:f=>(f>=0?"+":"")+(f*0.6).toFixed(2)+"bp/tick",
+      onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/drift`,{value:fToDr(f)}).then(()=>it.driftBias=fToDr(f))});
+    const sQ=slider({name:"Volume", hint:"traded size × (drives ADV + participation)",
+      min:0,max:3,step:0.05,value:qToF(it.volumeScale),fmt:f=>"× "+f.toFixed(2),
+      onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/volume`,{value:fToQ(f)})});
+    sliders.append(sBp.el,sDr.el,sQ.el);
+    p.append(sliders);
+
+    const row=$("div","btnrow");
+    const dn=$("button",null,"− nudge"); dn.onclick=()=>post(`/api/sim/instrument/${enc(it.id)}/nudge`,{value:-0.004});
+    const up=$("button",null,"+ nudge"); up.onclick=()=>post(`/api/sim/instrument/${enc(it.id)}/nudge`,{value:0.004});
+    const zap=$("button","zap","⚡ news shock"); zap.onclick=()=>post("/api/sim/news",{instrumentId:it.id,direction:it.driftBias>=0?"BULL":"BEAR",magnitude:0.015}).catch(()=>{});
+    const mute=$("button","mute","Mute");
+    mute.onclick=()=>{const on=!mute.classList.contains("on");mute.classList.toggle("on",on);
+      const v=on?0:(it.prevVol||1); if(on)it.prevVol=it.volMultiplier; it.volMultiplier=v; sBp.set(volToF(v));
+      post(`/api/sim/instrument/${enc(it.id)}/vol`,{value:v});};
+    row.append(dn,zap,up,mute);
+    const chartBtn=$("button",null,"📈 price history"); chartBtn.onclick=()=>window.openChart&&window.openChart(it.id);
+    row.append(chartBtn);
+    p.append(row);
+
+    p._price=price; p._chg=chg; p._mfill=mfill; p._id=it.id;
+    activePanel=p;
+    return p;
+  }
+
+  // ---- charts tab: all ticks, small multiples, time range ----
+  const RANGES=[["1m",1],["5m",5],["15m",15],["1h",60],["6h",360],["12h",720]];
+  function chartsPanel(){
+    const wrap=$("div");
+    const rb=$("div","rangebar"); rb.append($("span","lbl","Window:"));
+    RANGES.forEach(([label,mins])=>{const b=$("button",chartMinutes===mins?"on":"",label);
+      b.onclick=()=>{chartMinutes=mins;renderView();}; rb.append(b);});
+    wrap.append(rb);
+    const grid=$("div","grid"); grid.id="chartGrid"; wrap.append(grid);
+    state.instruments.forEach(it=>{
+      const card=$("div","card"); card.dataset.id=it.id;
+      card.append($("h4","",`<span>${esc(it.name||it.id)}</span><span class="c muted mono" data-c></span>`),
+                  $("div","plot",'<div class="empty">loading…</div>'));
+      grid.append(card);
+    });
+    const ev=$("div","events"); ev.innerHTML='<h4>Recent events</h4><div id="evlist" class="muted">—</div>'; wrap.append(ev);
+    // first load AFTER renderView appends this panel to the document (else #chartGrid isn't found yet)
+    setTimeout(()=>{loadCharts();loadEvents();},0);
+    chartTimer=setInterval(()=>{loadCharts();loadEvents();},4000);
+    return wrap;
+  }
+  async function loadCharts(){
+    const grid=document.getElementById("chartGrid"); if(!grid)return;
+    await Promise.all([...grid.children].map(async card=>{
+      try{
+        const pts=await (await fetch(`/api/history/${enc(card.dataset.id)}?minutes=${chartMinutes}`)).json();
+        const plot=card.querySelector(".plot"); const cEl=card.querySelector("[data-c]");
+        plot.innerHTML=miniSvg(pts);
+        if(pts.length>1){const f=+pts[0].price,l=+pts[pts.length-1].price,ch=(l-f)/f*100;
+          cEl.textContent=(ch>=0?"+":"")+ch.toFixed(2)+"%"; cEl.className="c mono "+(ch>=0?"up":"down");}
+        else cEl.textContent="";
+      }catch(e){}
+    }));
+  }
+  function miniSvg(points){
+    if(!points||points.length<2) return '<div class="empty">not enough ticks yet in this window</div>';
+    const W=340,H=120,pl=6,pr=6,pt=8,pb=8;
+    const t0=points[0].t,t1=points[points.length-1].t||(t0+1);
+    const ys=points.map(p=>+p.price),mn=Math.min(...ys),mx=Math.max(...ys),span=(mx-mn)||1;
+    const X=t=>pl+(t1===t0?0:(t-t0)/(t1-t0))*(W-pl-pr);
+    const Y=v=>H-pb-((v-mn)/span)*(H-pt-pb);
+    const line=points.map((p,i)=>`${i?"L":"M"}${X(p.t).toFixed(1)},${Y(+p.price).toFixed(1)}`).join(" ");
+    const area=`M${X(t0).toFixed(1)},${H-pb} `+points.map(p=>`L${X(p.t).toFixed(1)},${Y(+p.price).toFixed(1)}`).join(" ")+` L${X(t1).toFixed(1)},${H-pb} Z`;
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path class="area" d="${area}"/><path class="line" d="${line}"/></svg>`;
+  }
+  async function loadEvents(){
+    try{ const s=await (await fetch("/api/sim/spikes")).json(); const el=document.getElementById("evlist"); if(!el)return;
+      if(!s.length){el.className="muted";el.textContent="no spikes yet — nudge a market or fire ⚡";return;}
+      el.className=""; el.innerHTML=s.slice(0,20).map(e=>{
+        const t=new Date(e.atMillis).toLocaleTimeString([],{hour12:false});
+        return `<div class="ev"><span class="t">${t}</span><span class="pill ${e.type.toLowerCase()}">${esc(e.type)}</span><b>${esc(e.name||e.instrumentId)}</b><span class="muted">${esc(e.detail)}</span></div>`;
       }).join("");
     }catch(e){}
   }
 
-  // ---- animate meters ----
-  function frame(){
-    chans.forEach(c=>{const target=Math.max(c.pAct||0,c.vAct||0);c.act=(c.act||0)*0.82+target*0.18;
-      if(c.meter){paintMeter(c.meter.segs,c.act);
-        if(c.link)c.meter.setGhost(clamp(c.vol/3 + ((buses[c.bus]?.fm.value()??.5)-.5)*.6,0,1));
-        c.meter.link&&c.meter.link(c.link);}});
-    Object.values(buses).forEach(b=>paintMeter(b.fm.segs,b.meterGet()));
-    if(master.fm){const avg=chans.length?chans.reduce((a,c)=>a+c.act,0)/chans.length:0;paintMeter(master.fm.segs,clamp(avg*1.5,0,1));}
-    requestAnimationFrame(frame);
+  // ---- live price + meter for the active instrument panel ----
+  let activePanel=null, lastMid={};
+  async function loadLive(){
+    if(view!=="inst"||!activePanel)return;
+    try{
+      const depth=await (await fetch("/api/depth")).json();
+      const d=depth.find(x=>x.instrumentId===activePanel._id); if(!d)return;
+      const mid=(+d.bid + +d.ask)/2;
+      const prev=lastMid[activePanel._id]; lastMid[activePanel._id]=mid;
+      activePanel._price.firstChild.nodeValue=(mid>=1000?mid.toFixed(1):mid>=100?mid.toFixed(2):mid.toFixed(4))+" ";
+      if(prev){const bps=(mid/prev-1)*10000;
+        activePanel._chg.textContent=(bps>=0?"+":"")+bps.toFixed(0)+"bp";
+        activePanel._chg.className="chg mono "+(bps>0.5?"up":bps<-0.5?"down":"");
+        const act=clamp(Math.abs(bps)/60,0,1); activePanel._mfill.style.width=(act*100).toFixed(0)+"%";}
+    }catch(e){}
   }
 
   async function boot(){
@@ -297,16 +305,15 @@
     try{
       const r=await fetch("/api/sim/control");
       if(r.status===403){badge.textContent="idle";badge.className="badge clean";
-        document.getElementById("stage").innerHTML='<div class="notice"><h2>The console is live only in SIM feed mode</h2><div>Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine to mix the tape here.</div></div>';return;}
+        document.getElementById("stage").innerHTML='<div class="notice"><h2>The console is live only in SIM feed mode</h2><div>Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine.</div></div>';return;}
       state=await r.json();
       badge.textContent=state.active?"panel-driven":"seeded · untouched";badge.className="badge "+(state.active?"live":"clean");
+      try{ (await (await fetch("/api/instruments")).json()).forEach(i=>instrClass[i.instrumentId]=i.assetClass); }catch(e){}
       build();
-      document.getElementById("foot").innerHTML='faders → <span class="mono">SimControl</span> drift/vol/volume · buses move their group together · ⚡ fires a sim news shock · tape = <span class="mono">/api/sim/spikes</span>';
-      requestAnimationFrame(frame);
-      loadLive();loadSpikes();
-      setInterval(()=>{loadLive();loadSpikes();},1500);
-      // refresh the panel-driven badge occasionally
-      setInterval(async()=>{try{const s=await(await fetch("/api/sim/control")).json();badge.textContent=s.active?"panel-driven":"seeded · untouched";badge.className="badge "+(s.active?"live":"clean");}catch(e){}},4000);
+      loadLive(); setInterval(loadLive,1500);
+      setInterval(async()=>{try{const s=await(await fetch("/api/sim/control")).json();
+        if(s.active!==state.active){state.active=s.active;badge.textContent=s.active?"panel-driven":"seeded · untouched";badge.className="badge "+(s.active?"live":"clean");}
+      }catch(e){}},4000);
     }catch(e){document.getElementById("stage").innerHTML='<div class="notice">sim console unavailable</div>';}
   }
   boot();
