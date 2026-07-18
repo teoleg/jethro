@@ -27,8 +27,9 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 
 /**
- * AUTO hedging (ADR-0039): when the advisor is in AUTO and an axis breaches its cap, this submits
- * the sized minimum-variance hedge as a simulated MARKET order through the ordinary order path —
+ * AUTO hedging (ADR-0039): when the advisor is in AUTO and an axis carries net exposure above its
+ * rebalance floor, this submits the sized hedge-to-flat as a simulated MARKET order through the
+ * ordinary order path —
  * the pre-trade gate and ADV slicer apply, and it is hard-gated to {@code feedMode == SIM} (ADR-0019)
  * and suspended while the firm halt switch is tripped. A per-axis cooldown stops a re-hedge before
  * the fill has repriced the book. OFF/ADVISE do nothing here (the panel still shows the proposal).
@@ -103,7 +104,7 @@ public final class HedgeLifecycle {
                     vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf);
             long now = System.currentTimeMillis();
             for (HedgeAdvisor.Axis axis : snap.axes()) {
-                if (!axis.breached() || !axis.hedgeRecommended() || axis.hedgeQuantity() == null
+                if (!axis.hedging() || !axis.hedgeRecommended() || axis.hedgeQuantity() == null
                         || axis.hedgeQuantity().signum() <= 0) {
                     continue;
                 }

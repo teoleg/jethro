@@ -146,7 +146,7 @@
   <div class="col">
     <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
     <div class="stats" id="stats"></div>
-    <div class="section-h">Hedging <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic min-variance proxy hedge (ADR-0038): exposure vs cap, the sized hedge &amp; its math</span>
+    <div class="section-h">Hedging <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic min-variance proxy hedge (ADR-0038): net equity held target-flat, the sized hedge &amp; its math</span>
       <span class="badge" id="hedgeMode" style="margin-left:8px" title="OFF / ADVISE / AUTO">—</span>
       <span class="badge" id="histBadge" style="margin-left:6px" title="daily-return history the covariance is built from">hist —</span></div>
     <div class="panel pad"><div id="hedging" class="muted" style="padding:14px">loading…</div></div>
@@ -387,7 +387,7 @@
   }
   async function loadQuant() { try { renderQuant(await (await fetch("/api/strategy/actions")).json()); } catch (e) {} }
 
-  // ---- hedging: per-axis exposure vs cap, the sized min-variance hedge and its math (ADR-0038) ----
+  // ---- hedging: net equity held target-flat, the sized min-variance hedge and its math (ADR-0038) ----
   function fmtUsd(v) {
     if (v === null || v === undefined) return "—";
     const n = +v; return (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString(undefined, {maximumFractionDigits: 0});
@@ -397,11 +397,11 @@
     if (mb) { mb.textContent = s.mode; mb.title = "hedging mode: " + s.mode; }
     const axes = s.axes || [];
     const body = axes.length ? axes.map(a => {
-      const util = Math.max(0, Math.min(1.2, a.utilization || 0));
-      const pct = Math.round((a.utilization || 0) * 100);
-      const barColor = a.breached ? "var(--alert)" : "var(--up)";
+      const util = Math.max(0, Math.min(1, a.utilization || 0)); // bar = hedge effectiveness ρ²
+      const pct = Math.round((a.effectiveness != null ? a.effectiveness : 0) * 100);
+      const barColor = a.status === "REDUCE" ? "var(--warn)" : a.hedging ? "var(--brand)" : "var(--up)";
       const statusColor = a.status === "HEDGE" ? "var(--brand)" : a.status === "REDUCE" ? "var(--warn)"
-        : a.status === "BREACHED" ? "var(--alert)" : "var(--dim)";
+        : a.status === "WARMING" ? "var(--alert)" : "var(--dim)";
       let hedgeRow = "";
       if (a.hedgeQuantity !== null && a.hedgeQuantity !== undefined) {
         const eff = a.effectiveness != null ? (a.effectiveness * 100).toFixed(0) + "%" : "—";
@@ -414,7 +414,7 @@
         <div style="display:flex;align-items:baseline;gap:8px">
           <b>${esc(a.axis)}</b>
           <span style="color:${statusColor};font-size:10px;letter-spacing:.06em">${esc(a.status)}</span>
-          <span class="muted" style="margin-left:auto;font-size:12px">${fmtUsd(a.netExposureUsd)} / ${fmtUsd(a.capUsd)} cap · ${pct}%</span>
+          <span class="muted" style="margin-left:auto;font-size:12px">${fmtUsd(a.netExposureUsd)} net → flat${a.effectiveness != null ? " · ρ² " + pct + "%" : ""}</span>
         </div>
         <div style="height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden">
           <div style="height:100%;width:${Math.round(Math.min(1, util) * 100)}%;background:${barColor}"></div></div>
