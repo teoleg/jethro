@@ -41,6 +41,8 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0035](0035-rag-for-ai-layer.md) | Retrieval-augmented context for the AI layer — local embeddings + pgvector | Accepted |
 | [0036](0036-ai-signal-balance.md) | AI signal balance — measure directional skew, feed it back to the model, never quota | Accepted |
 | [0037](0037-clean-vs-comprehensive-pnl.md) | Clean vs comprehensive P&L — lock realized FX at booking, break out translation | Proposed |
+| [0038](0038-minimum-variance-proxy-hedging.md) | Minimum-variance proxy hedging — beta to index futures, DV01 to Treasury futures, direct FX | Proposed |
+| [0039](0039-hedge-lifecycle-band-triggers.md) | Hedge lifecycle — deterministic band triggers with hysteresis, advisory-first | Proposed |
 
 ## Lifecycle
 
