@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Recalibrate sim-calibration.json from REAL daily market history (ADR-0026).
 
-Pulls free daily closes from Stooq (no API key) for the full universe — the equities
+Pulls free daily closes from Yahoo's chart JSON (no API key) for the full universe — the equities
 themselves, ETF/index proxies for the futures (SPY→ES, QQQ→NQ), IEF for the 10Y yield
 factor, and spot FX — then estimates:
 
@@ -20,53 +20,69 @@ Usage (on a machine with internet — the platform itself never fetches, ADR-000
 Stdlib only. If a symbol fails to download the script keeps the hand-curated default
 for that piece and says so on stderr — it never emits a partially-broken file silently.
 """
-import csv
-import io
+import datetime
 import json
 import math
 import statistics as st
 import sys
+import urllib.parse
 import urllib.request
 
 YEARS = 5
-STOOQ = "https://stooq.com/q/d/l/?s={sym}&i=d"
+# Yahoo chart JSON (keyless, the same host the live adapter uses). Stooq's CSV endpoint now
+# serves an anti-bot HTML page to scripts, so it's no longer usable here.
+YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range={yrs}y"
 
-# instrument -> stooq symbol (proxies documented; invariant 2 does not apply here —
-# this is an offline calibration tool, symbols never enter the platform).
-EQUITIES = {"AAPL": "aapl.us", "MSFT": "msft.us", "AMZN": "amzn.us", "GOOG": "googl.us",
-            "SAP": "sap.us"}          # SAP US ADR as the proxy for the EUR listing
-FUTURE_PROXIES = {"ES": "spy.us", "NQ": "qqq.us"}
-FX = {"EURUSD": "eurusd", "GBPUSD": "gbpusd", "USDJPY": "usdjpy"}
-RATES_PROXY = "ief.us"                 # 7-10Y Treasury ETF; dYield ≈ -ret / 7.5
+# instrument -> Yahoo symbol (proxies documented; invariant 2 does not apply here — this is an
+# offline calibration tool, symbols never enter the platform). Equities are their own tickers;
+# index futures use the ETF proxy (SPY→ES, QQQ→NQ); FX uses Yahoo's "=X" spot symbols.
+EQUITIES = {"AAPL": "AAPL", "MSFT": "MSFT", "AMZN": "AMZN", "GOOG": "GOOGL",
+            "SAP": "SAP", "JNJ": "JNJ", "NVDA": "NVDA", "JPM": "JPM"}  # SAP US ADR ~ EUR listing
+FUTURE_PROXIES = {"ES": "SPY", "NQ": "QQQ"}
+FX = {"EURUSD": "EURUSD=X", "GBPUSD": "GBPUSD=X", "USDJPY": "USDJPY=X", "AUDUSD": "AUDUSD=X"}
+RATES_PROXY = "IEF"                    # 7-10Y Treasury ETF; dYield ≈ -ret / 7.5
 IEF_DURATION = 7.5
-EQ_FACTOR = "spy.us"
+EQ_FACTOR = "SPY"
 
 REGIMES = ["CALM", "TREND_UP", "TREND_DOWN", "RISK_OFF", "INFLATION_SHOCK"]
 
 
-# Stooq 404s / blocks the default urllib User-Agent ("Python-urllib/..."); a browser UA is
-# the usual fix. It also rate-limits by IP with a plain-text "Exceeded the daily hits limit"
-# body (HTTP 200, not an error code) — surface that clearly instead of parsing it as CSV.
+# Yahoo serves the chart JSON to a normal browser UA (a bare urllib UA is sometimes blocked).
 UA = ("Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 
 
 def fetch_closes(sym):
-    url = STOOQ.format(sym=sym)
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/csv,*/*"})
+    """Daily adjusted closes {YYYY-MM-DD: close} for a Yahoo symbol (last YEARS years)."""
+    url = YAHOO.format(sym=urllib.parse.quote(sym), yrs=YEARS)
+    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as r:
-        text = r.read().decode("utf-8", "replace")
-    low = text.lower()
-    if "exceeded the daily hits limit" in low:
-        raise RuntimeError(f"stooq rate-limited this IP for {sym} — retry later or from another host")
-    if "<html" in low or "Close" not in text.splitlines()[0]:
-        raise RuntimeError(f"stooq returned no CSV for {sym} (blocked/moved?): {text[:80]!r}")
-    rows = list(csv.DictReader(io.StringIO(text)))
-    closes = [(row["Date"], float(row["Close"])) for row in rows if row.get("Close") not in (None, "", "0", "N/A")]
-    if not closes:
-        raise RuntimeError(f"stooq CSV for {sym} had no usable closes")
-    n = min(len(closes), YEARS * 252)
-    return dict(closes[-n:])
+        data = json.load(r)
+    chart = data.get("chart") or {}
+    if not chart.get("result"):
+        err = (chart.get("error") or {}).get("description", "no data")
+        raise RuntimeError(f"yahoo returned no data for {sym}: {err}")
+    result = chart["result"][0]
+    stamps = result.get("timestamp") or []
+    ind = result.get("indicators", {})
+    # Prefer adjusted close (splits/dividends) so returns are clean; fall back to raw close.
+    series = None
+    if ind.get("adjclose") and ind["adjclose"][0].get("adjclose"):
+        series = ind["adjclose"][0]["adjclose"]
+    elif ind.get("quote") and ind["quote"][0].get("close"):
+        series = ind["quote"][0]["close"]
+    if not stamps or not series:
+        raise RuntimeError(f"yahoo payload for {sym} had no close series")
+    out = {}
+    for t, c in zip(stamps, series):
+        if c is None:
+            continue
+        d = datetime.datetime.utcfromtimestamp(t).strftime("%Y-%m-%d")
+        out[d] = float(c)
+    if not out:
+        raise RuntimeError(f"yahoo close series for {sym} was all null")
+    dates = sorted(out)[-(YEARS * 252):]
+    return {d: out[d] for d in dates}
 
 
 def returns(closes):
@@ -190,7 +206,7 @@ def main():
         transition.append(row)
 
     out = {
-        "_doc": [f"Calibrated from Stooq daily history ({YEARS}y window) by scripts/calibrate_sim.py.",
+        "_doc": [f"Calibrated from Yahoo daily history ({YEARS}y window) by scripts/calibrate_sim.py.",
                  "Factor order: [EQUITY, RATES_LEVEL, RATES_SLOPE, USD]. See ADR-0026."],
         "equityFactorVolAnnual": round(ann_vol(eq_v), 3),
         "usdFactorVolAnnual": round(ann_vol(usd_v), 3),
