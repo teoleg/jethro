@@ -56,6 +56,13 @@ public final class HypothesisMemory {
     private final java.util.concurrent.atomic.AtomicLong embedCalls = new java.util.concurrent.atomic.AtomicLong();
     private final java.util.concurrent.atomic.AtomicLong embedFailures = new java.util.concurrent.atomic.AtomicLong();
     private volatile int lastEmbeddingDim = -1; // dimension of the last successful embedding, -1 = none yet
+    // Back off when the embedder is failing (e.g. the model isn't pulled): after a run of failures,
+    // stop calling Ollama for a cooldown so RAG can't hammer a sick/absent model every cycle.
+    private static final int EMBED_FAIL_THRESHOLD = 4;
+    private static final long EMBED_COOLDOWN_MILLIS = 60_000;
+    private final java.util.concurrent.atomic.AtomicInteger consecutiveEmbedFailures =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private volatile long embedCooldownUntilMillis = 0;
 
     /** RAG health for the ops view: is it on, the model + live embedding dimension, indexed chunk
      *  counts, and the retrieval hit/miss counters (a hit = retrieval found a similar chunk). */
@@ -172,15 +179,22 @@ public final class HypothesisMemory {
         if (!enabled()) {
             return null;
         }
+        if (System.currentTimeMillis() < embedCooldownUntilMillis) {
+            return null; // backing off after repeated failures — don't hammer a sick/absent model
+        }
         embedCalls.incrementAndGet();
         try {
             float[] v = embeddings.embed(text);
             if (v != null && v.length > 0) {
                 lastEmbeddingDim = v.length;
             }
+            consecutiveEmbedFailures.set(0);
             return v;
         } catch (RuntimeException e) {
             embedFailures.incrementAndGet();
+            if (consecutiveEmbedFailures.incrementAndGet() >= EMBED_FAIL_THRESHOLD) {
+                embedCooldownUntilMillis = System.currentTimeMillis() + EMBED_COOLDOWN_MILLIS;
+            }
             if (!warnedUnavailable) {
                 warnedUnavailable = true;
                 log.warn("RAG retrieval unavailable ({}) — falling back to the deterministic guard "

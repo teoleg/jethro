@@ -30,15 +30,25 @@ public class AiConfig {
         return new InferenceMonitor();
     }
 
+    /** The one-at-a-time gate over the single-model box — shared by generate and embed so RAG
+     *  retrieval can't collide with an inference (unconditional so RAG can use it even if the
+     *  commentary loop is off). */
+    @Bean
+    OllamaGate ollamaGate() {
+        return new OllamaGate();
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "jethro.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
-    ModelInferenceClient modelInferenceClient(AiProperties properties, InferenceMonitor monitor) {
-        // Layers (outer → inner): single-flight (one inference at a time, skip if busy — the
-        // fast busy-skip is NOT monitored) → monitor (records real calls for the ops view) →
-        // Ollama. So overlapping loops can't pile up and time out as "ollama unreachable".
+    ModelInferenceClient modelInferenceClient(AiProperties properties, InferenceMonitor monitor, OllamaGate gate) {
+        // Layers (outer → inner): single-flight over the shared gate (one model call at a time,
+        // skip if busy — the fast busy-skip is NOT monitored) → monitor (records real calls for the
+        // ops view) → circuit breaker (a wedged Ollama trips it and backs off, so we don't hammer a
+        // sick model with 120s-hanging calls every cycle) → Ollama.
         var ollama = new OllamaClient(properties.baseUrl(), properties.model(),
                 Duration.ofSeconds(properties.requestTimeoutSeconds()));
-        return new SingleFlightInferenceClient(new MonitoringInferenceClient(ollama, monitor));
+        var breaker = new CircuitBreakerInferenceClient(ollama, 3, Duration.ofSeconds(60));
+        return new SingleFlightInferenceClient(new MonitoringInferenceClient(breaker, monitor), gate);
     }
 
     /** Loads the model at startup so the first real inference isn't a slow cold-start failure. */

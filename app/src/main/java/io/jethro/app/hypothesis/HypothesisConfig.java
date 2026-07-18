@@ -47,14 +47,19 @@ public class HypothesisConfig {
      *  call time (best-effort) so the deterministic guard stands alone. */
     @Bean
     HypothesisMemory hypothesisMemory(RagProperties rag,
-                                      ObjectProvider<io.jethro.app.ai.AiProperties> aiProps) {
+                                      ObjectProvider<io.jethro.app.ai.AiProperties> aiProps,
+                                      io.jethro.app.ai.OllamaGate gate) {
         if (!rag.enabledOrDefault()) {
             return HypothesisMemory.DISABLED;
         }
         var ai = aiProps.getIfAvailable();
         String baseUrl = ai != null ? ai.baseUrl() : rag.ollamaBaseUrlOrDefault();
-        var client = new io.jethro.trading.algo.inference.OllamaEmbeddingClient(
-                baseUrl, rag.modelOrDefault(), Duration.ofSeconds(rag.timeoutSecondsOrDefault()));
+        // Share the inference gate: embeddings serialize with generate on the single-model box, so
+        // RAG can never collide with an inference and time out as "ollama unreachable" (ADR-0035).
+        var client = new io.jethro.app.ai.SingleFlightEmbeddingClient(
+                new io.jethro.trading.algo.inference.OllamaEmbeddingClient(
+                        baseUrl, rag.modelOrDefault(), Duration.ofSeconds(rag.timeoutSecondsOrDefault())),
+                gate);
         log.warn("RAG ON (ADR-0035) — embeddings via {} at {}; semantic de-dup (cosine ≥ {}) + "
                         + "past-outcome memory (recall ≥ {}). Advisory only; deterministic guard stays the floor.",
                 rag.modelOrDefault(), baseUrl, rag.dedupThresholdOrDefault(), rag.recallThresholdOrDefault());
