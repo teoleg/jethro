@@ -3,7 +3,7 @@
 > **Scope narrowed** — this is the sim *price engine* only (gap-register G1). Volume-in-algos +
 > depth are ADR-0033, news→tape coupling ADR-0034, RAG ADR-0035. See the Scope section below.
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-18
 - **Deciders:** Oleg
 - **Tags:** market-data, sim, algo, execution, data
