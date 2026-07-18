@@ -295,7 +295,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 // VOLATILE/SHOCK regimes — you drive vol from the mixer. sim-regimes=true lets the
                 // Markov chain switch on its own; the mixer's regime dropdown overrides either way.
                 if (!properties.simRegimesOrDefault()) {
-                    sim.control().overrideRegime(io.jethro.trading.marketdata.sim.MarketRegime.CALM);
+                    sim.control().pinDefaultRegime(io.jethro.trading.marketdata.sim.MarketRegime.CALM);
                 }
                 if (properties.simNewsEnabled()) {
                     sim.configureNews(properties.simSeed() + 7, newsPerTickProbability(), newsHorizonTicks());

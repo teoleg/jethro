@@ -83,6 +83,23 @@ class SimControlTest {
     }
 
     @Test
+    void pinnedDefaultRegimeSurvivesResetAndIsNotPanelDriven() {
+        // Steady baseline (sim-regimes=false): CALM is pinned at wiring. Reset must restore the
+        // PIN — never silently resume the Markov chain — and the pinned state is the identity,
+        // not a "panel-driven" flag.
+        SimControl c = control();
+        c.pinDefaultRegime(MarketRegime.CALM);
+        assertEquals(MarketRegime.CALM, c.regimeOverride());
+        assertFalse(c.anyDialActive(), "the pinned baseline is the identity state");
+
+        c.overrideRegime(MarketRegime.RISK_OFF); // operator stages a scenario
+        assertTrue(c.anyDialActive());
+        c.resetAll();
+        assertEquals(MarketRegime.CALM, c.regimeOverride(), "reset restores the pin, not AUTO");
+        assertFalse(c.anyDialActive());
+    }
+
+    @Test
     void unknownInstrumentIsRejected() {
         SimControl c = control();
         assertThrows(IllegalArgumentException.class, () -> c.setDriftBias("NOPE", 0.001));

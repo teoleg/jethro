@@ -49,6 +49,9 @@ public final class SimControl {
     private volatile double speedMultiplier = 1.0;
     private volatile boolean paused = false;
     private volatile MarketRegime regimeOverride = null; // null = AUTO (seeded Markov chain)
+    // The wiring-time default the panel's "reset" restores — CALM when the app runs the steady
+    // baseline (sim-regimes=false), null (AUTO) otherwise. Reset must NOT silently unpin it.
+    private volatile MarketRegime defaultRegime = null;
     private final AtomicLong pendingReseed = new AtomicLong(NO_RESEED);
 
     private final AtomicLongArray driftBiasBits;  // additive per-tick log-drift, default 0.0
@@ -166,6 +169,14 @@ public final class SimControl {
         this.regimeOverride = regime;
     }
 
+    /** Pins the WIRING-TIME default regime (steady baseline, e.g. CALM when auto-regimes are off).
+     *  Sets it now AND makes {@link #resetAll()} restore it — reset must never silently resume
+     *  the Markov chain the operator turned off. */
+    public void pinDefaultRegime(MarketRegime regime) {
+        this.defaultRegime = regime;
+        this.regimeOverride = regime;
+    }
+
     public void reseed(long seed) {
         pendingReseed.set(seed);
     }
@@ -228,11 +239,13 @@ public final class SimControl {
         }
     }
 
-    /** Resets every dial to its identity value — the panel's "back to seeded config" button. */
+    /** Resets every dial to its identity value — the panel's "back to seeded config" button.
+     *  The regime goes back to the wiring-time DEFAULT (the pinned steady-baseline regime when
+     *  auto-regimes are off), not blindly to AUTO. */
     public void resetAll() {
         speedMultiplier = 1.0;
         paused = false;
-        regimeOverride = null;
+        regimeOverride = defaultRegime;
         for (int i = 0; i < ids.length; i++) {
             driftBiasBits.set(i, 0L);
             volMultBits.set(i, Double.doubleToRawLongBits(1.0));
@@ -265,9 +278,10 @@ public final class SimControl {
     }
 
     /** True when any dial deviates from its identity value — used to LABEL a panel-driven
-     *  session so a screenshot isn't mistaken for organic seeded sim output (ADR-0031). */
+     *  session so a screenshot isn't mistaken for organic seeded sim output (ADR-0031). The
+     *  pinned default regime IS the identity for a steady-baseline session, not a panel action. */
     public boolean anyDialActive() {
-        if (speedMultiplier != 1.0 || paused || regimeOverride != null) {
+        if (speedMultiplier != 1.0 || paused || regimeOverride != defaultRegime) {
             return true;
         }
         for (int i = 0; i < ids.length; i++) {
