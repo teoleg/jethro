@@ -32,6 +32,7 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
     private final long tickIntervalNanos;
     private final long ticksPerDay;                // 0 disables overnight gaps
     private final SimControl control;              // live control panel (ADR-0031)
+    private volatile SimNewsEngine newsEngine;     // sim-generated news (ADR-0034); null = disabled
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
     private volatile long dayIndexV;               // completed simulated trading days
@@ -111,6 +112,18 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
         return sim.regime();
     }
 
+    /** Enables sim-generated news (ADR-0034): each tick may fire a news event that shocks the
+     *  emitting instrument (jump + momentum + volume surge). Call before {@link #start}. */
+    public void configureNews(long seed, double perTickProbability, int horizonTicks) {
+        this.newsEngine = new SimNewsEngine(seed, java.util.List.of(factorIds), control,
+                perTickProbability, horizonTicks);
+    }
+
+    /** The sim news engine (ADR-0034), or null when news is disabled — for the narrative bridge. */
+    public SimNewsEngine newsEngine() {
+        return newsEngine;
+    }
+
     /** Completed simulated trading days on THIS tape (tick-counted) — the session calendar
      *  keys to this so day boundaries and overnight gaps never drift apart (ADR-0027). */
     public long simDayIndex() {
@@ -140,6 +153,13 @@ public final class CorrelatedMarketDataAdapter implements MarketDataAdapter {
             if (control.paused()) {
                 java.util.concurrent.locks.LockSupport.parkNanos(control.pausePollNanos());
                 continue;
+            }
+            // News shocks (ADR-0034): decay active shocks, then maybe fire a new one — it applies
+            // a jump/momentum/volume shock the engine reads this same tick.
+            control.onTick();
+            SimNewsEngine ne = newsEngine;
+            if (ne != null) {
+                ne.maybeFire(tickCount);
             }
             long now = System.currentTimeMillis();
             // Overnight gap at each simulated day boundary (ADR-0026/0027): one correlated

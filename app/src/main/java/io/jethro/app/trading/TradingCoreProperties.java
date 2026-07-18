@@ -34,6 +34,11 @@ public record TradingCoreProperties(
         /** Mean bootstrap block length in days for {@code simEngine=historical} (default 5 — a
          *  business week; longer preserves more autocorrelation, shorter mixes more). */
         Double simBlockLength,
+        /** Sim-generated news events per simulated day (ADR-0034; SIM provider only) — each shocks
+         *  its instrument (jump + momentum + volume surge). Default 4; 0 disables. */
+        Double simNewsPerDay,
+        /** How long a news shock takes to fade, in sim seconds (ADR-0034). Default 20. */
+        Double simNewsHorizonSeconds,
         /** Time compression: wall seconds per simulated trading day (default 120 — multi-day
          *  regimes play out in minutes). */
         Double simSecondsPerDay,
@@ -151,6 +156,20 @@ public record TradingCoreProperties(
 
     public double simBlockLengthOrDefault() {
         return simBlockLength != null && simBlockLength >= 1 ? simBlockLength : 5.0;
+    }
+
+    public double simNewsPerDayOrDefault() {
+        return simNewsPerDay != null && simNewsPerDay >= 0 ? simNewsPerDay : 4.0;
+    }
+
+    public double simNewsHorizonSecondsOrDefault() {
+        return simNewsHorizonSeconds != null && simNewsHorizonSeconds > 0 ? simNewsHorizonSeconds : 20.0;
+    }
+
+    /** News shocks run only under the pure SIM provider (never a live/composed feed) — invariant:
+     *  news must never move a live tape (ADR-0034). */
+    public boolean simNewsEnabled() {
+        return "sim".equalsIgnoreCase(providerOrDefault()) && simNewsPerDayOrDefault() > 0;
     }
 
     public String simCalibrationPathOrNull() {

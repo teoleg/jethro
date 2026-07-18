@@ -30,6 +30,7 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
     private final long tickIntervalNanos;
     private final long ticksPerDay;                // >0: per-tick volume = daily / ticksPerDay
     private final SimControl control;
+    private volatile SimNewsEngine newsEngine;     // sim-generated news (ADR-0034); null = disabled
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
     private volatile long dayIndexV;
@@ -69,6 +70,17 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
     /** The live control panel (ADR-0031) — sim-only, gated on {@code feedMode == SIM}. */
     public SimControl control() {
         return control;
+    }
+
+    /** Enables sim-generated news (ADR-0034); call before {@link #start}. */
+    public void configureNews(long seed, double perTickProbability, int horizonTicks) {
+        this.newsEngine = new SimNewsEngine(seed, java.util.List.of(factorIds), control,
+                perTickProbability, horizonTicks);
+    }
+
+    /** The sim news engine (ADR-0034), or null when news is disabled — for the narrative bridge. */
+    public SimNewsEngine newsEngine() {
+        return newsEngine;
     }
 
     /** No regime concept on the historical engine — always CALM (the panel's regime override is
@@ -125,6 +137,12 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
             if (control.paused()) {
                 java.util.concurrent.locks.LockSupport.parkNanos(control.pausePollNanos());
                 continue;
+            }
+            // News shocks (ADR-0034): decay actives, then maybe fire a new one for this tick.
+            control.onTick();
+            SimNewsEngine ne = newsEngine;
+            if (ne != null) {
+                ne.maybeFire(tickCount);
             }
             long now = System.currentTimeMillis();
             if (ticksPerDay > 0 && tickCount > 0 && tickCount % ticksPerDay == 0) {
