@@ -39,19 +39,20 @@ case "$ACTION:$TARGET" in
     docker compose ps || true
     app_running && echo "app: RUNNING (pid $(cat "$PIDFILE"))" || echo "app: stopped" ;;
 
-  stop:app)      app_stop ;;
+  stop:app)      ./scripts/backup-db.sh || true; app_stop ;;
   start:app)     app_start ;;
-  restart:app)   app_stop; app_start ;;
+  restart:app)   app_stop; app_start ;;                         # DB stays up; no dump needed
 
-  stop:infra)    docker compose stop $INFRA ;;
+  stop:infra)    ./scripts/backup-db.sh || true; docker compose stop $INFRA ;;
   start:infra)   docker compose up -d $INFRA ;;
   restart:infra) docker compose restart $INFRA ;;
 
-  stop:all)      app_stop; docker compose stop $INFRA ;;
+  stop:all)      ./scripts/backup-db.sh || true; app_stop; docker compose stop $INFRA ;;
   start:all)     app_start ;;                                  # run-local brings up infra + app
   restart:all)   app_stop; docker compose restart $INFRA; app_start ;;
 
-  stop:ollama|stop:postgres|stop:redpanda)          docker compose stop "$TARGET" ;;
+  stop:postgres) ./scripts/backup-db.sh || true; docker compose stop postgres ;;
+  stop:ollama|stop:redpanda)                        docker compose stop "$TARGET" ;;
   start:ollama|start:postgres|start:redpanda)       docker compose up -d "$TARGET" ;;
   restart:ollama|restart:postgres|restart:redpanda) docker compose restart "$TARGET" ;;
 

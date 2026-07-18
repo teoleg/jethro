@@ -20,6 +20,9 @@ else
   echo "==> No app pid file; skipping app stop (was it started with run-local.sh?)"
 fi
 
+# Always snapshot the DB first, so even a --volumes wipe leaves a restore file in backups/.
+./scripts/backup-db.sh || true
+
 if [ "${1:-}" = "--volumes" ]; then
   echo "==> Stopping infra and removing volumes (Postgres + Redpanda data wiped)…"
   docker compose down --volumes

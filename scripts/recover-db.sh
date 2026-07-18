@@ -37,17 +37,25 @@ for c in "${SORTED[@]}"; do
 done
 echo
 
-# choose source: the arg if given, else the newest
-if [ -n "$SRC_ARG" ]; then
-  SRC="$SRC_ARG"
-else
-  first="${SORTED[0]}"; rest="${first#*|}"; SRC="${rest%%|*}"
-fi
-
-# find the live target (…pg-data)
+# find the live target (…pg-data) first, so auto-pick can skip it.
 TARGET=$(docker volume ls -q | grep -E 'pg-data$' | head -1 || true)
 if [ -z "$TARGET" ]; then
   echo "!! Couldn't find the current pg-data volume. Start the stack once so it's created, then re-run."; exit 1
+fi
+
+# choose source: the arg if given, else the NEWEST cluster that ISN'T the current target
+# (the target is usually the newest — it's the live/empty DB — so we skip past it).
+if [ -n "$SRC_ARG" ]; then
+  SRC="$SRC_ARG"
+else
+  SRC=""
+  for c in "${SORTED[@]}"; do
+    rest="${c#*|}"; vol="${rest%%|*}"
+    if [ "$vol" != "$TARGET" ]; then SRC="$vol"; break; fi
+  done
+fi
+if [ -z "$SRC" ]; then
+  echo "!! No recoverable cluster other than the current one ($TARGET)."; exit 1
 fi
 if [ "$SRC" = "$TARGET" ]; then
   echo "!! Source and target are the same volume ($SRC) — nothing to do."; exit 1
