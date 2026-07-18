@@ -19,12 +19,13 @@ public class HedgeConfig {
     @Bean
     HedgeAdvisor hedgeAdvisor(
             @Value("${jethro.hedge.mode:ADVISE}") String mode,
-            @Value("${jethro.hedge.equity-cap-usd:250000}") BigDecimal equityCapUsd,
+            @Value("${jethro.hedge.equity-cap-usd:100000}") BigDecimal equityCapUsd,
             @Value("${jethro.hedge.effectiveness-floor:0.25}") double effectivenessFloor,
             @Value("${jethro.hedge.equity-proxy:ES}") String equityProxy,
-            @Value("${jethro.hedge.equity-proxy-multiplier:50}") BigDecimal equityProxyMultiplier) {
+            @Value("${jethro.hedge.equity-proxy-multiplier:50}") BigDecimal equityProxyMultiplier,
+            @Value("${jethro.hedge.fallback-beta:1.0}") BigDecimal fallbackBeta) {
         return new HedgeAdvisor(HedgeAdvisor.Mode.valueOf(mode.trim().toUpperCase(java.util.Locale.ROOT)),
-                equityCapUsd, effectivenessFloor, equityProxy, equityProxyMultiplier);
+                equityCapUsd, effectivenessFloor, equityProxy, equityProxyMultiplier, fallbackBeta);
     }
 
     /** AUTO-hedge executor (ADR-0039): submits the sized hedge in AUTO mode, sim-gated. */

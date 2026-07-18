@@ -27,7 +27,7 @@ class HedgeAdvisorTest {
     }
 
     private static HedgeAdvisor advisor(HedgeAdvisor.Mode mode, String capUsd) {
-        return new HedgeAdvisor(mode, new BigDecimal(capUsd), 0.25, "ES", new BigDecimal("50"));
+        return new HedgeAdvisor(mode, new BigDecimal(capUsd), 0.25, "ES", new BigDecimal("50"), new BigDecimal("1.0"));
     }
 
     private static final java.util.function.Predicate<String> IS_EQUITY = "STOCK"::equals;
@@ -61,14 +61,18 @@ class HedgeAdvisorTest {
     }
 
     @Test
-    void breachDuringCovarianceWarmupCannotSizeYet() {
+    void breachDuringCovarianceWarmupHedgesProvisionallyAtTheAssumedBeta() {
         var snap = advisor(HedgeAdvisor.Mode.ADVISE, "500000")
                 .evaluate(Optional.empty(), Map.of("STOCK", new BigDecimal("1000000")), IS_EQUITY, ES_AT_5600);
         var axis = snap.axes().get(0);
         assertTrue(axis.breached());
         assertFalse(snap.covarianceReady());
-        assertNull(axis.hedgeQuantity(), "no covariance → no sized hedge, but the breach is still shown");
-        assertTrue(axis.rationale().contains("warming up"), axis.rationale());
+        // No covariance yet → hedge NOW at β=1.0: net $1M → 1,000,000/(5600×50) = 3.571429 ES SELL.
+        assertTrue(axis.hedgeRecommended(), "provisional hedge still fires so AUTO can act immediately");
+        assertEquals("SELL", axis.hedgeSide());
+        assertEquals(0, new BigDecimal("3.571429").compareTo(axis.hedgeQuantity()));
+        assertNull(axis.effectiveness(), "effectiveness is unknown until the covariance is ready");
+        assertTrue(axis.rationale().contains("provisional"), axis.rationale());
     }
 
     @Test
