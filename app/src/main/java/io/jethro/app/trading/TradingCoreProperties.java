@@ -166,10 +166,12 @@ public record TradingCoreProperties(
         return simNewsHorizonSeconds != null && simNewsHorizonSeconds > 0 ? simNewsHorizonSeconds : 20.0;
     }
 
-    /** News shocks run only under the pure SIM provider (never a live/composed feed) — invariant:
-     *  news must never move a live tape (ADR-0034). */
+    /** The sim news ENGINE is wired under the pure SIM provider (never a live tape — ADR-0034). It
+     *  exists so the mixer's manual ⚡ can fire a shock WITH a headline the model reads, even when
+     *  the AUTO-fire rate ({@code sim-news-per-day}) is 0 — the steady-baseline default, so news
+     *  only moves the tape when you send it. Auto-fire is governed separately by the per-tick rate. */
     public boolean simNewsEnabled() {
-        return "sim".equalsIgnoreCase(providerOrDefault()) && simNewsPerDayOrDefault() > 0;
+        return "sim".equalsIgnoreCase(providerOrDefault());
     }
 
     public String simCalibrationPathOrNull() {

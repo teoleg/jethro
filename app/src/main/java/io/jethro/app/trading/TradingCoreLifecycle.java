@@ -291,12 +291,20 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 this.regimeSource = () -> sim.regime().name();
                 this.simDayIndexSource = sim::simDayIndex;
                 this.simControl = sim.control();
+                // Steady baseline (default): pin CALM so the tape doesn't spontaneously lurch into
+                // VOLATILE/SHOCK regimes — you drive vol from the mixer. sim-regimes=true lets the
+                // Markov chain switch on its own; the mixer's regime dropdown overrides either way.
+                if (!properties.simRegimesOrDefault()) {
+                    sim.control().overrideRegime(io.jethro.trading.marketdata.sim.MarketRegime.CALM);
+                }
                 if (properties.simNewsEnabled()) {
                     sim.configureNews(properties.simSeed() + 7, newsPerTickProbability(), newsHorizonTicks());
                     this.simNewsSource = sim::newsEngine;
-                    log.warn("SIM NEWS (ADR-0034): {} events/day shock the tape (jump + momentum + volume "
-                            + "surge), {}s fade.", properties.simNewsPerDayOrDefault(),
-                            properties.simNewsHorizonSecondsOrDefault());
+                    double perDay = properties.simNewsPerDayOrDefault();
+                    log.warn(perDay > 0
+                            ? "SIM NEWS (ADR-0034): {} events/day auto-shock the tape; manual ⚡ also available."
+                            : "SIM NEWS (ADR-0034): auto-fire OFF (steady baseline) — the mixer's ⚡ fires shocks on demand.",
+                            perDay);
                 }
                 log.info("SIM ENGINE: correlated factor model (ADR-0026) — {} instruments, {} regimes, "
                                 + "t(ν={}) tails, {}s per simulated trading day",
