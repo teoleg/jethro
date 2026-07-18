@@ -93,6 +93,8 @@
   .ratechart .ach{fill:none;stroke:var(--teal);stroke-width:1.8}
   .ratechart .tgt{fill:none;stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4}
   .ratechart .fill2{fill:rgba(72,211,196,.08)}
+  .pricechart svg .line{fill:none;stroke:var(--brand);stroke-width:1.8}
+  .pricechart svg .area{fill:rgba(91,140,255,.10);stroke:none}
 
   /* charts */
   .rangebar{display:flex;gap:6px;align-items:center;margin-bottom:14px}
@@ -233,8 +235,34 @@
     con.append(ch, masterStrip());
     con._price=price; con._chg=chg; con._meter=meter; con._id=it.id;
     con._quote=quote; con._volline=volline; activeCh=con;
-    const row=$("div","simrow"); row.append(con, rateChartPanel());
+    const row=$("div","simrow"); row.append(con, priceChartPanel(it));
     return row;
+  }
+
+  // ---- live price chart for the focused instrument (price is what matters here, not tick rate;
+  //      the ticks/s telemetry still shows numerically in the master strip) ----
+  function priceChartPanel(it){
+    const p=$("div","ratechart pricechart");
+    p.append($("h4",null,"Price — "+esc(it.name||it.id)),
+             $("div","now mono",'<span id="priceNow">—</span><small id="priceChg"></small>'),
+             $("div","plot",'<div id="pricePlot"><div class="muted" style="padding:60px 0;text-align:center;font-size:11px">loading…</div></div>'));
+    loadPriceChart(it.id);
+    chartTimer=setInterval(()=>loadPriceChart(it.id), 3000); // renderView clears this on view switch
+    return p;
+  }
+  async function loadPriceChart(id){
+    try{
+      const pts=await (await fetch(`/api/history/${enc(id)}?minutes=${chartMinutes}`)).json();
+      const el=document.getElementById("pricePlot"); if(!el)return;
+      el.innerHTML=miniSvg(pts);
+      const now=document.getElementById("priceNow"), chg=document.getElementById("priceChg");
+      if(pts.length>1){
+        const f=+pts[0].price,l=+pts[pts.length-1].price,c=(l-f)/f*100;
+        if(now)now.textContent=(+l).toLocaleString(undefined,{maximumFractionDigits:6});
+        if(chg){chg.textContent=(c>=0?"+":"")+c.toFixed(2)+"% · "+chartMinutes+"m";
+          chg.style.color=c>=0?"var(--up)":"var(--down)";}
+      } else if(now){ now.textContent="—"; }
+    }catch(e){}
   }
 
   // ---- live tick-rate graph (publisher telemetry): achieved vs target, last 2 minutes ----
