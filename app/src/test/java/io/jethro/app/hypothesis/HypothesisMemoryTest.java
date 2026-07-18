@@ -18,14 +18,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class HypothesisMemoryTest {
 
     // A toy embedder: "beat" stories embed one way, "miss" another, else a third direction.
-    private static final EmbeddingClient TOY = text -> {
-        if (text.contains("beat")) {
-            return new float[]{1, 0, 0};
+    // (EmbeddingClient has two abstract methods, so it's not a functional interface — no lambda.)
+    private static final EmbeddingClient TOY = new EmbeddingClient() {
+        @Override
+        public String modelId() {
+            return "toy";
         }
-        if (text.contains("miss")) {
-            return new float[]{0, 1, 0};
+
+        @Override
+        public float[] embed(String text) {
+            if (text.contains("beat")) {
+                return new float[]{1, 0, 0};
+            }
+            if (text.contains("miss")) {
+                return new float[]{0, 1, 0};
+            }
+            return new float[]{0, 0, 1};
         }
-        return new float[]{0, 0, 1};
     };
 
     private static Hypothesis h(String instrument, Side dir, String thesis) {
@@ -62,8 +71,16 @@ class HypothesisMemoryTest {
 
     @Test
     void embeddingFailureDegradesToNotDuplicate() {
-        EmbeddingClient boom = text -> {
-            throw new InferenceException("embedding model unavailable");
+        EmbeddingClient boom = new EmbeddingClient() {
+            @Override
+            public String modelId() {
+                return "boom";
+            }
+
+            @Override
+            public float[] embed(String text) {
+                throw new InferenceException("embedding model unavailable");
+            }
         };
         var mem = memory(boom);
         var call = h("AAPL", Side.BUY, "earnings beat");
