@@ -36,6 +36,16 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
         return Optional.ofNullable(ref);
     }
 
+    @Override
+    public java.util.Set<String> instrumentIds() {
+        Map<String, InstrumentRef> current = cache;
+        if (current.isEmpty()) {
+            reload();
+            current = cache;
+        }
+        return java.util.Set.copyOf(current.keySet());
+    }
+
     private synchronized void reload() {
         Map<String, Map<String, String>> attributes = repository.findAllAttributes();
         Map<String, InstrumentRef> next = new HashMap<>();

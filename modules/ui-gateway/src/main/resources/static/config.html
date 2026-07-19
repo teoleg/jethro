@@ -15,7 +15,7 @@
   .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
   .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
-  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; margin-left:8px; }
   .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; }
   .tab:hover { color:var(--txt); background:var(--surface); }
   .tab.active { color:var(--txt); background:var(--surface-2); }
@@ -48,6 +48,10 @@
       <a class="tab active" href="/config.html">Config</a>
       <a class="tab" href="/sim.html">Sim</a>
       <a class="tab" href="/backtest.html">Backtest</a>
+      <a class="tab" href="/strategy.html">Strategy</a>
+      <a class="tab" href="/social.html">Social</a>
+      <a class="tab" href="/social-sources.html">Sources</a>
+      <a class="tab" href="/discovery.html">Discover</a>
       <a class="tab" href="/ollama.html">Ops</a>
     </nav>
     <span class="spacer"></span>
@@ -66,6 +70,7 @@
     <div class="panel"><div id="sim" class="muted">loading…</div></div>
   </div>
 </main>
+<script src="/poll.js"></script>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const money = v => v==null ? "—" : "$" + Number(v).toLocaleString();
@@ -136,7 +141,7 @@
     } catch (e) { document.getElementById("limits").textContent = "config unavailable: " + e; }
   }
   load();
-  setInterval(load, 5000);
+  poll(load, 5000); // poll.js: no-overlap, pauses while hidden (see index.html)
 </script>
 </body>
 </html>

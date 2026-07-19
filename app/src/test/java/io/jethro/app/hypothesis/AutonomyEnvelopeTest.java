@@ -14,8 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Bounded autonomy gated on the AI's MEASURED track record (ADR-0027): probation size while
  * the record builds, full size only while measured outcome P&L is positive, revoked when the
- * record is non-positive. The momentum backtest no longer gates (it measured a different
- * strategy — the category error that silently revoked all autonomy).
+ * record is non-positive. The deterministic backtest is a HARD pre-gate at the lifecycle level
+ * (ADR-0049, see {@link HypothesisAutonomyGateTest}) applied BEFORE this envelope — so these
+ * envelope tests exercise the track-record/cap/whitelist logic that runs on top of that gate.
  */
 class AutonomyEnvelopeTest {
 

@@ -11,6 +11,7 @@ import io.jethro.trading.algo.strategy.MeanReversionStrategy;
 import io.jethro.trading.algo.strategy.MomentumStrategy;
 import io.jethro.trading.algo.strategy.Strategy;
 import io.jethro.trading.algo.strategy.TradeSignal;
+import io.jethro.trading.algo.strategy.VolatilityRegime;
 import io.jethro.trading.marketdata.sim.SimTickGenerator;
 
 import java.math.BigDecimal;
@@ -68,6 +69,8 @@ public final class BacktestEngine {
         }
 
         SimTickGenerator gen = new SimTickGenerator(cfg.seed(), startPrices, maxSteps, cfg.regimes());
+        // Price-derived risk-off sensing (ADR-0051), default params matching the live path for parity.
+        VolatilityRegime volRegime = new VolatilityRegime();
         Strategy strategy = "mean-reversion".equals(cfg.algo())
                 ? new MeanReversionStrategy(cfg.lookback(), cfg.thresholdSigmas(), cfg.minSignalBps())
                 : new MomentumStrategy(cfg.lookback(), cfg.thresholdSigmas(), cfg.minSignalBps());
@@ -93,8 +96,12 @@ public final class BacktestEngine {
                 for (int i = 0; i < n; i++) {
                     obs.add(new Strategy.Observation(ids[i], mark[i], false));
                 }
-                String regime = gen.regime().name();
-                BigDecimal regimeScale = "VOLATILE".equals(regime) ? cfg.volatileScale() : BigDecimal.ONE;
+                // ADR-0051: the risk-off scale is SENSED from prices (same detector as live), never the
+                // sim's regime label — so the backtest measures the identical sizing behaviour the live
+                // strategy runs. The sim tape may still switch regimes (cfg.regimes()); we detect the vol.
+                volRegime.update(obs);
+                BigDecimal regimeScale =
+                        volRegime.regime() == VolatilityRegime.Regime.ELEVATED ? cfg.volatileScale() : BigDecimal.ONE;
                 for (TradeSignal signal : strategy.evaluate(obs)) {
                     signalCount++;
                     int idx = indexOf(ids, signal.instrumentId());

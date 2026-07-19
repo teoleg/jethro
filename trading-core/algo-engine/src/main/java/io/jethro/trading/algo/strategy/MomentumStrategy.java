@@ -37,6 +37,9 @@ public final class MomentumStrategy implements Strategy {
     private final BigDecimal minSignalBps;
     private final double volumeConfirmMin; // ADR-0033: require relativeVolume ≥ this; 0 disables
     private final double baselineLambda;   // EWMA decay for the slow vol baseline (halflife = lookback)
+    /** ADR-0052: when non-null, threshold/floor/lookback/volume-confirm are read from here on every
+     *  evaluate (live tuning). Null on the backtest/walk-forward path, which must stay reproducible. */
+    private final SignalParams live;
     private final Map<String, Deque<BigDecimal>> history = new HashMap<>();
     private final Map<String, Baseline> baselines = new HashMap<>();
 
@@ -77,6 +80,17 @@ public final class MomentumStrategy implements Strategy {
      */
     public MomentumStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps,
                             double volumeConfirmMin) {
+        this(lookback, thresholdSigmas, minSignalBps, volumeConfirmMin, null);
+    }
+
+    /**
+     * Live-tunable variant (ADR-0052): {@code live} overrides threshold/floor/lookback/volume-confirm
+     * on every evaluate. The constructor args remain the fallback (used until an override is set and
+     * whenever a live getter returns a non-usable value). Only the live strategy passes a source;
+     * the backtest never does, so its measurement stays reproducible.
+     */
+    public MomentumStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps,
+                            double volumeConfirmMin, SignalParams live) {
         if (lookback < 2) {
             throw new IllegalArgumentException("lookback must be >= 2");
         }
@@ -88,11 +102,37 @@ public final class MomentumStrategy implements Strategy {
         this.minSignalBps = minSignalBps;
         this.volumeConfirmMin = Math.max(0.0, volumeConfirmMin);
         this.baselineLambda = Math.exp(-Math.log(2.0) / lookback); // halflife = lookback returns
+        this.live = live;
     }
 
     /** Feeds one observation snapshot and returns any signals it triggers. */
     @Override
     public List<TradeSignal> evaluate(List<Strategy.Observation> observations) {
+        // ADR-0052: snapshot the tunable params ONCE per cycle. With a live source they reflect the
+        // current runtime override; without one they are the construction-time constants (backtest).
+        // Each getter falls back to the constant when the live value is unusable, so a bad override
+        // can never wedge the detector. baselineLambda stays at its constructor value — it drives only
+        // the reporting baseline (never a signal), so a live lookback change doesn't need to rebuild it.
+        int lookback = this.lookback;
+        double thresholdSigmas = this.thresholdSigmas;
+        BigDecimal minSignalBps = this.minSignalBps;
+        double volumeConfirmMin = this.volumeConfirmMin;
+        if (live != null) {
+            int l = live.lookback();
+            if (l >= 2) {
+                lookback = l;
+            }
+            double t = live.thresholdSigmas();
+            if (t > 0 && Double.isFinite(t)) {
+                thresholdSigmas = t;
+            }
+            BigDecimal floor = live.minSignalBps();
+            if (floor != null && floor.signum() >= 0) {
+                minSignalBps = floor;
+            }
+            double vc = live.volumeConfirmMin();
+            volumeConfirmMin = Double.isFinite(vc) ? Math.max(0.0, vc) : this.volumeConfirmMin;
+        }
         List<TradeSignal> signals = new ArrayList<>();
         for (Strategy.Observation obs : observations) {
             if (obs.stale()) {
@@ -136,7 +176,7 @@ public final class MomentumStrategy implements Strategy {
             }
 
             double move = windowMove(window);
-            double z = windowZScore(window);
+            double z = windowZScore(window, lookback);
             // Honest reading: the same move vs the slow baseline vol (reporting only). Until the
             // baseline is warm (or degenerate), fall back to the in-window z so it never misleads.
             double baselineZ = baselineReady && baselineVarBefore > 0
@@ -166,7 +206,7 @@ public final class MomentumStrategy implements Strategy {
     }
 
     /** Signed z: window log-move divided by (per-return σ · √lookback); ±∞ for a steady trend. */
-    private double windowZScore(Deque<BigDecimal> window) {
+    private double windowZScore(Deque<BigDecimal> window, int lookback) {
         DescriptiveStatistics returns = new DescriptiveStatistics();
         double previous = Double.NaN;
         double move = 0.0;

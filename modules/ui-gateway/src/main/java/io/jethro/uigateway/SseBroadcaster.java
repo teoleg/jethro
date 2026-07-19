@@ -10,7 +10,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public final class SseBroadcaster {
 
     private static final Logger log = LoggerFactory.getLogger(SseBroadcaster.class);
-    private static final long EMITTER_TIMEOUT_MILLIS = 0L; // no server-side timeout
+    // Server-side timeout so a half-open connection (client vanished without a clean close — laptop
+    // slept, network dropped) is torn down by the container instead of lingering. Without it such an
+    // emitter's send() can block on a full socket buffer, and because broadcast() serializes all
+    // sends under one lock, a single stuck client would wedge EVERY broadcasting thread (mark loop,
+    // schedulers, monitors). The browser's EventSource reconnects automatically. 5 min ≫ the ~1Hz
+    // broadcast cadence, so a live tab is never dropped mid-stream.
+    private static final long EMITTER_TIMEOUT_MILLIS = 300_000L;
 
     private final CopyOnWriteArrayList<SseEmitter> emitters = new CopyOnWriteArrayList<>();
 

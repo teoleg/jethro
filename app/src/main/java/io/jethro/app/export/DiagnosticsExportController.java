@@ -35,13 +35,19 @@ public final class DiagnosticsExportController {
     private final ObjectProvider<RiskProjection> projection;
     private final ObjectProvider<VarService> varService;
     private final ObjectProvider<JdbcTemplate> jdbc;
+    private final ObjectProvider<io.jethro.app.strategy.StrategySelector> selector;
+    private final ObjectProvider<io.jethro.trading.algo.strategy.Strategy> tradingStrategy;
 
     public DiagnosticsExportController(ObjectProvider<RiskProjection> projection,
                                        ObjectProvider<VarService> varService,
-                                       ObjectProvider<JdbcTemplate> jdbc) {
+                                       ObjectProvider<JdbcTemplate> jdbc,
+                                       ObjectProvider<io.jethro.app.strategy.StrategySelector> selector,
+                                       ObjectProvider<io.jethro.trading.algo.strategy.Strategy> tradingStrategy) {
         this.projection = projection;
         this.varService = varService;
         this.jdbc = jdbc;
+        this.selector = selector;
+        this.tradingStrategy = tradingStrategy;
     }
 
     @GetMapping("/api/export/diagnostics.xlsx")
@@ -57,6 +63,7 @@ public final class DiagnosticsExportController {
             groupSheet(wb, "P&L by asset class", snap.byAssetClass());
             positionsSheet(wb, snap.positions());
         }
+        selectionSheet(wb);
         JdbcTemplate db = jdbc.getIfAvailable();
         if (db != null) {
             fillsSheet(db, wb);
@@ -102,6 +109,40 @@ public final class DiagnosticsExportController {
             }
         }
         wb.sheet("Summary", List.of("metric", "value"), rows);
+    }
+
+    /** Per-instrument selection state — so "no picks / no backtest" is diagnosable from the workbook
+     *  alone. Shows the ADR-0043 OOS medians AND (when the ADR-0044 regime path is live) the
+     *  price-derived regime + efficiency ratio actually driving the pick, plus market breadth. */
+    private void selectionSheet(Xlsx wb) {
+        io.jethro.app.strategy.StrategySelector s = selector.getIfAvailable();
+        io.jethro.trading.algo.strategy.TrendDetector detector = detector();
+        List<List<Object>> rows = new ArrayList<>();
+        if (s == null) {
+            rows.add(List.of("(selection off — jethro.strategy.selection.enabled=false; single algo runs)"));
+        } else if (s.lastError() != null) {
+            rows.add(List.of("last measurement FAILED: " + s.lastError()));
+        } else if (s.lastRunMillis() == 0) {
+            rows.add(List.of("measuring… first OOS run runs ~90s after boot"));
+        } else {
+            rows.add(List.of("measured at " + java.time.Instant.ofEpochMilli(s.lastRunMillis())
+                    + (detector != null ? " · market breadth " + detector.breadth().name() : "")));
+            s.selection().forEach((id, c) -> {
+                String regime = detector == null ? "—" : detector.regimeFor(id).name();
+                java.math.BigDecimal er = detector == null ? null : detector.efficiencyRatio(id);
+                rows.add(List.of(id, c.algo(), regime, er == null ? "—" : num(er),
+                        num(c.momentumMedianPnl()), (long) c.momentumTrades(),
+                        num(c.meanReversionMedianPnl()), (long) c.meanReversionTrades()));
+            });
+        }
+        wb.sheet("Strategy selection", List.of("instrument", "chosen", "live_regime", "efficiency_ratio",
+                "momentum_median", "momentum_trades", "meanrev_median", "meanrev_trades"), rows);
+    }
+
+    /** The live strategy's trend detector when the ADR-0044 regime-aware path is wired, else null. */
+    private io.jethro.trading.algo.strategy.TrendDetector detector() {
+        io.jethro.trading.algo.strategy.Strategy strategy = tradingStrategy.getIfAvailable();
+        return strategy instanceof io.jethro.trading.algo.strategy.SelectingStrategy ss ? ss.detector() : null;
     }
 
     private void groupSheet(Xlsx wb, String name, List<ConsolidatedRisk.Group> groups) {

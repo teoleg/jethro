@@ -16,7 +16,7 @@
   .bar{display:flex;align-items:center;gap:18px;padding:0 22px;height:54px;max-width:1560px;margin:0 auto}
   .brand{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:.2em;font-size:14px}
   .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
-  .nav{display:flex;gap:3px} .nav a{padding:7px 12px;border-radius:8px;color:var(--dim);text-decoration:none;font-size:12.5px}
+  .nav{display:flex;flex-wrap:wrap;gap:3px} .nav a{padding:7px 12px;border-radius:8px;color:var(--dim);text-decoration:none;font-size:12.5px}
   .nav a:hover{color:var(--txt);background:var(--strip)} .nav a.active{color:var(--txt);background:var(--strip)}
   .spacer{flex:1} .badge{font-size:10px;padding:2px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--dim)}
   .badge.live{color:var(--warn);border-color:var(--warn)} .badge.clean{color:var(--up);border-color:var(--up)}
@@ -118,11 +118,12 @@
 <body>
 <div class="topbar"><div class="bar">
   <span class="brand"><span class="dot"></span>JETHRO</span>
-  <nav class="nav"><a href="/">Overview</a><a href="/markets.html">Markets</a><a href="/books.html">Books</a>
-    <a href="/orders.html">Orders</a><a class="active" href="/sim.html">Sim</a><a href="/ollama.html">Ops</a></nav>
+  <nav class="nav"><a href="/">Overview</a><a href="/markets.html">Markets</a><a href="/rates.html">Rates</a><a href="/books.html">Books</a><a href="/orders.html">Orders</a><a href="/config.html">Config</a><a class="active" href="/sim.html">Sim</a><a href="/backtest.html">Backtest</a><a href="/strategy.html">Strategy</a><a href="/social.html">Social</a><a href="/social-sources.html">Sources</a><a href="/discovery.html">Discover</a><a href="/ollama.html">Ops</a></nav>
   <span class="spacer"></span><span id="statusBadge" class="badge">loading…</span>
 </div></div>
 <main><div id="stage"><div class="notice">connecting to the sim…</div></div></main>
+<script src="/format.js"></script>
+<script src="/poll.js"></script>
 <script src="/chart.js"></script>
 <script>
 (() => {
@@ -193,7 +194,7 @@
   function renderView(){
     const old=document.querySelector(".tabs"); if(old) old.replaceWith(tabBar());
     const c=document.getElementById("content");
-    if(chartTimer){clearInterval(chartTimer);chartTimer=null;}
+    if(chartTimer){chartTimer();chartTimer=null;} // chartTimer holds poll()'s stop() handle
     activeCh=null; c.innerHTML="";
     if(view==="charts"){ c.append(chartsPanel()); return; }
     c.append(consolePanel(state.instruments.find(i=>i.id===current)));
@@ -246,8 +247,7 @@
     p.append($("h4",null,"Price — "+esc(it.name||it.id)),
              $("div","now mono",'<span id="priceNow">—</span><small id="priceChg"></small>'),
              $("div","plot",'<div id="pricePlot"><div class="muted" style="padding:60px 0;text-align:center;font-size:11px">loading…</div></div>'));
-    loadPriceChart(it.id);
-    chartTimer=setInterval(()=>loadPriceChart(it.id), 3000); // renderView clears this on view switch
+    chartTimer=poll(()=>loadPriceChart(it.id), 3000); // poll's immediate tick draws it now; stop() on view switch
     return p;
   }
   async function loadPriceChart(id){
@@ -258,10 +258,7 @@
       const now=document.getElementById("priceNow"), chg=document.getElementById("priceChg");
       if(pts.length>1){
         const f=+pts[0].price,l=+pts[pts.length-1].price,c=(l-f)/f*100;
-        // prices are carried at 1e-6 scale (invariant 1); show sensible precision by magnitude
-        // (futures ~1dp, equities 2dp, FX 4dp) instead of the raw 6 places.
-        const fmtPx=n=>n>=1000?n.toFixed(1):n>=100?n.toFixed(2):n.toFixed(4);
-        if(now)now.textContent=fmtPx(l);
+        if(now)now.textContent=fmtPrice(l, id); // shared per-instrument precision (FX 5dp, else 2dp)
         if(chg){chg.textContent=(c>=0?"+":"")+c.toFixed(2)+"% · "+chartMinutes+"m";
           chg.style.color=c>=0?"var(--up)":"var(--down)";}
       } else if(now){ now.textContent="—"; }
@@ -322,8 +319,8 @@
     state.instruments.forEach(it=>{const card=$("div","card"); card.dataset.id=it.id;
       card.append($("h4","",`<span>${esc(it.name||it.id)}</span><span class="c mono muted" data-c></span>`),$("div","plot",'<div class="empty">loading…</div>')); grid.append(card);});
     const ev=$("div","events"); ev.innerHTML='<h4>Recent events</h4><div id="evlist" class="muted">—</div>'; wrap.append(ev);
-    setTimeout(()=>{loadCharts();loadEvents();},0);
-    chartTimer=setInterval(()=>{loadCharts();loadEvents();},4000);
+    setTimeout(()=>{loadCharts();loadEvents();},0); // first paint after this node is appended by the caller
+    chartTimer=poll(()=>{loadCharts();loadEvents();},4000); // recurring; stop() on view switch
     return wrap;
   }
   async function loadCharts(){
@@ -357,7 +354,7 @@
       fetch("/api/depth").then(r=>r.ok?r.json():[]).catch(()=>[]),
       fetch("/api/volume").then(r=>r.ok?r.json():[]).catch(()=>[])]);
     const d=depth.find(x=>x.instrumentId===activeCh._id); if(!d)return;
-    const px=v=>{const n=+v;return n>=1000?n.toFixed(1):n>=100?n.toFixed(2):n.toFixed(4);};
+    const px=v=>fmtPrice(v, activeCh._id); // shared per-instrument precision (FX 5dp, else 2dp)
     const mid=(+d.bid + +d.ask)/2, prev=lastMid[activeCh._id]; lastMid[activeCh._id]=mid;
     activeCh._price.firstChild.nodeValue=px(mid)+" ";
     if(prev){const bps=(mid/prev-1)*10000; activeCh._chg.textContent=(bps>=0?"+":"")+bps.toFixed(0)+"bp";
@@ -381,9 +378,9 @@
         document.getElementById("stage").innerHTML='<div class="notice"><h2>The console is live only in SIM feed mode</h2><div>Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine.</div></div>';return;}
       state=await r.json(); badge.textContent=state.active?"panel-driven":"seeded · untouched"; badge.className="badge "+(state.active?"live":"clean");
       try{ (await (await fetch("/api/instruments")).json()).forEach(i=>instrClass[i.instrumentId]=i.assetClass); }catch(e){}
-      build(); loadLive(); setInterval(loadLive,1500);
+      build(); poll(loadLive,1500); // poll.js: no-overlap, pauses while hidden (see index.html)
       // publisher telemetry (1s): master-strip readout + the live tick-rate graph
-      setInterval(async()=>{try{const s=await(await fetch("/api/sim/control")).json();
+      poll(async()=>{try{const s=await(await fetch("/api/sim/control")).json();
         rateHist.push({t:Date.now(),ach:s.achievedTicksPerSec||0,tgt:s.targetTicksPerSec||0});
         while(rateHist.length>240)rateHist.shift();
         const el=document.getElementById("rateStat");
@@ -394,7 +391,7 @@
         if(now){now.textContent=(s.achievedTicksPerSec||0).toFixed(1)+"/s";
           tgt.textContent="target "+(s.targetTicksPerSec||0).toFixed(1)+"/s";}
         drawRate();
-      }catch(e){}},1000);
+      }catch(e){}},1000); // poll.js
     }catch(e){document.getElementById("stage").innerHTML='<div class="notice">sim console unavailable</div>';}
   }
   boot();

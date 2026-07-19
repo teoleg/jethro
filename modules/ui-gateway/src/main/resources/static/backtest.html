@@ -18,7 +18,7 @@
   .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
   .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
-  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; margin-left:8px; }
   .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
   .tab:hover { color:var(--txt); background:var(--surface); }
   .tab.active { color:var(--txt); background:var(--surface-2); }
@@ -60,6 +60,10 @@
       <a class="tab" href="/config.html">Config</a>
       <a class="tab" href="/sim.html">Sim</a>
       <a class="tab active" href="/backtest.html">Backtest</a>
+      <a class="tab" href="/strategy.html">Strategy</a>
+      <a class="tab" href="/social.html">Social</a>
+      <a class="tab" href="/social-sources.html">Sources</a>
+      <a class="tab" href="/discovery.html">Discover</a>
       <a class="tab" href="/ollama.html">Ops</a>
     </nav>
     <span class="spacer"></span>
@@ -67,6 +71,9 @@
   </div>
 </div>
 <main>
+  <div class="section-h">Live strategy selection <span class="muted" id="stratselAsOf" style="text-transform:none;letter-spacing:0">— what the OOS harness picked per instrument to drive live trading (ADR-0043)</span></div>
+  <div class="panel" style="padding:2px 4px"><div id="stratsel" class="muted" style="padding:12px">loading…</div></div>
+
   <div class="section-h">Run a backtest <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic: same seed reproduces the run; backtests the current strategy config on the price-quoted universe</span></div>
   <div class="panel">
     <form class="controls" id="f">
@@ -96,6 +103,7 @@
     <div id="wfresult" class="muted" style="margin-top:10px">—</div>
   </div>
 </main>
+<script src="/poll.js"></script>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const money = s => { const n=Number(s); return (n<0?"−$":"$") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
@@ -173,6 +181,39 @@
         '</table><div class="muted" style="font-size:11px;padding:6px 2px">Fit P&L is IN-SAMPLE (what the grid optimised — always flattering); only the OOS column is evidence.</div></div>';
     } catch (e) { el.textContent = "walk-forward failed: " + e; }
   };
+
+  // ---- live per-instrument strategy selection (ADR-0043) ----
+  function renderSelection(v) {
+    const as = document.getElementById("stratselAsOf");
+    const drive = v.regimeAware
+      ? "; a PRICE-DERIVED trend detector picks the live algo (breadth " + esc(v.breadth || "—") + ", ADR-0044), the OOS medians only VETO a measured-losing pick"
+      : "; the live strategy trades each instrument's OOS winner (nothing where neither has edge)";
+    if (as) as.textContent = !v.available ? " — selection off (jethro.strategy.selection.enabled=false)"
+      : v.error ? " — last measurement FAILED: " + v.error + " (running the default algo meanwhile)"
+      : v.lastRunMillis ? " — measured " + new Date(v.lastRunMillis).toLocaleTimeString() + drive
+      : " — measuring… (first run ~90s after boot; a few seconds of backtests)";
+    const rows = v.rows || [];
+    const badge = a => a === "momentum" ? '<b class="up">momentum</b>'
+      : a === "mean-reversion" ? '<b class="down">mean-rev</b>'
+      : '<b class="muted">no-trade</b>';
+    // Live price-derived regime driving the pick (ADR-0044): TREND→momentum, CHOP→mean-rev.
+    const regimeCell = r => {
+      if (!v.regimeAware || !r.regime || r.regime === "UNKNOWN")
+        return '<span class="muted" title="window still warming — the default algo trades">warming</span>';
+      const er = r.efficiencyRatio == null ? "" : ` <span class="muted" style="font-size:10px">ER ${Number(r.efficiencyRatio).toFixed(2)}</span>`;
+      return (r.regime === "TREND" ? '<b class="up">trend</b>' : '<b class="down">chop</b>') + er;
+    };
+    const num = n => { const x = Number(n); return (x < 0 ? "−$" : "$") + Math.abs(x).toLocaleString(undefined, {maximumFractionDigits: 0}); };
+    document.getElementById("stratsel").outerHTML = '<div id="stratsel" class="muted" style="padding:2px 4px">' + (rows.length
+      ? "<table><tr><th>instrument</th><th>live regime</th><th>OOS pick</th><th>momentum median</th><th>mean-rev median</th></tr>" +
+        rows.map(r => `<tr><td class="mono">${esc(r.instrument)}</td><td>${regimeCell(r)}</td><td>${badge(r.chosen)}</td>
+          <td class="mono ${Number(r.momentumMedianPnl)>0?'up':(Number(r.momentumMedianPnl)<0?'down':'')}">${num(r.momentumMedianPnl)} <span class="muted" style="font-size:10px">${r.momentumTrades}t</span></td>
+          <td class="mono ${Number(r.meanReversionMedianPnl)>0?'up':(Number(r.meanReversionMedianPnl)<0?'down':'')}">${num(r.meanReversionMedianPnl)} <span class="muted" style="font-size:10px">${r.meanReversionTrades}t</span></td></tr>`).join("") + "</table>"
+      : `<div class="muted" style="padding:12px">${v.available ? "first OOS measurement runs ~30s after boot, then hourly — regime, OOS pick + both medians appear here" : "per-instrument selection is off; the single configured algo runs"}</div>`) + '</div>';
+  }
+  async function loadSelection() { try { renderSelection(await (await fetch("/api/strategy/selection")).json()); } catch (e) {} }
+  loadSelection();
+  poll(loadSelection, 30000); // poll.js: no-overlap, pauses while hidden (see index.html)
 </script>
 </body>
 </html>

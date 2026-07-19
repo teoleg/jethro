@@ -7,7 +7,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Regime-aware sizing scale: reduced in VOLATILE, unscaled otherwise; safe defaults. */
+/** The ELEVATED (risk-off) sizing scale value; the regime itself is sensed from prices (ADR-0051). */
 class StrategyPropertiesTest {
 
     private static StrategyProperties withVolatileScale(BigDecimal scale) {
@@ -16,20 +16,18 @@ class StrategyPropertiesTest {
     }
 
     @Test
-    void volatileRegimeScalesDownOthersUnchanged() {
-        var p = withVolatileScale(new BigDecimal("0.5"));
-        assertEquals(0, new BigDecimal("0.5").compareTo(p.regimeScaleFor("VOLATILE")));
-        assertEquals(0, BigDecimal.ONE.compareTo(p.regimeScaleFor("CALM")));
-        assertEquals(0, BigDecimal.ONE.compareTo(p.regimeScaleFor("TREND_UP")));
+    void elevatedScaleIsTheConfiguredValue() {
+        assertEquals(0, new BigDecimal("0.5").compareTo(
+                withVolatileScale(new BigDecimal("0.5")).regimeVolatileScaleOrDefault()));
     }
 
     @Test
     void defaultsToHalfSizeWhenUnset() {
-        assertEquals(0, new BigDecimal("0.5").compareTo(withVolatileScale(null).regimeScaleFor("VOLATILE")));
+        assertEquals(0, new BigDecimal("0.5").compareTo(withVolatileScale(null).regimeVolatileScaleOrDefault()));
     }
 
     @Test
     void zeroMeansStandAside() {
-        assertEquals(0, BigDecimal.ZERO.compareTo(withVolatileScale(BigDecimal.ZERO).regimeScaleFor("VOLATILE")));
+        assertEquals(0, BigDecimal.ZERO.compareTo(withVolatileScale(BigDecimal.ZERO).regimeVolatileScaleOrDefault()));
     }
 }

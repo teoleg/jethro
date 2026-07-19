@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — social</title>
+<style>
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --warn:#e0a83d; --alert:#f0553f; --up:#35c07a; --down:#f0553f;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; background:rgba(10,13,19,.72); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:16px; padding:0 24px; height:56px; max-width:1400px; margin:0 auto; }
+  .brand { font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; }
+  .tab { padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; }
+  .tab:hover { color:var(--txt); background:var(--surface); } .tab.active { color:var(--txt); background:var(--surface-2); }
+  main { max-width:1400px; margin:0 auto; padding:18px 24px 40px; display:flex; flex-direction:column; gap:18px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 0; }
+  .note { font-size:12px; color:var(--dim); }
+  .stats { display:grid; grid-template-columns:repeat(6, 1fr); gap:10px; }
+  @media (max-width:900px){ .stats{ grid-template-columns:repeat(2,1fr);} }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .stat .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  .stat .v { font-size:19px; font-weight:650; margin-top:4px; }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:4px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:5px 12px; border-bottom:1px solid var(--line); line-height:1.6; }
+  tr:last-child td { border-bottom:0; }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+  .up{color:var(--up)} .down{color:var(--down)} .dim{color:var(--dim)} .warn{color:var(--warn)}
+  .tag { font-size:9px; text-transform:uppercase; letter-spacing:.04em; border:1px solid var(--line-2); border-radius:4px; padding:1px 5px; color:var(--dim); }
+  .tag.TRUSTED{ color:var(--up); border-color:var(--up);} .tag.STANDARD{ color:var(--brand); border-color:var(--brand);} .tag.UNTRUSTED{ color:var(--dim);}
+  .pill { display:inline-block; font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
+  .pill.pump { color:var(--alert); border-color:var(--alert); } .pill.ok { color:var(--up); border-color:var(--up); }
+  .pill.new { color:var(--brand); border-color:var(--brand); }
+  .empty { color:var(--dim); text-align:center; padding:20px 0; }
+</style>
+</head>
+<body>
+<script src="/format.js"></script>
+<script src="/poll.js"></script>
+<div class="topbar"><div class="bar">
+  <span class="brand">JETHRO</span>
+  <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+      <a class="tab" href="/config.html">Config</a>
+      <a class="tab" href="/sim.html">Sim</a>
+      <a class="tab" href="/backtest.html">Backtest</a>
+      <a class="tab" href="/strategy.html">Strategy</a>
+      <a class="tab active" href="/social.html">Social</a>
+      <a class="tab" href="/social-sources.html">Sources</a>
+      <a class="tab" href="/discovery.html">Discover</a>
+      <a class="tab" href="/ollama.html">Ops</a>
+    </nav>
+</div></div>
+<main>
+  <div class="section-h">Social signals <span class="note" style="text-transform:none;letter-spacing:0">— adversarial source (ADR-0050): spam pre-filter → corroboration gate → advisory context. Never an order (ADR-0049). <span id="asof"></span></span></div>
+  <div class="stats" id="stats"></div>
+
+  <div class="section-h">Corroborated subjects &amp; suspected manipulation</div>
+  <div class="panel"><div id="signals"><div class="empty">loading…</div></div></div>
+
+  <div class="section-h">Recent posts (kept after spam filter)</div>
+  <div class="panel"><div id="posts"><div class="empty">loading…</div></div></div>
+</main>
+<script>
+  const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+  function stat(k, v) { return `<div class="stat"><div class="k">${k}</div><div class="v mono">${v}</div></div>`; }
+
+  function render(v) {
+    document.getElementById("asof").textContent = v.lastRunMillis ? "· " + new Date(v.lastRunMillis).toLocaleTimeString() : "· measuring…";
+    const c = v.counters || {};
+    document.getElementById("stats").innerHTML =
+      stat("ingested", c.ingested||0) + stat("kept", c.kept||0) +
+      stat("dup dropped", c.duplicateDropped||0) + stat("shill dropped", c.cashtagSpamDropped||0) +
+      `<div class="stat"><div class="k">corroborated</div><div class="v mono up">${c.corroborated||0}</div></div>` +
+      `<div class="stat"><div class="k">pump flagged</div><div class="v mono down">${c.manipulationSuspected||0}</div></div>`;
+
+    const sigs = v.signals || [];
+    document.getElementById("signals").outerHTML = '<div id="signals">' + (sigs.length ?
+      "<table><tr><th>instrument</th><th>tracked?</th><th>sector</th><th>direction</th><th>credible ch.</th><th>mentions</th><th>status</th><th>sample</th></tr>" +
+      sigs.map(s => `<tr>
+        <td class="mono">${esc(s.instrument)}</td>
+        <td>${s.tracked ? '<span class="pill ok">tracked</span>' : '<span class="pill new">new — suggest add</span>'}</td>
+        <td class="dim">${esc(s.sector)}</td>
+        <td class="${s.direction==='BULLISH'?'up':(s.direction==='BEARISH'?'down':'dim')}">${esc(s.direction)}</td>
+        <td class="mono">${s.channels}</td>
+        <td class="mono">${s.mentions}</td>
+        <td>${s.manipulationSuspected ? '<span class="pill pump">pump — ignored</span>' : '<span class="pill ok">corroborated</span>'}</td>
+        <td class="dim" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.sample)}">${esc(s.sample)}</td>
+      </tr>`).join("") + "</table>"
+      : '<div class="empty">nothing corroborated yet — a single post or a low-credibility burst never promotes</div>') + '</div>';
+
+    const posts = v.recent || [];
+    document.getElementById("posts").outerHTML = '<div id="posts">' + (posts.length ?
+      "<table><tr><th>time</th><th>channel</th><th>tier</th><th>credible</th><th>text</th></tr>" +
+      posts.slice(0,40).map(p => `<tr>
+        <td class="dim mono">${new Date(p.timestampMillis).toLocaleTimeString()}</td>
+        <td class="mono">${esc(p.channel)}</td>
+        <td><span class="tag ${esc(p.tier)}">${esc(p.tier)}</span></td>
+        <td class="${p.credible?'up':'dim'}">${p.credible?'yes':'no'}</td>
+        <td>${esc(p.text)}</td>
+      </tr>`).join("") + "</table>"
+      : '<div class="empty">no posts yet</div>') + '</div>';
+  }
+
+  async function load() {
+    try {
+      const v = await (await pollFetch("/api/social")).json();
+      if (!v.available) { document.getElementById("signals").innerHTML = '<div class="empty">social source is off (jethro.social.enabled=false)</div>'; return; }
+      render(v);
+    } catch (e) {}
+  }
+  poll(load, 5000);
+</script>
+</body>
+</html>

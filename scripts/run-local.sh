@@ -39,7 +39,12 @@ if [ -f local.env ]; then
 fi
 
 PROFILE="${PROFILE:-pi}"
-HEAP="${HEAP:-512m}"
+# 512m was too tight: the hourly OOS strategy-selector backtest is a large TRANSIENT allocation
+# spike, and on a 512m ZGC heap it drove allocation stalls that froze the whole JVM for the run's
+# duration (~1h cadence). 768m gives that spike headroom while staying Pi-friendly alongside a 1.5b
+# Ollama model. A pre-run heap guard (StrategySelector) is the backstop — it SKIPS the backtest when
+# headroom is thin rather than freezing. On an 8GB+ box set HEAP=1g so the selector always refreshes.
+HEAP="${HEAP:-768m}"
 AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:1.5b}" # 1.5b fits a Pi (frees ~1.5GB + CPU vs 3b, so you stay out of swap).
                                # MODEL=qwen2.5:3b for better text on an 8GB+ box; :0.5b for very tight RAM.

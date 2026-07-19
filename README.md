@@ -41,13 +41,16 @@ before any real-money broker (ADR-0015).
 **Sizing.** Volatility-targeted and covariance-aware; conviction never multiplies size (the AI
 proposes direction only — numbers are the quant layer's).
 
-**Hedging (ADR-0038/0039, advisory v1).** A deterministic **minimum-variance proxy hedge**: it
-sums the book's single-name equity exposure and, when it breaches a cap (the target-flat deadband),
-sizes the index-future (ES) hedge that removes the most variance — `h* = Cov(book, r_F)/Var(r_F)`
-off the EWMA covariance — carrying its measured **effectiveness ρ²**, so a weak proxy is flagged
-*reduce, don't hedge* rather than dressed up. Surfaced on the landing page with the worked math
-(exposure vs cap, sized hedge, daily σ before→after). DV01-neutral rates + FX axes, AUTO
-execution, and the firm-breaker one-shot de-risk are the next increments.
+**Hedging (ADR-0038/0040/0041/0042, advisory v1).** A deterministic **minimum-variance proxy hedge**:
+it sums the book's single-name equity exposure and holds net equity **target-flat**, sizing the
+index-future hedge that removes the most variance — `h* = Cov(book, r_F)/Var(r_F)` off the EWMA
+covariance (with a covariance burn-in gate, ADR-0041) — carrying its measured **effectiveness ρ²**,
+so a weak proxy is flagged *reduce, don't hedge*. The **proxy is chosen by measured ρ²** across
+candidates (ES/NQ) with switch hysteresis and unwind-before-build (ADR-0042); under it sits a
+**history-free structural tier** (ADR-0040) that hedges each equity to the index at an assigned
+GICS-sector beta when covariance isn't yet trustworthy. The hedge is a **delta** (target − held on a
+dedicated HEDGE book), so AUTO can't compound. Surfaced on the landing page with the worked math.
+DV01-neutral rates + FX axes and the firm-breaker one-shot de-risk are the next increments.
 
 **Session & corporate actions.** A tick-counted sim calendar and a live-feed session calendar
 (exchange holidays, 17:00-ET futures roll, closing-auction marks); a **corporate-action / bad-print
@@ -102,9 +105,11 @@ Hard rule: **a model output is never parsed into a number that feeds positions/P
 - **Hypothesis layer** (ADR-0022) — the model synthesises marks + news + portfolio into structured,
   **number-free** theses (instrument + direction + ordinal conviction); a deterministic quant
   evaluator sizes and guardrails them; admissible ones surface on the attention feed.
-- **Bounded autonomy** (ADR-0019/0022) — admissible, backtest-supported theses inside a
-  deterministic **risk envelope** may auto-submit **simulated** orders (never a real broker);
-  outcomes are scored mark-to-mark at horizon expiry and feed a measured track record.
+- **AI never originates an order** (ADR-0049) — a news/AI thesis is order-eligible **only** when the
+  deterministic OOS backtest independently supports that instrument+direction (a hard gate,
+  fail-closed: an unmeasured name never trades). The model proposes; the deterministic edge decides;
+  outcomes are scored mark-to-mark at horizon expiry and feed a measured track record that can only
+  *further* constrain size, never substitute for the gate.
 - **Trigger idempotency** — the same news never re-fires a hypothesis (deterministic news-id/text
   guard + the live calls fed back to the model).
 - **Attention-first UI** (ADR-0017) — the landing page is an agent-curated feed with a
@@ -114,6 +119,38 @@ Hard rule: **a model output is never parsed into a number that feeds positions/P
   turn audited to Postgres.
 - **Retrieval-augmented context** (ADR-0035, in progress) — local embeddings + pgvector for semantic
   news dedup and past-outcome memory.
+
+---
+
+## Signals — deterministic selection, social & discovery
+
+The newest layer. Everything here is **advisory or deterministic** — it can shape *which* algo runs
+or add *context*, but a signal can never move the book without passing the deterministic edge gate
+(ADR-0049), and nothing here writes a number into sizing/risk (invariant 7).
+
+- **Per-instrument strategy selection** (ADR-0043) — momentum and mean-reversion are measured
+  **out-of-sample** on multi-seed sim paths, and each instrument routes to the algo with the better
+  cost-honest median (or *no-trade* when neither has a measured edge). No blind global algo.
+- **Regime-aware selection** (ADR-0044) — a **price-derived trend detector** (Kaufman efficiency
+  ratio over each name's own prices, with hysteresis + cross-sectional breadth) picks momentum in a
+  trend / mean-reversion in chop and *switches when the regime turns*. It reads **prices only** —
+  never the sim's regime label — so it's honest in production (sim=prod parity). The OOS selector
+  becomes the edge **gate** on top.
+- **Social media — an adversarial source** (ADR-0050) — **always real data** (StockTwits, Telegram),
+  no relation to the market sim. A deterministic **spam pre-filter → credibility tiers →
+  corroboration gate** stands in front: a subject promotes only on ≥k **distinct credible** channels;
+  a low-credibility burst is flagged as a **suspected pump** and ignored, never traded. Per-source
+  **connection health, progress, and the live controls** are on their own *Sources* page.
+- **Unrestricted discovery** — social/news surface **any** ticker they discuss, tagged
+  tracked-or-not; a corroborated **untracked** name is a *suggestion to add*, not a filtered-out blank.
+- **News → universe discovery** (ADR-0045/0050 §7) — real **RSS** from your curated outlets feeds a
+  ranked **candidate-additions** register (cross-source names outrank one loud source); *Discover*
+  shows what's cooking. Big outlets propose additions to the base list; social adds an emerging name.
+  Suggestions only — promoting one to reference data is a human decision.
+
+The AI/news/social feeds are **built, tested, and advisory-only**; the live external calls are opt-in
+(configure your outlets/API tokens) and fail-open — an unreachable source shows *unreachable*, it
+never breaks the loop or fakes data.
 
 ---
 
@@ -140,7 +177,8 @@ seams preserved (the `order` module leaves first for real-money trading). Packag
 runtime}`, `modules:{order, reference-data, ui-gateway, finops}`, `app` (assembly), `infra` (CDK).
 
 **UI pages** (`http://localhost:8080`): Overview (attention feed) · Markets · Rates · Books · Orders
-· Config · **Sim** (control panel) · Backtest · Ops.
+· Config · **Sim** (control panel) · Backtest · **Social** · **Sources** (feed health) · **Discover**
+(candidate additions) · Ops.
 
 ---
 

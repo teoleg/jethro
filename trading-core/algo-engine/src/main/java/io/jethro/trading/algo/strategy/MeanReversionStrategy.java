@@ -26,7 +26,13 @@ public final class MeanReversionStrategy implements Strategy {
     /** With volume confirmation (ADR-0033): fade only extremes the market participated in. */
     public MeanReversionStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps,
                                  double volumeConfirmMin) {
-        this.detector = new MomentumStrategy(lookback, thresholdSigmas, minSignalBps, volumeConfirmMin);
+        this(lookback, thresholdSigmas, minSignalBps, volumeConfirmMin, null);
+    }
+
+    /** Live-tunable variant (ADR-0052): forwards the live params to the shared z-score detector. */
+    public MeanReversionStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps,
+                                 double volumeConfirmMin, SignalParams live) {
+        this.detector = new MomentumStrategy(lookback, thresholdSigmas, minSignalBps, volumeConfirmMin, live);
     }
 
     @Override

@@ -69,7 +69,9 @@
     const Y = v => H - pb - ((v - mn) / span) * (H - pt - pb);
     const line = points.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(Number(p.price)).toFixed(1)}`).join(" ");
     const area = `M${X(t0).toFixed(1)},${H - pb} ` + points.map(p => `L${X(p.t).toFixed(1)},${Y(Number(p.price)).toFixed(1)}`).join(" ") + ` L${X(t1).toFixed(1)},${H - pb} Z`;
-    const fmt = v => v.toLocaleString(undefined, { maximumFractionDigits: 4 });
+    const fmt = v => (typeof fmtPrice === "function")
+      ? fmtPrice(v, instrument) // shared per-instrument precision (FX 5dp, else 2dp)
+      : v.toLocaleString(undefined, { maximumFractionDigits: 4 });
     const grid = [mx, (mx + mn) / 2, mn].map(v =>
       `<line class="grid" x1="${pl}" y1="${Y(v).toFixed(1)}" x2="${W - pr}" y2="${Y(v).toFixed(1)}"/><text x="${pl - 8}" y="${(Y(v) + 3).toFixed(1)}" text-anchor="end">${fmt(v)}</text>`).join("");
     return `<svg viewBox="0 0 ${W} ${H}">${grid}<path class="area" d="${area}"/><path class="line" d="${line}"/>` +
