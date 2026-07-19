@@ -1,6 +1,6 @@
 # ADR-0027: Evaluation & risk rigor — hypothesis outcome scoring, out-of-sample backtests, VaR + firm breaker, day boundary
 
-- **Status:** Proposed
+- **Status:** Proposed — the "OOS backtest advisory-only, does not gate autonomy" stance is reversed by ADR-0049 (backtest becomes a hard gate for AI orders)
 - **Date:** 2026-07-14
 - **Deciders:** Oleg
 - **Tags:** risk, ai, backtest, quant

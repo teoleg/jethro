@@ -1,6 +1,6 @@
 # ADR-0022: LLM hypothesis layer — multi-source synthesis proposes structured theses; the quant layer computes; a deterministic risk envelope decides auto-execute vs human approval
 
-- **Status:** Accepted (extends ADR-0010/0016/0018/0019 — adds bounded autonomy above 0018's human-in-loop)
+- **Status:** Accepted (extends ADR-0010/0016/0018/0019 — adds bounded autonomy above 0018's human-in-loop) — autonomy amended by ADR-0049 (AI never originates an order; the deterministic backtest is a hard gate)
 - **Date:** 2026-07-13
 - **Deciders:** Oleg
 - **Tags:** ai, algo, risk, order
