@@ -202,6 +202,10 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 if (!auto) {
                     if (!props.autonomyOrDefault().enabledOrDefault() || orderService == null) {
                         autonomyReason = "autonomy off — human review";
+                    } else if (!deterministicallySupported(e)) {
+                        // ADR-0049: the deterministic backtest is the hard gate, applied before the
+                        // envelope — so "no AI order" on an unvalidated name is self-explanatory.
+                        autonomyReason = "gated (ADR-0049): deterministic backtest does not support this name — AI never orders unvalidated";
                     } else {
                         BigDecimal mult = refs.find(h.instrumentId())
                                 .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
@@ -263,8 +267,10 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         scheduler.scheduleWithFixedDelay(this::runOnce, interval, interval, TimeUnit.SECONDS);
         var auto = props.autonomyOrDefault();
         if (auto.enabledOrDefault() && orderService != null) {
-            log.warn("BOUNDED AUTONOMY ON (ADR-0022): admissible, backtest-supported theses with conviction ≥ {} "
-                            + "and notional ≤ {} auto-submit SIMULATED orders (cooldown {}s, whitelist {}). "
+            log.warn("BOUNDED AUTONOMY ON (ADR-0022), HARD-GATED by ADR-0049: a thesis auto-submits a "
+                            + "SIMULATED order ONLY when the deterministic OOS backtest supports the name AND it "
+                            + "clears the envelope (admissible, conviction ≥ {}, notional ≤ {}, cooldown {}s, "
+                            + "whitelist {}). The AI never originates an order without deterministic edge. "
                             + "Never against a real broker.",
                     auto.minConvictionOrDefault(), auto.maxOrderNotionalOrDefault().toPlainString(),
                     auto.cooldownSecondsOrDefault(),
@@ -406,9 +412,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     }
 
     /**
-     * Bounded-autonomy pass (ADR-0022): auto-executes admissible, backtest-supported theses
-     * that fit the deterministic risk envelope, as SIMULATED orders (ADR-0019). Off unless
-     * autonomy is enabled and an order path exists. @return instruments auto-traded this cycle.
+     * Bounded-autonomy pass (ADR-0022), hard-gated by ADR-0049: a news-driven thesis may become a
+     * SIMULATED order (ADR-0019) ONLY when the deterministic OOS backtest independently supports the
+     * name — the model never originates an order. The deterministic gate is applied FIRST; the risk
+     * envelope (admissibility/conviction/track-record/cap) then applies on top. Off unless autonomy
+     * is enabled and an order path exists. @return instruments auto-traded this cycle.
      */
     private Set<String> runAutonomy(List<HypothesisEvaluator.Evaluated> evaluated, long now) {
         Set<String> traded = new HashSet<>();
@@ -422,6 +430,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         long cooldownMillis = auto.cooldownSecondsOrDefault() * 1_000;
         AutonomyEnvelope.TrackRecord track = trackRecord();
         for (HypothesisEvaluator.Evaluated e : evaluated) {
+            if (!deterministicallySupported(e)) {
+                continue; // ADR-0049 HARD GATE: no deterministic edge → never an AI order
+            }
             BigDecimal multiplier = refs.find(e.hypothesis().instrumentId())
                     .map(InstrumentRef::multiplier).orElse(BigDecimal.ONE);
             AutonomyEnvelope.Decision decision = envelope.decide(e, multiplier, track);
@@ -438,6 +449,19 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             }
         }
         return traded;
+    }
+
+    /**
+     * ADR-0049 hard gate: an AI/news thesis may become an order ONLY when the DETERMINISTIC OOS
+     * backtest independently supports the name — a positive, cost-honest median edge over a majority
+     * of out-of-sample paths ({@link HypothesisEvaluator.Backtest#supports()}). Fail-CLOSED: a null
+     * backtest (name never measured, or the OOS run was skipped this cycle) is NOT support, so
+     * nothing auto-trades without a completed deterministic measurement. The model never originates
+     * an order; the deterministic model's measured edge is what admits the trade.
+     */
+    static boolean deterministicallySupported(HypothesisEvaluator.Evaluated e) {
+        HypothesisEvaluator.Backtest bt = e.backtest();
+        return bt != null && bt.supports();
     }
 
     /** The AI sleeve's measured record: scored outcomes + summed mark-to-mark P&L (ADR-0027). */
@@ -660,9 +684,12 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                         + " on " + e.backtest().trades() + " trades)."
                     : " Backtest does NOT support it (strategy not profitable on this name).";
         }
+        boolean detSupported = e.backtest() != null && e.backtest().supports();
         String tail = autoTraded
-                ? " Auto-submitted a SIMULATED order within the risk envelope (ADR-0019/0022)."
-                : " Review and execute on the Orders ticket.";
+                ? " Auto-submitted a SIMULATED order — deterministic backtest supports the name (ADR-0049) and it cleared the risk envelope (ADR-0019/0022)."
+                : detSupported
+                    ? " Deterministic backtest supports it — review and execute on the Orders ticket."
+                    : " Deterministic backtest does NOT support this name — information only (ADR-0049), not order-eligible.";
         String body = h.thesis() + " — Quant sized " + e.quantity().toPlainString() + " " + h.instrumentId()
                 + " on " + e.book() + " (" + h.horizon() + " horizon); pre-trade check passed." + backtestNote + tail;
         return new AttentionFeed.AttentionItem(id, now, AttentionFeed.Severity.INFO,

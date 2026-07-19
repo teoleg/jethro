@@ -1,6 +1,6 @@
 # ADR-0049: AI/news signals never place orders — the deterministic backtest is a hard gate
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-19
 - **Deciders:** Oleg
 - **Tags:** ai, strategy, risk, execution

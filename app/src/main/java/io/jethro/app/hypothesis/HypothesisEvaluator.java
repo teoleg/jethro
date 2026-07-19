@@ -35,10 +35,12 @@ public final class HypothesisEvaluator {
     /** Why a hypothesis did or didn't become an actionable candidate. */
     public enum Verdict { ADMISSIBLE, UNKNOWN_INSTRUMENT, NO_MARK, UNSIZEABLE, BLOCKED }
 
-    /** Backtest support for the thesis's instrument: the strategy's measured PnL on this
-     *  name over the sim tape. ADVISORY ONLY since the ADR-0027 autonomy correction — the
-     *  autonomy gate is the live track record, not this. {@code supports} = net-positive
-     *  on some trades. Null when no backtest was supplied. */
+    /** Backtest support for the thesis's instrument: the deterministic strategy's measured OOS PnL
+     *  on this name. {@code supports} = net-positive median over a majority of out-of-sample paths.
+     *  Null when no backtest was supplied (name not measured). Under <b>ADR-0049</b> this is again a
+     *  HARD GATE for autonomy: {@code supports == false} (or a null Backtest) blocks any AI order for
+     *  the name — the model never originates a trade without a deterministic edge. (This reverses the
+     *  ADR-0027 "advisory only" stance.) The live track record and the risk envelope apply on top. */
     public record Backtest(BigDecimal pnl, int trades, boolean supports) {
     }
 
