@@ -75,8 +75,40 @@ public final class StrategySelector implements AutoCloseable {
                 seedCount, ticks, initialDelaySeconds, intervalMinutes);
     }
 
+    /** Skip a refresh unless at least this fraction of the max heap is free. The hourly OOS run is a
+     *  large TRANSIENT allocation spike (seedCount × 2 algos × ticks × instruments of BigDecimal
+     *  math); on a small heap (dev default 512m) that spike drove ZGC into allocation stalls that
+     *  froze EVERY thread — the whole server appeared wedged for the run's duration. Refusing to
+     *  start the spike when headroom is thin trades a stale selection (we keep the last one) for a
+     *  live server. My own operational guard, not a risk/money dial. Give the box more heap (≥1g) to
+     *  keep the selector refreshing; the guard is the safety net, not the intended steady state. */
+    private static final double MIN_FREE_HEAP_FRACTION = 0.35;
+
+    /** True when free heap headroom is below the guard — running the backtest spike would risk a
+     *  stall/OOM. Uses committed-vs-max so a not-yet-grown heap still counts its uncommitted room. */
+    private static boolean lowHeap() {
+        Runtime rt = Runtime.getRuntime();
+        return lowHeap(rt.maxMemory(), rt.totalMemory() - rt.freeMemory(), MIN_FREE_HEAP_FRACTION);
+    }
+
+    /** Pure guard predicate (package-visible for exact-value testing): headroom = max − used; low
+     *  when that is under {@code minFreeFraction} of max. */
+    static boolean lowHeap(long maxBytes, long usedBytes, double minFreeFraction) {
+        long headroom = maxBytes - usedBytes;    // bytes the heap can still hand out before OOM
+        return headroom < maxBytes * minFreeFraction;
+    }
+
     private void refresh() {
         long t0 = System.currentTimeMillis();
+        if (lowHeap()) {
+            Runtime rt = Runtime.getRuntime();
+            long usedMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024);
+            long maxMb = rt.maxMemory() / (1024 * 1024);
+            log.warn("skipping OOS selection refresh — heap headroom below {}% ({}MB used of {}MB max). "
+                    + "Keeping the last selection; give the JVM more heap (≥1g) so the hourly backtest can run "
+                    + "without risking an allocation stall.", (int) (MIN_FREE_HEAP_FRACTION * 100), usedMb, maxMb);
+            return;
+        }
         try {
             var momentum = backtest.oosByInstrument(ticks, seedCount, "momentum", INTER_RUN_PAUSE_MILLIS);
             var meanReversion = backtest.oosByInstrument(ticks, seedCount, "mean-reversion", INTER_RUN_PAUSE_MILLIS);

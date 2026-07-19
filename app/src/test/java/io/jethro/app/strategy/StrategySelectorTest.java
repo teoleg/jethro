@@ -67,4 +67,18 @@ class StrategySelectorTest {
         var mr = Map.<String, BacktestResult.InstrumentResult>of();
         assertEquals("momentum", StrategySelector.choose(mom, mr).get("AMZN").algo());
     }
+
+    /** The heap guard (the fix for the ~1h whole-JVM freeze): the hourly backtest spike is skipped
+     *  when free heap headroom falls below the guard fraction, so it can't stall/OOM the server. */
+    @Test
+    void heapGuardTripsWhenHeadroomIsThin() {
+        long max = 512L * 1024 * 1024;
+        // 80% used → 20% headroom, below the 35% guard → skip.
+        org.junit.jupiter.api.Assertions.assertTrue(
+                StrategySelector.lowHeap(max, (long) (max * 0.80), 0.35));
+        // 50% used → 50% headroom, above the guard → run.
+        assertFalse(StrategySelector.lowHeap(max, (long) (max * 0.50), 0.35));
+        // exactly at the boundary (35% free) is not "below" → run.
+        assertFalse(StrategySelector.lowHeap(max, (long) (max * 0.65), 0.35));
+    }
 }
