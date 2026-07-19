@@ -1,6 +1,6 @@
 # ADR-0043: Per-instrument strategy selection from out-of-sample results (no blind global algo)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-19
 - **Deciders:** Oleg
 - **Tags:** strategy, evaluation, autonomy

@@ -79,9 +79,15 @@ public final class BacktestService {
      * self-confirmation (profitable on the exact tape the live sim replays proves nothing).
      */
     public Map<String, BacktestResult.InstrumentResult> oosByInstrument(int ticks, int seedCount) {
+        return oosByInstrument(ticks, seedCount, null);
+    }
+
+    /** As above for a SPECIFIC algo ("momentum"/"mean-reversion"); null = the live one. The
+     *  per-instrument strategy selector (ADR-0043) calls this once per algo and compares. */
+    public Map<String, BacktestResult.InstrumentResult> oosByInstrument(int ticks, int seedCount, String algo) {
         List<BacktestResult> runs = new ArrayList<>(seedCount);
         for (long seed : oosSeeds(sim.simSeed(), seedCount)) {
-            runs.add(run(seed, ticks, null, null));
+            runs.add(run(seed, ticks, null, null, algo));
         }
         return aggregateByMedian(runs);
     }

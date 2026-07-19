@@ -25,17 +25,53 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(prefix = "jethro.strategy", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class StrategyConfig {
 
-    /** The configured signal algo (jethro.strategy.algo): momentum or mean-reversion — both
-     *  drive the same lifecycle/guardrails/harness through the Strategy port. */
-    @Bean
-    io.jethro.trading.algo.strategy.Strategy tradingStrategy(StrategyProperties props) {
-        double volumeConfirm = props.volumeConfirmMinOrDefault(); // ADR-0033: participation gate
-        if ("mean-reversion".equals(props.algoOrDefault())) {
-            return new io.jethro.trading.algo.strategy.MeanReversionStrategy(
-                    props.lookback(), props.thresholdSigmasOrDefault(), props.minSignalBpsOrDefault(), volumeConfirm);
-        }
+    private static io.jethro.trading.algo.strategy.Strategy momentum(StrategyProperties props) {
         return new MomentumStrategy(props.lookback(), props.thresholdSigmasOrDefault(),
-                props.minSignalBpsOrDefault(), volumeConfirm);
+                props.minSignalBpsOrDefault(), props.volumeConfirmMinOrDefault());
+    }
+
+    private static io.jethro.trading.algo.strategy.Strategy meanReversion(StrategyProperties props) {
+        return new io.jethro.trading.algo.strategy.MeanReversionStrategy(props.lookback(),
+                props.thresholdSigmasOrDefault(), props.minSignalBpsOrDefault(), props.volumeConfirmMinOrDefault());
+    }
+
+    /**
+     * Per-instrument strategy selector (ADR-0043) — measures momentum vs mean-reversion OOS and
+     * picks per instrument. Present only when {@code jethro.strategy.selection.enabled=true} (default)
+     * AND the backtest service is available. Runs its measurement on a background thread.
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.strategy.selection", name = "enabled", havingValue = "true", matchIfMissing = true)
+    StrategySelector strategySelector(
+            ObjectProvider<io.jethro.app.backtest.BacktestService> backtest,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.seed-count:9}") int seedCount,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.ticks:8000}") int ticks,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.interval-minutes:60}") long intervalMinutes) {
+        var svc = backtest.getIfAvailable();
+        if (svc == null) {
+            return null; // no backtest service (persistence off) — falls back to the single-algo bean
+        }
+        var selector = new StrategySelector(svc, seedCount, ticks, intervalMinutes);
+        selector.start();
+        return selector;
+    }
+
+    /**
+     * The live signal strategy. With the ADR-0043 selector present, this is a {@link
+     * io.jethro.trading.algo.strategy.SelectingStrategy} that routes each instrument to the algo
+     * the OOS harness chose (and trades nothing where neither has an edge), falling back to the
+     * configured {@code jethro.strategy.algo} until the first measurement lands. Without the
+     * selector it is the single configured algo (momentum or mean-reversion).
+     */
+    @Bean
+    io.jethro.trading.algo.strategy.Strategy tradingStrategy(StrategyProperties props,
+                                                             ObjectProvider<StrategySelector> selector) {
+        StrategySelector sel = selector.getIfAvailable();
+        if (sel == null) {
+            return "mean-reversion".equals(props.algoOrDefault()) ? meanReversion(props) : momentum(props);
+        }
+        var byAlgo = java.util.Map.of("momentum", momentum(props), "mean-reversion", meanReversion(props));
+        return new io.jethro.trading.algo.strategy.SelectingStrategy(byAlgo, sel::algoFor, props.algoOrDefault());
     }
 
     @Bean
