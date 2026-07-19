@@ -90,6 +90,7 @@
     <div class="panel"><div id="swapbook" class="muted">no swap trades yet — fills on USD_IRS_5Y/10Y appear here dated and revalued.</div></div>
   </div>
 </main>
+<script src="/poll.js"></script>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const pct = v => (v*100).toFixed(4) + "%";
@@ -198,8 +199,8 @@
   }
   refresh();
   loadSwapBook();
-  setInterval(refresh, 2000);
-  setInterval(loadSwapBook, 5000);
+  poll(refresh, 2000); // poll.js: no-overlap, pauses while hidden (see index.html)
+  poll(loadSwapBook, 5000);
 </script>
 </body>
 </html>

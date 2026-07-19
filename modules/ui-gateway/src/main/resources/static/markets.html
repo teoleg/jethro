@@ -82,6 +82,7 @@
 </main>
 
 <script src="/format.js"></script>
+<script src="/poll.js"></script>
 <script src="/chart.js"></script>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
@@ -148,7 +149,7 @@
       instruments.forEach(i => { instrClass[i.instrumentId] = i.assetClass; cusipOf[i.instrumentId] = primaryId(i.symbology); });
     } catch (e) {}
     await refresh();
-    setInterval(refresh, 2000);
+    poll(refresh, 2000); // poll.js: no-overlap, pauses while hidden (see index.html)
   }
   init();
 </script>

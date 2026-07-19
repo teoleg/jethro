@@ -66,6 +66,7 @@
     <div class="panel"><div id="sim" class="muted">loading…</div></div>
   </div>
 </main>
+<script src="/poll.js"></script>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const money = v => v==null ? "—" : "$" + Number(v).toLocaleString();
@@ -136,7 +137,7 @@
     } catch (e) { document.getElementById("limits").textContent = "config unavailable: " + e; }
   }
   load();
-  setInterval(load, 5000);
+  poll(load, 5000); // poll.js: no-overlap, pauses while hidden (see index.html)
 </script>
 </body>
 </html>

@@ -124,6 +124,7 @@
 </div></div>
 <main><div id="stage"><div class="notice">connecting to the sim…</div></div></main>
 <script src="/format.js"></script>
+<script src="/poll.js"></script>
 <script src="/chart.js"></script>
 <script>
 (() => {
@@ -194,7 +195,7 @@
   function renderView(){
     const old=document.querySelector(".tabs"); if(old) old.replaceWith(tabBar());
     const c=document.getElementById("content");
-    if(chartTimer){clearInterval(chartTimer);chartTimer=null;}
+    if(chartTimer){chartTimer();chartTimer=null;} // chartTimer holds poll()'s stop() handle
     activeCh=null; c.innerHTML="";
     if(view==="charts"){ c.append(chartsPanel()); return; }
     c.append(consolePanel(state.instruments.find(i=>i.id===current)));
@@ -247,8 +248,7 @@
     p.append($("h4",null,"Price — "+esc(it.name||it.id)),
              $("div","now mono",'<span id="priceNow">—</span><small id="priceChg"></small>'),
              $("div","plot",'<div id="pricePlot"><div class="muted" style="padding:60px 0;text-align:center;font-size:11px">loading…</div></div>'));
-    loadPriceChart(it.id);
-    chartTimer=setInterval(()=>loadPriceChart(it.id), 3000); // renderView clears this on view switch
+    chartTimer=poll(()=>loadPriceChart(it.id), 3000); // poll's immediate tick draws it now; stop() on view switch
     return p;
   }
   async function loadPriceChart(id){
@@ -320,8 +320,8 @@
     state.instruments.forEach(it=>{const card=$("div","card"); card.dataset.id=it.id;
       card.append($("h4","",`<span>${esc(it.name||it.id)}</span><span class="c mono muted" data-c></span>`),$("div","plot",'<div class="empty">loading…</div>')); grid.append(card);});
     const ev=$("div","events"); ev.innerHTML='<h4>Recent events</h4><div id="evlist" class="muted">—</div>'; wrap.append(ev);
-    setTimeout(()=>{loadCharts();loadEvents();},0);
-    chartTimer=setInterval(()=>{loadCharts();loadEvents();},4000);
+    setTimeout(()=>{loadCharts();loadEvents();},0); // first paint after this node is appended by the caller
+    chartTimer=poll(()=>{loadCharts();loadEvents();},4000); // recurring; stop() on view switch
     return wrap;
   }
   async function loadCharts(){
@@ -379,9 +379,9 @@
         document.getElementById("stage").innerHTML='<div class="notice"><h2>The console is live only in SIM feed mode</h2><div>Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine.</div></div>';return;}
       state=await r.json(); badge.textContent=state.active?"panel-driven":"seeded · untouched"; badge.className="badge "+(state.active?"live":"clean");
       try{ (await (await fetch("/api/instruments")).json()).forEach(i=>instrClass[i.instrumentId]=i.assetClass); }catch(e){}
-      build(); loadLive(); setInterval(loadLive,1500);
+      build(); poll(loadLive,1500); // poll.js: no-overlap, pauses while hidden (see index.html)
       // publisher telemetry (1s): master-strip readout + the live tick-rate graph
-      setInterval(async()=>{try{const s=await(await fetch("/api/sim/control")).json();
+      poll(async()=>{try{const s=await(await fetch("/api/sim/control")).json();
         rateHist.push({t:Date.now(),ach:s.achievedTicksPerSec||0,tgt:s.targetTicksPerSec||0});
         while(rateHist.length>240)rateHist.shift();
         const el=document.getElementById("rateStat");
@@ -392,7 +392,7 @@
         if(now){now.textContent=(s.achievedTicksPerSec||0).toFixed(1)+"/s";
           tgt.textContent="target "+(s.targetTicksPerSec||0).toFixed(1)+"/s";}
         drawRate();
-      }catch(e){}},1000);
+      }catch(e){}},1000); // poll.js
     }catch(e){document.getElementById("stage").innerHTML='<div class="notice">sim console unavailable</div>';}
   }
   boot();

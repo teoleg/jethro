@@ -86,6 +86,7 @@
   <div class="section-h">Recent inference calls <span class="muted" style="text-transform:none;letter-spacing:0">— every Ollama call (commentary · hypotheses · chat), newest first</span></div>
   <div class="panel"><div id="runs" class="muted">waiting for the model…</div></div>
 </main>
+<script src="/poll.js"></script>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const ms = v => v == null ? "—" : (v >= 1000 ? (v/1000).toFixed(1) + "s" : v + "ms");
@@ -182,7 +183,7 @@
     loadRag();
   }
   refresh();
-  setInterval(refresh, 3000);
+  poll(refresh, 3000); // poll.js: no-overlap, pauses while hidden (see index.html)
 </script>
 </body>
 </html>

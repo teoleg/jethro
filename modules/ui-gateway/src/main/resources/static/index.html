@@ -120,6 +120,7 @@
 </head>
 <body>
 <script src="/format.js"></script>
+<script src="/poll.js"></script>
 <div class="topbar">
   <div class="bar">
     <span class="brand"><span class="dot"></span>JETHRO</span>
@@ -256,13 +257,13 @@
     } catch (err) { pending.remove(); addMsg("chat unavailable right now", "bot"); }
   });
 
-  async function loadRisk() { try { renderRisk(await (await fetch("/api/risk")).json()); } catch (e) {} }
+  async function loadRisk() { try { renderRisk(await (await pollFetch("/api/risk")).json()); } catch (e) {} }
 
   // ---- price ticker + feed connection indicators ----
   let tickPrev = {};
   async function loadTicker() {
     try {
-      const marks = (await (await fetch("/api/marks")).json()).filter(m => !m.instrumentId.startsWith("USD.SOFR."));
+      const marks = (await (await pollFetch("/api/marks")).json()).filter(m => !m.instrumentId.startsWith("USD.SOFR."));
       document.getElementById("ticker").innerHTML = marks.length ? marks.map(m => {
         const prev = tickPrev[m.instrumentId], now = Number(m.price);
         const c = prev == null ? "flat" : (now > prev ? "up" : (now < prev ? "down" : "flat"));
@@ -274,7 +275,7 @@
   // Major indices/ETFs (US + international) in the top bar — context only, delayed.
   async function loadIndicators() {
     try {
-      const ix = await (await fetch("/api/indicators")).json();
+      const ix = await (await pollFetch("/api/indicators")).json();
       const el = document.getElementById("indices");
       if (!ix.length) { el.innerHTML = ""; return; }
       const inner = i => {
@@ -309,7 +310,7 @@
   // Per-feed connection LEDs on the stream line, from real feed status (/api/feeds).
   async function loadFeeds() {
     try {
-      const feeds = await (await fetch("/api/feeds")).json();
+      const feeds = await (await pollFetch("/api/feeds")).json();
       // One pill per active feed (a composite shows Finnhub + Yahoo side by side). LED: green =
       // connected & live, amber = connected but delayed, red = down. Label names the source.
       const NAMES = { finnhub: "Finnhub", yahoo: "Yahoo", sim: "Sim", none: "—" };
@@ -357,8 +358,8 @@
       // /api/hypotheses is the event ledger (each distinct thesis retained, newest first);
       // /api/hypotheses/stats is the measured hit-rate per conviction (ADR-0027).
       const [led, stats] = await Promise.all([
-        fetch("/api/hypotheses").then(r => r.json()),
-        fetch("/api/hypotheses/stats").then(r => r.json()).catch(() => [])]);
+        pollFetch("/api/hypotheses").then(r => r.json()),
+        pollFetch("/api/hypotheses/stats").then(r => r.json()).catch(() => [])]);
       renderHypotheses(led.map(r => ({ ts:r.timestampMillis, instr:r.instrumentId, thesis:r.thesis,
         dir:r.direction, conv:r.conviction, verdict:r.verdict, auto:r.autonomous, executed:r.autonomous,
         btSupports:r.backtestSupports, btPnl:r.backtestPnl, btTrades:r.backtestTrades, note:r.note,
@@ -386,7 +387,7 @@
       }).join("") + "</table>"
       : '<div class="muted" style="padding:12px">no strategy actions yet — the momentum engine auto-trades ALPHA/MACRO; every entry and risk-reducing exit (with its reason) appears here</div>') + '</div>';
   }
-  async function loadQuant() { try { renderQuant(await (await fetch("/api/strategy/actions")).json()); } catch (e) {} }
+  async function loadQuant() { try { renderQuant(await (await pollFetch("/api/strategy/actions")).json()); } catch (e) {} }
 
   // ---- hedging: net equity held target-flat, the sized min-variance hedge and its math (ADR-0038) ----
   function fmtUsd(v) {
@@ -440,12 +441,12 @@
     const note = s.note ? `<div class="muted" style="font-size:10px;padding:6px 4px 0">${esc(s.note)}</div>` : "";
     document.getElementById("hedging").outerHTML = '<div id="hedging" class="muted">' + body + note + '</div>';
   }
-  async function loadHedging() { try { renderHedging(await (await fetch("/api/hedging")).json()); } catch (e) {} }
+  async function loadHedging() { try { renderHedging(await (await pollFetch("/api/hedging")).json()); } catch (e) {} }
 
   // history-loaded indicator: how many daily-return days back the covariance, and when seeded/loaded
   async function loadHistory() {
     try {
-      const h = await (await fetch("/api/history/status")).json();
+      const h = await (await pollFetch("/api/history/status")).json();
       const b = document.getElementById("histBadge");
       if (!b) return;
       if (h.ready) {
@@ -479,7 +480,7 @@
   let obPage = 0, obTotalPages = 1;
   async function loadOrders() {
     try {
-      const r = await (await fetch(`/api/orders/day?page=${obPage}&size=100`)).json();
+      const r = await (await pollFetch(`/api/orders/day?page=${obPage}&size=100`)).json();
       obTotalPages = r.totalPages;
       document.getElementById("obcount").textContent = "· " + r.total + " today";
       document.getElementById("obpage").textContent = `page ${r.page + 1} / ${r.totalPages}`;
@@ -513,21 +514,23 @@
   loadTicker();
   loadFeeds();
   loadIndicators();
-  setInterval(loadRisk, 2000);
-  setInterval(loadTicker, 2000);
-  setInterval(loadFeeds, 5000);
-  setInterval(loadIndicators, 30000);
-  setInterval(loadHypotheses, 15000);
-  setInterval(loadQuant, 5000);
-  setInterval(loadHedging, 5000);
-  setInterval(loadHistory, 15000);
-  const loadVar = () => fetch("/api/var").then(r => r.json()).then(v => { lastVar = v; }).catch(() => {});
-  loadVar();
-  setInterval(loadVar, 15000);
-  const loadEod = () => fetch("/api/eod").then(r => r.json()).then(v => { lastEod = v; }).catch(() => {});
-  loadEod();
-  setInterval(loadEod, 5000); // compressed sim days roll in minutes — keep the tile current
-  setInterval(() => { if (obPage === 0) loadOrders(); }, 5000); // live-refresh first page only
+  // poll() (poll.js): one in-flight run per loop, paused while the tab is hidden, immediate
+  // refresh on return — so backgrounded tabs stop hammering the JVM and a backend stall can't
+  // pile up pending fetches. The initial call inside each loadX above stays; poll runs its own
+  // immediate tick too (idempotent). Replaces raw setInterval, which wedged tabs overnight.
+  poll(loadRisk, 2000);
+  poll(loadTicker, 2000);
+  poll(loadFeeds, 5000);
+  poll(loadIndicators, 30000);
+  poll(loadHypotheses, 15000);
+  poll(loadQuant, 5000);
+  poll(loadHedging, 5000);
+  poll(loadHistory, 15000);
+  const loadVar = () => pollFetch("/api/var").then(r => r.json()).then(v => { lastVar = v; }).catch(() => {});
+  poll(loadVar, 15000);
+  const loadEod = () => pollFetch("/api/eod").then(r => r.json()).then(v => { lastEod = v; }).catch(() => {});
+  poll(loadEod, 5000); // compressed sim days roll in minutes — keep the tile current
+  poll(() => { if (obPage === 0) return loadOrders(); }, 5000); // live-refresh first page only
 </script>
 </body>
 </html>
