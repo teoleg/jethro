@@ -3,6 +3,7 @@ package io.jethro.app.social;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -29,7 +30,17 @@ public record SocialProperties(
         /** Sim feed seed (reproducible). */
         long seed,
         /** Curated channel → tier (TRUSTED/STANDARD/UNTRUSTED). Seeded below when unset. */
-        Map<String, String> channelTiers) {
+        Map<String, String> channelTiers,
+        /** Active sources (ADR-0050 Phase 2): any of {@code sim, stocktwits}. Default [sim] — a real
+         *  adapter is opt-in and the app never depends on the network at boot. */
+        List<String> sources,
+        /** Tier for a channel not in the registry. UNTRUSTED (sim-safe) by default; set STANDARD when
+         *  a real feed is on so organic accounts are judged by the credibility floors. */
+        String defaultTier,
+        /** StockTwits API base (public streams). */
+        String stocktwitsBaseUrl,
+        /** Symbols polled per cycle (round-robined over the universe) — a rate-limit guard. */
+        int stocktwitsSymbolsPerCycle) {
 
     public long intervalSecondsOrDefault() {
         return intervalSeconds > 0 ? intervalSeconds : 60;
@@ -57,6 +68,25 @@ public record SocialProperties(
 
     public long seedOrDefault() {
         return seed != 0 ? seed : 42L;
+    }
+
+    public List<String> sourcesOrDefault() {
+        return sources != null && !sources.isEmpty() ? sources : List.of("sim");
+    }
+
+    public SocialChannels.Tier defaultTierOrDefault() {
+        return defaultTier != null && !defaultTier.isBlank()
+                ? SocialChannels.Tier.valueOf(defaultTier.trim().toUpperCase())
+                : SocialChannels.Tier.UNTRUSTED;
+    }
+
+    public String stocktwitsBaseUrlOrDefault() {
+        return stocktwitsBaseUrl != null && !stocktwitsBaseUrl.isBlank()
+                ? stocktwitsBaseUrl : "https://api.stocktwits.com/api/2";
+    }
+
+    public int stocktwitsSymbolsPerCycleOrDefault() {
+        return stocktwitsSymbolsPerCycle > 0 ? stocktwitsSymbolsPerCycle : 3;
     }
 
     /** Curated seed registry (ADR-0050 §4) matching the sim channels; unknown channels are UNTRUSTED. */

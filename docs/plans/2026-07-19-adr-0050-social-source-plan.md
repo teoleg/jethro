@@ -38,8 +38,14 @@ Deterministic, offline, advisory-only. Package `io.jethro.app.social`.
   promoted, and only multi-channel-corroborated subjects surface as advisory context — zero orders.
 
 ## Phase 2 — real free adapters (behind the sim source)
-StockTwits API (finance-native, cashtags + sentiment) and Telegram (Bot API / MTProto public
-channels), API keys via env, rate-limit/ToS handling. Live gate (`feedMode`); sim stays default.
+- **2a (done):** `SocialFeed` multi-source composite + `StockTwitsSocialFeed` (HTTP, honours the env
+  proxy, fail-open, round-robins symbols/cycle as a rate-limit guard, parse fixture-tested). Source
+  selection via `jethro.social.sources` (default `sim` — opt-in, no boot network dependency); a
+  subject seen on two different sources corroborates. `SocialChannels` gained a `defaultTier` so a
+  real feed (`default-tier=STANDARD`) judges organic accounts by the credibility floors — a pump
+  throwaway still fails. The live HTTP call can't be verified offline; the mapping is what's tested.
+- **2b (todo):** Telegram adapter (Bot API / MTProto public channels), API keys via env; formal
+  rate-limit/ToS handling; a `feedMode`-style live gate if a source should be LIVE-only.
 
 ## Phase 3 — SLM classify + queue merge (ADR-0045)
 Replace/augment the deterministic router with the SLM sector-classify for posts without explicit

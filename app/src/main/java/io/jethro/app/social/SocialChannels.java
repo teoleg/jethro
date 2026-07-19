@@ -13,18 +13,32 @@ public final class SocialChannels {
     public enum Tier { TRUSTED, STANDARD, UNTRUSTED }
 
     private final Map<String, Tier> tiers;
+    private final Tier defaultTier;
     private final int credibleFollowerFloor;
     private final int credibleAgeDaysFloor;
 
+    /** Curated-only: unknown channels are UNTRUSTED (guilty until curated) — the sim default. */
     public SocialChannels(Map<String, Tier> tiers, int credibleFollowerFloor, int credibleAgeDaysFloor) {
+        this(tiers, Tier.UNTRUSTED, credibleFollowerFloor, credibleAgeDaysFloor);
+    }
+
+    /**
+     * @param defaultTier the tier for a channel not in the registry. UNTRUSTED (never credible) suits
+     *   a fully-curated set (the sim); a real feed (StockTwits/Telegram) where you cannot curate every
+     *   organic account sets it to STANDARD so unknown accounts are judged by the author FLOORS below
+     *   — a pump throwaway (unverified / few followers / brand-new) still fails and cannot corroborate.
+     */
+    public SocialChannels(Map<String, Tier> tiers, Tier defaultTier, int credibleFollowerFloor,
+                          int credibleAgeDaysFloor) {
         this.tiers = Map.copyOf(tiers);
+        this.defaultTier = defaultTier;
         this.credibleFollowerFloor = credibleFollowerFloor;
         this.credibleAgeDaysFloor = credibleAgeDaysFloor;
     }
 
-    /** Registry tier for a channel; an unknown channel is UNTRUSTED (guilty until curated). */
+    /** Registry tier for a channel; an unknown channel gets the configured default tier. */
     public Tier tierOf(String channel) {
-        return tiers.getOrDefault(channel, Tier.UNTRUSTED);
+        return tiers.getOrDefault(channel, defaultTier);
     }
 
     /**
