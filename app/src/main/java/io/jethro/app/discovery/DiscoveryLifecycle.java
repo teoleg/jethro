@@ -21,6 +21,11 @@ public final class DiscoveryLifecycle implements SmartLifecycle {
 
     private static final Logger log = LoggerFactory.getLogger(DiscoveryLifecycle.class);
 
+    // Run the first poll soon after boot (not after a full interval) so the UI shows the real source
+    // status within seconds instead of sitting on "not polled yet" for 5 minutes. Small delay lets
+    // boot finish first; the feed is off the tick path (MIN_PRIORITY). My scheduling knob, not a dial.
+    private static final long INITIAL_DELAY_SECONDS = 20;
+
     private final RssNewsFeed news;
     private final UniverseCandidates candidates;
     private final InstrumentRefSource refs;
@@ -44,9 +49,9 @@ public final class DiscoveryLifecycle implements SmartLifecycle {
             return t;
         });
         long interval = props.intervalSecondsOrDefault();
-        scheduler.scheduleWithFixedDelay(this::runOnce, interval, interval, TimeUnit.SECONDS);
-        log.info("universe discovery started (ADR-0050 §7): {} news outlet(s), every {}s, suggestions only",
-                props.outletsOrEmpty().size(), interval);
+        scheduler.scheduleWithFixedDelay(this::runOnce, INITIAL_DELAY_SECONDS, interval, TimeUnit.SECONDS);
+        log.info("universe discovery started (ADR-0050 §7): {} news outlet(s), first poll in {}s then every {}s, suggestions only",
+                props.outletsOrEmpty().size(), INITIAL_DELAY_SECONDS, interval);
     }
 
     private void runOnce() {

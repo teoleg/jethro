@@ -78,9 +78,12 @@ public final class SocialLifecycle implements SmartLifecycle {
             return t;
         });
         long interval = props.intervalSecondsOrDefault();
-        scheduler.scheduleWithFixedDelay(this::runOnce, interval, interval, TimeUnit.SECONDS);
-        log.info("social source started (ADR-0050): sim feed, every {}s, corroboration k={}, advisory-only "
-                + "(never an order)", interval, props.kOrDefault());
+        // First poll soon after boot (not after a full interval) so per-source status is real within
+        // seconds rather than "not polled yet". A short delay lets boot finish; feed is MIN_PRIORITY.
+        long initialDelay = Math.min(15, interval);
+        scheduler.scheduleWithFixedDelay(this::runOnce, initialDelay, interval, TimeUnit.SECONDS);
+        log.info("social source started (ADR-0050): sim feed, first poll in {}s then every {}s, corroboration k={}, "
+                + "advisory-only (never an order)", initialDelay, interval, props.kOrDefault());
     }
 
     private void runOnce() {
