@@ -81,6 +81,7 @@
   <div class="panel"><div id="positions" class="muted" style="padding:16px">loading…</div></div>
 </main>
 
+<script src="/format.js"></script>
 <script src="/chart.js"></script>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
@@ -113,8 +114,8 @@
     renderSubtabs();
     const ms = marks.filter(m => !m.instrumentId.startsWith("USD.SOFR.")).filter(m => match(m.instrumentId));
     document.getElementById("marks").innerHTML = ms.length ? ms.map(m =>
-      `<div class="m ${m.ageMillis>10000?'stale':''}" data-i="${esc(m.instrumentId)}" title="${m.bid&&m.ask?`bid ${esc(m.bid)} / ask ${esc(m.ask)} — `:''}click for price history"><span class="sym">${esc(m.instrumentId)}</span>
-        <span class="px mono">${esc(m.price)}</span><span class="age">${fmtAge(m.ageMillis)}</span>
+      `<div class="m ${m.ageMillis>10000?'stale':''}" data-i="${esc(m.instrumentId)}" title="${m.bid&&m.ask?`bid ${esc(fmtPrice(m.bid,m.instrumentId))} / ask ${esc(fmtPrice(m.ask,m.instrumentId))} — `:''}click for price history"><span class="sym">${esc(m.instrumentId)}</span>
+        <span class="px mono">${esc(fmtPrice(m.price,m.instrumentId))}</span><span class="age">${fmtAge(m.ageMillis)}</span>
         <span class="ico"><svg width="15" height="10" viewBox="0 0 15 10"><polyline points="0,9 4,4 8,6 15,0" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span></div>`).join("")
       : '<span class="muted">no live prices</span>';
     document.querySelectorAll("#marks .m").forEach(el => el.onclick = () => openChart(el.dataset.i));
@@ -124,7 +125,7 @@
       "<table><tr><th>instr</th><th>CUSIP / ID</th><th>book</th><th>market</th><th>qty</th><th>avg cost</th><th>mark</th><th>unrealized</th><th>realized</th><th>net exp</th></tr>" +
       ps.map(p => `<tr><td class="cls">${esc(p.instrumentId)}</td><td class="muted mono">${esc(cusipOf[p.instrumentId]||'—')}</td><td class="muted">${esc(p.bookId)}</td>
         <td class="muted">${esc(label(p.assetClass))}</td><td class="mono">${money(p.quantity)}</td>
-        <td class="mono">${money(p.avgCost)}</td><td class="mono">${p.hasMark?money(p.mark):'—'}</td>
+        <td class="mono">${fmtPrice(p.avgCost, p.instrumentId)}</td><td class="mono">${p.hasMark?fmtPrice(p.mark, p.instrumentId):'—'}</td>
         <td class="mono ${cls(p.unrealizedPnl)}">${money(p.unrealizedPnl)}</td>
         <td class="mono ${cls(p.realizedPnl)}">${money(p.realizedPnl)}</td>
         <td class="mono">${money(p.netExposure)}</td></tr>`).join("") + "</table>"

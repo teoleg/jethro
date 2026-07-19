@@ -123,6 +123,7 @@
   <span class="spacer"></span><span id="statusBadge" class="badge">loading…</span>
 </div></div>
 <main><div id="stage"><div class="notice">connecting to the sim…</div></div></main>
+<script src="/format.js"></script>
 <script src="/chart.js"></script>
 <script>
 (() => {
@@ -258,10 +259,7 @@
       const now=document.getElementById("priceNow"), chg=document.getElementById("priceChg");
       if(pts.length>1){
         const f=+pts[0].price,l=+pts[pts.length-1].price,c=(l-f)/f*100;
-        // prices are carried at 1e-6 scale (invariant 1); show sensible precision by magnitude
-        // (futures ~1dp, equities 2dp, FX 4dp) instead of the raw 6 places.
-        const fmtPx=n=>n>=1000?n.toFixed(1):n>=100?n.toFixed(2):n.toFixed(4);
-        if(now)now.textContent=fmtPx(l);
+        if(now)now.textContent=fmtPrice(l, id); // shared per-instrument precision (FX 5dp, else 2dp)
         if(chg){chg.textContent=(c>=0?"+":"")+c.toFixed(2)+"% · "+chartMinutes+"m";
           chg.style.color=c>=0?"var(--up)":"var(--down)";}
       } else if(now){ now.textContent="—"; }
@@ -357,7 +355,7 @@
       fetch("/api/depth").then(r=>r.ok?r.json():[]).catch(()=>[]),
       fetch("/api/volume").then(r=>r.ok?r.json():[]).catch(()=>[])]);
     const d=depth.find(x=>x.instrumentId===activeCh._id); if(!d)return;
-    const px=v=>{const n=+v;return n>=1000?n.toFixed(1):n>=100?n.toFixed(2):n.toFixed(4);};
+    const px=v=>fmtPrice(v, activeCh._id); // shared per-instrument precision (FX 5dp, else 2dp)
     const mid=(+d.bid + +d.ask)/2, prev=lastMid[activeCh._id]; lastMid[activeCh._id]=mid;
     activeCh._price.firstChild.nodeValue=px(mid)+" ";
     if(prev){const bps=(mid/prev-1)*10000; activeCh._chg.textContent=(bps>=0?"+":"")+bps.toFixed(0)+"bp";

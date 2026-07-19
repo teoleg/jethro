@@ -109,6 +109,7 @@
     <div class="panel"><div class="ph">Instrument master</div><div id="instruments" class="dim" style="padding:8px 12px">loading…</div></div>
   </div>
 </main>
+<script src="/format.js"></script>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
   const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
@@ -140,8 +141,8 @@
         "<table><tr><th>instr</th><th>CUSIP / ID</th><th>market</th><th>qty</th><th>avg cost</th><th>mark</th><th>unrealized</th><th>realized</th><th>net exp</th></tr>" +
         ps.map(p => { const closed = Number(p.quantity) === 0; // flat: no position, kept only to carry realized P&L
           return `<tr class="${closed?'closed':''}"><td><b>${esc(p.instrumentId)}</b>${closed?' <span class="tag-closed" title="position closed — no holding, realized P&L only">closed</span>':''}</td><td class="cid mono">${esc(cusipOf[p.instrumentId]||'—')}</td>
-          <td class="dim">${esc(p.assetClass)}</td><td class="mono">${closed?'flat':money(p.quantity)}</td><td class="mono">${closed?'—':money(p.avgCost)}</td>
-          <td class="mono">${closed||!p.hasMark?'—':money(p.mark)}</td><td class="mono ${cls(p.unrealizedPnl)}">${money(p.unrealizedPnl)}</td>
+          <td class="dim">${esc(p.assetClass)}</td><td class="mono">${closed?'flat':money(p.quantity)}</td><td class="mono">${closed?'—':fmtPrice(p.avgCost, p.instrumentId)}</td>
+          <td class="mono">${closed||!p.hasMark?'—':fmtPrice(p.mark, p.instrumentId)}</td><td class="mono ${cls(p.unrealizedPnl)}">${money(p.unrealizedPnl)}</td>
           <td class="mono ${cls(p.realizedPnl)}">${money(p.realizedPnl)}</td><td class="mono">${closed?'—':money(p.netExposure)}</td></tr>`; }).join("") + "</table>"
         : '<div class="empty-b">flat — no positions in this book</div>';
       return `<div class="book">${head}${body}</div>`;

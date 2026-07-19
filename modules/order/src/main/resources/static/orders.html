@@ -136,6 +136,7 @@
   </div>
 </div>
 
+<script src="/format.js"></script>
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const t = ms => new Date(ms).toLocaleTimeString();
@@ -228,9 +229,9 @@
         <td>${esc(o.instrumentId)}</td><td class="muted mono">${esc(cusipOf[o.instrumentId]||'—')}</td><td class="muted">${esc(o.bookId)}</td>
         <td class="${esc(o.side)}">${esc(o.side)}</td><td class="muted">${esc(o.orderType)}</td>
         <td class="muted">${esc(o.timeInForce||'GTC')}</td>
-        <td class="mono">${esc(o.quantity)}</td><td class="mono muted">${esc(o.limitPrice||"—")}</td>
+        <td class="mono">${esc(o.quantity)}</td><td class="mono muted">${o.limitPrice?esc(fmtPrice(o.limitPrice,o.instrumentId)):"—"}</td>
         <td><span class="st ${esc(o.status)}" title="${esc(o.reason||'')}">${working?'WORKING':esc(o.status)}</span>${(o.status==='REJECTED'||o.status==='CANCELLED')&&o.reason?`<div class="muted" style="font-size:10px">${esc(o.reason)}</div>`:''}</td>
-        <td class="mono">${f ? esc(f.price) : (working
+        <td class="mono">${f ? esc(fmtPrice(f.price, o.instrumentId)) : (working
             ? `<button type="button" class="pgbtn" style="font-size:11px;padding:2px 8px" onclick="cancelOrder('${esc(o.orderId)}')">cancel</button>`
             : '<span class="muted">—</span>')}</td>
         <td class="mono muted idcell" ${f ? `title="click to copy" onclick="copyId(this)"` : ''}>${f ? esc(f.fillId) : '—'}</td></tr>`; }).join("") + "</table>"

@@ -119,6 +119,7 @@
 </style>
 </head>
 <body>
+<script src="/format.js"></script>
 <div class="topbar">
   <div class="bar">
     <span class="brand"><span class="dot"></span>JETHRO</span>
@@ -266,7 +267,7 @@
         const prev = tickPrev[m.instrumentId], now = Number(m.price);
         const c = prev == null ? "flat" : (now > prev ? "up" : (now < prev ? "down" : "flat"));
         tickPrev[m.instrumentId] = now;
-        return `<div class="tk"><span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(m.price)}</span></div>`;
+        return `<div class="tk"><span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(fmtPrice(m.price, m.instrumentId))}</span></div>`;
       }).join("") : '<span class="muted" style="padding:4px 8px">no live prices</span>';
     } catch (e) {}
   }
