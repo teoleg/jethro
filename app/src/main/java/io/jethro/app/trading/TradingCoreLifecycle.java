@@ -539,7 +539,9 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         var rt = runtime;
         if (rt != null) {
             var stats = rt.stats();
-            log.info("trading-core: provider={} ticksIn={} dropped={} instruments={} marksFlushed={} regime={}",
+            // sim-regime is the simulator's own label, TELEMETRY only (CALM when live). No trading
+            // decision reads it — risk-off sizing senses volatility from prices (ADR-0051).
+            log.info("trading-core: provider={} ticksIn={} dropped={} instruments={} marksFlushed={} sim-regime={}",
                     adapter != null ? adapter.name() : "n/a", stats.ticksIn(), stats.ticksDropped(),
                     rt.markCache().size(), stats.marksFlushedTotal(), regime());
         }
