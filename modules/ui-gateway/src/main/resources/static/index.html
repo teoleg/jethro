@@ -47,8 +47,13 @@
   .led.ok { background:var(--up); box-shadow:0 0 8px var(--up); } .led.warn { background:var(--warn); } .led.bad { background:var(--down); }
 
   /* price ticker strip across the top of the landing page */
-  .ticker { grid-column:1 / -1; display:flex; gap:8px; overflow-x:auto; padding:2px 2px 12px; margin-bottom:2px; border-bottom:1px solid var(--line); scrollbar-width:thin; }
-  .tk { display:flex; align-items:baseline; gap:7px; background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:5px 11px; white-space:nowrap; }
+  /* continuously-scrolling price marquee under the menu (replaces the static strip) */
+  .ticker { grid-column:1 / -1; overflow:hidden; padding:4px 0 12px; margin-bottom:2px; border-bottom:1px solid var(--line);
+            -webkit-mask-image:linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+            mask-image:linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+  .ticker .marquee { display:inline-flex; white-space:nowrap; animation:ticker 90s linear infinite; will-change:transform; }
+  .ticker:hover .marquee { animation-play-state:paused; }
+  .tk { display:inline-flex; align-items:baseline; gap:7px; background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:5px 11px; margin-right:8px; white-space:nowrap; }
   .tk .s { color:var(--dim); font-size:10px; letter-spacing:.04em; } .tk .p { font-weight:600; font-size:13px; }
 
   main { max-width:1780px; margin:0 auto; padding:18px 24px 40px; display:grid; gap:18px; grid-template-columns:1.05fr 0.95fr; align-items:start; }
@@ -285,12 +290,32 @@
   async function loadTicker() {
     try {
       const marks = (await (await pollFetch("/api/marks")).json()).filter(m => !m.instrumentId.startsWith("USD.SOFR."));
-      document.getElementById("ticker").innerHTML = marks.length ? marks.map(m => {
+      const el = document.getElementById("ticker");
+      if (!marks.length) { el.innerHTML = '<span class="muted" style="padding:4px 8px">no live prices</span>'; el.dataset.syms = ""; return; }
+      // Compute each tile's HTML once per refresh (the up/down colour diff mutates tickPrev,
+      // so it must run exactly once per symbol even though the marquee has two copies).
+      const inner = {};
+      marks.forEach(m => {
         const prev = tickPrev[m.instrumentId], now = Number(m.price);
         const c = prev == null ? "flat" : (now > prev ? "up" : (now < prev ? "down" : "flat"));
         tickPrev[m.instrumentId] = now;
-        return `<div class="tk"><span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(fmtPrice(m.price, m.instrumentId))}</span></div>`;
-      }).join("") : '<span class="muted" style="padding:4px 8px">no live prices</span>';
+        inner[m.instrumentId] = `<span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(fmtPrice(m.price, m.instrumentId))}</span>`;
+      });
+      let track = el.querySelector(".marquee");
+      // Rebuild only when the set of symbols changes — otherwise update in place so the CSS
+      // animation keeps running smoothly (a rebuild restarts the scroll and causes a jump).
+      const symKey = marks.map(m => m.instrumentId).join(",");
+      if (!track || el.dataset.syms !== symKey) {
+        // Two duplicated copies give the seamless -50% loop (keyframes: translateX(-50%)).
+        const tiles = marks.map(m => `<span class="tk" data-sym="${esc(m.instrumentId)}">${inner[m.instrumentId]}</span>`).join("");
+        el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
+        el.dataset.syms = symKey;
+      } else {
+        track.querySelectorAll(".tk").forEach(node => {
+          const h = inner[node.dataset.sym];
+          if (h) node.innerHTML = h;
+        });
+      }
     } catch (e) {}
   }
   // Major indices/ETFs (US + international) in the top bar — context only, delayed.
