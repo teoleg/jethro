@@ -54,6 +54,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final AttentionFeed feed;
     private final SseBroadcaster sse;
     private final StrategyProperties props;
+    private final StrategyControl control; // ADR-0052: effective (override-or-config) tuning, live
     private final OrderService orderService; // nullable: null → suggestions only
     private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
     private final io.jethro.app.risk.InstrumentVolSource vols; // measured daily vol (sizing)
@@ -81,7 +82,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     public StrategyLifecycle(Strategy strategy, TradingCoreLifecycle tradingCore,
                              InstrumentRefSource refs, PreTradeGuardrail guardrail, RiskProjection risk,
                              RiskLimitSource limits, AttentionFeed feed, SseBroadcaster sse,
-                             StrategyProperties props, OrderService orderService,
+                             StrategyProperties props, StrategyControl control, OrderService orderService,
                              io.jethro.app.risk.TradingHaltSwitch halt,
                              io.jethro.app.risk.InstrumentVolSource vols,
                              io.jethro.app.risk.PortfolioCorrelationSource correlations,
@@ -97,6 +98,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.feed = feed;
         this.sse = sse;
         this.props = props;
+        this.control = control;
         this.orderService = orderService;
         this.halt = halt;
         this.vols = vols;
@@ -105,7 +107,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     }
 
     private boolean autoExecuting() {
-        return props.autoExecute() && orderService != null;
+        return control.autoExecute() && orderService != null;
     }
 
     /** The SENSED volatility regime (ADR-0051) — CALM/ELEVATED/UNKNOWN, price-derived (never a sim
@@ -128,15 +130,16 @@ public final class StrategyLifecycle implements SmartLifecycle {
         });
         scheduler.scheduleWithFixedDelay(this::runOnce,
                 props.intervalSeconds(), props.intervalSeconds(), TimeUnit.SECONDS);
-        log.info("{} strategy started: every {}s, lookback {}, threshold {}σ (floor {}bps), default book {}",
-                strategy.name(), props.intervalSeconds(), props.lookback(), props.thresholdSigmasOrDefault(),
-                props.minSignalBpsOrDefault(), props.book());
+        log.info("{} strategy started: every {}s, lookback {}, threshold {}σ (floor {}bps), default book {} "
+                        + "(dials live-tunable — ADR-0052)",
+                strategy.name(), props.intervalSeconds(), control.lookback(), control.thresholdSigmas(),
+                control.minSignalBps().toPlainString(), props.book());
         if (autoExecuting()) {
             log.warn("AUTO-EXECUTE ON (ADR-0019): strategy signals auto-submit SIMULATED orders "
                     + "(routed by asset class {}, default {}; cooldown {}s). Never enable against a real broker.",
-                    props.bookByClass(), props.book(), props.autoCooldownSeconds());
-        } else if (props.autoExecute()) {
-            log.warn("jethro.strategy.auto-execute=true but no order service available — suggestions only");
+                    props.bookByClass(), props.book(), control.autoCooldownSeconds());
+        } else if (control.autoExecute()) {
+            log.warn("strategy auto-execute is on but no order service available — suggestions only");
         }
     }
 
@@ -172,7 +175,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
             var volState = volRegime.regime();
             BigDecimal regimeScale =
                     volState == io.jethro.trading.algo.strategy.VolatilityRegime.Regime.ELEVATED
-                            ? props.regimeVolatileScaleOrDefault() : BigDecimal.ONE;
+                            ? control.regimeVolatileScale() : BigDecimal.ONE;
             String regime = volState.name();
             Set<String> current = new HashSet<>();
             int signals = 0;
@@ -196,14 +199,14 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 BigDecimal held = risk.instrumentNetExposure(book, signal.instrumentId());
                 boolean sameDirection = (held.signum() > 0) == (signal.side() == Side.BUY);
                 if (held.signum() != 0 && sameDirection
-                        && held.abs().compareTo(props.maxPositionNotionalOrDefault()) >= 0) {
+                        && held.abs().compareTo(control.maxPositionNotional()) >= 0) {
                     atPosition++;
                     continue;
                 }
                 BigDecimal quantity = sized.get();
                 // Long-only guard (default): a SELL may only REDUCE an existing long, never
                 // open or extend a short. Clamp the reducing order so it stops at flat.
-                if (!props.allowShortOrDefault() && signal.side() == Side.SELL) {
+                if (!control.allowShort() && signal.side() == Side.SELL) {
                     BigDecimal heldQty = risk.positionQuantity(book, signal.instrumentId());
                     if (heldQty.signum() <= 0) {
                         shortsBlocked++; // nothing to reduce — a short would be opened; skip
@@ -317,17 +320,17 @@ public final class StrategyLifecycle implements SmartLifecycle {
             var rho = correlations.correlationToPortfolio(signal.instrumentId());
             notionalTarget = rho.isPresent()
                     ? io.jethro.app.risk.VolTargeting.marginalNotionalFor(
-                            props.riskBudgetDailyOrDefault(), dailyVol.get(), rho.get(),
-                            props.maxOrderNotionalFor(assetClass))
+                            control.riskBudgetDaily(), dailyVol.get(), rho.get(),
+                            control.maxOrderNotionalFor(assetClass))
                     : io.jethro.app.risk.VolTargeting.notionalFor(
-                            props.riskBudgetDailyOrDefault(), dailyVol.get(), props.maxOrderNotionalFor(assetClass));
+                            control.riskBudgetDaily(), dailyVol.get(), control.maxOrderNotionalFor(assetClass));
         } else {
             double z = Math.abs(signal.zScore());
             double sigmaBps = Double.isFinite(z) && z > 1e-9
                     ? Math.abs(signal.changeBps().doubleValue()) / z
-                    : props.volReferenceBpsOrDefault();
-            double scale = Math.max(0.5, Math.min(2.0, props.volReferenceBpsOrDefault() / Math.max(sigmaBps, 1e-9)));
-            notionalTarget = props.targetNotional().multiply(BigDecimal.valueOf(scale));
+                    : control.volReferenceBps();
+            double scale = Math.max(0.5, Math.min(2.0, control.volReferenceBps() / Math.max(sigmaBps, 1e-9)));
+            notionalTarget = control.targetNotional().multiply(BigDecimal.valueOf(scale));
         }
         // Regime scale on top: risk-off in VOLATILE/RISK_OFF/INFLATION_SHOCK.
         notionalTarget = notionalTarget.multiply(regimeScale);
@@ -338,7 +341,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
             var advUsd = measuredAdv.advUsd(signal.instrumentId());
             if (advUsd.isPresent()) {
                 BigDecimal liquidityCap = advUsd.get()
-                        .multiply(BigDecimal.valueOf(props.liquidityCapAdvFractionOrDefault()));
+                        .multiply(BigDecimal.valueOf(control.liquidityCapAdvFraction()));
                 if (liquidityCap.signum() > 0 && notionalTarget.compareTo(liquidityCap) > 0) {
                     notionalTarget = liquidityCap;
                 }
@@ -348,7 +351,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         if (qty.signum() <= 0) {
             // Cap is per asset class: one Treasury contract (~$110k) is a legitimate order
             // for a rates book even though it dwarfs the equity-sized default cap.
-            BigDecimal cap = props.maxOrderNotionalFor(ref.map(InstrumentRef::assetClass).orElse(null));
+            BigDecimal cap = control.maxOrderNotionalFor(ref.map(InstrumentRef::assetClass).orElse(null));
             if (notionalPerUnit.compareTo(cap) > 0) {
                 return Optional.empty(); // one unit already blows the order cap — unsizeable
             }
@@ -363,7 +366,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
      * @return true if an order was submitted this cycle.
      */
     private boolean maybeAutoExecute(TradeSignal signal, String book, BigDecimal qty, long now) {
-        long cooldownMillis = props.autoCooldownSeconds() * 1_000;
+        long cooldownMillis = control.autoCooldownSeconds() * 1_000;
         Long last = lastAutoExec.get(signal.instrumentId());
         if (last != null && now - last < cooldownMillis) {
             return false; // still cooling down for this instrument
@@ -405,7 +408,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         // Gated on live exposure so the card clears once the book is flat (the day's realized
         // loss legitimately keeps the separate loss ALERT up — that happened, it's honest).
         Set<String> flatten = new HashSet<>();
-        if (props.deriskOnLossCapOrDefault()) {
+        if (control.deriskOnLossCap()) {
             for (ConsolidatedRisk.Group g : snapshot.byBook()) {
                 if (!managed.contains(g.key()) || g.grossExposure().signum() == 0) {
                     continue;
@@ -421,8 +424,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
             }
         }
 
-        BigDecimal stop = props.stopLossPctOrNull();
-        BigDecimal takeProfit = props.takeProfitPctOrNull();
+        BigDecimal stop = control.stopLossPctOrNull();
+        BigDecimal takeProfit = control.takeProfitPctOrNull();
         int closed = 0;
         for (PositionRisk p : snapshot.positions()) {
             if (p.quantity().signum() == 0 || !managed.contains(p.bookId())) {

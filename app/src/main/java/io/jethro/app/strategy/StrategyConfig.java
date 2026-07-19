@@ -25,14 +25,31 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(prefix = "jethro.strategy", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class StrategyConfig {
 
-    private static io.jethro.trading.algo.strategy.Strategy momentum(StrategyProperties props) {
+    // Live detectors read tuning through StrategyControl (ADR-0052): the SignalParams overrides
+    // threshold/floor/lookback/volume-confirm at runtime. The backtest builds its OWN detectors from
+    // static config (never this bean), so OOS edge measurement stays reproducible.
+    private static io.jethro.trading.algo.strategy.Strategy momentum(StrategyProperties props, StrategyControl live) {
         return new MomentumStrategy(props.lookback(), props.thresholdSigmasOrDefault(),
-                props.minSignalBpsOrDefault(), props.volumeConfirmMinOrDefault());
+                props.minSignalBpsOrDefault(), props.volumeConfirmMinOrDefault(), live);
     }
 
-    private static io.jethro.trading.algo.strategy.Strategy meanReversion(StrategyProperties props) {
+    private static io.jethro.trading.algo.strategy.Strategy meanReversion(StrategyProperties props, StrategyControl live) {
         return new io.jethro.trading.algo.strategy.MeanReversionStrategy(props.lookback(),
-                props.thresholdSigmasOrDefault(), props.minSignalBpsOrDefault(), props.volumeConfirmMinOrDefault());
+                props.thresholdSigmasOrDefault(), props.minSignalBpsOrDefault(), props.volumeConfirmMinOrDefault(), live);
+    }
+
+    /**
+     * Live strategy-tuning control (ADR-0052): resolves each dial as override-or-config and persists
+     * overrides to Postgres when available (else in-memory for the process). Present even when the
+     * selector isn't, so the live detector always has a tuning source.
+     */
+    @Bean
+    StrategyControl strategyControl(StrategyProperties props,
+                                    ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbc) {
+        var template = jdbc.getIfAvailable();
+        StrategyOverrideStore store = template != null
+                ? new JdbcStrategyOverrideStore(template) : StrategyOverrideStore.NONE;
+        return new StrategyControl(props, store);
     }
 
     /**
@@ -67,6 +84,7 @@ public class StrategyConfig {
     @Bean
     io.jethro.trading.algo.strategy.Strategy tradingStrategy(
             StrategyProperties props,
+            StrategyControl control,
             ObjectProvider<StrategySelector> selector,
             @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.enabled:true}") boolean trendEnabled,
             @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.window:20}") int trendWindow,
@@ -74,9 +92,9 @@ public class StrategyConfig {
             @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.lower-band:0.3}") String trendLower) {
         StrategySelector sel = selector.getIfAvailable();
         if (sel == null) {
-            return "mean-reversion".equals(props.algoOrDefault()) ? meanReversion(props) : momentum(props);
+            return "mean-reversion".equals(props.algoOrDefault()) ? meanReversion(props, control) : momentum(props, control);
         }
-        var byAlgo = java.util.Map.of("momentum", momentum(props), "mean-reversion", meanReversion(props));
+        var byAlgo = java.util.Map.of("momentum", momentum(props, control), "mean-reversion", meanReversion(props, control));
         if (trendEnabled) {
             // ADR-0044: a price-derived detector picks momentum (trend) vs mean-reversion (chop) and
             // switches when the regime turns; the OOS selector becomes the edge gate (veto only).
@@ -94,6 +112,7 @@ public class StrategyConfig {
                                         InstrumentRefSource refs, PreTradeGuardrail guardrail,
                                         RiskProjection risk, RiskLimitSource limits,
                                         AttentionFeed feed, SseBroadcaster sse, StrategyProperties props,
+                                        StrategyControl control,
                                         ObjectProvider<OrderService> orderService,
                                         io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch,
                                         ObjectProvider<io.jethro.app.risk.InstrumentVolSource> vols,
@@ -112,7 +131,7 @@ public class StrategyConfig {
                 volWindow, new java.math.BigDecimal(volUpper), new java.math.BigDecimal(volLower),
                 new java.math.BigDecimal(volLambda));
         return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, risk, limits, feed, sse, props,
-                orderService.getIfAvailable(), tradingHaltSwitch,
+                control, orderService.getIfAvailable(), tradingHaltSwitch,
                 vols.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE),
                 correlations.getIfAvailable(() -> io.jethro.app.risk.PortfolioCorrelationSource.NONE),
                 measuredAdv.getIfAvailable(), volRegime);

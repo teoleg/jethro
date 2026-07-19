@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — strategy tuning</title>
+<style>
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
+    --up:#35c07a; --down:#f0553f;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body {
+    background: radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 0%, rgba(53,192,122,.06), transparent 55%), var(--bg);
+    color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased;
+  }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
+
+  main { max-width:1780px; margin:0 auto; padding:20px 24px 48px; }
+  .lead { color:var(--dim); font-size:13px; max-width:900px; margin:2px 2px 18px; }
+  .lead b { color:var(--txt); font-weight:600; }
+  .toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:0 2px 18px; }
+  .toolbar input { background:#0c1019; color:var(--txt); border:1px solid var(--line-2); border-radius:9px; padding:8px 11px; font:inherit; font-size:13px; }
+  .toolbar input#note { flex:1; min-width:240px; }
+  .toolbar input#actor { width:150px; }
+  .btn { background:var(--surface-2); color:var(--txt); border:1px solid var(--line-2); border-radius:9px; padding:8px 14px; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+  .btn:hover { border-color:var(--brand); }
+  .btn.warn:hover { border-color:var(--alert); color:var(--alert); }
+
+  .groups { display:grid; gap:16px; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); align-items:start; }
+  .group { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
+  .group h2 { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin-bottom:12px; }
+  .dial { display:grid; grid-template-columns:1fr auto; gap:6px 10px; align-items:center; padding:10px 0; border-top:1px solid var(--line); }
+  .group .dial:first-of-type { border-top:0; }
+  .dial .name { font-size:13px; font-weight:600; display:flex; align-items:center; gap:7px; }
+  .dial .risk { font-size:9px; letter-spacing:.06em; text-transform:uppercase; color:var(--warn); border:1px solid var(--warn); border-radius:4px; padding:0 5px; }
+  .dial .sub { grid-column:1 / -1; color:var(--dim); font-size:11px; margin-top:-2px; }
+  .dial .sub .ov { color:var(--brand); }
+  .ctl { display:flex; align-items:center; gap:6px; }
+  .ctl input, .ctl select { width:120px; background:#0c1019; color:var(--txt); border:1px solid var(--line-2); border-radius:8px; padding:7px 9px; font:inherit; font-size:13px; text-align:right; }
+  .ctl select { text-align:left; }
+  .ctl input:focus, .ctl select:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(91,140,255,.18); }
+  .ctl input.dirty { border-color:var(--warn); }
+  .ctl .apply { background:var(--brand); color:#fff; border:0; border-radius:8px; padding:7px 10px; font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
+  .ctl .reset { background:none; border:1px solid var(--line-2); color:var(--dim); border-radius:8px; padding:6px 9px; font-size:12px; cursor:pointer; }
+  .ctl .reset:hover { border-color:var(--brand); color:var(--txt); }
+  .ctl .reset[disabled] { opacity:.3; cursor:default; }
+  .badge-ov { font-size:9px; letter-spacing:.06em; text-transform:uppercase; color:var(--brand); border:1px solid var(--brand); border-radius:999px; padding:1px 7px; }
+
+  .msg { margin:0 2px 14px; padding:9px 13px; border-radius:10px; font-size:12.5px; display:none; }
+  .msg.err { display:block; background:rgba(240,85,63,.1); border:1px solid var(--alert); color:#ffb3a8; }
+  .msg.ok { display:block; background:rgba(53,192,122,.08); border:1px solid var(--up); color:#a6e9c6; }
+
+  .history { margin-top:26px; }
+  .history h2 { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:0 2px 12px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:5px 12px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  td.num { text-align:right; }
+  .empty { color:var(--dim); text-align:center; padding:20px 0; border:1px dashed var(--line); border-radius:12px; }
+</style>
+</head>
+<body>
+<script src="/format.js"></script>
+<script src="/poll.js"></script>
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+      <a class="tab" href="/config.html">Config</a>
+      <a class="tab" href="/sim.html">Sim</a>
+      <a class="tab" href="/backtest.html">Backtest</a>
+      <a class="tab active" href="/strategy.html">Strategy</a>
+      <a class="tab" href="/social.html">Social</a>
+      <a class="tab" href="/social-sources.html">Sources</a>
+      <a class="tab" href="/discovery.html">Discover</a>
+      <a class="tab" href="/ollama.html">Ops</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="pill" id="ovPill">— overrides</span>
+  </div>
+</div>
+<main>
+  <p class="lead">
+    Live strategy tuning (<b>ADR-0052</b>). Dials take effect immediately — no restart. The effective
+    value is the override if set, else the <b>application.properties</b> default. The
+    <b>OOS backtest always uses the config default</b>, so edge measurement stays reproducible, and
+    auto-execute stays SIM-gated. Every change is <b>persisted &amp; audited</b> (old→new, who, when) —
+    that record is the provenance a live-set risk dial requires. Dials that gate money/risk are marked
+    <span class="risk" style="color:var(--warn);border:1px solid var(--warn);border-radius:4px;padding:0 5px;font-size:9px">RISK</span>.
+  </p>
+
+  <div class="toolbar">
+    <input id="actor" placeholder="your name (attribution)" autocomplete="off">
+    <input id="note" placeholder="note — why this change (recorded in the audit log)" autocomplete="off">
+    <button class="btn warn" onclick="resetAll()">Reset all to config</button>
+    <button class="btn" onclick="load()">Refresh</button>
+  </div>
+
+  <div class="msg" id="msg"></div>
+  <div class="groups" id="groups"></div>
+
+  <div class="history">
+    <h2>Change history</h2>
+    <div id="history"><div class="empty">no changes recorded</div></div>
+  </div>
+</main>
+
+<script>
+  const GROUP_ORDER = ["Sensitivity", "Turnover", "Sizing", "Exposure", "Exits", "Behaviour"];
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c])); }
+  function actor() { return document.getElementById("actor").value.trim(); }
+  function note() { return document.getElementById("note").value.trim(); }
+  function flash(kind, text) {
+    const m = document.getElementById("msg");
+    m.className = "msg " + kind; m.textContent = text;
+    if (kind === "ok") setTimeout(() => { m.className = "msg"; }, 2500);
+  }
+
+  function dialRow(d) {
+    const overridden = d.overridden;
+    const isBool = d.kind === "BOOL";
+    let control;
+    if (isBool) {
+      control = `<select data-param="${esc(d.key)}">
+          <option value="true"${d.effective === "true" ? " selected" : ""}>true</option>
+          <option value="false"${d.effective === "false" ? " selected" : ""}>false</option></select>`;
+    } else {
+      const step = d.kind === "INT" ? "1" : "any";
+      control = `<input type="number" step="${step}" min="${d.min}" max="${d.max}" value="${esc(d.effective)}" data-param="${esc(d.key)}">`;
+    }
+    const risk = d.gatesRisk ? `<span class="risk">risk</span>` : "";
+    const ovBadge = overridden ? `<span class="badge-ov">override</span>` : "";
+    const bounds = isBool ? "true / false" : `range ${d.min}–${d.max}`;
+    const sub = overridden
+      ? `<span class="ov">overridden → ${esc(d.effective)}</span> · config default ${esc(d.defaultValue)} · ${bounds}`
+      : `config default ${esc(d.defaultValue)} · ${bounds}`;
+    return `<div class="dial">
+        <div class="name">${esc(d.label)} ${risk} ${ovBadge}</div>
+        <div class="ctl">
+          ${control}
+          <button class="apply" onclick="applyDial('${esc(d.key)}')">Set</button>
+          <button class="reset" onclick="resetDial('${esc(d.key)}')" ${overridden ? "" : "disabled"}>Reset</button>
+        </div>
+        <div class="sub" data-key="${esc(d.key)}">${sub}</div>
+      </div>`;
+  }
+
+  function render(state) {
+    document.getElementById("ovPill").textContent = state.overrides + " override" + (state.overrides === 1 ? "" : "s");
+    const byGroup = {};
+    state.dials.forEach(d => (byGroup[d.group] = byGroup[d.group] || []).push(d));
+    const groups = [...new Set([...GROUP_ORDER, ...Object.keys(byGroup)])].filter(g => byGroup[g]);
+    document.getElementById("groups").innerHTML = groups.map(g =>
+      `<div class="group"><h2>${esc(g)}</h2>${byGroup[g].map(dialRow).join("")}</div>`).join("");
+    // mark inputs dirty when edited away from the effective value
+    document.querySelectorAll(".ctl input, .ctl select").forEach(el => {
+      const original = el.value;
+      el.addEventListener("input", () => el.classList.toggle("dirty", el.value !== original));
+      el.addEventListener("keydown", e => { if (e.key === "Enter") applyDial(el.dataset.param); });
+    });
+  }
+
+  function inputFor(param) { return document.querySelector(`[data-param="${param}"]`); }
+
+  async function applyDial(param) {
+    const el = inputFor(param);
+    if (!el) return;
+    try {
+      const res = await fetch("/api/strategy/control/set", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ param, value: String(el.value), actor: actor(), note: note() })
+      });
+      if (!res.ok) { flash("err", param + ": " + (await res.text() || res.status)); return; }
+      render(await res.json()); flash("ok", param + " set to " + el.value); loadHistory();
+    } catch (e) { flash("err", "network error: " + e); }
+  }
+
+  async function resetDial(param) {
+    try {
+      const res = await fetch("/api/strategy/control/reset", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ param, actor: actor() })
+      });
+      if (!res.ok) { flash("err", await res.text() || res.status); return; }
+      render(await res.json()); flash("ok", param + " reset to config default"); loadHistory();
+    } catch (e) { flash("err", "network error: " + e); }
+  }
+
+  async function resetAll() {
+    if (!confirm("Clear every override and revert all dials to the application.properties defaults?")) return;
+    try {
+      const res = await fetch("/api/strategy/control/reset-all", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ actor: actor() })
+      });
+      render(await res.json()); flash("ok", "all dials reset to config"); loadHistory();
+    } catch (e) { flash("err", "network error: " + e); }
+  }
+
+  async function load() {
+    try { render(await (await fetch("/api/strategy/control")).json()); }
+    catch (e) { flash("err", "could not load strategy control: " + e); }
+  }
+
+  async function loadHistory() {
+    try {
+      const rows = await (await fetch("/api/strategy/control/history?limit=40")).json();
+      const el = document.getElementById("history");
+      if (!rows.length) { el.innerHTML = '<div class="empty">no changes recorded</div>'; return; }
+      el.innerHTML = `<table><thead><tr><th>When</th><th>Dial</th><th class="num">From</th><th class="num">To</th><th>By</th><th>Note</th></tr></thead><tbody>`
+        + rows.map(r => `<tr>
+            <td class="mono">${esc(new Date(r.atMillis).toLocaleString())}</td>
+            <td>${esc(r.param)}</td>
+            <td class="num mono">${esc(r.oldValue == null ? "—" : r.oldValue)}</td>
+            <td class="num mono">${esc(r.newValue == null ? "(reset)" : r.newValue)}</td>
+            <td>${esc(r.actor || "—")}</td>
+            <td>${esc(r.note || "")}</td></tr>`).join("") + `</tbody></table>`;
+    } catch (e) { /* history is best-effort */ }
+  }
+
+  load();
+  loadHistory();
+  // Refresh state periodically so an override set from another tab / by config reload is reflected.
+  poll(load, 15000);
+</script>
+</body>
+</html>
