@@ -85,9 +85,30 @@ public final class BacktestService {
     /** As above for a SPECIFIC algo ("momentum"/"mean-reversion"); null = the live one. The
      *  per-instrument strategy selector (ADR-0043) calls this once per algo and compares. */
     public Map<String, BacktestResult.InstrumentResult> oosByInstrument(int ticks, int seedCount, String algo) {
-        List<BacktestResult> runs = new ArrayList<>(seedCount);
-        for (long seed : oosSeeds(sim.simSeed(), seedCount)) {
-            runs.add(run(seed, ticks, null, null, algo));
+        return oosByInstrument(ticks, seedCount, algo, 0L);
+    }
+
+    /**
+     * As above, but sleep {@code pauseMillisBetweenRuns} between the individual seed backtests.
+     * The runs are CPU-bound; a background caller (the strategy selector) passes a small pause so
+     * this yields the core between runs instead of monopolising it and starving the REST threads
+     * on a small/single-core box. The synchronous callers (REST, hypothesis layer) pass 0 and are
+     * unaffected. An interrupt aborts early and aggregates whatever ran (never blocks shutdown).
+     */
+    public Map<String, BacktestResult.InstrumentResult> oosByInstrument(int ticks, int seedCount, String algo,
+                                                                        long pauseMillisBetweenRuns) {
+        long[] seeds = oosSeeds(sim.simSeed(), seedCount);
+        List<BacktestResult> runs = new ArrayList<>(seeds.length);
+        for (int i = 0; i < seeds.length; i++) {
+            runs.add(run(seeds[i], ticks, null, null, algo));
+            if (pauseMillisBetweenRuns > 0 && i < seeds.length - 1) {
+                try {
+                    Thread.sleep(pauseMillisBetweenRuns);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
         }
         return aggregateByMedian(runs);
     }

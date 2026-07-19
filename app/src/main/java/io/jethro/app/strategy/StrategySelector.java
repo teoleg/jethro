@@ -53,10 +53,18 @@ public final class StrategySelector implements AutoCloseable {
         this.initialDelaySeconds = Math.max(5, initialDelaySeconds);
     }
 
+    /** Yield the core this long between individual OOS backtest runs so the CPU-bound refresh
+     *  doesn't monopolise a small/single-core box and starve the REST threads (which made the
+     *  UI's polling pile up). My own value, not a risk/money dial — purely a scheduling knob. */
+    private static final long INTER_RUN_PAUSE_MILLIS = 25;
+
     public void start() {
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "strategy-selector");
             t.setDaemon(true);
+            // Below-normal priority: the refresh is a background chore, never latency-critical.
+            // Lets the OS favour request-serving threads when they're runnable on a shared core.
+            t.setPriority(Thread.MIN_PRIORITY);
             return t;
         });
         // First run a bit after boot (let the app finish starting; the backtest is CPU-heavy),
@@ -70,8 +78,8 @@ public final class StrategySelector implements AutoCloseable {
     private void refresh() {
         long t0 = System.currentTimeMillis();
         try {
-            var momentum = backtest.oosByInstrument(ticks, seedCount, "momentum");
-            var meanReversion = backtest.oosByInstrument(ticks, seedCount, "mean-reversion");
+            var momentum = backtest.oosByInstrument(ticks, seedCount, "momentum", INTER_RUN_PAUSE_MILLIS);
+            var meanReversion = backtest.oosByInstrument(ticks, seedCount, "mean-reversion", INTER_RUN_PAUSE_MILLIS);
             Map<String, Choice> next = choose(momentum, meanReversion);
             choices = next;
             lastRunMillis = System.currentTimeMillis();
