@@ -103,6 +103,12 @@ the UI as a rule; a `β=1.0` placeholder; a sped-up sim clock).
 - Tests: JUnit 5; every PnL/risk calculation gets exact-value tests (decimals make this
   possible — use it). Sim adapter is seedable — use fixed seeds in tests.
 - Errors in data paths: never silently drop a tick/fill — count, log, and expose a metric.
+- Reference data is the universe's single source: when a migration adds an instrument to the
+  master, the **same change** must backfill its attribute rows — `display_name`, `adv_usd`,
+  `spread_bps`, feed symbology (yahoo/finnhub for price-quoted names) + standard identifiers;
+  futures/swaps also need contract specs. An instrument in the master without them shows
+  blank/generic on the UI. (Learned: the V31 universe expansion added NVDA/JNJ/JPM/AUDUSD but
+  not their attributes — backfilled in V34.)
 
 ## Response & reasoning style for this repo
 
