@@ -59,6 +59,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private final io.jethro.app.risk.InstrumentVolSource vols; // measured daily vol (sizing)
     private final io.jethro.app.risk.PortfolioCorrelationSource correlations; // covariance-aware sizing
     private final io.jethro.app.order.MeasuredAdvSource measuredAdv; // nullable: live ADV for the liquidity cap (ADR-0033)
+    private final io.jethro.trading.algo.strategy.VolatilityRegime volRegime; // ADR-0051: price-derived risk-off sensing
 
     private static final int ACTIVITY_CAP = 50;
     private final java.util.Deque<StrategyActivity> activity = new java.util.ArrayDeque<>(); // newest first
@@ -84,7 +85,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
                              io.jethro.app.risk.TradingHaltSwitch halt,
                              io.jethro.app.risk.InstrumentVolSource vols,
                              io.jethro.app.risk.PortfolioCorrelationSource correlations,
-                             io.jethro.app.order.MeasuredAdvSource measuredAdv) {
+                             io.jethro.app.order.MeasuredAdvSource measuredAdv,
+                             io.jethro.trading.algo.strategy.VolatilityRegime volRegime) {
         this.strategy = strategy;
         this.measuredAdv = measuredAdv;
         this.tradingCore = tradingCore;
@@ -99,6 +101,7 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.halt = halt;
         this.vols = vols;
         this.correlations = correlations;
+        this.volRegime = volRegime;
     }
 
     private boolean autoExecuting() {
@@ -150,10 +153,16 @@ public final class StrategyLifecycle implements SmartLifecycle {
             // Exit pass first (the risk-reducing half of the loop, ADR-0019): stop-loss,
             // take-profit and book de-risk close positions before we look for new entries.
             int exited = manageOpenPositions(now);
-            // Regime-aware sizing (quant-engine phase 5): shrink new entries in VOLATILE
-            // (risk-off in turbulence). Exits above are unaffected — you can always reduce.
-            String regime = tradingCore.regime();
-            BigDecimal regimeScale = props.regimeScaleFor(regime);
+            // Regime-aware sizing (ADR-0051): shrink new entries when the market is in an elevated-
+            // volatility (risk-off) state — SENSED from the marks we just observed (price-derived),
+            // never the sim's regime label, so it behaves identically in sim, live and replay. Exits
+            // above are unaffected — you can always reduce.
+            volRegime.update(observations);
+            var volState = volRegime.regime();
+            BigDecimal regimeScale =
+                    volState == io.jethro.trading.algo.strategy.VolatilityRegime.Regime.ELEVATED
+                            ? props.regimeVolatileScaleOrDefault() : BigDecimal.ONE;
+            String regime = volState.name();
             Set<String> current = new HashSet<>();
             int signals = 0;
             int suppressed = 0;

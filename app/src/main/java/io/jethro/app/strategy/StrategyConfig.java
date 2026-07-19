@@ -98,15 +98,23 @@ public class StrategyConfig {
                                         io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch,
                                         ObjectProvider<io.jethro.app.risk.InstrumentVolSource> vols,
                                         ObjectProvider<io.jethro.app.risk.PortfolioCorrelationSource> correlations,
-                                        ObjectProvider<io.jethro.app.order.MeasuredAdvSource> measuredAdv) {
+                                        ObjectProvider<io.jethro.app.order.MeasuredAdvSource> measuredAdv,
+                                        @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.window:30}") int volWindow,
+                                        @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.upper-factor:1.5}") String volUpper,
+                                        @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.lower-factor:1.1}") String volLower,
+                                        @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.ewma-lambda:0.97}") String volLambda) {
         // OrderService present only when persistence is on; without it the strategy is
         // suggestion-only even if auto-execute is set. Measured vol likewise — fixed-notional
         // sizing until the daily history accrues. MeasuredAdvSource (ADR-0033) is the live ADV the
         // liquidity cap sizes against; absent → no liquidity cap (falls back to vol/notional caps).
+        // ADR-0051: the risk-off scale is driven by a PRICE-DERIVED volatility regime, not the sim label.
+        var volRegime = new io.jethro.trading.algo.strategy.VolatilityRegime(
+                volWindow, new java.math.BigDecimal(volUpper), new java.math.BigDecimal(volLower),
+                new java.math.BigDecimal(volLambda));
         return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, risk, limits, feed, sse, props,
                 orderService.getIfAvailable(), tradingHaltSwitch,
                 vols.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE),
                 correlations.getIfAvailable(() -> io.jethro.app.risk.PortfolioCorrelationSource.NONE),
-                measuredAdv.getIfAvailable());
+                measuredAdv.getIfAvailable(), volRegime);
     }
 }
