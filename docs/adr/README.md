@@ -47,7 +47,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0041](0041-estimation-rigor.md) | Estimation rigor — covariance burn-in, par-curve bootstrap, honest VaR windows | Accepted |
 | [0042](0042-hedge-proxy-selection.md) | Hedge proxy selection — best measured proxy, tradability-gated, switch hysteresis | Accepted |
 | [0043](0043-per-instrument-strategy-selection.md) | Per-instrument strategy selection from out-of-sample results (no blind global algo) | Proposed |
-| [0044](0044-regime-aware-strategy-selection.md) | Regime-aware strategy selection from a price-derived trend detector (no regime oracle) | Proposed |
+| [0044](0044-regime-aware-strategy-selection.md) | Regime-aware strategy selection from a price-derived trend detector (no regime oracle) | Accepted |
 | [0045](0045-news-advisory-signals.md) | News-driven advisory signals — RSS → SLM verdict → bounded, audited overlay | Proposed |
 
 ## Lifecycle

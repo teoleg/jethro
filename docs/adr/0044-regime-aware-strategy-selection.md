@@ -1,6 +1,6 @@
 # ADR-0044: Regime-aware strategy selection from a price-derived trend detector (no regime oracle)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-19
 - **Deciders:** Oleg
 - **Tags:** strategy, evaluation, sim-parity

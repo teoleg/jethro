@@ -65,13 +65,27 @@ public class StrategyConfig {
      * selector it is the single configured algo (momentum or mean-reversion).
      */
     @Bean
-    io.jethro.trading.algo.strategy.Strategy tradingStrategy(StrategyProperties props,
-                                                             ObjectProvider<StrategySelector> selector) {
+    io.jethro.trading.algo.strategy.Strategy tradingStrategy(
+            StrategyProperties props,
+            ObjectProvider<StrategySelector> selector,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.enabled:true}") boolean trendEnabled,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.window:20}") int trendWindow,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.upper-band:0.5}") String trendUpper,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.lower-band:0.3}") String trendLower) {
         StrategySelector sel = selector.getIfAvailable();
         if (sel == null) {
             return "mean-reversion".equals(props.algoOrDefault()) ? meanReversion(props) : momentum(props);
         }
         var byAlgo = java.util.Map.of("momentum", momentum(props), "mean-reversion", meanReversion(props));
+        if (trendEnabled) {
+            // ADR-0044: a price-derived detector picks momentum (trend) vs mean-reversion (chop) and
+            // switches when the regime turns; the OOS selector becomes the edge gate (veto only).
+            var detector = new io.jethro.trading.algo.strategy.TrendDetector(
+                    trendWindow, new java.math.BigDecimal(trendUpper), new java.math.BigDecimal(trendLower));
+            return new io.jethro.trading.algo.strategy.SelectingStrategy(
+                    byAlgo, detector, "momentum", "mean-reversion", props.algoOrDefault(), sel::gate);
+        }
+        // ADR-0043 only: regime-blind OOS pick per instrument.
         return new io.jethro.trading.algo.strategy.SelectingStrategy(byAlgo, sel::algoFor, props.algoOrDefault());
     }
 

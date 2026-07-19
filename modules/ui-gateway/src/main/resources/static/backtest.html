@@ -181,21 +181,31 @@
   // ---- live per-instrument strategy selection (ADR-0043) ----
   function renderSelection(v) {
     const as = document.getElementById("stratselAsOf");
+    const drive = v.regimeAware
+      ? "; a PRICE-DERIVED trend detector picks the live algo (breadth " + esc(v.breadth || "—") + ", ADR-0044), the OOS medians only VETO a measured-losing pick"
+      : "; the live strategy trades each instrument's OOS winner (nothing where neither has edge)";
     if (as) as.textContent = !v.available ? " — selection off (jethro.strategy.selection.enabled=false)"
       : v.error ? " — last measurement FAILED: " + v.error + " (running the default algo meanwhile)"
-      : v.lastRunMillis ? " — measured " + new Date(v.lastRunMillis).toLocaleTimeString() + "; the live strategy trades each instrument's winner (nothing where neither has edge)"
+      : v.lastRunMillis ? " — measured " + new Date(v.lastRunMillis).toLocaleTimeString() + drive
       : " — measuring… (first run ~90s after boot; a few seconds of backtests)";
     const rows = v.rows || [];
     const badge = a => a === "momentum" ? '<b class="up">momentum</b>'
       : a === "mean-reversion" ? '<b class="down">mean-rev</b>'
       : '<b class="muted">no-trade</b>';
+    // Live price-derived regime driving the pick (ADR-0044): TREND→momentum, CHOP→mean-rev.
+    const regimeCell = r => {
+      if (!v.regimeAware || !r.regime || r.regime === "UNKNOWN")
+        return '<span class="muted" title="window still warming — the default algo trades">warming</span>';
+      const er = r.efficiencyRatio == null ? "" : ` <span class="muted" style="font-size:10px">ER ${Number(r.efficiencyRatio).toFixed(2)}</span>`;
+      return (r.regime === "TREND" ? '<b class="up">trend</b>' : '<b class="down">chop</b>') + er;
+    };
     const num = n => { const x = Number(n); return (x < 0 ? "−$" : "$") + Math.abs(x).toLocaleString(undefined, {maximumFractionDigits: 0}); };
     document.getElementById("stratsel").outerHTML = '<div id="stratsel" class="muted" style="padding:2px 4px">' + (rows.length
-      ? "<table><tr><th>instrument</th><th>chosen</th><th>momentum median</th><th>mean-rev median</th></tr>" +
-        rows.map(r => `<tr><td class="mono">${esc(r.instrument)}</td><td>${badge(r.chosen)}</td>
+      ? "<table><tr><th>instrument</th><th>live regime</th><th>OOS pick</th><th>momentum median</th><th>mean-rev median</th></tr>" +
+        rows.map(r => `<tr><td class="mono">${esc(r.instrument)}</td><td>${regimeCell(r)}</td><td>${badge(r.chosen)}</td>
           <td class="mono ${Number(r.momentumMedianPnl)>0?'up':(Number(r.momentumMedianPnl)<0?'down':'')}">${num(r.momentumMedianPnl)} <span class="muted" style="font-size:10px">${r.momentumTrades}t</span></td>
           <td class="mono ${Number(r.meanReversionMedianPnl)>0?'up':(Number(r.meanReversionMedianPnl)<0?'down':'')}">${num(r.meanReversionMedianPnl)} <span class="muted" style="font-size:10px">${r.meanReversionTrades}t</span></td></tr>`).join("") + "</table>"
-      : `<div class="muted" style="padding:12px">${v.available ? "first OOS measurement runs ~30s after boot, then hourly — chosen algo + both medians appear here" : "per-instrument selection is off; the single configured algo runs"}</div>`) + '</div>';
+      : `<div class="muted" style="padding:12px">${v.available ? "first OOS measurement runs ~30s after boot, then hourly — regime, OOS pick + both medians appear here" : "per-instrument selection is off; the single configured algo runs"}</div>`) + '</div>';
   }
   async function loadSelection() { try { renderSelection(await (await fetch("/api/strategy/selection")).json()); } catch (e) {} }
   loadSelection();

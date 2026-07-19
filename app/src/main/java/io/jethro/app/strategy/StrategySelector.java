@@ -155,6 +155,37 @@ public final class StrategySelector implements AutoCloseable {
         return c == null ? null : c.algo();
     }
 
+    /**
+     * ADR-0044 edge gate. Given the price-derived detector's trend-matched candidate algo, VETO it to
+     * {@link SelectingStrategy#NO_TRADE} only when THAT algo has a MEASURED non-positive OOS median
+     * (trades &gt; 0 and median ≤ 0). Unmeasured or measured-positive → allow the candidate through.
+     * The detector decides which algo and when to switch; this only blocks trading into a measured
+     * loser (a detector false-positive can't force a losing trade). Deliberately conservative: the
+     * OOS median is regime-averaged, so a genuinely trend-profitable algo whose all-regime median is
+     * negative is still vetoed — the regime-specific validator is the ADR-0044 walk-forward follow-up.
+     */
+    public String gate(String instrumentId, String candidateAlgo) {
+        Choice c = choices.get(instrumentId);
+        if (c == null || candidateAlgo == null) {
+            return candidateAlgo; // unmeasured → trust the detector, nothing to veto on
+        }
+        BigDecimal median;
+        int trades;
+        if ("momentum".equals(candidateAlgo)) {
+            median = c.momentumMedianPnl();
+            trades = c.momentumTrades();
+        } else if ("mean-reversion".equals(candidateAlgo)) {
+            median = c.meanReversionMedianPnl();
+            trades = c.meanReversionTrades();
+        } else {
+            return candidateAlgo; // default/unknown algo — no per-algo measurement to gate on
+        }
+        if (trades > 0 && median != null && median.signum() <= 0) {
+            return SelectingStrategy.NO_TRADE;
+        }
+        return candidateAlgo;
+    }
+
     /** The current selection (for the UI/API); empty until the first run completes. */
     public Map<String, Choice> selection() {
         return choices;
