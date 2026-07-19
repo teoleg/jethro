@@ -18,6 +18,8 @@ public final class QuoteCache {
     public static final class QuoteHolder {
         private volatile long bidScaled;
         private volatile long askScaled;
+        private volatile long bidSizeScaled;   // ADR-0033: qty at the touch (synthesized from volume)
+        private volatile long askSizeScaled;
         private volatile long providerTimestampMillis;
 
         public long bidScaled() {
@@ -26,6 +28,14 @@ public final class QuoteCache {
 
         public long askScaled() {
             return askScaled;
+        }
+
+        public long bidSizeScaled() {
+            return bidSizeScaled;
+        }
+
+        public long askSizeScaled() {
+            return askSizeScaled;
         }
 
         public long providerTimestampMillis() {
@@ -39,15 +49,31 @@ public final class QuoteCache {
         public BigDecimal ask() {
             return Decimals.fromScaledLong(askScaled, Decimals.PRICE_SCALE);
         }
+
+        public BigDecimal bidSize() {
+            return Decimals.fromScaledLong(bidSizeScaled, Decimals.QTY_SCALE);
+        }
+
+        public BigDecimal askSize() {
+            return Decimals.fromScaledLong(askSizeScaled, Decimals.QTY_SCALE);
+        }
     }
 
     private final ConcurrentHashMap<String, QuoteHolder> quotes = new ConcurrentHashMap<>();
 
-    /** Hot path (feed thread): last-value quote update. */
+    /** Hot path (feed thread): last-value quote update (no sizes — leaves depth at 0). */
     public void update(String instrumentId, long bidScaled, long askScaled, long providerTimestampMillis) {
+        update(instrumentId, bidScaled, askScaled, 0L, 0L, providerTimestampMillis);
+    }
+
+    /** Hot path (feed thread): last-value quote update WITH touch sizes (ADR-0033). */
+    public void update(String instrumentId, long bidScaled, long askScaled,
+                       long bidSizeScaled, long askSizeScaled, long providerTimestampMillis) {
         QuoteHolder holder = quotes.computeIfAbsent(instrumentId, k -> new QuoteHolder());
         holder.bidScaled = bidScaled;
         holder.askScaled = askScaled;
+        holder.bidSizeScaled = bidSizeScaled;
+        holder.askSizeScaled = askSizeScaled;
         holder.providerTimestampMillis = providerTimestampMillis;
     }
 

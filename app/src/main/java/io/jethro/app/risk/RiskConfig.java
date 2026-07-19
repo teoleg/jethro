@@ -109,10 +109,14 @@ public class RiskConfig {
         return new io.jethro.trading.riskpnl.BondFutureDurations(treasuryCurveView, refs, windows);
     }
 
-    /** Live SOFR curve from streamed tenor quotes (quant-engine phase 4). */
+    /** Live SOFR curve from streamed tenor quotes (quant-engine phase 4). PAR quotes are
+     *  bootstrapped to zeros (ADR-0041) so each tenor's Strata par rate reproduces its quote —
+     *  quote-as-zero was a long-tenor PV/DV01 bias on any sloped curve. */
     @Bean
-    CurveService curveService() {
-        return new CurveService();
+    CurveService curveService(ObjectProvider<io.jethro.app.session.TradingCalendar> calendar) {
+        var cal = calendar.getIfAvailable();
+        return new CurveService(true,
+                cal != null ? cal::sessionDay : java.time.LocalDate::now);
     }
 
     /** The DISTINCT US Treasury par curve (USD.TSY.* marks) — swap spread visible vs SOFR. */
@@ -367,7 +371,8 @@ public class RiskConfig {
                 ? Math.max(5, Math.round(props.simSecondsPerDayOrDefault() / 10.0))
                 : 60;
         var recorder = new MarketHistoryRecorder(jdbc, core,
-                () -> projection.snapshot(System.currentTimeMillis()).total().totalPnl(),
+                // firm equity history = actual money incl. FX translation (ADR-0037)
+                () -> projection.snapshot(System.currentTimeMillis()).total().comprehensivePnl(),
                 cal != null ? cal::sessionDay : java.time.LocalDate::now, period);
         if (core != null) {
             recorder.start(); // trading off → nothing to record, never scheduled

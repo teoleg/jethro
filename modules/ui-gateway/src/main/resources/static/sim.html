@@ -3,231 +3,402 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>jethro — sim control</title>
+<title>jethro — sim console</title>
 <style>
-  :root { --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
-    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --up:#35c07a; --down:#f0553f; --warn:#e0a83d; }
-  * { box-sizing:border-box; margin:0; }
-  body { background:radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%), var(--bg);
-         color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
-  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
-  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
-  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
-  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
-  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
-  .tabs { display:flex; gap:4px; margin-left:8px; }
-  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; }
-  .tab:hover { color:var(--txt); background:var(--surface); }
-  .tab.active { color:var(--txt); background:var(--surface-2); }
-  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
-  .spacer { flex:1; } .hint { color:var(--dim); font-size:12px; }
-  main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
-  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; display:flex; align-items:center; gap:10px; }
-  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin-bottom:18px; }
-  .globals { display:flex; flex-wrap:wrap; gap:22px; align-items:flex-end; }
-  .field { display:flex; flex-direction:column; gap:6px; }
-  .field label { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); }
-  input[type=range] { width:180px; accent-color:var(--brand); }
-  input[type=number] { width:90px; background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt);
-    border-radius:8px; padding:6px 8px; font:13px/1 "SF Mono", ui-monospace, monospace; }
-  select { background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt); border-radius:8px; padding:7px 10px; font-size:13px; }
-  button { background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt); border-radius:8px;
-    padding:7px 12px; font-size:13px; cursor:pointer; }
-  button:hover { border-color:var(--brand); color:#fff; }
-  button.primary { background:rgba(91,140,255,.16); border-color:var(--brand); }
-  button.warn { border-color:var(--warn); color:var(--warn); }
-  .val { font-variant-numeric:tabular-nums; color:var(--txt); min-width:52px; display:inline-block; }
-  table { width:100%; border-collapse:collapse; font-size:12.5px; }
-  th, td { text-align:right; padding:6px 10px; border-bottom:1px solid var(--line); }
-  th:first-child, td:first-child { text-align:left; }
-  tr:last-child td { border-bottom:0; }
-  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
-  .nudge-btns button { padding:4px 8px; font-size:12px; }
-  .stepper input { width:74px; }
-  .badge { font-size:10px; padding:2px 8px; border-radius:999px; letter-spacing:.06em; text-transform:uppercase; }
-  .badge.live { background:rgba(224,168,61,.16); color:var(--warn); border:1px solid rgba(224,168,61,.4); }
-  .badge.clean { background:rgba(53,192,122,.14); color:var(--up); border:1px solid rgba(53,192,122,.35); }
-  .muted { color:var(--dim); }
-  .notice { padding:40px 20px; text-align:center; color:var(--dim); }
-  .notice h2 { color:var(--txt); font-size:16px; margin-bottom:8px; }
+  :root{ --body:#0e1016; --bg2:#141826; --strip:#1d212b; --rail:#0c0e13; --slot:#0a0c10;
+    --txt:#e9ecf4; --dim:#828b9e; --line:#252d3d; --line2:#39404f; --brand:#5b8cff;
+    --up:#3ecf8e; --down:#f0553f; --warn:#e6a23f; --teal:#48d3c4; }
+  *{box-sizing:border-box;margin:0}
+  body{background:radial-gradient(900px 500px at 15% -8%,rgba(72,211,196,.05),transparent 60%),var(--body);
+    color:var(--txt);font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;user-select:none}
+  .mono{font-variant-numeric:tabular-nums;font-family:"SF Mono",ui-monospace,Menlo,monospace}
+  .topbar{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);background:rgba(14,16,22,.75);border-bottom:1px solid var(--line)}
+  .bar{display:flex;align-items:center;gap:18px;padding:0 22px;height:54px;max-width:1560px;margin:0 auto}
+  .brand{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:.2em;font-size:14px}
+  .brand .dot{width:8px;height:8px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .nav{display:flex;gap:3px} .nav a{padding:7px 12px;border-radius:8px;color:var(--dim);text-decoration:none;font-size:12.5px}
+  .nav a:hover{color:var(--txt);background:var(--strip)} .nav a.active{color:var(--txt);background:var(--strip)}
+  .spacer{flex:1} .badge{font-size:10px;padding:2px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--dim)}
+  .badge.live{color:var(--warn);border-color:var(--warn)} .badge.clean{color:var(--up);border-color:var(--up)}
+  main{max-width:1560px;margin:0 auto;padding:16px 22px 40px}
+
+  /* tabs */
+  .tabs{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:16px}
+  .tabgroup{display:flex;align-items:center;gap:6px}
+  .glabel{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);margin:0 2px 0 10px}
+  .tab{padding:7px 13px;border-radius:8px;border:1px solid var(--line);background:var(--strip);color:var(--dim);font-size:13px;font-weight:600;cursor:pointer}
+  .tab:hover{color:var(--txt)} .tab.active{color:#fff;background:#222838;border-color:var(--brand)}
+  .tab.charts.active{border-color:var(--teal)}
+
+  /* the console surface */
+  .console{background:linear-gradient(180deg,#191d26,#131722);border:1px solid var(--line);border-radius:16px;
+    box-shadow:0 24px 60px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.03);padding:16px;display:flex;gap:16px;align-items:stretch;overflow-x:auto}
+  .strip{background:linear-gradient(180deg,var(--strip),#171b23);border:1px solid var(--line);border-radius:12px;
+    padding:14px;display:flex;flex-direction:column;gap:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
+  .channel{min-width:420px}
+  .master{width:230px;background:linear-gradient(180deg,#1f232c,#161a22)}
+  .shead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .sname{font-size:18px;font-weight:700} .sid{color:var(--dim);font-size:11px}
+  .scls{font-size:9.5px;padding:2px 8px;border-radius:999px;border:1px solid var(--line2);color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+  .price{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums} .price .chg{font-size:14px;margin-left:10px}
+  .quote{font-size:12.5px;color:var(--dim);font-variant-numeric:tabular-nums;display:flex;gap:14px;flex-wrap:wrap}
+  .quote b{color:var(--txt);font-weight:600} .quote .bid b{color:var(--up)} .quote .ask b{color:var(--down)}
+  .up{color:var(--up)} .down{color:var(--down)} .warn{color:var(--warn)}
+
+  /* fader bank + meter */
+  .bank{display:flex;gap:24px;align-items:flex-end;padding:6px 4px 2px}
+  .vu{width:16px;height:190px;display:flex;flex-direction:column-reverse;gap:2px;padding:3px;border-radius:6px;background:var(--slot);border:1px solid #242a35;align-self:flex-end}
+  .vu i{flex:1;border-radius:2px;background:#20262f}
+  .vu i.on{background:var(--up);box-shadow:0 0 5px rgba(62,207,142,.6)}
+  .vu i.on.mid{background:var(--warn);box-shadow:0 0 5px rgba(230,162,63,.6)}
+  .vu i.on.hot{background:var(--down);box-shadow:0 0 6px rgba(240,85,63,.8)}
+  .vulabel{align-self:flex-end;font-size:9px;color:var(--dim);letter-spacing:.08em;writing-mode:vertical-rl;transform:rotate(180deg);height:190px;text-align:center}
+
+  .fw{display:flex;flex-direction:column;align-items:center;gap:8px}
+  .fval{font-size:12px;font-variant-numeric:tabular-nums;color:var(--teal);font-family:"SF Mono",ui-monospace,monospace;min-height:15px}
+  .fader{position:relative;width:30px;height:190px;background:var(--slot);border:1px solid #262c38;border-radius:8px;cursor:grab;box-shadow:inset 0 2px 6px rgba(0,0,0,.6);touch-action:none}
+  .fader:active{cursor:grabbing}
+  .fader .fill{position:absolute;left:0;right:0;bottom:0;border-radius:0 0 7px 7px;background:linear-gradient(180deg,rgba(230,162,63,.35),rgba(230,162,63,.06))}
+  .fader.bipolar .fill{background:linear-gradient(180deg,rgba(91,140,255,.32),rgba(91,140,255,.05))}
+  .master .fader .fill{background:linear-gradient(180deg,rgba(72,211,196,.4),rgba(72,211,196,.06))}
+  .fader .mid{position:absolute;left:2px;right:2px;top:50%;height:1px;background:var(--line2)}
+  .thumb{position:absolute;left:-6px;right:-6px;height:20px;border-radius:5px;background:linear-gradient(180deg,#3d4453,#242a35);
+    border:1px solid #4a5568;box-shadow:0 3px 7px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.14)}
+  .thumb::before{content:"";position:absolute;left:5px;right:5px;top:50%;height:2px;transform:translateY(-50%);background:var(--warn);border-radius:2px;opacity:.9}
+  .fader.bipolar .thumb::before{background:var(--brand)} .master .thumb::before{background:var(--teal)}
+  .flabel{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);text-align:center}
+  .flabel b{display:block;color:var(--txt);font-size:10.5px}
+
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+  button{background:#20252f;border:1px solid #333a48;color:var(--dim);border-radius:8px;padding:8px 13px;font-size:12.5px;font-weight:600;cursor:pointer}
+  button:hover{color:var(--txt);border-color:var(--line2)} button:active{transform:translateY(1px)}
+  button.zap{color:var(--warn);border-color:rgba(230,162,63,.5)} button.warn{color:var(--warn);border-color:var(--warn)}
+  button.mute.on{background:rgba(240,85,63,.16);border-color:var(--down);color:var(--down)}
+  button.big.on{background:rgba(72,211,196,.16);border-color:var(--teal);color:var(--teal)}
+  select{background:#191d25;border:1px solid #333a48;color:var(--txt);border-radius:8px;padding:7px 9px;font-size:12px;width:100%;cursor:pointer}
+  .mtitle{font-size:12px;font-weight:700;letter-spacing:.06em} .msub{font-size:9px;color:var(--dim)}
+  .mrow{display:flex;flex-direction:column;gap:6px;width:100%}
+  .mlbl{font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim)}
+
+  /* console + live rate graph side by side */
+  .simrow{display:flex;gap:16px;align-items:stretch;flex-wrap:wrap}
+  .simrow .console{flex:0 1 auto}
+  .ratechart{flex:1;min-width:340px;background:var(--bg2);border:1px solid var(--line);border-radius:16px;
+    padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+  .ratechart h4{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+  .ratechart .now{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums}
+  .ratechart .now small{font-size:12px;color:var(--dim);font-weight:400;margin-left:8px}
+  .ratechart .plot{flex:1;min-height:180px}
+  .ratechart svg{width:100%;height:100%;display:block}
+  .ratechart .ach{fill:none;stroke:var(--teal);stroke-width:1.8}
+  .ratechart .tgt{fill:none;stroke:var(--dim);stroke-width:1;stroke-dasharray:4 4}
+  .ratechart .fill2{fill:rgba(72,211,196,.08)}
+  .pricechart svg .line{fill:none;stroke:var(--brand);stroke-width:1.8}
+  .pricechart svg .area{fill:rgba(91,140,255,.10);stroke:none}
+
+  /* charts */
+  .rangebar{display:flex;gap:6px;align-items:center;margin-bottom:14px}
+  .rangebar .l{font-size:11px;color:var(--dim);margin-right:4px}
+  .rangebar button{padding:5px 12px;border-radius:999px;font-size:12px}
+  .rangebar button.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+  .card{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+  .card h4{font-size:13px;margin-bottom:2px;display:flex;justify-content:space-between;align-items:baseline}
+  .card .plot svg{width:100%;height:120px;display:block} .card svg .line{fill:none;stroke:var(--brand);stroke-width:1.6}
+  .card svg .area{fill:rgba(91,140,255,.10);stroke:none} .card .empty{color:var(--dim);font-size:11px;padding:38px 0;text-align:center}
+  .events{margin-top:16px} .events h4{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .ev{display:flex;gap:12px;align-items:baseline;padding:6px 2px;border-bottom:1px solid var(--line);font-size:13px}
+  .ev:last-child{border:0} .ev .t{color:var(--dim);font-family:"SF Mono",ui-monospace,monospace;font-size:12px;white-space:nowrap}
+  .ev .pill{font-size:9px;padding:1px 7px;border-radius:999px;font-weight:700}
+  .pill.price{background:rgba(91,140,255,.16);color:var(--brand)} .pill.volume{background:rgba(230,162,63,.16);color:var(--warn)} .pill.news{background:rgba(62,207,142,.14);color:var(--up)}
+  .muted{color:var(--dim)}
+  .notice{padding:48px 20px;text-align:center;color:var(--dim)} .notice h2{color:var(--txt);font-size:16px;margin-bottom:8px}
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="bar">
-    <span class="brand"><span class="dot"></span>JETHRO</span>
-    <nav class="tabs">
-      <a class="tab" href="/">Overview</a>
-      <a class="tab" href="/markets.html">Markets</a>
-      <a class="tab" href="/rates.html">Rates</a>
-      <a class="tab" href="/books.html">Books</a>
-      <a class="tab" href="/orders.html">Orders</a>
-      <a class="tab" href="/config.html">Config</a>
-      <a class="tab active" href="/sim.html">Sim</a>
-      <a class="tab" href="/backtest.html">Backtest</a>
-      <a class="tab" href="/ollama.html">Ops</a>
-    </nav>
-    <span class="spacer"></span>
-    <span id="statusBadge" class="hint">loading…</span>
-  </div>
-</div>
-<main>
-  <div id="content" class="notice muted">loading sim control…</div>
-  <div id="volumePanel"></div>
-</main>
+<div class="topbar"><div class="bar">
+  <span class="brand"><span class="dot"></span>JETHRO</span>
+  <nav class="nav"><a href="/">Overview</a><a href="/markets.html">Markets</a><a href="/books.html">Books</a>
+    <a href="/orders.html">Orders</a><a class="active" href="/sim.html">Sim</a><a href="/ollama.html">Ops</a></nav>
+  <span class="spacer"></span><span id="statusBadge" class="badge">loading…</span>
+</div></div>
+<main><div id="stage"><div class="notice">connecting to the sim…</div></div></main>
+<script src="/chart.js"></script>
 <script>
-  const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
-  const f2 = v => Number(v).toFixed(2);
-  const f4 = v => Number(v).toFixed(4);
+(() => {
+  const $=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+  const esc=s=>{const d=document.createElement("span");d.textContent=s??"";return d.innerHTML;};
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const enc=encodeURIComponent;
+  async function post(u,b){const r=await fetch(u,{method:"POST",headers:{"content-type":"application/json"},body:b==null?null:JSON.stringify(b)});if(!r.ok)throw new Error("HTTP "+r.status);return r.json();}
 
-  async function post(url, body) {
-    const res = await fetch(url, { method:"POST", headers:{"content-type":"application/json"},
-      body: body==null ? null : JSON.stringify(body) });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    return res.json();
+  // mappings ↔ SimControl dials. Calibrated for the REAL-TIME tape (~0.34bp/tick baseline σ):
+  // vol× up to 10 (a ×10 name prints a violent-day tape); drift ±2bp/tick = ±20bp/sec at full —
+  // strong, steerable, and the label tells the truth (the old map sent 60bp/tick, showing 0.6).
+  const VOL_MAX=10, DRIFT_MAX=0.0002; // ±log-drift per tick (0.0002 = 2bp/tick)
+  const volToF=v=>clamp(v/VOL_MAX,0,1), fToVol=f=>+(f*VOL_MAX).toFixed(2);
+  const qToF =v=>clamp(v/3,0,1),   fToQ=f=>+(f*3).toFixed(2);             // volume ×
+  const drToF=d=>clamp(d/DRIFT_MAX/2+0.5,0,1), fToDr=f=>+(((f-0.5)*2)*DRIFT_MAX).toFixed(6);
+  const spToF=s=>clamp(Math.log(s/0.1)/Math.log(200),0,1), fToSp=f=>+(0.1*Math.pow(200,f)).toFixed(2);
+
+  let state=null, instrClass={}, current=null, view="inst", chartMinutes=15, chartTimer=null, activeCh=null, lastMid={};
+
+  // ---- a draggable vertical fader (moving handle) ----
+  function fader({label, value, bipolar, cls, fmt, onCommit}){
+    const fw=$("div","fw"); const val=$("div","fval"); const track=$("div","fader"+(bipolar?" bipolar":"")+(cls?" "+cls:""));
+    const fill=$("div","fill"); const thumb=$("div","thumb"); track.append(fill); if(bipolar)track.append($("div","mid")); track.append(thumb);
+    const lab=$("div","flabel",label);
+    fw.append(val,track,lab);
+    let cur=clamp(value,0,1);
+    const H=190, TH=20;
+    const place=x=>{const y=(1-x)*(H-TH); thumb.style.top=y+"px"; fill.style.height=(H-y-TH/2)+"px";};
+    const setVisual=x=>{cur=clamp(x,0,1); place(cur); val.textContent=fmt(cur);};
+    let drag=false;
+    const fromY=e=>{const r=track.getBoundingClientRect(); return 1-clamp((e.clientY-r.top-TH/2)/(r.height-TH),0,1);};
+    track.addEventListener("pointerdown",e=>{drag=true;track.setPointerCapture(e.pointerId);setVisual(fromY(e));});
+    track.addEventListener("pointermove",e=>{if(drag)setVisual(fromY(e));});
+    track.addEventListener("pointerup",()=>{if(drag){drag=false;onCommit(cur);}});
+    setVisual(cur);
+    return {el:fw, setVisual, value:()=>cur};
+  }
+  // ---- a standalone VU meter ----
+  function vu(labelText){
+    const box=$("div","bank"); const meter=$("div","vu"); const segs=[];
+    for(let i=0;i<20;i++){const s=$("i");meter.append(s);segs.push(s);}
+    box.append(meter, $("div","vulabel",labelText));
+    return {el:box, paint:level=>{const on=Math.round(clamp(level,0,1)*segs.length);
+      segs.forEach((s,i)=>s.className=i<on?("on"+(i>=segs.length-3?" hot":i>=segs.length*.6?" mid":"")):"");}};
   }
 
-  let state = null;
-
-  function render() {
-    const badge = document.getElementById("statusBadge");
-    if (!state || !state.enabled) {
-      badge.innerHTML = '<span class="badge clean">idle</span>';
-      document.getElementById("content").innerHTML =
-        '<div class="notice"><h2>Sim control is available only in SIM feed mode</h2>' +
-        '<div>The running feed is live or replay (or the legacy sim engine). ' +
-        'Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine to stage scenarios here.</div></div>';
-      return;
-    }
-    badge.innerHTML = state.active
-      ? '<span class="badge live">panel-driven · dials active</span>'
-      : '<span class="badge clean">seeded · untouched</span>';
-
-    const g = `
-      <div class="globals">
-        <div class="field">
-          <label>Speed × <span class="val mono" id="speedVal">${f2(state.speedMultiplier)}</span></label>
-          <input type="range" id="speed" min="0.1" max="20" step="0.1" value="${state.speedMultiplier}">
-        </div>
-        <div class="field">
-          <label>Feed</label>
-          <button id="pauseBtn" class="${state.paused?'warn':''}">${state.paused?'▶ Resume':'⏸ Pause'}</button>
-        </div>
-        <div class="field">
-          <label>Regime override</label>
-          <select id="regime">
-            ${state.regimes.concat().length ? '' : ''}
-            <option value="AUTO"${state.regimeOverride==='AUTO'?' selected':''}>AUTO (Markov)</option>
-            ${state.regimes.map(r=>`<option value="${r}"${state.regimeOverride===r?' selected':''}>${r}</option>`).join("")}
-          </select>
-        </div>
-        <div class="field">
-          <label>Determinism</label>
-          <div style="display:flex; gap:8px">
-            <button id="reseed">↻ Reseed</button>
-            <button id="reset" class="warn">Reset all dials</button>
-          </div>
-        </div>
-      </div>`;
-
-    const rows = state.instruments.map(it => `
-      <tr data-id="${esc(it.id)}">
-        <td><b>${esc(it.name)}</b><div class="muted mono" style="font-size:10px">${esc(it.id)}</div></td>
-        <td class="nudge-btns">
-          <button data-nudge="-0.02">−2%</button>
-          <button data-nudge="-0.005">−0.5%</button>
-          <button data-nudge="0.005">+0.5%</button>
-          <button data-nudge="0.02">+2%</button>
-        </td>
-        <td class="stepper"><input type="number" data-drift step="0.0005" value="${f4(it.driftBias)}"></td>
-        <td class="stepper"><input type="number" data-vol step="0.25" min="0" value="${f2(it.volMultiplier)}"></td>
-        <td class="stepper"><input type="number" data-volume step="0.5" min="0" value="${f2(it.volumeScale)}"></td>
-      </tr>`).join("");
-
-    document.getElementById("content").className = "";
-    document.getElementById("content").innerHTML = `
-      <div class="section-h">Global</div>
-      <div class="panel">${g}</div>
-      <div class="section-h">Per-instrument dials
-        <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
-          nudge = one-shot price bump · drift = per-tick log-drift · vol = idiosyncratic vol × · volume = trade-size ×</span></div>
-      <div class="panel">
-        <table>
-          <tr><th>instrument</th><th>nudge price</th><th>drift bias</th><th>vol ×</th><th>volume ×</th></tr>
-          ${rows}
-        </table>
-      </div>`;
-    wire();
+  // ---- build ----
+  function build(){
+    const stage=document.getElementById("stage"); stage.innerHTML="";
+    stage.append(tabBar(), $("div","",'<div id="content"></div>'));
+    if(!current && state.instruments.length) current=state.instruments[0].id;
+    renderView();
   }
-
-  function wire() {
-    const speed = document.getElementById("speed");
-    speed.oninput = () => document.getElementById("speedVal").textContent = f2(speed.value);
-    speed.onchange = async () => { state = await post("/api/sim/control/speed", { multiplier: Number(speed.value) }); render(); };
-    document.getElementById("pauseBtn").onclick = async () => {
-      state = await post("/api/sim/control/pause", { paused: !state.paused }); render(); };
-    document.getElementById("regime").onchange = async (e) => {
-      state = await post("/api/sim/control/regime", { regime: e.target.value }); render(); };
-    document.getElementById("reseed").onclick = async () => { state = await post("/api/sim/control/reseed", {}); render(); };
-    document.getElementById("reset").onclick = async () => { state = await post("/api/sim/control/reset", {}); render(); };
-
-    document.querySelectorAll("tr[data-id]").forEach(tr => {
-      const id = tr.getAttribute("data-id");
-      tr.querySelectorAll("button[data-nudge]").forEach(b =>
-        b.onclick = async () => { state = await post(`/api/sim/instrument/${encodeURIComponent(id)}/nudge`,
-          { value: Number(b.getAttribute("data-nudge")) }); render(); });
-      const send = (path, input) => async () => { state = await post(
-        `/api/sim/instrument/${encodeURIComponent(id)}/${path}`, { value: Number(input.value) }); render(); };
-      const drift = tr.querySelector("input[data-drift]");
-      const vol = tr.querySelector("input[data-vol]");
-      const volume = tr.querySelector("input[data-volume]");
-      drift.onchange = send("drift", drift);
-      vol.onchange = send("vol", vol);
-      volume.onchange = send("volume", volume);
+  function tabBar(){
+    const bar=$("div","tabs"); const groups={};
+    state.instruments.forEach(it=>{const c=instrClass[it.id]||"OTHER";(groups[c]=groups[c]||[]).push(it);});
+    Object.keys(groups).sort().forEach(cls=>{
+      const grp=$("div","tabgroup"); grp.append($("span","glabel",cls));
+      groups[cls].forEach(it=>{const t=$("button","tab"+(view==="inst"&&current===it.id?" active":""),esc(it.name||it.id));
+        t.onclick=()=>{view="inst";current=it.id;renderView();}; grp.append(t);});
+      bar.append(grp);
     });
+    const ct=$("button","tab charts"+(view==="charts"?" active":""),"📈 Charts");
+    ct.onclick=()=>{view="charts";renderView();}; bar.append(ct);
+    return bar;
+  }
+  function renderView(){
+    const old=document.querySelector(".tabs"); if(old) old.replaceWith(tabBar());
+    const c=document.getElementById("content");
+    if(chartTimer){clearInterval(chartTimer);chartTimer=null;}
+    activeCh=null; c.innerHTML="";
+    if(view==="charts"){ c.append(chartsPanel()); return; }
+    c.append(consolePanel(state.instruments.find(i=>i.id===current)));
   }
 
-  async function load() {
-    try {
-      const res = await fetch("/api/sim/control");
-      if (res.status === 403) { state = { enabled:false }; render(); return; }
-      state = await res.json();
-      // Only re-render passively when the user isn't mid-edit (avoid clobbering focus).
-      if (!document.querySelector("input:focus, select:focus")) render();
-    } catch (e) {
-      document.getElementById("statusBadge").textContent = "sim control unavailable";
-    }
+  // ---- console: one channel + master strip ----
+  function consolePanel(it){
+    if(!it) return $("div","notice","pick a market");
+    const con=$("div","console");
+    // channel strip
+    const ch=$("div","strip channel");
+    const head=$("div","shead");
+    head.append($("div","sname",esc(it.name||it.id)),$("div","sid mono",esc(it.id)),$("div","scls",esc(instrClass[it.id]||"—")));
+    const price=$("div","price mono","—"); const chg=$("span","chg mono",""); price.append(chg);
+    const quote=$("div","quote mono",'<span class="bid">bid <b>—</b></span><span class="ask">ask <b>—</b></span><span class="last">last qty <b>—</b></span>');
+    const volline=$("div","quote mono",'<span>rel-vol <b>—</b></span><span>measured ADV <b>—</b></span>');
+    ch.append(head,price,quote,volline);
+    const bank=$("div","bank");
+    const meter=vu("activity");
+    const fBp=fader({label:'BP range<b>move size</b>',value:volToF(it.volMultiplier),fmt:f=>"×"+fToVol(f).toFixed(2),
+      onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/vol`,{value:fToVol(f)}).then(()=>it.volMultiplier=fToVol(f))});
+    const fDr=fader({label:'Drift<b>trend</b>',value:drToF(it.driftBias),bipolar:true,
+      fmt:f=>{const bpTick=(f-0.5)*2*DRIFT_MAX*1e4;return (bpTick>=0?"+":"")+bpTick.toFixed(2)+"bp/t ("+(bpTick>=0?"+":"")+(bpTick*10).toFixed(0)+"bp/s)";},
+      onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/drift`,{value:fToDr(f)}).then(()=>it.driftBias=fToDr(f))});
+    const fVol=fader({label:'Volume<b>size ×</b>',value:qToF(it.volumeScale),fmt:f=>"×"+fToQ(f).toFixed(2),
+      onCommit:f=>post(`/api/sim/instrument/${enc(it.id)}/volume`,{value:fToQ(f)})});
+    bank.append(meter.el,fBp.el,fDr.el,fVol.el);
+    ch.append(bank);
+    const btns=$("div","btns");
+    const dn=$("button",null,"− nudge"); dn.onclick=()=>post(`/api/sim/instrument/${enc(it.id)}/nudge`,{value:-0.004});
+    const up=$("button",null,"+ nudge"); up.onclick=()=>post(`/api/sim/instrument/${enc(it.id)}/nudge`,{value:0.004});
+    const zap=$("button","zap","⚡ news"); zap.onclick=()=>post("/api/sim/news",{instrumentId:it.id,direction:it.driftBias>=0?"BULL":"BEAR",magnitude:0.015}).catch(()=>{});
+    const mute=$("button","mute","Mute");
+    mute.onclick=()=>{const on=!mute.classList.contains("on");mute.classList.toggle("on",on);
+      const v=on?0:(it.prevVol||1); if(on)it.prevVol=it.volMultiplier; it.volMultiplier=v; fBp.setVisual(volToF(v));
+      post(`/api/sim/instrument/${enc(it.id)}/vol`,{value:v});};
+    const chart=$("button",null,"📈 history"); chart.onclick=()=>window.openChart&&window.openChart(it.id);
+    btns.append(dn,zap,up,mute,chart); ch.append(btns);
+    con.append(ch, masterStrip());
+    con._price=price; con._chg=chg; con._meter=meter; con._id=it.id;
+    con._quote=quote; con._volline=volline; activeCh=con;
+    const row=$("div","simrow"); row.append(con, priceChartPanel(it));
+    return row;
   }
 
-  const advFmt = v => v==null ? '<span class="muted">config</span>'
-    : "$" + (v>=1e9 ? (v/1e9).toFixed(2)+"B" : v>=1e6 ? (v/1e6).toFixed(1)+"M" : Math.round(v).toLocaleString());
-  const relCls = r => r>=1.5 ? "up" : r<=0.6 ? "down" : "";
-
-  async function loadVolume() {
-    try {
-      const rows = await (await fetch("/api/volume")).json();
-      if (!rows.length) { document.getElementById("volumePanel").innerHTML = ""; return; }
-      const body = rows.map(r => `
-        <tr>
-          <td><b>${esc(r.name)}</b><div class="muted mono" style="font-size:10px">${esc(r.instrumentId)}</div></td>
-          <td class="mono">${advFmt(r.measuredAdvUsd)}</td>
-          <td class="mono" style="color:var(--${relCls(r.relativeVolume)||'txt'})">${r.relativeVolume.toFixed(2)}×</td>
-          <td class="mono muted">${r.samples.toLocaleString()}</td>
-        </tr>`).join("");
-      document.getElementById("volumePanel").innerHTML = `
-        <div class="section-h">Live volume &amp; liquidity
-          <span class="muted" style="text-transform:none;letter-spacing:0;font-size:11px">
-            measured ADV now drives the execution participation cap + impact (ADR-0032) · rel-vol = recent ÷ baseline</span></div>
-        <div class="panel"><table>
-          <tr><th>instrument</th><th>measured ADV</th><th>rel vol</th><th>samples</th></tr>
-          ${body}
-        </table></div>`;
-    } catch (e) { /* volume is best-effort context */ }
+  // ---- live price chart for the focused instrument (price is what matters here, not tick rate;
+  //      the ticks/s telemetry still shows numerically in the master strip) ----
+  function priceChartPanel(it){
+    const p=$("div","ratechart pricechart");
+    p.append($("h4",null,"Price — "+esc(it.name||it.id)),
+             $("div","now mono",'<span id="priceNow">—</span><small id="priceChg"></small>'),
+             $("div","plot",'<div id="pricePlot"><div class="muted" style="padding:60px 0;text-align:center;font-size:11px">loading…</div></div>'));
+    loadPriceChart(it.id);
+    chartTimer=setInterval(()=>loadPriceChart(it.id), 3000); // renderView clears this on view switch
+    return p;
+  }
+  async function loadPriceChart(id){
+    try{
+      const pts=await (await fetch(`/api/history/${enc(id)}?minutes=${chartMinutes}`)).json();
+      const el=document.getElementById("pricePlot"); if(!el)return;
+      el.innerHTML=miniSvg(pts);
+      const now=document.getElementById("priceNow"), chg=document.getElementById("priceChg");
+      if(pts.length>1){
+        const f=+pts[0].price,l=+pts[pts.length-1].price,c=(l-f)/f*100;
+        // prices are carried at 1e-6 scale (invariant 1); show sensible precision by magnitude
+        // (futures ~1dp, equities 2dp, FX 4dp) instead of the raw 6 places.
+        const fmtPx=n=>n>=1000?n.toFixed(1):n>=100?n.toFixed(2):n.toFixed(4);
+        if(now)now.textContent=fmtPx(l);
+        if(chg){chg.textContent=(c>=0?"+":"")+c.toFixed(2)+"% · "+chartMinutes+"m";
+          chg.style.color=c>=0?"var(--up)":"var(--down)";}
+      } else if(now){ now.textContent="—"; }
+    }catch(e){}
   }
 
-  function tick() { load(); loadVolume(); }
-  tick();
-  setInterval(tick, 5000);
+  // ---- live tick-rate graph (publisher telemetry): achieved vs target, last 2 minutes ----
+  const rateHist=[]; // {t, ach, tgt}
+  function rateChartPanel(){
+    const p=$("div","ratechart");
+    p.append($("h4",null,"Tick rate — live"),
+             $("div","now mono",'<span id="rateNow">—</span><small id="rateTgt"></small>'),
+             $("div","plot",'<div id="ratePlot"></div>'));
+    drawRate();
+    return p;
+  }
+  function drawRate(){
+    const el=document.getElementById("ratePlot"); if(!el)return;
+    if(rateHist.length<2){el.innerHTML='<div class="muted" style="padding:60px 0;text-align:center;font-size:11px">collecting… move the Rate fader and watch</div>';return;}
+    const W=520,H=200,pl=34,pr=8,pt=10,pb=18;
+    const pts=rateHist.slice(-120);
+    const t0=pts[0].t,t1=pts[pts.length-1].t||(t0+1);
+    const top=Math.max(...pts.map(p=>Math.max(p.ach,p.tgt)),1)*1.15;
+    const X=t=>pl+(t1===t0?0:(t-t0)/(t1-t0))*(W-pl-pr);
+    const Y=v=>H-pb-(v/top)*(H-pt-pb);
+    const line=k=>pts.map((p,i)=>`${i?"L":"M"}${X(p.t).toFixed(1)},${Y(p[k]).toFixed(1)}`).join(" ");
+    const area=`M${X(t0).toFixed(1)},${H-pb} `+pts.map(p=>`L${X(p.t).toFixed(1)},${Y(p.ach).toFixed(1)}`).join(" ")+` L${X(t1).toFixed(1)},${H-pb} Z`;
+    const gy=[top/1.15, top/2].map(v=>`<line x1="${pl}" y1="${Y(v).toFixed(1)}" x2="${W-pr}" y2="${Y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${pl-6}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end" fill="var(--dim)" font-size="9">${v.toFixed(0)}</text>`).join("");
+    el.innerHTML=`<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${gy}<path class="fill2" d="${area}"/><path class="tgt" d="${line('tgt')}"/><path class="ach" d="${line('ach')}"/></svg>`;
+  }
+  function masterStrip(){
+    const m=$("div","strip master");
+    m.append($("div","mtitle","MASTER"),$("div","msub","session · global"));
+    const fSp=fader({label:'Rate<b>ticks/s ×</b>',value:spToF(state.speedMultiplier),cls:"",fmt:f=>"×"+fToSp(f).toFixed(1),
+      onCommit:f=>post("/api/sim/control/speed",{multiplier:fToSp(f)}).then(s=>state=s)});
+    const bank=$("div","bank"); bank.style.justifyContent="center"; bank.append(fSp.el); m.append(bank);
+    const rateStat=$("div","msub mono"); rateStat.id="rateStat"; rateStat.textContent="—"; m.append(rateStat);
+    const reg=$("div","mrow"); const sel=$("select"); const auto=$("option",null,"AUTO");auto.value="AUTO";sel.append(auto);
+    (state.regimes||[]).forEach(r=>{const o=$("option",null,r);o.value=r;sel.append(o);});
+    sel.value=state.regimeOverride||"AUTO"; sel.onchange=()=>post("/api/sim/control/regime",{regime:sel.value}).then(s=>state=s);
+    reg.append($("div","mlbl","Regime"),sel); m.append(reg);
+    const tr=$("div","mrow");
+    const pause=$("button","big"+(state.paused?" on":""),state.paused?"▶ Resume":"⏸ Pause");
+    pause.onclick=()=>post("/api/sim/control/pause",{paused:!state.paused}).then(s=>{state=s;renderView();});
+    const reseed=$("button",null,"↻ Reseed"); reseed.onclick=()=>post("/api/sim/control/reseed",{}).then(s=>state=s);
+    const reset=$("button","warn","Reset dials"); reset.onclick=()=>post("/api/sim/control/reset",{}).then(s=>{state=s;renderView();});
+    tr.append($("div","mlbl","Transport"),pause,reseed,reset); m.append(tr);
+    return m;
+  }
+
+  // ---- charts ----
+  const RANGES=[["1m",1],["5m",5],["15m",15],["1h",60],["6h",360],["12h",720]];
+  function chartsPanel(){
+    const wrap=$("div"); const rb=$("div","rangebar"); rb.append($("span","l","Window:"));
+    RANGES.forEach(([l,mins])=>{const b=$("button",chartMinutes===mins?"on":"",l); b.onclick=()=>{chartMinutes=mins;renderView();}; rb.append(b);});
+    wrap.append(rb);
+    const grid=$("div","grid"); grid.id="chartGrid"; wrap.append(grid);
+    state.instruments.forEach(it=>{const card=$("div","card"); card.dataset.id=it.id;
+      card.append($("h4","",`<span>${esc(it.name||it.id)}</span><span class="c mono muted" data-c></span>`),$("div","plot",'<div class="empty">loading…</div>')); grid.append(card);});
+    const ev=$("div","events"); ev.innerHTML='<h4>Recent events</h4><div id="evlist" class="muted">—</div>'; wrap.append(ev);
+    setTimeout(()=>{loadCharts();loadEvents();},0);
+    chartTimer=setInterval(()=>{loadCharts();loadEvents();},4000);
+    return wrap;
+  }
+  async function loadCharts(){
+    const grid=document.getElementById("chartGrid"); if(!grid)return;
+    await Promise.all([...grid.children].map(async card=>{ try{
+      const pts=await (await fetch(`/api/history/${enc(card.dataset.id)}?minutes=${chartMinutes}`)).json();
+      card.querySelector(".plot").innerHTML=miniSvg(pts); const cEl=card.querySelector("[data-c]");
+      if(pts.length>1){const f=+pts[0].price,l=+pts[pts.length-1].price,ch=(l-f)/f*100; cEl.textContent=(ch>=0?"+":"")+ch.toFixed(2)+"%"; cEl.className="c mono "+(ch>=0?"up":"down");}
+    }catch(e){}}));
+  }
+  function miniSvg(points){
+    if(!points||points.length<2)return '<div class="empty">not enough ticks yet in this window</div>';
+    const W=340,H=120,pl=6,pr=6,pt=8,pb=8; const t0=points[0].t,t1=points[points.length-1].t||(t0+1);
+    const ys=points.map(p=>+p.price),mn=Math.min(...ys),mx=Math.max(...ys),span=(mx-mn)||1;
+    const X=t=>pl+(t1===t0?0:(t-t0)/(t1-t0))*(W-pl-pr), Y=v=>H-pb-((v-mn)/span)*(H-pt-pb);
+    const line=points.map((p,i)=>`${i?"L":"M"}${X(p.t).toFixed(1)},${Y(+p.price).toFixed(1)}`).join(" ");
+    const area=`M${X(t0).toFixed(1)},${H-pb} `+points.map(p=>`L${X(p.t).toFixed(1)},${Y(+p.price).toFixed(1)}`).join(" ")+` L${X(t1).toFixed(1)},${H-pb} Z`;
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path class="area" d="${area}"/><path class="line" d="${line}"/></svg>`;
+  }
+  async function loadEvents(){ try{ const s=await (await fetch("/api/sim/spikes")).json(); const el=document.getElementById("evlist"); if(!el)return;
+    if(!s.length){el.className="muted";el.textContent="no spikes yet — nudge a market or fire ⚡";return;}
+    el.className=""; el.innerHTML=s.slice(0,20).map(e=>{const t=new Date(e.atMillis).toLocaleTimeString([],{hour12:false});
+      return `<div class="ev"><span class="t">${t}</span><span class="pill ${e.type.toLowerCase()}">${esc(e.type)}</span><b>${esc(e.name||e.instrumentId)}</b><span class="muted">${esc(e.detail)}</span></div>`;}).join("");
+  }catch(e){}}
+
+  // ---- live price + VU ----
+  const szFmt=v=>{const n=+v;return n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?(n/1e3).toFixed(0)+"k":n.toFixed(0);};
+  const advFmt=v=>v==null?"—":"$"+(v>=1e9?(v/1e9).toFixed(2)+"B":v>=1e6?(v/1e6).toFixed(1)+"M":Math.round(v).toLocaleString());
+  async function loadLive(){ if(view!=="inst"||!activeCh)return; try{
+    const [depth,vol]=await Promise.all([
+      fetch("/api/depth").then(r=>r.ok?r.json():[]).catch(()=>[]),
+      fetch("/api/volume").then(r=>r.ok?r.json():[]).catch(()=>[])]);
+    const d=depth.find(x=>x.instrumentId===activeCh._id); if(!d)return;
+    const px=v=>{const n=+v;return n>=1000?n.toFixed(1):n>=100?n.toFixed(2):n.toFixed(4);};
+    const mid=(+d.bid + +d.ask)/2, prev=lastMid[activeCh._id]; lastMid[activeCh._id]=mid;
+    activeCh._price.firstChild.nodeValue=px(mid)+" ";
+    if(prev){const bps=(mid/prev-1)*10000; activeCh._chg.textContent=(bps>=0?"+":"")+bps.toFixed(0)+"bp";
+      activeCh._chg.className="chg mono "+(bps>0.5?"up":bps<-0.5?"down":""); activeCh._meter.paint(clamp(Math.abs(bps)/60,0,1));}
+    activeCh._quote.innerHTML=
+      `<span class="bid">bid <b>${px(d.bid)}</b> ×${szFmt(d.bidSize)}</span>`+
+      `<span class="ask">ask <b>${px(d.ask)}</b> ×${szFmt(d.askSize)}</span>`+
+      `<span>spread <b>${((+d.ask - +d.bid)/mid*10000).toFixed(1)}bp</b></span>`;
+    const v=vol.find(x=>x.instrumentId===activeCh._id);
+    if(v) activeCh._volline.innerHTML=
+      `<span>rel-vol <b>${v.relativeVolume.toFixed(2)}×</b></span>`+
+      `<span>measured ADV <b>${advFmt(v.measuredAdvUsd)}</b></span>`+
+      `<span>prints <b>${(v.samples||0).toLocaleString()}</b></span>`;
+  }catch(e){}}
+
+  async function boot(){
+    const badge=document.getElementById("statusBadge");
+    try{
+      const r=await fetch("/api/sim/control");
+      if(r.status===403){badge.textContent="idle";badge.className="badge clean";
+        document.getElementById("stage").innerHTML='<div class="notice"><h2>The console is live only in SIM feed mode</h2><div>Boot with <span class="mono">jethro.trading.provider=sim</span> and the correlated engine.</div></div>';return;}
+      state=await r.json(); badge.textContent=state.active?"panel-driven":"seeded · untouched"; badge.className="badge "+(state.active?"live":"clean");
+      try{ (await (await fetch("/api/instruments")).json()).forEach(i=>instrClass[i.instrumentId]=i.assetClass); }catch(e){}
+      build(); loadLive(); setInterval(loadLive,1500);
+      // publisher telemetry (1s): master-strip readout + the live tick-rate graph
+      setInterval(async()=>{try{const s=await(await fetch("/api/sim/control")).json();
+        rateHist.push({t:Date.now(),ach:s.achievedTicksPerSec||0,tgt:s.targetTicksPerSec||0});
+        while(rateHist.length>240)rateHist.shift();
+        const el=document.getElementById("rateStat");
+        if(el){const late=(s.lateTicks||0)+(s.clockResyncs||0);
+          el.textContent=`target ${s.targetTicksPerSec.toFixed(1)}/s · achieving ${s.achievedTicksPerSec.toFixed(1)}/s`+(late?` · ${s.lateTicks} late/${s.clockResyncs} resync`:"");
+          el.style.color = s.achievedTicksPerSec < s.targetTicksPerSec*0.9 ? "var(--warn)" : "var(--dim)";}
+        const now=document.getElementById("rateNow"), tgt=document.getElementById("rateTgt");
+        if(now){now.textContent=(s.achievedTicksPerSec||0).toFixed(1)+"/s";
+          tgt.textContent="target "+(s.targetTicksPerSec||0).toFixed(1)+"/s";}
+        drawRate();
+      }catch(e){}},1000);
+    }catch(e){document.getElementById("stage").innerHTML='<div class="notice">sim console unavailable</div>';}
+  }
+  boot();
+})();
 </script>
 </body>
 </html>

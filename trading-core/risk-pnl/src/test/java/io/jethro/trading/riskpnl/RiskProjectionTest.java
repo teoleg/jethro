@@ -37,6 +37,10 @@ class RiskProjectionTest {
         return risk.positions().get(0);
     }
 
+    private static ConsolidatedRisk.Group book(ConsolidatedRisk risk) {
+        return risk.byBook().stream().filter(g -> g.key().equals("ALPHA")).findFirst().orElseThrow();
+    }
+
     private static void eq(String expected, BigDecimal actual) {
         assertEquals(0, new BigDecimal(expected).compareTo(actual), "expected " + expected + " got " + actual);
     }
@@ -142,6 +146,46 @@ class RiskProjectionTest {
         eq("1085", book.unrealizedPnl());                      // 1000 × 1.085
         eq("20615", book.grossExposure());                     // 19000 × 1.085
         eq("1085", risk.total().unrealizedPnl());
+    }
+
+    @Test
+    void realizedFxLocksAtBookingRateSoAFlatBookHoldsStill() {
+        // ADR-0037: a EUR round-trip banks €1,000 realized. Locked at the €→$ rate in force
+        // when the closing fill booked (1.10) ⇒ $1,100 clean. When EURUSD later rallies to
+        // 1.20 the book is FLAT — nothing traded — so CLEAN P&L must not move; the revaluation
+        // of the foreign cash is FX-translation P&L, and only COMPREHENSIVE (actual) moves.
+        var p = new RiskProjection(refs);
+        p.applyMark("EURUSD", new BigDecimal("1.10"), 1_000);      // rate present to lock against
+        p.applyFill(fill("b", "SAP", Side.BUY, "100", "180"));     // open  100 SAP @ €180
+        p.applyFill(fill("s", "SAP", Side.SELL, "100", "190"));    // close → +€1,000 realized
+
+        var s1 = p.snapshot(2_000);
+        eq("1000", only(s1).realizedPnl());       // local fact stays in EUR
+        eq("1100", only(s1).realizedPnlBase());   // locked to USD at booking: €1,000 × 1.10
+        var g1 = book(s1);
+        eq("1100", g1.realizedPnl());             // rollup realized is the locked (clean) figure
+        eq("1100", g1.totalPnl());                // clean trading P&L
+        eq("0", g1.fxTranslationPnl());
+        eq("1100", g1.comprehensivePnl());
+
+        // EURUSD rallies to 1.20 — book still flat, no fills.
+        p.applyMark("EURUSD", new BigDecimal("1.20"), 3_000);
+        var g2 = book(p.snapshot(3_000));
+        eq("1100", g2.realizedPnl());             // locked — unchanged
+        eq("1100", g2.totalPnl());                // CLEAN HOLDS STILL (the reported bug, fixed)
+        eq("100", g2.fxTranslationPnl());         // €1,000 × (1.20 − 1.10) = $100, broken out
+        eq("1200", g2.comprehensivePnl());        // actual book value did move — real FX P&L
+    }
+
+    @Test
+    void usdRealizedHasNoFxTranslationCleanEqualsComprehensive() {
+        var p = new RiskProjection(refs);
+        p.applyFill(fill("b", "AAPL", Side.BUY, "100", "10"));
+        p.applyFill(fill("s", "AAPL", Side.SELL, "100", "12"));   // +$200 realized, USD
+        var g = book(p.snapshot(1_000));
+        eq("200", g.realizedPnl());
+        eq("0", g.fxTranslationPnl());
+        eq("200", g.comprehensivePnl());
     }
 
     @Test

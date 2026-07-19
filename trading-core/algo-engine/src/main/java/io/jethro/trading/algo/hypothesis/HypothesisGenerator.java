@@ -74,6 +74,14 @@ public final class HypothesisGenerator {
             re-propose the same call (same instrument + direction) on the SAME news — only add a \
             hypothesis when genuinely new information or a materially different reason justifies it. \
             Repeating a live call on unchanged news is an error.
+            - MEMORY: pastOutcomes is YOUR OWN track record on similar past setups (thesis → \
+            WIN/LOSS/FLAT with P&L). Learn from it — lean into patterns that won, and be sceptical \
+            of a call that resembles past losers. It is context, not a rule.
+            - BALANCE: directionBalance is the recent long/short mix of your calls. If it is lopsided, \
+            actively look for the OTHER side where a thesis genuinely supports it (a reduction, a \
+            hedge, a short on a bearish headline) — but NEVER force a call to hit a ratio; a call \
+            without a real reason is worse than a skew. A persistently one-directional tape may \
+            legitimately stay one-sided.
             - Output the JSON array only — no prose, no markdown fences.""";
 
     private final ModelInferenceClient client;
@@ -292,6 +300,15 @@ public final class HypothesisGenerator {
         if (context.alreadyProposed() != null && !context.alreadyProposed().isEmpty()) {
             root.putArray("alreadyProposed").addAll(
                     context.alreadyProposed().stream().map(JSON.getNodeFactory()::textNode).toList());
+        }
+        // Retrieved past outcomes on similar setups (RAG memory, ADR-0035) — advisory context.
+        if (context.pastOutcomes() != null && !context.pastOutcomes().isEmpty()) {
+            root.putArray("pastOutcomes").addAll(
+                    context.pastOutcomes().stream().map(JSON.getNodeFactory()::textNode).toList());
+        }
+        // Recent directional skew (ADR-0036) — advisory; the model should look for the other side.
+        if (context.directionBalance() != null && !context.directionBalance().isBlank()) {
+            root.put("directionBalance", context.directionBalance());
         }
         return root.toString();
     }

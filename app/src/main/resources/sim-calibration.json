@@ -9,8 +9,8 @@
     "correlations tighten); INFLATION_SHOCK = the 2022 pattern (stocks down WHILE yields up,",
     "stock-bond correlation flips sign). Treasury futures (ZT/ZF/ZN/ZB) and swaps carry no spec:",
     "they price FROM the curve, whose level/slope ARE the RATES factors.",
-    "Refresh from real daily history with: python3 scripts/calibrate_sim.py (needs internet;",
-    "run on the Pi). The platform itself never fetches at runtime (ADR-0009)."
+    "Hand-curated from long-run market stats; the hedge covariance is seeded separately from",
+    "real Yahoo history in-app at boot (YahooHistorySeeder). The platform never fetches on the tick path (ADR-0009)."
   ],
   "equityFactorVolAnnual": 0.16,
   "usdFactorVolAnnual": 0.07,
@@ -25,8 +25,12 @@
     { "id": "AMZN",   "annualVol": 0.33, "betaEquity": 1.30, "betaUsd": 0.00 },
     { "id": "GOOG",   "annualVol": 0.30, "betaEquity": 1.20, "betaUsd": 0.00 },
     { "id": "SAP",    "annualVol": 0.26, "betaEquity": 0.85, "betaUsd": 0.00 },
+    { "id": "JNJ",    "annualVol": 0.16, "betaEquity": 0.55, "betaUsd": 0.00 },
+    { "id": "NVDA",   "annualVol": 0.45, "betaEquity": 1.75, "betaUsd": 0.00 },
+    { "id": "JPM",    "annualVol": 0.26, "betaEquity": 1.15, "betaUsd": 0.00 },
     { "id": "EURUSD", "annualVol": 0.08, "betaEquity": 0.10, "betaUsd": -1.00 },
     { "id": "GBPUSD", "annualVol": 0.09, "betaEquity": 0.12, "betaUsd": -1.00 },
+    { "id": "AUDUSD", "annualVol": 0.10, "betaEquity": 0.30, "betaUsd": -1.00 },
     { "id": "USDJPY", "annualVol": 0.09, "betaEquity": 0.25, "betaUsd": 1.00 }
   ],
   "regimes": [

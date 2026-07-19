@@ -59,7 +59,10 @@ if [ -f "$PIDFILE" ]; then
   rm -f "$PIDFILE"
 fi
 
-# 2) Docker containers + volumes (the Postgres + Redpanda data).
+# 2) Snapshot the DB before wiping — a clean slate shouldn't mean an unrecoverable one.
+./scripts/backup-db.sh || true
+
+# 3) Docker containers + volumes (the Postgres + Redpanda data).
 echo "==> Removing Docker containers and volumes…"
 docker compose down --volumes --remove-orphans || true
 

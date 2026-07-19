@@ -35,6 +35,20 @@ public final class HypothesisController {
                            double hitRate, String outcomePnl) {
     }
 
+    /** The recent directional skew of live calls (ADR-0036) — descriptive, not a risk limit. */
+    public record BalanceDto(int longs, int shorts, String skew) {
+    }
+
+    /** RAG health (ADR-0035): whether retrieval is on and working, how much is indexed, and the
+     *  measured retrieval hit-rate. All advisory — retrieval never feeds a number into risk. */
+    public record RagDto(boolean enabled, String model, int embeddingDim,
+                         int dedupChunks, int outcomeChunks, int totalChunks,
+                         long dedupChecks, long dedupHits, Double dedupHitRate,
+                         long recallQueries, long recallHits, Double recallHitRate,
+                         long embedCalls, long embedFailures, String lastEmbedError,
+                         double dedupThreshold, double recallThreshold) {
+    }
+
     private final ObjectProvider<HypothesisLifecycle> lifecycle;
 
     public HypothesisController(ObjectProvider<HypothesisLifecycle> lifecycle) {
@@ -71,6 +85,37 @@ public final class HypothesisController {
             return new StatsDto(s.conviction(), s.total(), s.open(), s.wins(), s.losses(), s.flat(),
                     Math.round(hitRate * 1000) / 1000.0, s.outcomePnl().toPlainString());
         }).toList();
+    }
+
+    /** The live long/short balance of proposed calls (ADR-0036) — surfaces the model's skew. */
+    @GetMapping("/api/hypotheses/balance")
+    public BalanceDto balance() {
+        HypothesisLifecycle live = lifecycle.getIfAvailable();
+        if (live == null) {
+            return new BalanceDto(0, 0, "balanced");
+        }
+        var b = live.directionBalance();
+        return new BalanceDto(b.longs(), b.shorts(), b.skew());
+    }
+
+    /** RAG health (ADR-0035): is retrieval on, is the embedding model answering, how many chunks
+     *  are indexed, and how often a query actually finds a similar chunk (hit-rate). */
+    @GetMapping("/api/hypotheses/rag")
+    public RagDto rag() {
+        HypothesisLifecycle live = lifecycle.getIfAvailable();
+        if (live == null) {
+            return new RagDto(false, null, -1, 0, 0, 0, 0, 0, null, 0, 0, null, 0, 0, "", 0, 0);
+        }
+        var s = live.ragStats();
+        Double dedupRate = s.dedupChecks() == 0 ? null
+                : Math.round((double) s.dedupHits() / s.dedupChecks() * 1000) / 1000.0;
+        Double recallRate = s.recallQueries() == 0 ? null
+                : Math.round((double) s.recallHits() / s.recallQueries() * 1000) / 1000.0;
+        return new RagDto(s.enabled(), s.modelId(), s.embeddingDim(),
+                s.dedupChunks(), s.outcomeChunks(), s.dedupChunks() + s.outcomeChunks(),
+                s.dedupChecks(), s.dedupHits(), dedupRate,
+                s.recallQueries(), s.recallHits(), recallRate,
+                s.embedCalls(), s.embedFailures(), s.lastEmbedError(), s.dedupThreshold(), s.recallThreshold());
     }
 
     @GetMapping("/api/hypotheses")

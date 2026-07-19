@@ -3,6 +3,7 @@ package io.jethro.app.kafka;
 import io.jethro.app.trading.TradingCoreLifecycle;
 import io.jethro.uigateway.AttentionFeed;
 import io.jethro.uigateway.AttentionRules;
+import io.jethro.uigateway.LmdbMarkHistory;
 import io.jethro.uigateway.MarkHistory;
 import io.jethro.uigateway.MarkState;
 import io.jethro.uigateway.SseBroadcaster;
@@ -62,10 +63,12 @@ public class KafkaConfig {
         @Bean(destroyMethod = "close")
         @org.springframework.context.annotation.DependsOn({"schemaRegistry", "provenanceConfig"})
         UiGatewayRuntime uiGatewayRuntime(JethroKafkaProperties properties, MarkState markState,
-                                          MarkHistory markHistory, AttentionFeed feed,
-                                          AttentionRules rules, SseBroadcaster sse) {
+                                          MarkHistory markHistory,
+                                          @org.springframework.beans.factory.annotation.Value("${jethro.ui.replay-window-minutes:30}") long replayWindowMinutes,
+                                          AttentionFeed feed, AttentionRules rules, SseBroadcaster sse) {
             var runtime = new UiGatewayRuntime(
-                    properties.bootstrapServers(), markState, markHistory, feed, rules, sse);
+                    properties.bootstrapServers(), markState, markHistory,
+                    replayWindowMinutes * 60_000L, feed, rules, sse);
             runtime.start();
             return runtime;
         }
@@ -76,9 +79,19 @@ public class KafkaConfig {
         return new MarkState();
     }
 
-    @Bean
-    MarkHistory markHistory(@org.springframework.beans.factory.annotation.Value("${jethro.ui.history-hours:2}") long historyHours) {
-        return new MarkHistory(historyHours * 3_600_000L);
+    /**
+     * Durable LMDB-backed price history for the interactive chart (ADR-0014 derived data): a long
+     * window survives a restart and reads fast, no full broker replay on boot. Shares the same
+     * on-disk root as the trading-core warm-restart cache (its own subdirectory), so one data
+     * volume covers both. Falls back to an in-memory ring if no path is set.
+     */
+    @Bean(destroyMethod = "close")
+    LmdbMarkHistory markHistory(
+            @org.springframework.beans.factory.annotation.Value("${jethro.ui.history-hours:12}") long historyHours,
+            @org.springframework.beans.factory.annotation.Value("${jethro.ui.history-path:data/ui-history}") String historyPath,
+            @org.springframework.beans.factory.annotation.Value("${jethro.ui.history-max-size-mb:256}") long maxSizeMb) {
+        return LmdbMarkHistory.open(java.nio.file.Path.of(historyPath),
+                maxSizeMb * 1024 * 1024, historyHours * 3_600_000L);
     }
 
     @Bean

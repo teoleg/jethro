@@ -36,7 +36,16 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0030](0030-schema-registry-serde.md) | Schema-registry serde — writer-schema resolution on the wire | Accepted |
 | [0031](0031-sim-control-panel.md) | Sim control panel — live UI dials over the simulator for model testing | Accepted |
 | [0032](0032-empirical-sim-volume-liquidity.md) | History-anchored market simulation (sim price engine) | Accepted |
-| [0035](0035-rag-for-ai-layer.md) | Retrieval-augmented context for the AI layer — local embeddings + pgvector | Proposed |
+| [0033](0033-flow-aware-algos-and-depth.md) | Flow-aware algorithms (volume confirmation + liquidity sizing) and synthesized depth | Accepted |
+| [0034](0034-news-driven-sim-shocks.md) | News-driven sim shocks — news moves the tape (correlated volume surge + bp momentum) | Accepted |
+| [0035](0035-rag-for-ai-layer.md) | Retrieval-augmented context for the AI layer — local embeddings + pgvector | Accepted |
+| [0036](0036-ai-signal-balance.md) | AI signal balance — measure directional skew, feed it back to the model, never quota | Accepted |
+| [0037](0037-clean-vs-comprehensive-pnl.md) | Clean vs comprehensive P&L — lock realized FX at booking, break out translation | Proposed |
+| [0038](0038-minimum-variance-proxy-hedging.md) | Minimum-variance proxy hedging — beta to index futures, DV01 to Treasury futures, direct FX | Proposed |
+| [0039](0039-hedge-lifecycle-band-triggers.md) | Hedge lifecycle — always-flat deterministic hedging, advisory-first | Proposed |
+| [0040](0040-structural-sector-hedging.md) | Structural sector hedging — a history-free fundamental floor under the statistical hedge | Accepted |
+| [0041](0041-estimation-rigor.md) | Estimation rigor — covariance burn-in, par-curve bootstrap, honest VaR windows | Accepted |
+| [0042](0042-hedge-proxy-selection.md) | Hedge proxy selection — best measured proxy, tradability-gated, switch hysteresis | Accepted |
 
 ## Lifecycle
 

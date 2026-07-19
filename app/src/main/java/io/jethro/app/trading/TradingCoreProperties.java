@@ -34,6 +34,11 @@ public record TradingCoreProperties(
         /** Mean bootstrap block length in days for {@code simEngine=historical} (default 5 — a
          *  business week; longer preserves more autocorrelation, shorter mixes more). */
         Double simBlockLength,
+        /** Sim-generated news events per simulated day (ADR-0034; SIM provider only) — each shocks
+         *  its instrument (jump + momentum + volume surge). Default 4; 0 disables. */
+        Double simNewsPerDay,
+        /** How long a news shock takes to fade, in sim seconds (ADR-0034). Default 20. */
+        Double simNewsHorizonSeconds,
         /** Time compression: wall seconds per simulated trading day (default 120 — multi-day
          *  regimes play out in minutes). */
         Double simSecondsPerDay,
@@ -151,6 +156,22 @@ public record TradingCoreProperties(
 
     public double simBlockLengthOrDefault() {
         return simBlockLength != null && simBlockLength >= 1 ? simBlockLength : 5.0;
+    }
+
+    public double simNewsPerDayOrDefault() {
+        return simNewsPerDay != null && simNewsPerDay >= 0 ? simNewsPerDay : 4.0;
+    }
+
+    public double simNewsHorizonSecondsOrDefault() {
+        return simNewsHorizonSeconds != null && simNewsHorizonSeconds > 0 ? simNewsHorizonSeconds : 20.0;
+    }
+
+    /** The sim news ENGINE is wired under the pure SIM provider (never a live tape — ADR-0034). It
+     *  exists so the mixer's manual ⚡ can fire a shock WITH a headline the model reads, even when
+     *  the AUTO-fire rate ({@code sim-news-per-day}) is 0 — the steady-baseline default, so news
+     *  only moves the tape when you send it. Auto-fire is governed separately by the per-tick rate. */
+    public boolean simNewsEnabled() {
+        return "sim".equalsIgnoreCase(providerOrDefault());
     }
 
     public String simCalibrationPathOrNull() {

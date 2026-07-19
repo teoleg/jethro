@@ -31,17 +31,22 @@ public class OrderRepository implements OrderStore {
      */
     @Override
     public boolean insertIfAbsent(Order order, Instant now) {
+        return insertChildIfAbsent(order, null, now);
+    }
+
+    @Override
+    public boolean insertChildIfAbsent(Order order, String parentOrderId, Instant now) {
         int rows = jdbc.update("""
                 insert into orders (order_id, idempotency_key, book_id, instrument_id, side,
                                     order_type, quantity, limit_price, time_in_force, status,
-                                    created_at, updated_at)
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    created_at, updated_at, parent_order_id)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict (idempotency_key) do nothing
                 """,
                 order.orderId(), order.idempotencyKey(), order.bookId().value(),
                 order.instrumentId().value(), order.side().name(), order.type().name(),
                 order.quantity(), order.limitPrice().orElse(null), order.timeInForce().name(),
-                order.status().name(), ts(order.createdAt()), ts(now));
+                order.status().name(), ts(order.createdAt()), ts(now), parentOrderId);
         return rows == 1;
     }
 
@@ -128,7 +133,7 @@ public class OrderRepository implements OrderStore {
         OffsetDateTime end = start.plusDays(1);
         return jdbc.query("""
                 select order_id, book_id, instrument_id, side, order_type, quantity,
-                       limit_price, time_in_force, status, reason, created_at
+                       limit_price, time_in_force, status, reason, created_at, parent_order_id
                 from orders where created_at >= ? and created_at < ?
                 order by created_at desc offset ? limit ?
                 """, OrderRepository::mapRow, start, end, offset, limit);
@@ -146,7 +151,7 @@ public class OrderRepository implements OrderStore {
     public List<OrderRow> recentOrders(int limit) {
         return jdbc.query("""
                 select order_id, book_id, instrument_id, side, order_type, quantity,
-                       limit_price, time_in_force, status, reason, created_at
+                       limit_price, time_in_force, status, reason, created_at, parent_order_id
                 from orders order by created_at desc limit ?
                 """, OrderRepository::mapRow, limit);
     }
@@ -165,7 +170,11 @@ public class OrderRepository implements OrderStore {
     /** Boundary DTOs: decimals as strings (invariant 1 — never a JS float). */
     public record OrderRow(String orderId, String bookId, String instrumentId, String side,
                            String orderType, String quantity, String limitPrice, String timeInForce,
-                           String status, String reason, long createdAtMillis) {
+                           String status, String reason, long createdAtMillis, String parentOrderId) {
+        /** A child slice produced by the ADV auto-slicer (has a parent). Lets the UI tag it "split". */
+        public boolean split() {
+            return parentOrderId != null;
+        }
     }
 
     public record FillRow(String fillId, String orderId, String instrumentId, String side,
@@ -178,7 +187,8 @@ public class OrderRepository implements OrderStore {
                 rs.getString("side"), rs.getString("order_type"), rs.getBigDecimal("quantity").toPlainString(),
                 rs.getBigDecimal("limit_price") == null ? null : rs.getBigDecimal("limit_price").toPlainString(),
                 rs.getString("time_in_force"), rs.getString("status"), rs.getString("reason"),
-                rs.getTimestamp("created_at").toInstant().toEpochMilli());
+                rs.getTimestamp("created_at").toInstant().toEpochMilli(),
+                rs.getString("parent_order_id"));
     }
 
     private static Order mapOrder(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

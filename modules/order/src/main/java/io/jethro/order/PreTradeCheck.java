@@ -16,6 +16,17 @@ public interface PreTradeCheck {
     /** @param signedQuantity order quantity signed by side (BUY positive, SELL negative). */
     Decision check(BookId bookId, InstrumentId instrumentId, BigDecimal signedQuantity);
 
+    /**
+     * Whether this order reduces the book's exposure to the instrument (an exit / risk-reducer).
+     * Such orders bypass the ADV participation cap — a desk must always be able to get out of a
+     * position, whatever the day's volume. Default {@code false}: with no risk wired, treat
+     * every order as risk-adding so the cap still applies (conservative).
+     * @param signedQuantity order quantity signed by side (BUY positive, SELL negative).
+     */
+    default boolean reducesRisk(BookId bookId, InstrumentId instrumentId, BigDecimal signedQuantity) {
+        return false;
+    }
+
     record Decision(boolean approved, String reason) {
         public static Decision approve() {
             return new Decision(true, null);

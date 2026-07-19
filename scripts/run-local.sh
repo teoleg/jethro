@@ -16,7 +16,9 @@
 #
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
 #            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:1.5b),
-#            PROVIDER (sim|yahoo, default: yahoo), AUTONOMY (off|on, default: off)
+#            PROVIDER (sim|yahoo|finnhub, default: yahoo), AUTONOMY (off|on, default: on),
+#            RAG (off|on, default: on). Set them once in local.env — a plain KEY=value file
+#            (copy local.env.example); command-line env still overrides it.
 #
 # AUTOEXEC  = the momentum STRATEGY auto-submits simulated orders (ADR-0019).
 # AUTONOMY  = the LLM's HYPOTHESES auto-execute, but only within the deterministic risk
@@ -26,11 +28,23 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Optional local config: copy local.env.example → local.env, a plain KEY=value file.
+# Command-line env still wins (each key is applied only when it isn't already set).
+if [ -f local.env ]; then
+  while IFS='=' read -r k v; do
+    k="${k//[[:space:]]/}"; case "$k" in ''|\#*) continue;; esac
+    v="${v%$'\r'}"
+    [ -z "${!k:-}" ] && export "$k=$v"
+  done < local.env
+fi
+
 PROFILE="${PROFILE:-pi}"
 HEAP="${HEAP:-512m}"
 AI="${AI:-on}"
 MODEL="${MODEL:-qwen2.5:1.5b}" # 1.5b fits a Pi (frees ~1.5GB + CPU vs 3b, so you stay out of swap).
                                # MODEL=qwen2.5:3b for better text on an 8GB+ box; :0.5b for very tight RAM.
+RAG="${RAG:-on}"               # on = RAG retrieval (ADR-0035); needs the embedding model below.
+EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}" # RAG embeddings (~275MB); the chat MODEL can't embed.
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
 PROVIDER="${PROVIDER:-yahoo}"  # sim | yahoo (delayed, ADR-0023) | finnhub (real-time WS, ADR-0024)
@@ -78,11 +92,18 @@ if ! wait_for "Redpanda" 90 docker compose exec -T redpanda rpk cluster health -
   echo "     docker compose exec redpanda rpk cluster health"
 fi
 
-AI_ARGS=(--jethro.ai.enabled=false)
+AI_ARGS=(--jethro.ai.enabled=false --jethro.rag.enabled=false) # no Ollama ⇒ no RAG either
 if [ "$AI" = "on" ]; then
   echo "==> Pulling model $MODEL (first run downloads it)…"
   docker compose exec -T ollama ollama pull "$MODEL"
   AI_ARGS=(--jethro.ai.model="$MODEL")
+  if [ "$RAG" != "off" ] && [ -n "$EMBED_MODEL" ]; then
+    echo "==> Pulling embedding model $EMBED_MODEL for RAG (ADR-0035; the chat model can't embed)…"
+    docker compose exec -T ollama ollama pull "$EMBED_MODEL" \
+      || echo "   WARN: embed pull failed — RAG degrades to the deterministic guard until it's present"
+  else
+    AI_ARGS+=(--jethro.rag.enabled=false)
+  fi
 fi
 
 EXTRA_ARGS=()
@@ -95,6 +116,12 @@ if [ "$AUTONOMY" = "on" ]; then
   EXTRA_ARGS+=(--jethro.hypothesis.autonomy.enabled=true)
 fi
 EXTRA_ARGS+=(--jethro.trading.provider="$PROVIDER")
+# Sim time compression: wall-seconds per simulated trading day. Unset = app default (23400 =
+# real time, the steady watchable tape). SIM_DAY_SECONDS=120 fast-cycles days for EOD/VaR work.
+if [ -n "${SIM_DAY_SECONDS:-}" ]; then
+  EXTRA_ARGS+=(--jethro.trading.sim-seconds-per-day="$SIM_DAY_SECONDS")
+  echo "==> SIM TIME: $SIM_DAY_SECONDS wall-seconds per trading day"
+fi
 if [ "$PROVIDER" = "yahoo" ]; then
   echo "==> MARKET DATA: Yahoo (real, ~15-min delayed, dev/demo only — ADR-0023). Needs internet."
 fi

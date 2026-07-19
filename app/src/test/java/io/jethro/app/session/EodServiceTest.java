@@ -37,8 +37,10 @@ class EodServiceTest {
     }
 
     private static ConsolidatedRisk risk(String totalPnl) {
+        // EodService reads comprehensivePnl() (actual money), so map the test's total there.
         var totals = new ConsolidatedRisk.Totals(BigDecimal.ZERO, BigDecimal.ZERO,
-                new BigDecimal(totalPnl), BigDecimal.ZERO, BigDecimal.ZERO);
+                new BigDecimal(totalPnl), BigDecimal.ZERO, new BigDecimal(totalPnl),
+                BigDecimal.ZERO, BigDecimal.ZERO);
         return new ConsolidatedRisk(0L, totals, List.of(), List.of(), List.of());
     }
 

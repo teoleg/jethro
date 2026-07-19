@@ -37,7 +37,9 @@ class SimControlControllerTest {
         when(coreProvider.getIfAvailable()).thenReturn(core);
         ObjectProvider<RefDataRepository> refProvider = mock(ObjectProvider.class);
         when(refProvider.getIfAvailable()).thenReturn(null);
-        return new SimControlController(coreProvider, refProvider);
+        ObjectProvider<SpikeMonitor> spikeProvider = mock(ObjectProvider.class);
+        when(spikeProvider.getIfAvailable()).thenReturn(null);
+        return new SimControlController(coreProvider, refProvider, spikeProvider);
     }
 
     @Test
@@ -87,5 +89,60 @@ class SimControlControllerTest {
         var ex = assertThrows(ResponseStatusException.class,
                 () -> controller.nudge("NOPE", new SimControlController.ValueRequest(0.01)));
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
+    }
+
+    @Test
+    void spikeFeedIsEmptyWithoutAMonitor() {
+        Provenance.configure(FeedMode.SIM, "epoch-sim");
+        var controller = controller(new SimControl(1, List.of("ES")));
+        assertTrue(controller.spikes().isEmpty(), "no monitor wired → empty feed, not a failure");
+    }
+
+    @Test
+    void newsShockRejectedOutsideSim() {
+        Provenance.configure(FeedMode.LIVE, "epoch-live");
+        var controller = controller(new SimControl(1, List.of("ES")));
+        var ex = assertThrows(ResponseStatusException.class,
+                () -> controller.news(new SimControlController.NewsRequest("ES", "BULL", null)));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatusCode());
+    }
+
+    @Test
+    void newsShockUnknownInstrumentIs404() {
+        Provenance.configure(FeedMode.SIM, "epoch-sim");
+        var controller = controller(new SimControl(1, List.of("ES")));
+        var ex = assertThrows(ResponseStatusException.class,
+                () -> controller.news(new SimControlController.NewsRequest("NOPE", "BULL", null)));
+        assertEquals(HttpStatus.NOT_FOUND, ex.getStatusCode());
+    }
+
+    @Test
+    void newsShockUnknownDirectionIs400() {
+        Provenance.configure(FeedMode.SIM, "epoch-sim");
+        var controller = controller(new SimControl(1, List.of("ES")));
+        var ex = assertThrows(ResponseStatusException.class,
+                () -> controller.news(new SimControlController.NewsRequest("ES", "sideways", null)));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatusCode());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void newsShockFiresThroughLifecycle() {
+        Provenance.configure(FeedMode.SIM, "epoch-sim");
+        var control = new SimControl(1, List.of("ES", "AAPL"));
+        TradingCoreLifecycle core = mock(TradingCoreLifecycle.class);
+        when(core.simControl()).thenReturn(control);
+        when(core.fireSimNews("AAPL", -1, 0.02)).thenReturn(true);
+        ObjectProvider<TradingCoreLifecycle> coreProvider = mock(ObjectProvider.class);
+        when(coreProvider.getIfAvailable()).thenReturn(core);
+        ObjectProvider<RefDataRepository> refProvider = mock(ObjectProvider.class);
+        when(refProvider.getIfAvailable()).thenReturn(null);
+        ObjectProvider<SpikeMonitor> spikeProvider = mock(ObjectProvider.class);
+        when(spikeProvider.getIfAvailable()).thenReturn(null);
+        var controller = new SimControlController(coreProvider, refProvider, spikeProvider);
+
+        var state = controller.news(new SimControlController.NewsRequest("AAPL", "BEAR", 0.02));
+        assertTrue(state.enabled(), "a fired shock returns the fresh control state");
+        org.mockito.Mockito.verify(core).fireSimNews("AAPL", -1, 0.02);
     }
 }

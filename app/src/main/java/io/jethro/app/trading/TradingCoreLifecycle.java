@@ -47,6 +47,8 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     private volatile java.util.function.LongSupplier simDayIndexSource; // correlated sim only
     private volatile io.jethro.trading.marketdata.sim.SimControl simControl; // ADR-0031: correlated sim only
     private volatile long simTradesPerDay; // ADR-0032: per-instrument prints/day (0 when not sim) → measured ADV
+    private volatile java.util.function.Supplier<io.jethro.trading.marketdata.sim.SimNewsEngine> simNewsSource; // ADR-0034
+    private volatile java.util.function.Supplier<io.jethro.trading.marketdata.sim.TickClock.Stats> simClockStats; // publisher telemetry
     private volatile RealTreasuryCurve realCurve;     // non-null only when the live curve is active
     private volatile TreasuryCurveFetcher curveFetcher;
     private volatile String curveSource = "sim";      // "treasury-live" or "sim" (for the UI)
@@ -290,6 +292,22 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 this.regimeSource = () -> sim.regime().name();
                 this.simDayIndexSource = sim::simDayIndex;
                 this.simControl = sim.control();
+                this.simClockStats = sim::clockStats;
+                // Steady baseline (default): pin CALM so the tape doesn't spontaneously lurch into
+                // VOLATILE/SHOCK regimes — you drive vol from the mixer. sim-regimes=true lets the
+                // Markov chain switch on its own; the mixer's regime dropdown overrides either way.
+                if (!properties.simRegimesOrDefault()) {
+                    sim.control().pinDefaultRegime(io.jethro.trading.marketdata.sim.MarketRegime.CALM);
+                }
+                if (properties.simNewsEnabled()) {
+                    sim.configureNews(properties.simSeed() + 7, newsPerTickProbability(), newsHorizonTicks());
+                    this.simNewsSource = sim::newsEngine;
+                    double perDay = properties.simNewsPerDayOrDefault();
+                    log.warn(perDay > 0
+                            ? "SIM NEWS (ADR-0034): {} events/day auto-shock the tape; manual ⚡ also available."
+                            : "SIM NEWS (ADR-0034): auto-fire OFF (steady baseline) — the mixer's ⚡ fires shocks on demand.",
+                            perDay);
+                }
                 log.info("SIM ENGINE: correlated factor model (ADR-0026) — {} instruments, {} regimes, "
                                 + "t(ν={}) tails, {}s per simulated trading day",
                         calibration.instruments().size(), calibration.regimes().size(),
@@ -330,6 +348,11 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
             this.regimeSource = () -> sim.regime().name();
             this.simDayIndexSource = sim::simDayIndex;
             this.simControl = sim.control();
+            this.simClockStats = sim::clockStats;
+            if (properties.simNewsEnabled()) {
+                sim.configureNews(properties.simSeed() + 7, newsPerTickProbability(), newsHorizonTicks());
+                this.simNewsSource = sim::newsEngine;
+            }
             log.warn("SIM ENGINE: historical bootstrap (ADR-0032) over a {} snapshot — {} instruments, "
                             + "mean block {}d, {}s per simulated day. {}",
                     snapshot.source(), snapshot.instrumentIds().size(),
@@ -418,6 +441,13 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
 
     /** The live sim control panel (ADR-0031), or null when the feed isn't the correlated sim
      *  (live/replay/legacy). The REST surface additionally gates on {@code feedMode == SIM}. */
+    /** Publisher telemetry (deadline clock): target vs achieved tick rate, late/resync counts.
+     *  Null when no sim engine is running. */
+    public io.jethro.trading.marketdata.sim.TickClock.Stats simClockStats() {
+        var src = simClockStats;
+        return src != null ? src.get() : null;
+    }
+
     public io.jethro.trading.marketdata.sim.SimControl simControl() {
         return simControl;
     }
@@ -432,6 +462,43 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
     public io.jethro.trading.runtime.VolumeStats volumeStats() {
         var rt = runtime;
         return rt != null ? rt.volumeStats() : null;
+    }
+
+    /** Recent sim-generated news events (ADR-0034) — the narrative feed maps these to items the
+     *  model reads, so it sees the headline that moved the tape. Empty when news is off/not sim. */
+    public java.util.List<io.jethro.trading.marketdata.sim.SimNewsEngine.SimNewsEvent> recentSimNews() {
+        var src = simNewsSource;
+        var engine = src != null ? src.get() : null;
+        return engine != null ? engine.recent() : java.util.List.of();
+    }
+
+    /** Manually fire a sim news shock (ADR-0034 follow-up) on an instrument: routes through the
+     *  news engine when news is on (so the headline reaches the model), else applies the shock via
+     *  the control directly. Returns false when there's no sim control / unknown instrument. */
+    public boolean fireSimNews(String instrumentId, int sign, double magnitude) {
+        var src = simNewsSource;
+        var engine = src != null ? src.get() : null;
+        if (engine != null) {
+            return engine.fireManual(instrumentId, sign, magnitude);
+        }
+        var control = simControl;
+        if (control != null) {
+            control.fireNewsShock(instrumentId, sign, magnitude, newsHorizonTicks());
+            return true;
+        }
+        return false;
+    }
+
+    /** Per-tick probability of a news event, from the configured events/day and ticks/day (ADR-0034). */
+    private double newsPerTickProbability() {
+        double ticksPerDay = Math.max(1, simTradesPerDay);
+        return properties.simNewsPerDayOrDefault() / ticksPerDay;
+    }
+
+    /** News-shock fade length in ticks, from the configured sim-seconds horizon (ADR-0034). */
+    private int newsHorizonTicks() {
+        double tickSeconds = properties.simTickIntervalMillis() / 1_000.0;
+        return Math.max(1, (int) Math.round(properties.simNewsHorizonSecondsOrDefault() / tickSeconds));
     }
 
     /** instrumentId → Finnhub symbol for the covered equities (US listings). Reads 'finnhub'

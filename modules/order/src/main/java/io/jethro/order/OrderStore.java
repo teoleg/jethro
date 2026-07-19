@@ -18,6 +18,15 @@ public interface OrderStore {
     /** Inserts a NEW order unless its idempotency key exists; true if this call created it. */
     boolean insertIfAbsent(Order order, Instant now);
 
+    /**
+     * Inserts a NEW child slice linked to its parent order (the ADV auto-slicer). The parent
+     * linkage is persistence-only — it never enters the {@link Order} domain record. Default
+     * ignores the parent id (fakes keep working); the JDBC store persists it.
+     */
+    default boolean insertChildIfAbsent(Order order, String parentOrderId, Instant now) {
+        return insertIfAbsent(order, now);
+    }
+
     void updateStatus(String orderId, OrderStatus status, String reason, Instant now);
 
     /**

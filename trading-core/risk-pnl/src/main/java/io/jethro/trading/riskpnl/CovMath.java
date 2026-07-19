@@ -95,6 +95,13 @@ public final class CovMath {
      * EWMA covariance from consecutive-day return vectors (oldest first, {@link VarMath.DayVector}
      * shape). Strict coverage: the instrument set is the intersection across ALL days. Empty
      * below {@code minObservations} days.
+     *
+     * <p>BURN-IN (ADR-0041): Σ is seeded with the equal-weight zero-mean SAMPLE covariance of the
+     * first {@code min(20, n/2)} vectors, then the EWMA recursion runs over the remainder. A
+     * single-day outer-product seed is rank-1 noise that still carries λ^19 ≈ 31% of the estimate
+     * at 20 observations (RiskMetrics' effective memory for λ=0.94 is ≈74 days) — the sample-cov
+     * seed replaces that with a proper multi-day estimate. For a constant return series the seed
+     * equals the outer product, so the closed-form convergence property is unchanged.
      */
     public static Optional<Covariance> ewmaCovariance(List<VarMath.DayVector> days, int minObservations) {
         if (days.size() < Math.max(2, minObservations)) {
@@ -109,22 +116,34 @@ public final class CovMath {
         }
         instruments.sort(String::compareTo); // deterministic axis regardless of map ordering
         int n = instruments.size();
+        int seedDays = Math.max(1, Math.min(20, days.size() / 2));
         double[][] sigma = new double[n][n];
-        boolean first = true;
-        for (VarMath.DayVector day : days) {
-            double[] r = new double[n];
-            for (int i = 0; i < n; i++) {
-                r[i] = day.returns().get(instruments.get(i));
-            }
+        double[] r = new double[n];
+        // Seed: equal-weight sample covariance (zero-mean, RiskMetrics daily convention).
+        for (int d = 0; d < seedDays; d++) {
+            fill(r, days.get(d), instruments);
             for (int i = 0; i < n; i++) {
                 for (int j = 0; j < n; j++) {
-                    double outer = r[i] * r[j];
-                    sigma[i][j] = first ? outer : LAMBDA * sigma[i][j] + (1 - LAMBDA) * outer;
+                    sigma[i][j] += r[i] * r[j] / seedDays;
                 }
             }
-            first = false;
+        }
+        // EWMA recursion over the remaining days.
+        for (int d = seedDays; d < days.size(); d++) {
+            fill(r, days.get(d), instruments);
+            for (int i = 0; i < n; i++) {
+                for (int j = 0; j < n; j++) {
+                    sigma[i][j] = LAMBDA * sigma[i][j] + (1 - LAMBDA) * r[i] * r[j];
+                }
+            }
         }
         return Optional.of(new Covariance(List.copyOf(instruments), sigma, days.size()));
+    }
+
+    private static void fill(double[] r, VarMath.DayVector day, List<String> instruments) {
+        for (int i = 0; i < r.length; i++) {
+            r[i] = day.returns().get(instruments.get(i));
+        }
     }
 
     /** Parametric VaR over the covered exposures; uncovered exposure disclosed as skipped. */

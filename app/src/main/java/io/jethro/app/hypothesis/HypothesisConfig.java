@@ -36,11 +36,38 @@ import java.util.Map;
  * has no hypotheses (the market path never depends on the model, invariant 7).
  */
 @Configuration
-@EnableConfigurationProperties(HypothesisProperties.class)
+@EnableConfigurationProperties({HypothesisProperties.class, RagProperties.class})
 @ConditionalOnProperty(prefix = "jethro.hypothesis", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class HypothesisConfig {
 
     private static final Logger log = LoggerFactory.getLogger(HypothesisConfig.class);
+
+    /** Semantic hypothesis de-dup + outcome memory (ADR-0035) — ON by default; the DISABLED no-op
+     *  only when jethro.rag.enabled=false. If the embedding model isn't reachable it degrades at
+     *  call time (best-effort) so the deterministic guard stands alone. */
+    @Bean
+    HypothesisMemory hypothesisMemory(RagProperties rag,
+                                      ObjectProvider<io.jethro.app.ai.AiProperties> aiProps,
+                                      io.jethro.app.ai.OllamaGate gate) {
+        if (!rag.enabledOrDefault()) {
+            return HypothesisMemory.DISABLED;
+        }
+        var ai = aiProps.getIfAvailable();
+        String baseUrl = ai != null ? ai.baseUrl() : rag.ollamaBaseUrlOrDefault();
+        // Share the inference gate: embeddings serialize with generate on the single-model box, so
+        // RAG can never collide with an inference and time out as "ollama unreachable" (ADR-0035).
+        var client = new io.jethro.app.ai.SingleFlightEmbeddingClient(
+                new io.jethro.trading.algo.inference.OllamaEmbeddingClient(
+                        baseUrl, rag.modelOrDefault(), Duration.ofSeconds(rag.timeoutSecondsOrDefault())),
+                gate);
+        log.warn("RAG ON (ADR-0035) — embeddings via {} at {}; semantic de-dup (cosine ≥ {}) + "
+                        + "past-outcome memory (recall ≥ {}). Advisory only; deterministic guard stays the floor.",
+                rag.modelOrDefault(), baseUrl, rag.dedupThresholdOrDefault(), rag.recallThresholdOrDefault());
+        return new HypothesisMemory(client,
+                new io.jethro.trading.algo.inference.SemanticMemory<>(rag.memoryCapacityOrDefault()),
+                new io.jethro.trading.algo.inference.SemanticMemory<>(rag.memoryCapacityOrDefault()),
+                rag.dedupThresholdOrDefault(), rag.recallThresholdOrDefault());
+    }
 
     @Bean
     HypothesisEvaluator hypothesisEvaluator(InstrumentRefSource refs, PreTradeGuardrail guardrail,
@@ -62,7 +89,8 @@ public class HypothesisConfig {
     @Bean
     NarrativeFeed narrativeFeed(HypothesisProperties props, TradingCoreProperties trading,
                                 io.jethro.app.trading.FinnhubRateLimiter rateLimiter,
-                                ObjectProvider<RefDataRepository> refData) {
+                                ObjectProvider<RefDataRepository> refData,
+                                ObjectProvider<TradingCoreLifecycle> tradingCore) {
         String token = trading.finnhubTokenOrEmpty();
         if (!token.isEmpty()) {
             Map<String, String> names = finnhubNewsSymbols(refData.getIfAvailable());
@@ -71,6 +99,16 @@ public class HypothesisConfig {
                     props.narrativeRefreshSecondsOrDefault());
             var client = new FinnhubNewsClient(token, Duration.ofSeconds(10), rateLimiter);
             return new FinnhubNarrativeFeed(client, names, props.narrativeRefreshSecondsOrDefault() * 1_000);
+        }
+        // Pure-sim with news enabled: the model reads the sim's OWN headlines — the ones that moved
+        // the tape (ADR-0034), so news→price is causal, not a coincidence.
+        TradingCoreLifecycle core = tradingCore.getIfAvailable();
+        if (trading.simNewsEnabled() && core != null) {
+            var rd = refData.getIfAvailable();
+            InstrumentNameSource names = rd != null ? InstrumentNameSource.from(rd) : InstrumentNameSource.NONE;
+            log.warn("NARRATIVE: the model reads the sim's own generated news (ADR-0034) — the headlines "
+                    + "that moved the tape.");
+            return new SimEngineNarrativeFeed(core, names);
         }
         return new SimNarrativeFeed(props.narrativeSeedOrDefault());
     }
@@ -111,7 +149,8 @@ public class HypothesisConfig {
                                             ObjectProvider<OrderService> orderService,
                                             HypothesisRecordStore recordStore,
                                             io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch,
-                                            ObjectProvider<RefDataRepository> refData) {
+                                            ObjectProvider<RefDataRepository> refData,
+                                            HypothesisMemory hypothesisMemory) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
         // the broker is wired — every hypothesis-generation run is an audited AiDecision.
         DecisionSink sink = decision -> {
@@ -130,7 +169,7 @@ public class HypothesisConfig {
         InstrumentNameSource names = rd != null ? InstrumentNameSource.from(rd) : InstrumentNameSource.NONE;
         return new HypothesisLifecycle(generator, evaluator, narrativeFeed, backtest,
                 tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable(), recordStore,
-                tradingHaltSwitch, names);
+                tradingHaltSwitch, names, hypothesisMemory);
     }
 
     @Bean

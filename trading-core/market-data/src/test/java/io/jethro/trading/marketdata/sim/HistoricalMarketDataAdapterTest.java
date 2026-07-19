@@ -28,6 +28,7 @@ class HistoricalMarketDataAdapterTest {
 
         var latch = new CountDownLatch(20);
         Map<String, Long> lastQty = new ConcurrentHashMap<>();
+        Map<String, Long> lastBidSize = new ConcurrentHashMap<>();
         AtomicInteger quotes = new AtomicInteger();
         adapter.start(new MarketDataListener() {
             @Override
@@ -37,7 +38,8 @@ class HistoricalMarketDataAdapterTest {
             }
 
             @Override
-            public void onQuote(String id, long bid, long ask, long p, long in) {
+            public void onQuote(String id, long bid, long ask, long bidSize, long askSize, long p, long in) {
+                lastBidSize.put(id, bidSize);
                 quotes.incrementAndGet();
             }
         });
@@ -48,5 +50,7 @@ class HistoricalMarketDataAdapterTest {
         assertTrue(lastQty.getOrDefault("AAPL", 0L) > 1_000_000L,
                 "AAPL prints must carry real per-tick volume, not a unit default");
         assertTrue(quotes.get() > 0, "quotes should be synthesized around the mid");
+        assertTrue(lastBidSize.getOrDefault("AAPL", 0L) > 1_000_000L,
+                "quotes must carry a synthesized depth-at-touch size (ADR-0033)");
     }
 }

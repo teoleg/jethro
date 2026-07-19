@@ -19,10 +19,25 @@ import java.math.BigDecimal;
  *               instruments (their exposure is qty × price × multiplier).
  * @param spreadBps per-NAME full bid/ask spread in bps (ADR-0025); null = fall back to the
  *               asset-class config.
+ * @param hedgeGroup structural-hedge group — the GICS sector for equities (ADR-0040), drives the
+ *               balance view; null where not classified.
+ * @param hedgeProxy the instrument the structural tier hedges this name with (e.g. ES); null =
+ *               no structural proxy assigned.
+ * @param hedgeBeta assigned FUNDAMENTAL beta to the hedge proxy (ADR-0040) — lets the structural
+ *               tier size a beta-hedge with no return history; null = unassigned. Provenance lives
+ *               with the refdata value, never invented in code.
  */
 public record InstrumentRef(String instrumentId, String assetClass, String currency,
                             BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd,
-                            BigDecimal notionalPerLot, BigDecimal spreadBps) {
+                            BigDecimal notionalPerLot, BigDecimal spreadBps,
+                            String hedgeGroup, String hedgeProxy, BigDecimal hedgeBeta) {
+
+    public InstrumentRef(String instrumentId, String assetClass, String currency,
+                         BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd,
+                         BigDecimal notionalPerLot, BigDecimal spreadBps) {
+        this(instrumentId, assetClass, currency, multiplier, modDuration, advUsd, notionalPerLot,
+                spreadBps, null, null, null);
+    }
 
     public InstrumentRef(String instrumentId, String assetClass, String currency,
                          BigDecimal multiplier, BigDecimal modDuration, BigDecimal advUsd,

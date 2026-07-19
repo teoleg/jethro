@@ -115,11 +115,29 @@ public final class PreTradeGuardrail {
         return Optional.empty();
     }
 
+    /**
+     * Whether an order reduces the book's exposure to the instrument — a risk-reducing exit.
+     * Structural (invariant 3 owns positions): projected book gross strictly below current
+     * means the trade shrinks |position|. Such orders bypass the ADV participation cap
+     * downstream — you must always be able to get out of a position. A zero/absent delta, or
+     * a trade that leaves gross unchanged or higher, is not risk-reducing.
+     */
+    public synchronized boolean reducesRisk(String bookId, String instrumentId, BigDecimal signedQuantity) {
+        if (signedQuantity == null || signedQuantity.signum() == 0) {
+            return false;
+        }
+        RiskProjection.Exposure current = projection.projectedExposure(bookId, instrumentId, BigDecimal.ZERO);
+        RiskProjection.Exposure projected = projection.projectedExposure(bookId, instrumentId, signedQuantity);
+        return projected.gross().compareTo(current.gross()) < 0;
+    }
+
     /** Current loss (positive number) of a book, zero if profitable or unknown. */
     private BigDecimal bookLoss(String bookId, long now) {
         for (ConsolidatedRisk.Group g : projection.snapshot(now).byBook()) {
             if (g.key().equals(bookId)) {
-                return g.totalPnl().signum() < 0 ? g.totalPnl().negate() : BigDecimal.ZERO;
+                // COMPREHENSIVE (actual loss incl. FX translation), not the clean figure (ADR-0037).
+                BigDecimal pnl = g.comprehensivePnl();
+                return pnl.signum() < 0 ? pnl.negate() : BigDecimal.ZERO;
             }
         }
         return BigDecimal.ZERO;

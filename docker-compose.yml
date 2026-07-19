@@ -22,6 +22,8 @@ services:
       - "9092:9092"   # Kafka API
       - "8081:8081"   # built-in schema registry (ADR-0012)
       - "9644:9644"   # admin
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data   # persist topics/offsets across restarts
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health --exit-when-healthy || exit 1"]
       interval: 10s
@@ -36,6 +38,8 @@ services:
       POSTGRES_PASSWORD: jethro   # dev only; real secrets via SSM (ADR-0013)
     ports:
       - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data   # persist the DB across restarts (books, fills, orders…)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U jethro -d jethro"]
       interval: 10s
@@ -70,3 +74,5 @@ services:
 
 volumes:
   ollama-models:
+  pg-data:
+  redpanda-data:

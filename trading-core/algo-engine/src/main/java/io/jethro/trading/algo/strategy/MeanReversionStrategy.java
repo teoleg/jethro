@@ -20,7 +20,13 @@ public final class MeanReversionStrategy implements Strategy {
     private final MomentumStrategy detector; // same windows, same z — one detector, two readings
 
     public MeanReversionStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps) {
-        this.detector = new MomentumStrategy(lookback, thresholdSigmas, minSignalBps);
+        this(lookback, thresholdSigmas, minSignalBps, 0.0);
+    }
+
+    /** With volume confirmation (ADR-0033): fade only extremes the market participated in. */
+    public MeanReversionStrategy(int lookback, double thresholdSigmas, BigDecimal minSignalBps,
+                                 double volumeConfirmMin) {
+        this.detector = new MomentumStrategy(lookback, thresholdSigmas, minSignalBps, volumeConfirmMin);
     }
 
     @Override
@@ -28,7 +34,7 @@ public final class MeanReversionStrategy implements Strategy {
         return detector.evaluate(observations).stream()
                 .map(s -> new TradeSignal(s.instrumentId(),
                         s.side() == Side.BUY ? Side.SELL : Side.BUY,
-                        s.referencePrice(), s.price(), s.changeBps(), s.zScore(), name()))
+                        s.referencePrice(), s.price(), s.changeBps(), s.zScore(), s.baselineSigmas(), name()))
                 .toList();
     }
 

@@ -19,12 +19,17 @@ import java.util.List;
 @RestController
 public final class RiskController {
 
+    // P&L is split clean vs comprehensive (ADR-0037): totalPnl is the clean trading figure
+    // (locked realized + unrealized — holds still when flat); fxTranslationPnl is the live
+    // revaluation of foreign realized cash; comprehensivePnl is actual book-value change.
     public record TotalsDto(String realizedPnl, String unrealizedPnl, String totalPnl,
+                            String fxTranslationPnl, String comprehensivePnl,
                             String grossExposure, String netExposure) {
     }
 
     public record GroupDto(String key, String currency, String realizedPnl, String unrealizedPnl,
-                           String totalPnl, String grossExposure, String netExposure, int positionCount) {
+                           String totalPnl, String fxTranslationPnl, String comprehensivePnl,
+                           String grossExposure, String netExposure, int positionCount) {
     }
 
     public record PositionDto(String bookId, String instrumentId, String assetClass, String currency,
@@ -110,6 +115,7 @@ public final class RiskController {
         return new RiskDto(
                 r.asOfMillis(),
                 new TotalsDto(s(r.total().realizedPnl()), s(r.total().unrealizedPnl()), s(r.total().totalPnl()),
+                        s(r.total().fxTranslationPnl()), s(r.total().comprehensivePnl()),
                         s(r.total().grossExposure()), s(r.total().netExposure())),
                 r.byAssetClass().stream().map(RiskController::group).toList(),
                 r.byBook().stream().map(RiskController::group).toList(),
@@ -118,7 +124,8 @@ public final class RiskController {
 
     private static GroupDto group(ConsolidatedRisk.Group g) {
         return new GroupDto(g.key(), g.currency(), s(g.realizedPnl()), s(g.unrealizedPnl()),
-                s(g.totalPnl()), s(g.grossExposure()), s(g.netExposure()), g.positionCount());
+                s(g.totalPnl()), s(g.fxTranslationPnl()), s(g.comprehensivePnl()),
+                s(g.grossExposure()), s(g.netExposure()), g.positionCount());
     }
 
     private static PositionDto position(PositionRisk p) {

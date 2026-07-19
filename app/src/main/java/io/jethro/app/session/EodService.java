@@ -136,7 +136,7 @@ public final class EodService implements AutoCloseable {
         ConsolidatedRisk closeSnapshot = bufferedRisk != null ? bufferedRisk : risk.get();
         List<MarkSource.Mark> closeMarks = bufferedMarks != null ? bufferedMarks : marks.marks();
         ConsolidatedRisk snapshot = closeSnapshot;
-        BigDecimal closeTotal = snapshot != null ? snapshot.total().totalPnl() : previousCloseTotal;
+        BigDecimal closeTotal = snapshot != null ? snapshot.total().comprehensivePnl() : previousCloseTotal;
         if (jdbc != null) {
             for (MarkSource.Mark mark : closeMarks) {
                 jdbc.update("""
@@ -155,7 +155,7 @@ public final class EodService implements AutoCloseable {
                             values (?, ?, ?, ?, ?)
                             on conflict (day, book) do update set realized_pnl = excluded.realized_pnl,
                                 unrealized_pnl = excluded.unrealized_pnl, total_pnl = excluded.total_pnl
-                            """, ended, book.key(), book.realizedPnl(), book.unrealizedPnl(), book.totalPnl());
+                            """, ended, book.key(), book.realizedPnl(), book.unrealizedPnl(), book.comprehensivePnl());
                 }
             }
         }
@@ -164,7 +164,7 @@ public final class EodService implements AutoCloseable {
         // move is open − previous close, intraday is live total − open. Persisted so the split
         // survives restarts.
         ConsolidatedRisk openSnapshot = risk.get();
-        BigDecimal open = openSnapshot != null ? openSnapshot.total().totalPnl() : closeTotal;
+        BigDecimal open = openSnapshot != null ? openSnapshot.total().comprehensivePnl() : closeTotal;
         if (jdbc != null) {
             jdbc.update("""
                     insert into firm_equity (day, total_pnl, open_pnl) values (?, ?, ?)
@@ -197,7 +197,7 @@ public final class EodService implements AutoCloseable {
     /** Live today-so-far P&L: current firm total minus the previous session close. */
     public BigDecimal todayPnl() {
         ConsolidatedRisk snapshot = risk.get();
-        BigDecimal total = snapshot != null ? snapshot.total().totalPnl() : previousCloseTotal;
+        BigDecimal total = snapshot != null ? snapshot.total().comprehensivePnl() : previousCloseTotal;
         return total.subtract(previousCloseTotal);
     }
 
@@ -215,7 +215,7 @@ public final class EodService implements AutoCloseable {
             return null;
         }
         ConsolidatedRisk snapshot = risk.get();
-        BigDecimal total = snapshot != null ? snapshot.total().totalPnl() : open;
+        BigDecimal total = snapshot != null ? snapshot.total().comprehensivePnl() : open;
         return total.subtract(open);
     }
 

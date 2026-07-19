@@ -24,4 +24,17 @@ public interface MarketDataListener {
     default void onQuote(String instrumentId, long bidScaled, long askScaled,
                          long providerTimestampMillis, long ingestTimestampMillis) {
     }
+
+    /**
+     * A top-of-book quote WITH sizes (ADR-0033): best bid/ask plus the quantity resting at each
+     * touch (scaled-long, {@link io.jethro.domain.Decimals#QTY_SCALE}). Synthesized by the sim
+     * from real volume — a model of depth, not a real order book. Default delegates to the
+     * size-less {@link #onQuote} so existing listeners are unaffected; a depth-aware listener
+     * overrides this.
+     */
+    default void onQuote(String instrumentId, long bidScaled, long askScaled,
+                         long bidSizeScaled, long askSizeScaled,
+                         long providerTimestampMillis, long ingestTimestampMillis) {
+        onQuote(instrumentId, bidScaled, askScaled, providerTimestampMillis, ingestTimestampMillis);
+    }
 }

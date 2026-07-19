@@ -59,7 +59,7 @@ class ScenarioFullRevalTest {
         BigDecimal q = new BigDecimal(qty);
         BigDecimal net = q.multiply(new BigDecimal(mark)).multiply(new BigDecimal(mult));
         return new PositionRisk(book, instrument, assetClass, "USD", q, new BigDecimal(mark),
-                new BigDecimal(mark), true, 0, BigDecimal.ZERO, BigDecimal.ZERO, net, net.abs());
+                new BigDecimal(mark), true, 0, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, net, net.abs());
     }
 
     private static ScenarioEngine.ScenarioResult byId(List<ScenarioEngine.ScenarioResult> results, String id) {

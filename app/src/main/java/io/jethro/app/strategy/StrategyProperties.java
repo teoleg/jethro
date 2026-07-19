@@ -70,10 +70,26 @@ public record StrategyProperties(
         /** Signal algo: "momentum" (default) or "mean-reversion" — the SAME z-score detector
          *  read in opposite directions; both run through the identical guardrails, sizing and
          *  OOS harness, which is what adjudicates between them (ADR-0027). */
-        String algo) {
+        String algo,
+        /** Volume confirmation (ADR-0033): a signal fires only when relativeVolume ≥ this — a
+         *  breakout on thin participation is discarded. Default 0.7; 0 disables. Neutral in the
+         *  backtest (no volume), so it gates the live path only. */
+        Double volumeConfirmMin,
+        /** Liquidity-aware sizing (ADR-0033): cap an order at this fraction of the instrument's
+         *  live measured ADV — below the execution participation cap so a sized order passes.
+         *  Default 0.015; 0 disables. */
+        Double liquidityCapAdvFraction) {
 
     public String algoOrDefault() {
         return algo != null && !algo.isBlank() ? algo.trim().toLowerCase() : "momentum";
+    }
+
+    public double volumeConfirmMinOrDefault() {
+        return volumeConfirmMin != null && volumeConfirmMin >= 0 ? volumeConfirmMin : 0.7;
+    }
+
+    public double liquidityCapAdvFractionOrDefault() {
+        return liquidityCapAdvFraction != null && liquidityCapAdvFraction > 0 ? liquidityCapAdvFraction : 0.015;
     }
 
     public BigDecimal riskBudgetDailyOrDefault() {

@@ -63,6 +63,7 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private final OrderService orderService; // nullable: null → human-in-loop only
     private final HypothesisRecordStore recordStore;
     private final io.jethro.app.risk.TradingHaltSwitch halt; // firm breaker (ADR-0027)
+    private final HypothesisMemory memory; // semantic de-dup (ADR-0035); DISABLED when RAG is off
 
     private static final int EXECUTED_CAP = 50;
     private static final int LEDGER_CAP = 60;
@@ -90,8 +91,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                                HypothesisProperties props, OrderService orderService,
                                HypothesisRecordStore recordStore,
                                io.jethro.app.risk.TradingHaltSwitch halt,
-                               InstrumentNameSource names) {
+                               InstrumentNameSource names, HypothesisMemory memory) {
         this.generator = generator;
+        this.memory = memory != null ? memory : HypothesisMemory.DISABLED;
         this.evaluator = evaluator;
         this.narrativeFeed = narrativeFeed;
         this.backtest = backtest;
@@ -133,6 +135,54 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             }
         }
         return out;
+    }
+
+    /** Re-embeds persisted scored hypotheses into the RAG outcome memory at boot (ADR-0035) —
+     *  durability by rebuild, no vector store. Best-effort; runs off the boot thread. */
+    private void rebuildOutcomeMemory(List<HypothesisRecord> persisted) {
+        int rebuilt = 0;
+        for (HypothesisRecord r : persisted) {
+            if (!r.isOpen() && r.outcome() != null) {
+                memory.rememberOutcome(r.instrumentId(), r.direction(), r.thesis(), r.outcome(),
+                        r.outcomePnl() != null ? r.outcomePnl().toPlainString() : "");
+                rebuilt++;
+            }
+        }
+        if (rebuilt > 0) {
+            log.info("RAG: rebuilt outcome memory from {} persisted scored hypotheses (ADR-0035)", rebuilt);
+        }
+    }
+
+    /** The recent directional mix of LIVE (not-yet-scored) calls (ADR-0036) — surfaced and fed
+     *  back to the model so it self-corrects a one-sided book. Descriptive, never a risk limit. */
+    public record DirectionBalance(int longs, int shorts, String skew) {
+    }
+
+    /** RAG health for the ops view (ADR-0035): indexed chunks, embedding dim, hit/miss counters. */
+    public HypothesisMemory.RagStats ragStats() {
+        return memory.stats();
+    }
+
+    public DirectionBalance directionBalance() {
+        int longs = 0;
+        int shorts = 0;
+        for (HypothesisEvent e : ledger()) {
+            if (e.outcome() != null) {
+                continue; // scored/closed — not a live call
+            }
+            if ("BUY".equals(e.direction())) {
+                longs++;
+            } else if ("SELL".equals(e.direction())) {
+                shorts++;
+            }
+        }
+        return new DirectionBalance(longs, shorts, HypothesisBalance.skew(longs, shorts));
+    }
+
+    /** The balance line fed to the model (ADR-0036), or "" when there are too few calls to matter. */
+    private String directionBalanceForPrompt() {
+        DirectionBalance b = directionBalance();
+        return HypothesisBalance.promptLine(b.longs(), b.shorts());
     }
 
     /** Records/updates a hypothesis in the ledger: same (instrument, thesis) updates in place
@@ -195,6 +245,14 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                         null, r.outcome(),
                         r.outcomePnl() != null ? r.outcomePnl().toPlainString() : null));
             }
+        }
+        // Rebuild the RAG outcome memory (ADR-0035) from the persisted scored records — the vectors
+        // are derived data, so re-embedding the durable Postgres records at boot gives durability
+        // with no vector store. Off the boot thread (embeddings hit Ollama) and best-effort.
+        if (memory.enabled()) {
+            Thread rebuild = new Thread(() -> rebuildOutcomeMemory(persisted), "rag-memory-rebuild");
+            rebuild.setDaemon(true);
+            rebuild.start();
         }
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "hypothesis");
@@ -274,9 +332,11 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             try {
                 // Tell the model which calls are already live (ADR-0022 idempotency) so it stops
                 // re-proposing the same trade on unchanged news; the deterministic guard below is
-                // the backstop.
+                // the backstop. Plus RAG memory (ADR-0035): its own outcomes on setups like today's
+                // news, retrieved semantically — empty/no-op when RAG is off.
                 hypotheses = generator.generate(new HypothesisContext(
-                        markViews, narrative, portfolio, tradable, activeCallsForPrompt()));
+                        markViews, narrative, portfolio, tradable,
+                        activeCallsForPrompt(), memory.recallSimilar(narrative), directionBalanceForPrompt()));
                 consecutiveFailures.set(0);
             } catch (InferenceException e) {
                 long failures = consecutiveFailures.incrementAndGet();
@@ -312,11 +372,15 @@ public final class HypothesisLifecycle implements SmartLifecycle {
             List<HypothesisEvaluator.Evaluated> fresh = new ArrayList<>(evaluated.size());
             int suppressed = 0;
             for (HypothesisEvaluator.Evaluated e : evaluated) {
-                if (idempotency.isDuplicate(e.hypothesis(), now)) {
+                // Deterministic floor (news id / text) + semantic layer (ADR-0035): the same story
+                // reworded across sources is still a repeat. Semantic is best-effort — off/failed,
+                // isSemanticDuplicate is false and the deterministic guard governs.
+                if (idempotency.isDuplicate(e.hypothesis(), now) || memory.isSemanticDuplicate(e.hypothesis())) {
                     suppressed++;
                     continue;
                 }
                 idempotency.markFired(e.hypothesis(), now); // also de-dups within this cycle
+                memory.remember(e.hypothesis());
                 fresh.add(e);
             }
             Set<String> autoTraded = runAutonomy(fresh, now);
@@ -471,6 +535,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 log.warn("could not persist outcome for {}: {}", r.id(), ex.toString());
             }
             HypothesisRecord scored = r.scored(score.outcome(), score.pnl(), exitMark);
+            // RAG memory (ADR-0035): remember the scored call so future prompts recall it.
+            memory.rememberOutcome(r.instrumentId(), r.direction(), r.thesis(),
+                    score.outcome(), score.pnl().toPlainString());
             synchronized (executed) {
                 executed.removeIf(x -> x.id().equals(r.id()));
                 executed.addFirst(scored);

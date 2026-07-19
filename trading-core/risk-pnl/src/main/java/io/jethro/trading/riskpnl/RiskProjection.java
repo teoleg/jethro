@@ -45,6 +45,12 @@ public final class RiskProjection {
 
     private final Map<String, Position> positions = new HashMap<>();
     private final Map<String, BigDecimal> realized = new HashMap<>();
+    // Realized P&L translated to USD and FROZEN at each closing fill's FX rate (ADR-0037) —
+    // the clean figure that does not re-wander with spot once a book is flat.
+    private final Map<String, BigDecimal> realizedBaseUsd = new HashMap<>();
+    // Realized P&L booked while no *USD pair mark was available to lock it — held in the
+    // instrument currency and locked lazily at the first snapshot that can convert it.
+    private final Map<String, BigDecimal> realizedPendingCcy = new HashMap<>();
     private final Set<String> seenFills = new HashSet<>();
     private final Map<String, MarkPoint> marks = new HashMap<>();
 
@@ -77,7 +83,17 @@ public final class RiskProjection {
         positions.put(key, applied.position());
         // The fee is a SEPARATE cash cost (ADR-0025): booked against realized immediately —
         // it is money already gone, whatever the position later does.
-        realized.merge(key, applied.realizedPnl().subtract(fill.fee()), BigDecimal::add);
+        BigDecimal ccyDelta = applied.realizedPnl().subtract(fill.fee());
+        realized.merge(key, ccyDelta, BigDecimal::add);
+        // Lock the USD value NOW, at the fill's FX rate (ADR-0037 clean realized). If no *USD
+        // pair mark exists yet to convert this currency, hold it pending and lock it later.
+        String ccy = ref.currency();
+        FxConversion fx = fxFromMarks();
+        if (fx.canConvert(ccy, "USD")) {
+            realizedBaseUsd.merge(key, fx.convert(ccyDelta, ccy, "USD"), BigDecimal::add);
+        } else {
+            realizedPendingCcy.merge(key, ccyDelta, BigDecimal::add);
+        }
     }
 
     /** Records the latest mark for an instrument (drives unrealized PnL and exposure). */
@@ -87,14 +103,19 @@ public final class RiskProjection {
 
     /** Builds a consolidated snapshot as of {@code nowMillis}. */
     public synchronized ConsolidatedRisk snapshot(long nowMillis) {
+        // FX built once from the LIVE *USD pair marks; used for the base-currency lock below
+        // AND the rollup translation, so both name the same marks.
+        FxConversion fx = fxFromMarks();
         List<PositionRisk> rows = new ArrayList<>();
         for (Map.Entry<String, Position> entry : positions.entrySet()) {
             Position pos = entry.getValue();
-            BigDecimal realizedPnl = p8(realized.getOrDefault(entry.getKey(), BigDecimal.ZERO));
+            String posKey = entry.getKey();
+            BigDecimal realizedPnl = p8(realized.getOrDefault(posKey, BigDecimal.ZERO));
             if (pos.isFlat() && realizedPnl.signum() == 0) {
                 continue; // fully closed and nothing realized — no signal
             }
             InstrumentRef ref = ref(pos.instrumentId().value());
+            BigDecimal realizedBase = lockedRealizedUsd(posKey, ref.currency(), fx);
             MarkPoint m = marks.get(pos.instrumentId().value());
             boolean hasMark = m != null;
             long age = hasMark ? Math.max(0, nowMillis - m.asOfMillis()) : -1;
@@ -114,7 +135,7 @@ public final class RiskProjection {
             rows.add(new PositionRisk(
                     pos.bookId().value(), pos.instrumentId().value(), ref.assetClass(), ref.currency(),
                     qty, p8(pos.avgCost()), hasMark ? p8(m.price()) : zero(), hasMark, age,
-                    realizedPnl, unrealized, net, net.abs()));
+                    realizedPnl, p8(realizedBase), unrealized, net, net.abs()));
         }
         rows.sort((a, b) -> b.grossExposure().compareTo(a.grossExposure()));
 
@@ -123,9 +144,27 @@ public final class RiskProjection {
         // built from the LIVE *USD pair marks the sim/feed is already publishing — every
         // conversion names its FX mark. An unconvertible currency keeps the honest MIXED
         // marker rather than silently mis-summing (finance-math rule).
-        FxConversion fx = fxFromMarks();
         return new ConsolidatedRisk(nowMillis, totals(rows, fx),
                 rollup(rows, PositionRisk::assetClass, fx), rollup(rows, PositionRisk::bookId, fx), rows);
+    }
+
+    /**
+     * The USD-locked realized P&amp;L for a position (ADR-0037): the sum already frozen at each
+     * closing fill's FX rate, plus any amount that was booked with no rate available then and
+     * can now be locked at the current rate (locked here and cached). If the currency still has
+     * no *USD pair mark, the raw local-currency remainder is returned so the MIXED bucket sums
+     * it honestly — clean and comprehensive coincide there, as they must without an FX rate.
+     */
+    private BigDecimal lockedRealizedUsd(String posKey, String ccy, FxConversion fx) {
+        BigDecimal locked = realizedBaseUsd.getOrDefault(posKey, BigDecimal.ZERO);
+        BigDecimal pending = realizedPendingCcy.getOrDefault(posKey, BigDecimal.ZERO);
+        if (pending.signum() != 0 && fx.canConvert(ccy, "USD")) {
+            locked = locked.add(fx.convert(pending, ccy, "USD"));
+            realizedBaseUsd.put(posKey, locked);
+            realizedPendingCcy.remove(posKey);
+            pending = BigDecimal.ZERO;
+        }
+        return pending.signum() == 0 ? locked : locked.add(pending);
     }
 
     /** The FX converter over the current *USD pair marks — for consumers (scenario
@@ -280,8 +319,8 @@ public final class RiskProjection {
             acc.add(r);
         }
         return new ConsolidatedRisk.Totals(
-                p8(acc.realized), p8(acc.unrealized), p8(acc.realized.add(acc.unrealized)),
-                p8(acc.gross), p8(acc.net));
+                p8(acc.cleanRealized), p8(acc.unrealized), p8(acc.cleanTotal()),
+                p8(acc.fxTranslation()), p8(acc.comprehensive()), p8(acc.gross), p8(acc.net));
     }
 
     private static List<ConsolidatedRisk.Group> rollup(List<PositionRisk> rows,
@@ -292,21 +331,25 @@ public final class RiskProjection {
         }
         List<ConsolidatedRisk.Group> out = new ArrayList<>();
         grouped.forEach((k, a) -> out.add(new ConsolidatedRisk.Group(
-                k, a.currency(), p8(a.realized), p8(a.unrealized),
-                p8(a.realized.add(a.unrealized)), p8(a.gross), p8(a.net), a.count)));
+                k, a.currency(), p8(a.cleanRealized), p8(a.unrealized), p8(a.cleanTotal()),
+                p8(a.fxTranslation()), p8(a.comprehensive()), p8(a.gross), p8(a.net), a.count)));
         out.sort((x, y) -> y.grossExposure().compareTo(x.grossExposure()));
         return out;
     }
 
     /**
-     * Rollup accumulator reporting in USD: each position's figures convert from its
-     * instrument currency at the live FX marks (quant-engine phase 3). If a currency
-     * can't be converted (no pair mark yet), the bucket keeps the honest MIXED marker —
-     * never a silent mis-sum across currencies.
+     * Rollup accumulator reporting in USD (quant-engine phase 3). Realized P&amp;L is split
+     * two ways (ADR-0037): {@code cleanRealized} is the sum of each row's FX rate LOCKED at
+     * its closing fill ({@link PositionRisk#realizedPnlBase()}) — it does not re-wander with
+     * spot; {@code liveRealized} re-translates the local realized at today's marks. Their
+     * difference is FX-translation P&amp;L. Unrealized and exposures always translate live
+     * (an open position genuinely revalues). A currency with no pair mark keeps the honest
+     * MIXED marker — never a silent mis-sum — and there clean == comprehensive (no rate).
      */
     private static final class Acc {
         final FxConversion fx;
-        BigDecimal realized = BigDecimal.ZERO, unrealized = BigDecimal.ZERO;
+        BigDecimal cleanRealized = BigDecimal.ZERO, liveRealized = BigDecimal.ZERO;
+        BigDecimal unrealized = BigDecimal.ZERO;
         BigDecimal gross = BigDecimal.ZERO, net = BigDecimal.ZERO;
         int count;
         boolean unconvertible;
@@ -317,18 +360,34 @@ public final class RiskProjection {
 
         void add(PositionRisk r) {
             count++;
+            cleanRealized = cleanRealized.add(r.realizedPnlBase()); // already USD-locked (or raw for MIXED)
             if (fx.canConvert(r.currency(), "USD")) {
-                realized = realized.add(fx.convert(r.realizedPnl(), r.currency(), "USD"));
+                liveRealized = liveRealized.add(fx.convert(r.realizedPnl(), r.currency(), "USD"));
                 unrealized = unrealized.add(fx.convert(r.unrealizedPnl(), r.currency(), "USD"));
                 gross = gross.add(fx.convert(r.grossExposure(), r.currency(), "USD"));
                 net = net.add(fx.convert(r.netExposure(), r.currency(), "USD"));
             } else {
                 unconvertible = true;
-                realized = realized.add(r.realizedPnl());
+                liveRealized = liveRealized.add(r.realizedPnl());
                 unrealized = unrealized.add(r.unrealizedPnl());
                 gross = gross.add(r.grossExposure());
                 net = net.add(r.netExposure());
             }
+        }
+
+        /** Clean trading P&L: locked realized + live unrealized — flat book ⇒ static. */
+        BigDecimal cleanTotal() {
+            return cleanRealized.add(unrealized);
+        }
+
+        /** FX revaluation of foreign realized cash: live translation − the locked figure. */
+        BigDecimal fxTranslation() {
+            return liveRealized.subtract(cleanRealized);
+        }
+
+        /** Actual book-value change: clean trading P&L + FX translation. Risk controls read this. */
+        BigDecimal comprehensive() {
+            return cleanTotal().add(fxTranslation());
         }
 
         String currency() {

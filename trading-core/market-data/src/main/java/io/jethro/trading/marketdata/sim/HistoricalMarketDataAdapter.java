@@ -29,7 +29,9 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
     private final Quotes.QuoteSpec[] swapSpecs;
     private final long tickIntervalNanos;
     private final long ticksPerDay;                // >0: per-tick volume = daily / ticksPerDay
+    private final TickClock clock;                 // deadline pacing — see TickClock
     private final SimControl control;
+    private volatile SimNewsEngine newsEngine;     // sim-generated news (ADR-0034); null = disabled
     private final AtomicBoolean running = new AtomicBoolean(false);
     private volatile Thread feedThread;
     private volatile long dayIndexV;
@@ -62,6 +64,7 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
         this.tickIntervalNanos = tickIntervalNanos;
         this.ticksPerDay = Math.round(simSecondsPerDay / (tickIntervalNanos / 1_000_000_000.0));
         this.control = new SimControl(tickIntervalNanos, factor);
+        this.clock = new TickClock(this.control::effectiveTickIntervalNanos);
         this.sim = new HistoricalBootstrapSimulator(seed, snapshot, factor,
                 factorStarts.stream().mapToLong(Long::longValue).toArray(), meanBlockLength, control);
     }
@@ -69,6 +72,17 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
     /** The live control panel (ADR-0031) — sim-only, gated on {@code feedMode == SIM}. */
     public SimControl control() {
         return control;
+    }
+
+    /** Enables sim-generated news (ADR-0034); call before {@link #start}. */
+    public void configureNews(long seed, double perTickProbability, int horizonTicks) {
+        this.newsEngine = new SimNewsEngine(seed, java.util.List.of(factorIds), control,
+                perTickProbability, horizonTicks);
+    }
+
+    /** The sim news engine (ADR-0034), or null when news is disabled — for the narrative bridge. */
+    public SimNewsEngine newsEngine() {
+        return newsEngine;
     }
 
     /** No regime concept on the historical engine — always CALM (the panel's regime override is
@@ -89,10 +103,18 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
         return specs;
     }
 
+    /** A few ticks of typical trade size rest at the touch — synthesized depth (ADR-0033). */
+    private static final long DEPTH_TICKS = 5;
+
+    private static long touchSize(long qtyScaled) {
+        return Math.max(1_000_000L, qtyScaled * DEPTH_TICKS);
+    }
+
     private static void quote(MarketDataListener listener, String id, Quotes.QuoteSpec spec,
-                              long midScaled, long now) {
+                              long midScaled, long sizeScaled, long now) {
         if (spec != null) {
-            listener.onQuote(id, Quotes.bidScaled(midScaled, spec), Quotes.askScaled(midScaled, spec), now, now);
+            listener.onQuote(id, Quotes.bidScaled(midScaled, spec), Quotes.askScaled(midScaled, spec),
+                    sizeScaled, sizeScaled, now, now);
         }
     }
 
@@ -124,7 +146,14 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
         while (running.get()) {
             if (control.paused()) {
                 java.util.concurrent.locks.LockSupport.parkNanos(control.pausePollNanos());
+                clock.resync(); // a pause is not an overrun
                 continue;
+            }
+            // News shocks (ADR-0034): decay actives, then maybe fire a new one for this tick.
+            control.onTick();
+            SimNewsEngine ne = newsEngine;
+            if (ne != null) {
+                ne.maybeFire(tickCount);
             }
             long now = System.currentTimeMillis();
             if (ticksPerDay > 0 && tickCount > 0 && tickCount % ticksPerDay == 0) {
@@ -136,14 +165,14 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
                 long mid = sim.priceScaled(i);
                 long qty = perTickQtyScaled(sim.currentDailyVolume(i), control.volumeScale(i));
                 listener.onTrade(factorIds[i], mid, qty, now, now);
-                quote(listener, factorIds[i], factorSpecs[i], mid, now);
+                quote(listener, factorIds[i], factorSpecs[i], mid, touchSize(qty), now);
             }
             if (curveSim != null) {
                 curveSim.step(); // the curve runs on its own seedable walk under this engine
                 for (int i = 0; i < linkedIds.length; i++) {
                     long mid = curveSim.linkedPriceScaled(linkedIds[i]);
                     listener.onTrade(linkedIds[i], mid, 1_000_000L, now, now);
-                    quote(listener, linkedIds[i], linkedSpecs[i], mid, now);
+                    quote(listener, linkedIds[i], linkedSpecs[i], mid, touchSize(1_000_000L), now);
                 }
                 for (int t = 0; t < CurveMarkSource.TENOR_IDS.length; t++) {
                     listener.onTrade(CurveMarkSource.TENOR_IDS[t],
@@ -156,11 +185,16 @@ public final class HistoricalMarketDataAdapter implements MarketDataAdapter {
                 for (int s = 0; s < CurveMarkSource.SWAP_IDS.length; s++) {
                     long mid = curveSim.swapParScaledPercent(s);
                     listener.onTrade(CurveMarkSource.SWAP_IDS[s], mid, 1_000_000L, now, now);
-                    quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, now);
+                    quote(listener, CurveMarkSource.SWAP_IDS[s], swapSpecs[s], mid, touchSize(1_000_000L), now);
                 }
             }
-            java.util.concurrent.locks.LockSupport.parkNanos(control.effectiveTickIntervalNanos());
+            clock.awaitNextTick(); // deadline pacing: work/jitter don't stretch the period
         }
+    }
+
+    /** Publisher telemetry (target vs achieved rate, late ticks, overrun resyncs). */
+    public TickClock.Stats clockStats() {
+        return clock.stats();
     }
 
     @Override

@@ -132,9 +132,10 @@
       const metric = (k, v, colour) => `<span class="metric">${k}<b class="${colour?cls(v):''} mono">${money(v)}</b></span>`;
       const head = `<div class="book-h"><span class="name">${esc(b.name)} <span class="dim">(${esc(b.bookId)})</span></span>
         <span class="ccy">${esc(b.baseCurrency)}</span><span class="spacer"></span>` +
-        (g ? metric("Total P&L", g.totalPnl, true) + metric("Realized", g.realizedPnl, true) + metric("Unrealized", g.unrealizedPnl, true)
+        (g ? metric("Trading P&L", g.totalPnl, true) + metric("Realized", g.realizedPnl, true) + metric("Unrealized", g.unrealizedPnl, true)
+           + (Number(g.fxTranslationPnl) !== 0 ? metric("FX transl.", g.fxTranslationPnl, true) : "")
            + metric("Net exp", g.netExposure) + metric("Gross exp", g.grossExposure)
-           : '<span class="metric">Total P&L<b class="flat mono">0.00</b></span>') + `</div>`;
+           : '<span class="metric">Trading P&L<b class="flat mono">0.00</b></span>') + `</div>`;
       const body = ps.length ?
         "<table><tr><th>instr</th><th>CUSIP / ID</th><th>market</th><th>qty</th><th>avg cost</th><th>mark</th><th>unrealized</th><th>realized</th><th>net exp</th></tr>" +
         ps.map(p => { const closed = Number(p.quantity) === 0; // flat: no position, kept only to carry realized P&L

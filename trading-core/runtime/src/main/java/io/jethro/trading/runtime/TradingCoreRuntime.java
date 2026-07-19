@@ -87,6 +87,12 @@ public final class TradingCoreRuntime implements AutoCloseable {
                                 long providerTs, long ingestTs) {
                 quoteCache.update(instrumentId, bidScaled, askScaled, providerTs);
             }
+
+            @Override
+            public void onQuote(String instrumentId, long bidScaled, long askScaled,
+                                long bidSizeScaled, long askSizeScaled, long providerTs, long ingestTs) {
+                quoteCache.update(instrumentId, bidScaled, askScaled, bidSizeScaled, askSizeScaled, providerTs);
+            }
         };
     }
 
