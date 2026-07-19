@@ -39,6 +39,13 @@ public final class StockTwitsSocialFeed implements SocialFeed {
     private final HttpClient http;
     private final ObjectMapper mapper = new ObjectMapper();
     private int cursor; // round-robins through the universe so all names get covered over cycles
+    private volatile SocialSourceStatus status =
+            new SocialSourceStatus("stocktwits", false, 0, 0, "not polled yet");
+
+    @Override
+    public List<SocialSourceStatus> health() {
+        return List.of(status);
+    }
 
     public StockTwitsSocialFeed(String baseUrl, int symbolsPerCycle, Duration timeout) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
@@ -55,8 +62,14 @@ public final class StockTwitsSocialFeed implements SocialFeed {
         if (universe == null || universe.isEmpty()) {
             return out;
         }
+        int polled = 0;
+        boolean anyOk = false;
+        String lastError = null;
+        List<String> symbols = new ArrayList<>();
         for (int i = 0; i < Math.min(symbolsPerCycle, universe.size()); i++) {
             String symbol = universe.get(Math.floorMod(cursor++, universe.size()));
+            symbols.add(symbol);
+            polled++;
             try {
                 HttpRequest req = HttpRequest.newBuilder(URI.create(baseUrl + "/streams/symbol/" + symbol + ".json"))
                         .timeout(Duration.ofSeconds(8))
@@ -64,14 +77,20 @@ public final class StockTwitsSocialFeed implements SocialFeed {
                         .GET().build();
                 HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() / 100 != 2) {
+                    lastError = "HTTP " + resp.statusCode() + " on " + symbol;
                     log.debug("stocktwits {} → HTTP {} (skipped)", symbol, resp.statusCode());
                     continue;
                 }
+                anyOk = true;
                 out.addAll(parse(resp.body(), nowMillis));
             } catch (Exception e) {
+                lastError = e.getClass().getSimpleName() + " on " + symbol;
                 log.debug("stocktwits {} skipped: {}", symbol, e.toString());
             }
         }
+        String detail = anyOk ? "reached " + baseUrl + " · polled " + symbols
+                : "unreachable — " + (lastError == null ? "no symbols" : lastError);
+        status = new SocialSourceStatus("stocktwits", anyOk, nowMillis, out.size(), detail);
         return out;
     }
 

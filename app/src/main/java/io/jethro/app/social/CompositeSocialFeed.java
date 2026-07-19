@@ -34,4 +34,13 @@ public final class CompositeSocialFeed implements SocialFeed {
         }
         return merged;
     }
+
+    @Override
+    public List<SocialSourceStatus> health() {
+        List<SocialSourceStatus> all = new ArrayList<>();
+        for (SocialFeed source : sources) {
+            all.addAll(source.health());
+        }
+        return all;
+    }
 }

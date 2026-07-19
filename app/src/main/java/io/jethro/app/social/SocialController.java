@@ -16,9 +16,11 @@ import java.util.List;
 public final class SocialController {
 
     private final ObjectProvider<SocialLifecycle> lifecycle;
+    private final SocialProperties props;
 
-    public SocialController(ObjectProvider<SocialLifecycle> lifecycle) {
+    public SocialController(ObjectProvider<SocialLifecycle> lifecycle, SocialProperties props) {
         this.lifecycle = lifecycle;
+        this.props = props;
     }
 
     public record Counters(long ingested, long kept, long duplicateDropped, long cashtagSpamDropped,
@@ -32,17 +34,34 @@ public final class SocialController {
     public record PostView(long timestampMillis, String channel, String tier, boolean credible, String text) {
     }
 
+    /** A source's live connection health (ADR-0050) — so the site connections are VISIBLE. */
+    public record SourceView(String name, boolean healthy, long lastPollMillis, int lastCount, String detail) {
+    }
+
+    /** The active controls, surfaced read-only so the running policy is legible. */
+    public record Controls(List<String> sources, long intervalSeconds, int corroborationChannels,
+                           int burstThreshold, int maxCashtags, int credibleFollowerFloor,
+                           int credibleAgeDaysFloor, String defaultTier) {
+    }
+
     public record SocialView(boolean available, long lastRunMillis, Counters counters,
+                             List<SourceView> sources, Controls controls,
                              List<SignalView> signals, List<PostView> recent) {
     }
 
     @GetMapping("/api/social")
     public SocialView social() {
+        Controls controls = new Controls(props.sourcesOrDefault(), props.intervalSecondsOrDefault(),
+                props.kOrDefault(), props.burstThresholdOrDefault(), props.maxCashtagsOrDefault(),
+                props.followerFloorOrDefault(), props.ageFloorOrDefault(), props.defaultTierOrDefault().name());
         SocialLifecycle s = lifecycle.getIfAvailable();
         if (s == null) {
-            return new SocialView(false, 0, new Counters(0, 0, 0, 0, 0, 0), List.of(), List.of());
+            return new SocialView(false, 0, new Counters(0, 0, 0, 0, 0, 0), List.of(), controls, List.of(), List.of());
         }
         long[] c = s.counters();
+        List<SourceView> sources = s.sourceHealth().stream()
+                .map(h -> new SourceView(h.name(), h.healthy(), h.lastPollMillis(), h.lastCount(), h.detail()))
+                .toList();
         List<SignalView> signals = s.signals().stream()
                 .map(x -> new SignalView(x.instrumentId(), x.sector(), x.direction(), x.corroboratingChannels(),
                         x.mentions(), x.manipulationSuspected(), x.sample()))
@@ -52,6 +71,6 @@ public final class SocialController {
                         s.credible(p), p.text()))
                 .toList();
         return new SocialView(true, s.lastRunMillis(),
-                new Counters(c[0], c[1], c[2], c[3], c[4], c[5]), signals, recent);
+                new Counters(c[0], c[1], c[2], c[3], c[4], c[5]), sources, controls, signals, recent);
     }
 }

@@ -44,8 +44,15 @@ Deterministic, offline, advisory-only. Package `io.jethro.app.social`.
   subject seen on two different sources corroborates. `SocialChannels` gained a `defaultTier` so a
   real feed (`default-tier=STANDARD`) judges organic accounts by the credibility floors — a pump
   throwaway still fails. The live HTTP call can't be verified offline; the mapping is what's tested.
-- **2b (todo):** Telegram adapter (Bot API / MTProto public channels), API keys via env; formal
-  rate-limit/ToS handling; a `feedMode`-style live gate if a source should be LIVE-only.
+- **2b (done):** `TelegramSocialFeed` (Bot API `getUpdates`, public channels the bot joins, token via
+  env, update cursor, fail-open, parse fixture-tested). Telegram gives no follower signal, so a
+  Telegram channel is credible only when curated TRUSTED. Enable with `sources=sim,telegram`.
+- **Visibility (done):** every source reports `SocialSourceStatus` (healthy / last poll / count /
+  detail); the composite flattens them. `/api/social` now returns per-source connection health + the
+  active controls. A dedicated **Sources** page (`social-sources.html`) shows the site connections,
+  progress counters, and the running controls — separate from the signals page.
+- **2c (todo):** formal rate-limit/backoff per source; a `feedMode`-style live gate if a source should
+  be LIVE-only; MTProto (read public channels without being added) if Bot API coverage is too thin.
 
 ## Phase 3 — SLM classify + queue merge (ADR-0045)
 Replace/augment the deterministic router with the SLM sector-classify for posts without explicit

@@ -174,6 +174,11 @@ public final class SocialLifecycle implements SmartLifecycle {
         }
     }
 
+    /** Per-source connection health for the UI (ADR-0050) — flattened across the composite. */
+    public List<SocialSourceStatus> sourceHealth() {
+        return feed.health();
+    }
+
     public List<SocialSignal> signals() {
         return signals;
     }

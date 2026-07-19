@@ -27,9 +27,15 @@ public final class SimSocialFeed implements SocialFeed {
 
     private final Random rnd;
     private long seq;
+    private volatile SocialSourceStatus status = new SocialSourceStatus("sim", true, 0, 0, "seedable synthetic feed");
 
     public SimSocialFeed(long seed) {
         this.rnd = new Random(seed);
+    }
+
+    @Override
+    public java.util.List<SocialSourceStatus> health() {
+        return java.util.List.of(status);
     }
 
     @Override
@@ -70,6 +76,7 @@ public final class SimSocialFeed implements SocialFeed {
             shill.append('$').append(pick(universe)).append(' ');
         }
         out.add(throwaway("tg:spamC", shill.toString(), now));
+        status = new SocialSourceStatus("sim", true, now, out.size(), "seedable synthetic feed (spam + pump)");
         return out;
     }
 

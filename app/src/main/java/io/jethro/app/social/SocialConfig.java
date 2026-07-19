@@ -45,6 +45,8 @@ public class SocialConfig {
                 case "stocktwits" -> sources.add(new StockTwitsSocialFeed(
                         props.stocktwitsBaseUrlOrDefault(), props.stocktwitsSymbolsPerCycleOrDefault(),
                         Duration.ofSeconds(8)));
+                case "telegram" -> sources.add(new TelegramSocialFeed(
+                        props.telegramBaseUrlOrDefault(), props.telegramBotTokenOrEmpty(), Duration.ofSeconds(8)));
                 default -> { /* unknown source name — ignored */ }
             }
         }

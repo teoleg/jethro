@@ -13,4 +13,10 @@ public interface SocialFeed {
 
     /** Recent posts to process this cycle. {@code equityUniverse} are the ids a post may reference. */
     List<SocialPost> poll(List<String> equityUniverse, long nowMillis);
+
+    /** Per-source connection health for the UI (ADR-0050). A single source returns one status; the
+     *  composite flattens its children. Default: nothing to report. */
+    default List<SocialSourceStatus> health() {
+        return List.of();
+    }
 }

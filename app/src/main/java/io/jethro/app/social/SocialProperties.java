@@ -40,7 +40,11 @@ public record SocialProperties(
         /** StockTwits API base (public streams). */
         String stocktwitsBaseUrl,
         /** Symbols polled per cycle (round-robined over the universe) — a rate-limit guard. */
-        int stocktwitsSymbolsPerCycle) {
+        int stocktwitsSymbolsPerCycle,
+        /** Telegram Bot API base. */
+        String telegramBaseUrl,
+        /** Telegram bot token (from env, e.g. ${TELEGRAM_BOT_TOKEN}); blank → the source is idle. */
+        String telegramBotToken) {
 
     public long intervalSecondsOrDefault() {
         return intervalSeconds > 0 ? intervalSeconds : 60;
@@ -87,6 +91,14 @@ public record SocialProperties(
 
     public int stocktwitsSymbolsPerCycleOrDefault() {
         return stocktwitsSymbolsPerCycle > 0 ? stocktwitsSymbolsPerCycle : 3;
+    }
+
+    public String telegramBaseUrlOrDefault() {
+        return telegramBaseUrl != null && !telegramBaseUrl.isBlank() ? telegramBaseUrl : "https://api.telegram.org";
+    }
+
+    public String telegramBotTokenOrEmpty() {
+        return telegramBotToken == null ? "" : telegramBotToken.trim();
     }
 
     /** Curated seed registry (ADR-0050 §4) matching the sim channels; unknown channels are UNTRUSTED. */

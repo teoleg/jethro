@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — social sources</title>
+<style>
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --warn:#e0a83d; --alert:#f0553f; --up:#35c07a; --down:#f0553f;
+  }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; background:rgba(10,13,19,.72); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:16px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
+  .brand { font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .tabs { display:flex; gap:4px; }
+  .tab { padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; }
+  .tab:hover { color:var(--txt); background:var(--surface); } .tab.active { color:var(--txt); background:var(--surface-2); }
+  main { max-width:1200px; margin:0 auto; padding:18px 24px 40px; display:flex; flex-direction:column; gap:18px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 0; }
+  .note { color:var(--dim); }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:4px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:6px 12px; border-bottom:1px solid var(--line); line-height:1.6; }
+  tr:last-child td { border-bottom:0; }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+  .led { display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--dim); margin-right:6px; vertical-align:middle; }
+  .led.ok { background:var(--up); box-shadow:0 0 8px var(--up); } .led.bad { background:var(--alert); }
+  .led.idle { background:var(--warn); }
+  .dim{color:var(--dim)} .up{color:var(--up)} .down{color:var(--down)}
+  .stats { display:grid; grid-template-columns:repeat(6, 1fr); gap:10px; }
+  @media (max-width:900px){ .stats{ grid-template-columns:repeat(2,1fr);} }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:10px 12px; }
+  .stat .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  .stat .v { font-size:19px; font-weight:650; margin-top:4px; }
+  .ctl { display:grid; grid-template-columns:repeat(4, 1fr); gap:10px; }
+  @media (max-width:900px){ .ctl{ grid-template-columns:repeat(2,1fr);} }
+  .ctl .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  .ctl .v { font-size:14px; font-weight:600; margin-top:3px; }
+  .empty { color:var(--dim); text-align:center; padding:20px 0; }
+</style>
+</head>
+<body>
+<script src="/format.js"></script>
+<script src="/poll.js"></script>
+<div class="topbar"><div class="bar">
+  <span class="brand">JETHRO</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Overview</a>
+    <a class="tab" href="/sim.html">Sim</a>
+    <a class="tab" href="/social.html">Social</a>
+    <a class="tab active" href="/social-sources.html">Sources</a>
+    <a class="tab" href="/ollama.html">Ops</a>
+  </nav>
+</div></div>
+<main>
+  <div class="section-h">Source connections <span class="note" style="text-transform:none;letter-spacing:0">— ADR-0050: which feeds are reaching their sites, when they last polled, and how many posts they pulled. Advisory-only; nothing here trades. <span id="asof"></span></span></div>
+  <div class="panel"><div id="sources"><div class="empty">loading…</div></div></div>
+
+  <div class="section-h">Progress</div>
+  <div class="stats" id="progress"></div>
+
+  <div class="section-h">Active controls <span class="note" style="text-transform:none;letter-spacing:0">— the running policy (edit in application.properties: jethro.social.*)</span></div>
+  <div class="panel" style="padding:12px"><div class="ctl" id="controls"></div></div>
+</main>
+<script>
+  const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+  function stat(k, v, cls) { return `<div class="stat"><div class="k">${k}</div><div class="v mono ${cls||''}">${v}</div></div>`; }
+  function ctl(k, v) { return `<div><div class="k">${k}</div><div class="v mono">${esc(v)}</div></div>`; }
+
+  function render(v) {
+    document.getElementById("asof").textContent = v.lastRunMillis ? "· last cycle " + new Date(v.lastRunMillis).toLocaleTimeString() : "· measuring…";
+
+    const sources = v.sources || [];
+    document.getElementById("sources").outerHTML = '<div id="sources">' + (sources.length ?
+      "<table><tr><th>source</th><th>status</th><th>last poll</th><th>posts</th><th>detail</th></tr>" +
+      sources.map(s => {
+        const cls = s.healthy ? "ok" : (/no token|idle/i.test(s.detail) ? "idle" : "bad");
+        const label = s.healthy ? "connected" : (/no token|idle/i.test(s.detail) ? "idle" : "unreachable");
+        return `<tr>
+          <td class="mono">${esc(s.name)}</td>
+          <td><span class="led ${cls}"></span>${label}</td>
+          <td class="dim mono">${s.lastPollMillis ? new Date(s.lastPollMillis).toLocaleTimeString() : "—"}</td>
+          <td class="mono">${s.lastCount}</td>
+          <td class="dim">${esc(s.detail)}</td>
+        </tr>`;
+      }).join("") + "</table>"
+      : '<div class="empty">social source is off (jethro.social.enabled=false)</div>') + '</div>';
+
+    const c = v.counters || {};
+    document.getElementById("progress").innerHTML =
+      stat("ingested", c.ingested||0) + stat("kept", c.kept||0) +
+      stat("dup dropped", c.duplicateDropped||0) + stat("shill dropped", c.cashtagSpamDropped||0) +
+      stat("corroborated", c.corroborated||0, "up") + stat("pump flagged", c.manipulationSuspected||0, "down");
+
+    const k = v.controls || {};
+    document.getElementById("controls").innerHTML =
+      ctl("sources", (k.sources||[]).join(", ")) +
+      ctl("cadence", (k.intervalSeconds||0) + "s") +
+      ctl("corroboration k", k.corroborationChannels) +
+      ctl("burst threshold", k.burstThreshold) +
+      ctl("max cashtags", k.maxCashtags) +
+      ctl("follower floor", k.credibleFollowerFloor) +
+      ctl("age floor (days)", k.credibleAgeDaysFloor) +
+      ctl("default tier", k.defaultTier);
+  }
+
+  async function load() {
+    try { render(await (await pollFetch("/api/social")).json()); } catch (e) {}
+  }
+  poll(load, 5000);
+</script>
+</body>
+</html>
