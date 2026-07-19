@@ -108,6 +108,17 @@ public final class StrategyLifecycle implements SmartLifecycle {
         return props.autoExecute() && orderService != null;
     }
 
+    /** The SENSED volatility regime (ADR-0051) — CALM/ELEVATED/UNKNOWN, price-derived (never a sim
+     *  label). For the landing-page badge. */
+    public String volatilityRegime() {
+        return volRegime.regime().name();
+    }
+
+    /** Market vol ÷ its baseline on the last sizing cycle (ADR-0051), for the badge tooltip. */
+    public String volatilityRatio() {
+        return volRegime.marketVolRatio().setScale(2, java.math.RoundingMode.HALF_EVEN).toPlainString();
+    }
+
     @Override
     public void start() {
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {

@@ -140,6 +140,8 @@
     </nav>
     <div class="indices" id="indices"></div>
     <span class="feeds" id="feeds"></span>
+    <span class="pill" id="trendPill" title="market trend — price-derived (ADR-0044)"><span class="led"></span><span>trend —</span></span>
+    <span class="pill" id="regimePill" title="volatility regime — price-derived (ADR-0051)"><span class="led"></span><span>regime —</span></span>
     <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
   </div>
 </div>
@@ -261,6 +263,22 @@
   });
 
   async function loadRisk() { try { renderRisk(await (await pollFetch("/api/risk")).json()); } catch (e) {} }
+
+  // Market state the SYSTEM senses from prices (never a sim label): trend (ADR-0044) + volatility
+  // regime (ADR-0051). Green = benign (trending / calm), amber = attention (chop / elevated vol).
+  async function loadMarketState() {
+    try {
+      const m = await (await pollFetch("/api/market/regime")).json();
+      const tp = document.getElementById("trendPill"), rp = document.getElementById("regimePill");
+      const t = (m.trend || "—");
+      if (tp) { tp.className = "pill " + (t === "TREND" ? "on" : (t === "CHOP" ? "off" : ""));
+        tp.lastElementChild.textContent = "trend " + (t === "—" ? "—" : t.toLowerCase()); }
+      const r = (m.regime || "—");
+      if (rp) { rp.className = "pill " + (r === "CALM" ? "on" : (r === "ELEVATED" ? "off" : ""));
+        rp.lastElementChild.textContent = "regime " + (r === "—" ? "—" : r.toLowerCase());
+        rp.title = "volatility regime — price-derived (ADR-0051)" + (m.volRatio ? " · vol×baseline " + m.volRatio : ""); }
+    } catch (e) {}
+  }
 
   // ---- price ticker + feed connection indicators ----
   let tickPrev = {};
@@ -521,6 +539,7 @@
   // pile up pending fetches. The initial call inside each loadX above stays; poll runs its own
   // immediate tick too (idempotent). Replaces raw setInterval, which wedged tabs overnight.
   poll(loadRisk, 2000);
+  poll(loadMarketState, 5000);
   poll(loadTicker, 2000);
   poll(loadFeeds, 5000);
   poll(loadIndicators, 30000);
