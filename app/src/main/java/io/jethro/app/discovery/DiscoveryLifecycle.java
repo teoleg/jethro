@@ -61,7 +61,7 @@ public final class DiscoveryLifecycle implements SmartLifecycle {
             var items = news.poll(now);
             int discovered = 0;
             for (NewsItem item : items) {
-                for (String ticker : Cashtags.extractCashtags(item.text())) {
+                for (String ticker : Cashtags.extractNewsTickers(item.text())) {
                     if (!tracked.contains(ticker)) { // only propose names we DON'T already track
                         candidates.observe(ticker, "news:" + item.outlet(), props.newsWeightOrDefault(),
                                 item.title(), now);
