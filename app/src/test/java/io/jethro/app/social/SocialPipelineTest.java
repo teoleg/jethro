@@ -42,9 +42,12 @@ class SocialPipelineTest {
     }
 
     @Test
-    void cashtagsResolveOnlyToTheUniverse() {
-        assertEquals(Set.of("AAPL", "MSFT"),
+    void extractsEveryCashtagUnrestrictedPlusBareTrackedMentions() {
+        // Unrestricted: an untracked $ZZZZ surfaces too (it's a discovered subject, tagged later).
+        assertEquals(Set.of("AAPL", "MSFT", "ZZZZ"),
                 Cashtags.extract("$AAPL breakout, watch $MSFT and $ZZZZ", UNIVERSE));
+        // A bare tracked id (no $) is still caught via the tracked set.
+        assertEquals(Set.of("AAPL"), Cashtags.extract("I think AAPL runs today", UNIVERSE));
     }
 
     @Test
@@ -58,16 +61,16 @@ class SocialPipelineTest {
     @Test
     void exactCopypastaIsDroppedAsDuplicate() {
         var posts = List.of(throwaway("tg:a", "$AAPL easy money buy"), throwaway("tg:b", "$AAPL easy money buy"));
-        var r = new SpamFilter(3).filter(posts, new LinkedHashSet<>(), UNIVERSE);
+        var r = new SpamFilter(3).filter(posts, new LinkedHashSet<>());
         assertEquals(1, r.kept().size(), "second identical post is a duplicate");
         assertEquals(1, r.dropped().getOrDefault(SpamFilter.Drop.DUPLICATE, 0));
     }
 
     @Test
     void multiCashtagShillIsDroppedAsSpam() {
-        // maxCashtags=2, post names 3 distinct universe tickers → over the limit → shill/spam drop.
-        var r = new SpamFilter(2).filter(List.of(throwaway("tg:c", "hot list: $AAPL $MSFT $NVDA buy now")),
-                new LinkedHashSet<>(), UNIVERSE);
+        // maxCashtags=2, post names 3 tickers (incl. an untracked one) → over the limit → shill drop.
+        var r = new SpamFilter(2).filter(List.of(throwaway("tg:c", "hot list: $AAPL $ZZZZ $NVDA buy now")),
+                new LinkedHashSet<>());
         assertTrue(r.kept().isEmpty(), "a post shilling 3 tickers is spam");
         assertEquals(1, r.dropped().getOrDefault(SpamFilter.Drop.CASHTAG_SPAM, 0));
     }
@@ -88,9 +91,25 @@ class SocialPipelineTest {
         assertEquals(1, signals.size());
         var s = signals.get(0);
         assertEquals("AAPL", s.instrumentId());
+        assertTrue(s.tracked(), "AAPL is in the configured universe");
         assertEquals("BULLISH", s.direction());
         assertFalse(s.manipulationSuspected(), "corroborated by credible channels — not a pump");
         assertEquals("Information Technology", s.sector());
+    }
+
+    @Test
+    void anUntrackedNameSurfacesAsASuggestionNotFiltered() {
+        // Two credible channels corroborate a ticker we DON'T track ($TSLA) — it is surfaced as a
+        // discovery ("suggest add"), tagged untracked, not silently dropped by the configured list.
+        var kept = List.of(
+                credible("wire:Reuters", "$TSLA breakout, huge volume"),
+                credible("st:Jane", "$TSLA rally, going long"));
+        var signals = CorroborationGate.evaluate(kept, UNIVERSE, SECTOR, registry(), 2, 4);
+        assertEquals(1, signals.size());
+        var s = signals.get(0);
+        assertEquals("TSLA", s.instrumentId());
+        assertFalse(s.tracked(), "TSLA is not in the configured universe");
+        assertEquals("untracked", s.sector());
     }
 
     @Test

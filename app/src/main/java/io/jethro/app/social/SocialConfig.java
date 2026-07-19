@@ -36,22 +36,24 @@ public class SocialConfig {
 
     @Bean
     SocialFeed socialFeed(SocialProperties props) {
-        // Compose the configured sources (ADR-0050 Phase 2). Default [sim] — a real adapter is opt-in
-        // and the app never depends on the network at boot; a failing source never sinks the cycle.
+        // REAL sources only (ADR-0050) — social media is an always-online external source with NO
+        // relation to the market-data sim. There is deliberately no synthetic runtime feed; a failing
+        // source never sinks the cycle and shows "unreachable" on the Sources page.
         List<SocialFeed> sources = new ArrayList<>();
         for (String s : props.sourcesOrDefault()) {
             switch (s.trim().toLowerCase()) {
-                case "sim" -> sources.add(new SimSocialFeed(props.seedOrDefault()));
                 case "stocktwits" -> sources.add(new StockTwitsSocialFeed(
                         props.stocktwitsBaseUrlOrDefault(), props.stocktwitsSymbolsPerCycleOrDefault(),
                         Duration.ofSeconds(8)));
                 case "telegram" -> sources.add(new TelegramSocialFeed(
                         props.telegramBaseUrlOrDefault(), props.telegramBotTokenOrEmpty(), Duration.ofSeconds(8)));
-                default -> { /* unknown source name — ignored */ }
+                default -> { /* unknown/removed source name (e.g. 'sim') — ignored */ }
             }
         }
         if (sources.isEmpty()) {
-            sources.add(new SimSocialFeed(props.seedOrDefault()));
+            // No source configured → an idle StockTwits so the pipeline + Sources page still run.
+            sources.add(new StockTwitsSocialFeed(props.stocktwitsBaseUrlOrDefault(),
+                    props.stocktwitsSymbolsPerCycleOrDefault(), Duration.ofSeconds(8)));
         }
         return sources.size() == 1 ? sources.get(0) : new CompositeSocialFeed(sources);
     }
@@ -63,8 +65,8 @@ public class SocialConfig {
 
     @Bean
     SocialLifecycle socialLifecycle(SocialFeed feed, SocialChannels channels, SpamFilter spamFilter,
-                                    InstrumentRefSource refs, TradingCoreProperties sim,
-                                    AttentionFeed attention, SseBroadcaster sse, SocialProperties props) {
-        return new SocialLifecycle(feed, channels, spamFilter, refs, sim, attention, sse, props);
+                                    InstrumentRefSource refs, AttentionFeed attention,
+                                    SseBroadcaster sse, SocialProperties props) {
+        return new SocialLifecycle(feed, channels, spamFilter, refs, attention, sse, props);
     }
 }

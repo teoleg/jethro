@@ -36,6 +36,7 @@
   .tag.TRUSTED{ color:var(--up); border-color:var(--up);} .tag.STANDARD{ color:var(--brand); border-color:var(--brand);} .tag.UNTRUSTED{ color:var(--dim);}
   .pill { display:inline-block; font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
   .pill.pump { color:var(--alert); border-color:var(--alert); } .pill.ok { color:var(--up); border-color:var(--up); }
+  .pill.new { color:var(--brand); border-color:var(--brand); }
   .empty { color:var(--dim); text-align:center; padding:20px 0; }
 </style>
 </head>
@@ -80,15 +81,16 @@
 
     const sigs = v.signals || [];
     document.getElementById("signals").outerHTML = '<div id="signals">' + (sigs.length ?
-      "<table><tr><th>instrument</th><th>sector</th><th>direction</th><th>credible ch.</th><th>mentions</th><th>status</th><th>sample</th></tr>" +
+      "<table><tr><th>instrument</th><th>tracked?</th><th>sector</th><th>direction</th><th>credible ch.</th><th>mentions</th><th>status</th><th>sample</th></tr>" +
       sigs.map(s => `<tr>
         <td class="mono">${esc(s.instrument)}</td>
+        <td>${s.tracked ? '<span class="pill ok">tracked</span>' : '<span class="pill new">new — suggest add</span>'}</td>
         <td class="dim">${esc(s.sector)}</td>
         <td class="${s.direction==='BULLISH'?'up':(s.direction==='BEARISH'?'down':'dim')}">${esc(s.direction)}</td>
         <td class="mono">${s.channels}</td>
         <td class="mono">${s.mentions}</td>
         <td>${s.manipulationSuspected ? '<span class="pill pump">pump — ignored</span>' : '<span class="pill ok">corroborated</span>'}</td>
-        <td class="dim" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.sample)}">${esc(s.sample)}</td>
+        <td class="dim" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.sample)}">${esc(s.sample)}</td>
       </tr>`).join("") + "</table>"
       : '<div class="empty">nothing corroborated yet — a single post or a low-credibility burst never promotes</div>') + '</div>';
 

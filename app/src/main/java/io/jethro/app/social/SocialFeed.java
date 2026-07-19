@@ -3,11 +3,11 @@ package io.jethro.app.social;
 import java.util.List;
 
 /**
- * The social-post source (ADR-0050). Two eventual implementations — {@link SimSocialFeed} (seedable
- * synthetic posts incl. spam + a pump, the offline/dev default) and real free adapters (StockTwits,
- * Telegram public channels — Phase 2, behind a live gate) — so a real feed slots in without touching
- * the pipeline (the ADR-0009 spirit). Nothing here is a number fed into sizing/risk (invariant 7);
- * the text is read for advisory context only, and no social signal can originate an order (ADR-0049).
+ * The social-post source (ADR-0050) — ALWAYS REAL DATA, with NO relation to the market-data sim.
+ * Implementations are the real free adapters ({@link StockTwitsSocialFeed}, {@link TelegramSocialFeed})
+ * composed by {@link CompositeSocialFeed}; a synthetic generator exists ONLY as a test double, never
+ * wired at runtime. Nothing here is a number fed into sizing/risk (invariant 7); the text is read for
+ * advisory context only, and no social signal can originate an order (ADR-0049).
  */
 public interface SocialFeed {
 

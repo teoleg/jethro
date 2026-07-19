@@ -40,12 +40,25 @@ adding a deterministic defensive pre-stage *before* the SLM and *before* any adv
    score each channel's advisory outcomes over time (reusing the ADR-0027 outcome machinery) and
    promote/demote/prune by measured hit-rate. Discovery of new channels is a later follow-up — we do
    not guess forever, we measure.
-5. **Same queue, classify, fan-out, gate.** Survivors carry `(subject → sector via hedge_group →
-   instruments)` and every `(instrument, direction)` still passes the **ADR-0049 hard gate**. Social
-   media is **advisory-only** and can never originate an order; worst case it surfaces context on a
-   name the deterministic model already has edge on. The sim emits synthetic posts — including
-   synthetic spam and a synthetic pump — through the *same* pipeline (ADR-0034 spirit); classify from
-   post **text**, never a sim-attached label (invariant 8, the ADR-0044 loophole lesson).
+5. **Same queue, classify, fan-out, gate.** Survivors carry `(subject → sector → instruments)` and any
+   `(instrument, direction)` that ever became a trade candidate still passes the **ADR-0049 hard gate**.
+   Social media is **advisory-only** and can never originate an order.
+
+6. **Always REAL data — no relation to the market-data sim.** Social media is an always-online external
+   source; it is NOT SIM/LIVE/REPLAY market data, so the ADR-0029/invariant-8 feed-mode separation does
+   not apply to it and it is never gated on `feedMode`. The runtime sources are the real free adapters
+   only (StockTwits, Telegram); a synthetic generator exists solely as a **test double**, never wired at
+   runtime. Offline/unconfigured simply shows a source as *unreachable/idle* on the Sources page — honest,
+   not faked.
+
+7. **Universe from reference data, and discovery is NOT filtered.** The instrument universe comes from the
+   **reference-data master** (not the sim's instrument list). Cashtag/sector extraction is **unrestricted**
+   — social discusses whatever it discusses; a discovered ticker is merely **tagged** tracked-or-not. An
+   untracked name that corroborates is surfaced as a *"suggest add"*, not silently dropped. What to do with
+   it — add it to the tracked list or ignore and focus on the configured set — is a **later** decision, not
+   a filter here. Intended division of labour: **big news outlets** propose additions to the base tracked
+   list; **social** then enriches the names we track and can flag an emerging one when *something is really
+   cooking* (the news→universe discovery mechanism is a follow-up).
 
 ## Alternatives considered
 
@@ -69,15 +82,15 @@ ingesting it responsible rather than reckless.
 
 - Positive: access to the channel that drives modern moves, absorbed by the existing queue/gate spine;
   the SLM only sees de-spammed, corroborated subjects; social media can never move the book on its own
-  (ADR-0049), so ingesting an adversarial source is *safe to explore*; runs offline in sim with
-  synthetic spam/pump exercising the filters.
+  (ADR-0049), so ingesting an adversarial source is *safe to explore*; unrestricted discovery means an
+  emerging name isn't hidden by the configured list — it becomes a suggestion to add.
 - Negative: social media is a live manipulation surface — the controls reduce but never eliminate the
   risk; the corroboration window trades latency for safety (a real burst waits for a second source);
   free coverage is uneven and X is deferred; credibility tiers and the *k* threshold are tuning knobs;
   classification/attribution quality is a new failure surface needing telemetry; trading on social
   data sits near market-manipulation regulation — the `ai.decisions` audit trail is part of the
   defence.
-- Follow-ups: real Telegram/StockTwits adapters behind the sim source; the SLM sector-classify step
-  (ADR-0045) once built; outcome-scored channel ranking + channel discovery; X behind its paid trigger;
-  a "manipulation suspected" attention signal when a burst fails corroboration (a defensive tell, not a
-  trade).
+- Follow-ups: the SLM sector-classify step (ADR-0045) once built; a **news-outlet → universe discovery**
+  mechanism that proposes additions to the base tracked list (with a persist-to-refdata path), which
+  social then enriches; outcome-scored channel ranking + channel discovery; X behind its paid trigger;
+  a "manipulation suspected" attention signal when a burst fails corroboration (a defensive tell).

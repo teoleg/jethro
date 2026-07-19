@@ -1,6 +1,5 @@
 package io.jethro.app.social;
 
-import io.jethro.app.trading.TradingCoreProperties;
 import io.jethro.trading.riskpnl.InstrumentRef;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.uigateway.AttentionFeed;
@@ -36,7 +35,6 @@ public final class SocialLifecycle implements SmartLifecycle {
     private final SocialChannels channels;
     private final SpamFilter spam;
     private final InstrumentRefSource refs;
-    private final TradingCoreProperties sim;
     private final AttentionFeed attention;
     private final SseBroadcaster sse;
     private final SocialProperties props;
@@ -55,13 +53,12 @@ public final class SocialLifecycle implements SmartLifecycle {
     private ScheduledExecutorService scheduler;
 
     public SocialLifecycle(SocialFeed feed, SocialChannels channels, SpamFilter spam,
-                           InstrumentRefSource refs, TradingCoreProperties sim, AttentionFeed attention,
+                           InstrumentRefSource refs, AttentionFeed attention,
                            SseBroadcaster sse, SocialProperties props) {
         this.feed = feed;
         this.channels = channels;
         this.spam = spam;
         this.refs = refs;
-        this.sim = sim;
         this.attention = attention;
         this.sse = sse;
         this.props = props;
@@ -84,20 +81,22 @@ public final class SocialLifecycle implements SmartLifecycle {
     private void runOnce() {
         try {
             long now = System.currentTimeMillis();
-            List<String> equities = new ArrayList<>();
-            Set<String> universe = new LinkedHashSet<>();
-            for (String id : sim.simInstruments()) {
-                refs.find(id).filter(r -> "EQUITY".equals(r.assetClass())).ifPresent(r -> {
-                    equities.add(id);
-                    universe.add(id);
-                });
-            }
-            if (universe.isEmpty()) {
-                return;
-            }
-            List<SocialPost> posts = feed.poll(equities, now);
-            SpamFilter.Result result = spam.filter(posts, seenHashes, universe);
-            List<SocialSignal> next = CorroborationGate.evaluate(result.kept(), universe, this::sectorOf,
+            // The TRACKED set is the REAL reference-data equity master — independent of any market-data
+            // feed/sim (ADR-0050): social is an always-online external source, unrelated to price
+            // simulation. It is used only to (a) give the real adapters symbols to poll and (b) TAG a
+            // discovered subject tracked-or-not — it does NOT restrict what social may surface (an
+            // untracked name that's "cooking" is a suggestion to add, decided later). Sorted for a
+            // stable round-robin in the adapters.
+            List<String> pollSymbols = new ArrayList<>();
+            Set<String> tracked = new LinkedHashSet<>();
+            refs.instrumentIds().stream().sorted().forEach(id ->
+                    refs.find(id).filter(r -> "EQUITY".equals(r.assetClass())).ifPresent(r -> {
+                        pollSymbols.add(id);
+                        tracked.add(id);
+                    }));
+            List<SocialPost> posts = feed.poll(pollSymbols, now);
+            SpamFilter.Result result = spam.filter(posts, seenHashes);
+            List<SocialSignal> next = CorroborationGate.evaluate(result.kept(), tracked, this::sectorOf,
                     channels, props.kOrDefault(), props.burstThresholdOrDefault());
 
             ingested.addAndGet(posts.size());

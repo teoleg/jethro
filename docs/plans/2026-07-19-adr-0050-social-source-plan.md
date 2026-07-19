@@ -14,7 +14,17 @@ adds the adversarial pre-stage. Advisory-only throughout — it can never origin
 - **ADR-0034 / invariant 8** — sim emits synthetic posts (incl. spam + a pump); classify from post
   TEXT, never a sim-attached label; the pipeline runs identically sim/live/replay.
 
-## Phase 1 — sim slice, visible TODAY (this change)
+## Corrections (per review) — social is REAL-only, decoupled from the sim
+- Social media has NO relation to the market-data sim: it's an always-online external source, never
+  gated on `feedMode`. The synthetic generator was demoted to a **test double** (moved to test
+  sources); the runtime sources are the real adapters only. Offline just shows *unreachable/idle*.
+- The universe comes from the **reference-data master** (`InstrumentRefSource.instrumentIds()`), not
+  the sim's instrument list.
+- Extraction is **unrestricted**: any discovered ticker surfaces, tagged tracked-or-not; an untracked
+  corroborated name is a *"suggest add"*, not filtered. News-outlet → universe discovery (proposing
+  additions to the base list) is the intended upstream, a follow-up.
+
+## Phase 1 — pipeline + adversarial controls (synthetic feed now a TEST double)
 Deterministic, offline, advisory-only. Package `io.jethro.app.social`.
 - `SocialPost` — id, source, channel, author, followers, verified, accountAgeDays, ts, text.
 - `SocialChannels` — curated channel→tier registry (TRUSTED/STANDARD/UNTRUSTED) seeded in config.

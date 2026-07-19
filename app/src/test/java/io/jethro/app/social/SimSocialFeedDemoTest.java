@@ -27,7 +27,7 @@ class SimSocialFeedDemoTest {
                 "st:MacroMike", SocialChannels.Tier.STANDARD), 5_000, 180);
 
         var posts = new SimSocialFeed(42L).poll(universe, System.currentTimeMillis());
-        var kept = new SpamFilter(3).filter(posts, new LinkedHashSet<>(), universeSet);
+        var kept = new SpamFilter(3).filter(posts, new LinkedHashSet<>());
         var signals = CorroborationGate.evaluate(kept.kept(), universeSet,
                 id -> "Information Technology", channels, 2, 4);
 

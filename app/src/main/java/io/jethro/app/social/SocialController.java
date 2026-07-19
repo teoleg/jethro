@@ -27,8 +27,8 @@ public final class SocialController {
                            long corroborated, long manipulationSuspected) {
     }
 
-    public record SignalView(String instrument, String sector, String direction, int channels,
-                             int mentions, boolean manipulationSuspected, String sample) {
+    public record SignalView(String instrument, boolean tracked, String sector, String direction,
+                             int channels, int mentions, boolean manipulationSuspected, String sample) {
     }
 
     public record PostView(long timestampMillis, String channel, String tier, boolean credible, String text) {
@@ -63,8 +63,8 @@ public final class SocialController {
                 .map(h -> new SourceView(h.name(), h.healthy(), h.lastPollMillis(), h.lastCount(), h.detail()))
                 .toList();
         List<SignalView> signals = s.signals().stream()
-                .map(x -> new SignalView(x.instrumentId(), x.sector(), x.direction(), x.corroboratingChannels(),
-                        x.mentions(), x.manipulationSuspected(), x.sample()))
+                .map(x -> new SignalView(x.instrumentId(), x.tracked(), x.sector(), x.direction(),
+                        x.corroboratingChannels(), x.mentions(), x.manipulationSuspected(), x.sample()))
                 .toList();
         List<PostView> recent = s.recentPosts().stream()
                 .map(p -> new PostView(p.timestampMillis(), p.channel(), s.tierOf(p.channel()),

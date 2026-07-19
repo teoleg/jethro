@@ -30,19 +30,21 @@ public final class CorroborationGate {
 
     /**
      * @param kept        posts that survived the spam filter (credible AND low-credibility)
-     * @param universe    valid instrument ids
-     * @param sectorOf    instrument id → GICS sector ({@code hedge_group}), or "—"
+     * @param tracked     ids in our configured reference-data universe — used only to TAG a discovered
+     *                    subject tracked/not and to catch bare-word mentions; NOT a filter on which
+     *                    subjects are surfaced (social discusses whatever it discusses)
+     * @param sectorOf    tracked instrument id → GICS sector ({@code hedge_group}); untracked → "untracked"
      * @param channels    the credibility registry
      * @param k           distinct credible channels required to promote a subject
      * @param burstThreshold mentions at/above which an uncorroborated, low-credibility-dominated
      *                       subject is flagged as suspected manipulation
      */
-    public static List<SocialSignal> evaluate(List<SocialPost> kept, Set<String> universe,
+    public static List<SocialSignal> evaluate(List<SocialPost> kept, Set<String> tracked,
                                               Function<String, String> sectorOf, SocialChannels channels,
                                               int k, int burstThreshold) {
         Map<String, List<SocialPost>> byInstrument = new LinkedHashMap<>();
         for (SocialPost p : kept) {
-            for (String id : Cashtags.extract(p.text(), universe)) {
+            for (String id : Cashtags.extract(p.text(), tracked)) { // unrestricted: any $ticker
                 byInstrument.computeIfAbsent(id, x -> new ArrayList<>()).add(p);
             }
         }
@@ -69,8 +71,10 @@ public final class CorroborationGate {
             if (!corroborated && !manipulation) {
                 return; // just watching — not enough independent credible corroboration yet
             }
+            boolean isTracked = tracked.contains(id);
             String direction = bull == bear ? "NEUTRAL" : (bull > bear ? "BULLISH" : "BEARISH");
-            out.add(new SocialSignal(id, sectorOf.apply(id), direction, credibleChannels.size(),
+            String sector = isTracked ? sectorOf.apply(id) : "untracked";
+            out.add(new SocialSignal(id, isTracked, sector, direction, credibleChannels.size(),
                     posts.size(), manipulation, posts.get(0).text()));
         });
         return out;

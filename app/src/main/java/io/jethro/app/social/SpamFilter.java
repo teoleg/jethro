@@ -32,7 +32,7 @@ public final class SpamFilter {
      * @param seenTextHashes normalized-text fingerprints already seen (cross-batch memory); newly-kept
      *                       fingerprints are ADDED, so a later identical post is a duplicate.
      */
-    public Result filter(List<SocialPost> posts, Set<String> seenTextHashes, Set<String> universe) {
+    public Result filter(List<SocialPost> posts, Set<String> seenTextHashes) {
         List<SocialPost> kept = new ArrayList<>();
         Map<Drop, Integer> dropped = new EnumMap<>(Drop.class);
         for (SocialPost p : posts) {
@@ -41,7 +41,8 @@ public final class SpamFilter {
                 dropped.merge(Drop.DUPLICATE, 1, Integer::sum);
                 continue;
             }
-            if (Cashtags.extract(p.text(), universe).size() > maxCashtags) {
+            // "Too many tickers" = shill, counted over ALL cashtags (not just configured ones).
+            if (Cashtags.extractCashtags(p.text()).size() > maxCashtags) {
                 dropped.merge(Drop.CASHTAG_SPAM, 1, Integer::sum);
                 continue;
             }

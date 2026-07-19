@@ -6,9 +6,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Extracts the instruments a post refers to (ADR-0050): {@code $CASHTAGS} and bare whole-word id
- * mentions, kept only when they resolve to the live universe. This is the deterministic "which
- * securities" step — code, not the model (the SLM's job in ADR-0045 is the sector, never the names).
+ * Extracts the instruments a post refers to (ADR-0050). Deliberately NOT restricted to the configured
+ * universe — social discusses whatever it discusses, and we want to SEE it. A discovered ticker is
+ * merely TAGGED tracked-or-not downstream; what to do with an untracked one (a suggestion to add it,
+ * or ignore and focus on the configured list) is a later choice, not a filter here.
  */
 public final class Cashtags {
 
@@ -17,22 +18,29 @@ public final class Cashtags {
     private Cashtags() {
     }
 
-    public static Set<String> extract(String text, Set<String> universe) {
+    /** Every {@code $CASHTAG} in the text (uppercased), unrestricted. Used both as the primary
+     *  subject extraction and for the spam "too many tickers" count. */
+    public static Set<String> extractCashtags(String text) {
         Set<String> out = new LinkedHashSet<>();
         if (text == null || text.isBlank()) {
             return out;
         }
         Matcher m = CASHTAG.matcher(text);
         while (m.find()) {
-            String sym = m.group(1).toUpperCase();
-            if (universe.contains(sym)) {
-                out.add(sym);
-            }
+            out.add(m.group(1).toUpperCase());
         }
-        // Bare mentions of an id as a whole word (e.g. "AAPL" without the $).
-        for (String id : universe) {
-            if (!out.contains(id) && Pattern.compile("\\b" + Pattern.quote(id) + "\\b").matcher(text).find()) {
-                out.add(id);
+        return out;
+    }
+
+    /** All cashtags PLUS bare whole-word mentions of a TRACKED id (e.g. "AAPL" without the $) — the
+     *  tracked set only helps catch un-tagged mentions of names we already know; it is not a filter. */
+    public static Set<String> extract(String text, Set<String> tracked) {
+        Set<String> out = extractCashtags(text);
+        if (text != null && tracked != null) {
+            for (String id : tracked) {
+                if (!out.contains(id) && Pattern.compile("\\b" + Pattern.quote(id) + "\\b").matcher(text).find()) {
+                    out.add(id);
+                }
             }
         }
         return out;
