@@ -65,6 +65,20 @@ public final class StrategyLifecycle implements SmartLifecycle {
     private static final int ACTIVITY_CAP = 50;
     private final java.util.Deque<StrategyActivity> activity = new java.util.ArrayDeque<>(); // newest first
 
+    /** Why the book is (or isn't) trading right now — a snapshot of the last cycle (ADR-0052). Makes
+     *  "not a lot of activity" diagnosable: how many names cleared the signal threshold, and for each
+     *  that did, the reason it did or didn't turn into a trade. */
+    public record Diag(long atMillis, int universe, int freshMarks, int staleMarks, int belowThreshold,
+                       String regime, String regimeScale, boolean autoExecuting, boolean halted,
+                       int signals, int executed, int exited, java.util.List<DiagSignal> outcomes) {
+    }
+
+    /** One signalling instrument and what became of it this cycle. */
+    public record DiagSignal(String instrumentId, String side, String outcome, String detail) {
+    }
+
+    private volatile Diag lastDiag = new Diag(0, 0, 0, 0, 0, "—", "1", false, false, 0, 0, 0, java.util.List.of());
+
     private static final long HEARTBEAT_CYCLES = 24; // ~2 min at a 5s cadence
     // In-flight guard on exits: a close is submitted synchronously but the fill only shrinks
     // the projection after it round-trips Kafka, so suppress re-closing the same position
@@ -185,12 +199,16 @@ public final class StrategyLifecycle implements SmartLifecycle {
             int shortsBlocked = 0;
             int executed = 0;
             String sampleReason = null;
+            java.util.List<DiagSignal> outcomes = new ArrayList<>();
             for (TradeSignal signal : strategy.evaluate(observations)) {
                 signals++;
                 String book = bookFor(signal.instrumentId()); // route by asset class, not all to one book
                 Optional<BigDecimal> sized = size(signal, regimeScale);
                 if (sized.isEmpty()) {
                     oversized++; // unsizeable under the cap, or standing aside in this regime
+                    outcomes.add(new DiagSignal(signal.instrumentId(), signal.side().name(), "unsizeable",
+                            regimeScale.signum() == 0 ? "standing aside — regime entry scale is 0"
+                                    : "one unit exceeds the order-notional cap"));
                     continue;
                 }
                 // Position-aware (quant-engine phase 5): once the book already holds the
@@ -201,6 +219,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 if (held.signum() != 0 && sameDirection
                         && held.abs().compareTo(control.maxPositionNotional()) >= 0) {
                     atPosition++;
+                    outcomes.add(new DiagSignal(signal.instrumentId(), signal.side().name(), "at-position",
+                            "book already holds the max position in this direction — only reducing signals pass"));
                     continue;
                 }
                 BigDecimal quantity = sized.get();
@@ -210,6 +230,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
                     BigDecimal heldQty = risk.positionQuantity(book, signal.instrumentId());
                     if (heldQty.signum() <= 0) {
                         shortsBlocked++; // nothing to reduce — a short would be opened; skip
+                        outcomes.add(new DiagSignal(signal.instrumentId(), signal.side().name(), "short-blocked",
+                                "SELL with no long to reduce — shorts are off (allow-short)"));
                         continue;
                     }
                     if (quantity.compareTo(heldQty) > 0) {
@@ -222,6 +244,8 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 if (rejection.isPresent()) {
                     suppressed++;
                     sampleReason = rejection.get();
+                    outcomes.add(new DiagSignal(signal.instrumentId(), signal.side().name(), "blocked",
+                            "pre-trade guardrail: " + rejection.get()));
                     continue; // not admissible under the book's limits — don't suggest it
                 }
                 // Firm breaker (ADR-0027): a halt stops NEW entries; the exit pass above is
@@ -231,10 +255,28 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 if (traded) {
                     executed++;
                 }
+                // Diagnostic: distinguish executed / cooling / breaker-held / advisory-only so the
+                // panel shows WHY a cleared signal did or didn't trade (ADR-0052).
+                String outcome;
+                if (traded) {
+                    outcome = "executed";
+                } else if (!autoExecuting()) {
+                    outcome = "suggested — auto-execute off";
+                } else if (halt.isHalted()) {
+                    outcome = "held — firm breaker halt";
+                } else if (withinCooldown(signal.instrumentId(), now)) {
+                    outcome = "cooldown — re-entry throttled";
+                } else {
+                    outcome = "suggested";
+                }
+                outcomes.add(new DiagSignal(signal.instrumentId(), signal.side().name(), outcome, signal.rationale()));
                 String id = "signal:" + signal.instrumentId();
                 current.add(id);
                 feed.upsert(toItem(signal, book, quantity, now, traded));
             }
+            lastDiag = new Diag(now, observations.size(), fresh, stale, Math.max(0, fresh - signals),
+                    regime, regimeScale.toPlainString(), autoExecuting(), halt.isHalted(),
+                    signals, executed, exited, java.util.List.copyOf(outcomes));
             boolean changed = false;
             for (String id : Set.copyOf(active)) {
                 if (!current.contains(id)) {
@@ -365,10 +407,15 @@ public final class StrategyLifecycle implements SmartLifecycle {
      * (ADR-0019: sim only, guardrail re-checked in OrderService), throttled by cooldown.
      * @return true if an order was submitted this cycle.
      */
+    /** True when this instrument auto-executed within the (live) cooldown window — shared by the
+     *  execute path and the diagnostic so the panel can say "cooldown" for the exact same reason. */
+    private boolean withinCooldown(String instrumentId, long now) {
+        Long last = lastAutoExec.get(instrumentId);
+        return last != null && now - last < control.autoCooldownSeconds() * 1_000;
+    }
+
     private boolean maybeAutoExecute(TradeSignal signal, String book, BigDecimal qty, long now) {
-        long cooldownMillis = control.autoCooldownSeconds() * 1_000;
-        Long last = lastAutoExec.get(signal.instrumentId());
-        if (last != null && now - last < cooldownMillis) {
+        if (withinCooldown(signal.instrumentId(), now)) {
             return false; // still cooling down for this instrument
         }
         try {
@@ -527,6 +574,11 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 activity.removeLast();
             }
         }
+    }
+
+    /** Why the book is (or isn't) trading right now — last cycle's snapshot (ADR-0052). */
+    public Diag diagnostics() {
+        return lastDiag;
     }
 
     /** Recent deterministic-strategy actions (entries + exits with reasons), newest first. */

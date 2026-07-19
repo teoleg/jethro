@@ -61,6 +61,28 @@
   .ctl .reset[disabled] { opacity:.3; cursor:default; }
   .badge-ov { font-size:9px; letter-spacing:.06em; text-transform:uppercase; color:var(--brand); border:1px solid var(--brand); border-radius:999px; padding:1px 7px; }
 
+  /* "why it's (not) trading" diagnostic */
+  .diag { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin:0 2px 18px; }
+  .diag h2 { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+  .diag h2 .stamp { color:var(--dim); font-weight:400; letter-spacing:0; font-size:11px; text-transform:none; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:7px 11px; font-size:12px; color:var(--dim); }
+  .chip b { color:var(--txt); font-weight:650; font-size:13px; margin-left:6px; }
+  .chip.on b { color:var(--up); } .chip.off b { color:var(--warn); }
+  .hint { margin-top:12px; padding:9px 12px; border-radius:9px; background:rgba(224,168,61,.08); border:1px solid rgba(224,168,61,.4); color:#f0d29a; font-size:12.5px; }
+  .hint.ok { background:rgba(53,192,122,.08); border-color:rgba(53,192,122,.4); color:#a6e9c6; }
+  .out { margin-top:12px; }
+  .out .r { display:grid; grid-template-columns:auto auto 1fr; gap:8px 12px; align-items:baseline; padding:6px 0; border-top:1px solid var(--line); font-size:12.5px; }
+  .out .r:first-child { border-top:0; }
+  .out .sym { font-weight:600; } .out .detail { color:var(--dim); font-size:11.5px; }
+  .ob { font-size:10px; letter-spacing:.05em; text-transform:uppercase; padding:2px 8px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); white-space:nowrap; }
+  .ob.executed { color:var(--up); border-color:var(--up); }
+  .ob.suggested { color:var(--info); border-color:var(--info); }
+  .ob.blocked, .ob.cooldown, .ob.at-position, .ob.short-blocked, .ob.unsizeable, .ob.held { color:var(--warn); border-color:var(--warn); }
+  .gated summary { cursor:pointer; color:var(--dim); font-size:12px; margin-top:12px; }
+  .gated ul { margin:8px 0 0 4px; padding-left:16px; color:var(--dim); font-size:12px; }
+  .gated li { margin:3px 0; } .gated li b { color:var(--txt); }
+
   .msg { margin:0 2px 14px; padding:9px 13px; border-radius:10px; font-size:12.5px; display:none; }
   .msg.err { display:block; background:rgba(240,85,63,.1); border:1px solid var(--alert); color:#ffb3a8; }
   .msg.ok { display:block; background:rgba(53,192,122,.08); border:1px solid var(--up); color:#a6e9c6; }
@@ -117,6 +139,9 @@
   </div>
 
   <div class="msg" id="msg"></div>
+
+  <div class="diag" id="diag"><h2>Live activity</h2><div class="empty">loading strategy state…</div></div>
+
   <div class="groups" id="groups"></div>
 
   <div class="history">
@@ -238,10 +263,64 @@
     } catch (e) { /* history is best-effort */ }
   }
 
+  // ---- "why it's (not) trading" diagnostic ----
+  function chip(label, value, cls) { return `<span class="chip ${cls || ""}">${esc(label)}<b>${esc(value)}</b></span>`; }
+  function renderDiag(d) {
+    const c = d.cycle;
+    const el = document.getElementById("diag");
+    if (!c || !c.atMillis) {
+      el.innerHTML = `<h2>Live activity</h2><div class="empty">no cycle yet — the strategy runs every few seconds</div>`;
+      return;
+    }
+    const chips = [
+      chip("signals", c.signals, c.signals > 0 ? "on" : ""),
+      chip("below threshold", c.belowThreshold),
+      chip("executed", c.executed, c.executed > 0 ? "on" : ""),
+      chip("exited", c.exited),
+      chip("universe", c.freshMarks + " fresh" + (c.staleMarks ? " / " + c.staleMarks + " stale" : "")),
+      chip("regime", c.regime + (c.regimeScale && c.regimeScale !== "1" ? " ×" + c.regimeScale : "")),
+      chip("auto-exec", c.autoExecuting ? "on" : "off", c.autoExecuting ? "on" : "off"),
+    ];
+    if (c.halted) chips.push(chip("breaker", "HALTED", "off"));
+    if (d.measured) chips.push(chip("OOS", d.tradable + " tradable / " + d.edgeGated.length + " no-edge"));
+
+    // The "so what" hint — the single most likely reason it's quiet.
+    let hint = "";
+    if (c.executed > 0) {
+      hint = `<div class="hint ok">Trading — ${c.executed} order(s) this cycle.</div>`;
+    } else if (c.signals === 0 && c.belowThreshold > 0) {
+      hint = `<div class="hint">No signals: all ${c.belowThreshold} live names are below the current σ threshold.
+        Lower <b>threshold-sigmas</b> (or <b>min-signal-bps</b>) below to react to smaller moves.</div>`;
+    } else if (c.signals > 0) {
+      hint = `<div class="hint">${c.signals} signal(s) fired but none traded — see the outcomes below (cooldown, at-position, blocked, or auto-execute off).</div>`;
+    } else if (c.freshMarks === 0) {
+      hint = `<div class="hint">No fresh marks — the feed may be stale; the strategy has nothing to act on.</div>`;
+    }
+
+    const outcomes = (c.outcomes || []).length ? `<div class="out">` + c.outcomes.map(o =>
+      `<div class="r"><span class="ob ${esc(o.outcome.split(" ")[0])}">${esc(o.outcome)}</span>
+        <span class="sym">${esc(o.side)} ${esc(o.instrumentId)}</span>
+        <span class="detail">${esc(o.detail || "")}</span></div>`).join("") + `</div>` : "";
+
+    const gated = d.edgeGated && d.edgeGated.length
+      ? `<details class="gated"><summary>${d.edgeGated.length} name(s) stood down by the OOS edge gate (measured, no positive edge)</summary>
+          <ul>${d.edgeGated.map(g => `<li><b>${esc(g.instrumentId)}</b> — ${esc(g.note)}</li>`).join("")}</ul></details>`
+      : "";
+
+    el.innerHTML = `<h2>Live activity <span class="stamp">· ${new Date(c.atMillis).toLocaleTimeString()}</span></h2>`
+      + `<div class="chips">${chips.join("")}</div>${hint}${outcomes}${gated}`;
+  }
+  async function loadDiag() {
+    try { renderDiag(await (await fetch("/api/strategy/diagnostics")).json()); }
+    catch (e) { /* diagnostic is best-effort */ }
+  }
+
   load();
   loadHistory();
+  loadDiag();
   // Refresh state periodically so an override set from another tab / by config reload is reflected.
   poll(load, 15000);
+  poll(loadDiag, 5000);
 </script>
 </body>
 </html>

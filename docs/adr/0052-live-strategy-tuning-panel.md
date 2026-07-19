@@ -1,6 +1,6 @@
 # ADR-0052: Live, DB-persisted strategy tuning — every dial editable, every change its own provenance
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-19
 - **Deciders:** Oleg
 - **Tags:** strategy, ui, data, governance

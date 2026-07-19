@@ -55,7 +55,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0049](0049-ai-signals-never-order-backtest-gated.md) | AI/news signals never place orders — the deterministic backtest is a hard gate | Accepted | ✅ Implemented |
 | [0050](0050-social-media-adversarial-source.md) | Social media as an adversarial source — spam/credibility/corroboration controls | Accepted | ◐ Partial |
 | [0051](0051-price-derived-volatility-regime.md) | Risk-off sizing from a price-derived volatility regime (no sim-regime oracle) | Accepted | ✅ Implemented |
-| [0052](0052-live-strategy-tuning-panel.md) | Live, DB-persisted strategy tuning — every dial editable, every change audited as its own provenance | Proposed | ◐ Partial |
+| [0052](0052-live-strategy-tuning-panel.md) | Live, DB-persisted strategy tuning — every dial editable, every change audited as its own provenance | Accepted | ✅ Implemented |
 
 ## Status vs Implementation
 
