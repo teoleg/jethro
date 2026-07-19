@@ -76,6 +76,10 @@
     <span class="muted" style="margin-left:12px;font-size:12px">downloads the current diagnostics workbook to attach for review</span>
   </div>
 
+  <div class="section-h">JVM runtime <span class="muted" id="jvmAsOf" style="text-transform:none;letter-spacing:0"></span></div>
+  <div class="tiles" id="jvmTiles"></div>
+  <div id="jvmHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
+
   <div class="section-h">Market traffic <span class="muted" id="trafficAsOf" style="text-transform:none;letter-spacing:0"></span></div>
   <div class="tiles" id="trafficTiles"></div>
   <div id="balanceLine" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
@@ -180,8 +184,48 @@
     } catch (e) {}
   }
 
+  function since(millis) {
+    if (!millis) return "never";
+    const s = Math.max(0, Math.round((Date.now() - millis) / 1000));
+    if (s < 60) return s + "s ago";
+    if (s < 3600) return Math.round(s / 60) + "m ago";
+    return Math.round(s / 3600) + "h ago";
+  }
+  function uptime(sec) {
+    if (sec < 3600) return Math.round(sec / 60) + "m";
+    const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+    return h + "h " + m + "m";
+  }
+  // JVM heap + the OOS-selector heap guard behind the ~1h freeze fix (ADR-0052 follow-up).
+  async function loadJvm() {
+    try {
+      const j = await (await fetch("/api/ops/jvm")).json();
+      // Heap health: green with room, amber as it approaches the guard, red once the guard trips.
+      const heapCls = j.guardTripping ? "down" : (j.headroomPct < j.guardPct + 15 ? "warn" : "up");
+      const sel = j.selector;
+      const selVal = !sel.present ? '<span class="muted" style="font-size:13px">off</span>'
+        : sel.guardTripping ? '<span class="down" style="font-size:13px">skipping (low heap)</span>'
+        : sel.lastError ? '<span class="down" style="font-size:13px">error</span>'
+        : `${sel.tradable}/${sel.measured} <span class="muted" style="font-size:11px">tradable · ${since(sel.lastRunMillis)}</span>`;
+      document.getElementById("jvmAsOf").textContent = "— heap, GC + the hourly-backtest heap guard (35% floor)";
+      document.getElementById("jvmTiles").innerHTML =
+        tile("Heap used", `<span class="${heapCls}">${j.heapUsedMb} / ${j.heapMaxMb} MB</span> <span class="muted" style="font-size:11px">(${j.heapUsedPct}%)</span>`) +
+        tile("Headroom", `<span class="${j.guardTripping?'down':'up'}">${j.headroomPct}%</span> <span class="muted" style="font-size:11px">guard ${j.guardPct}%</span>`) +
+        tile("Committed", j.heapCommittedMb + " MB") +
+        tile("Non-heap", j.nonHeapUsedMb + " MB") +
+        tile("GC", `${j.gcCount} <span class="muted" style="font-size:11px">(${j.gcTimeMs} ms)</span>`) +
+        tile("Threads", j.threads) +
+        tile("Uptime", uptime(j.uptimeSeconds)) +
+        tile("OOS selector", selVal);
+      document.getElementById("jvmHint").innerHTML = j.guardTripping
+        ? `<span class="down">heap headroom below the ${j.guardPct}% guard</span> — the hourly OOS strategy backtest is being SKIPPED to avoid an allocation stall (the ~1h freeze). Give the JVM more heap (run with <span class="mono">HEAP=1g</span>) so the selector refreshes again.`
+        : `heap guard OK — the hourly OOS backtest runs while headroom stays above ${j.guardPct}%. It's skipped (last selection kept) if the heap gets tight, so the box can't freeze.`;
+    } catch (e) {}
+  }
+
   async function refresh() {
     try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
+    loadJvm();
     loadTraffic();
     loadBalance();
     loadRag();

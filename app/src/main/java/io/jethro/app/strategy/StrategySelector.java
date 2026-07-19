@@ -82,7 +82,7 @@ public final class StrategySelector implements AutoCloseable {
      *  start the spike when headroom is thin trades a stale selection (we keep the last one) for a
      *  live server. My own operational guard, not a risk/money dial. Give the box more heap (≥1g) to
      *  keep the selector refreshing; the guard is the safety net, not the intended steady state. */
-    private static final double MIN_FREE_HEAP_FRACTION = 0.35;
+    public static final double MIN_FREE_HEAP_FRACTION = 0.35;
 
     /** True when free heap headroom is below the guard — running the backtest spike would risk a
      *  stall/OOM. Uses committed-vs-max so a not-yet-grown heap still counts its uncommitted room. */
