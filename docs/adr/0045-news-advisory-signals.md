@@ -1,6 +1,6 @@
 # ADR-0045: News-driven advisory signals — multi-source RSS → queued SLM sector-classify → bounded, audited overlay
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-19
 - **Deciders:** Oleg
 - **Tags:** ai, strategy, market-data, sim-parity

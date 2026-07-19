@@ -38,6 +38,8 @@ public final class SocialLifecycle implements SmartLifecycle {
     private final AttentionFeed attention;
     private final SseBroadcaster sse;
     private final SocialProperties props;
+    private final io.jethro.app.discovery.UniverseCandidates candidates; // nullable — discovery register
+    private final double discoverySocialWeight;
 
     private final AtomicLong ingested = new AtomicLong();
     private final AtomicLong kept = new AtomicLong();
@@ -54,7 +56,8 @@ public final class SocialLifecycle implements SmartLifecycle {
 
     public SocialLifecycle(SocialFeed feed, SocialChannels channels, SpamFilter spam,
                            InstrumentRefSource refs, AttentionFeed attention,
-                           SseBroadcaster sse, SocialProperties props) {
+                           SseBroadcaster sse, SocialProperties props,
+                           io.jethro.app.discovery.UniverseCandidates candidates, double discoverySocialWeight) {
         this.feed = feed;
         this.channels = channels;
         this.spam = spam;
@@ -62,6 +65,8 @@ public final class SocialLifecycle implements SmartLifecycle {
         this.attention = attention;
         this.sse = sse;
         this.props = props;
+        this.candidates = candidates;
+        this.discoverySocialWeight = discoverySocialWeight;
     }
 
     @Override
@@ -120,6 +125,17 @@ public final class SocialLifecycle implements SmartLifecycle {
             signals = next;
             lastRunMillis = now;
 
+            // Feed UNTRACKED corroborated names to the discovery register (ADR-0050 §7) as candidate
+            // additions — social "adds more if something is cooking". A suspected pump is NEVER a
+            // suggestion. Only when the discovery register is present.
+            if (candidates != null) {
+                for (SocialSignal sig : next) {
+                    if (!sig.tracked() && !sig.manipulationSuspected()) {
+                        candidates.observe(sig.instrumentId(), "social",
+                                discoverySocialWeight * Math.max(1, sig.corroboratingChannels()), sig.sample(), now);
+                    }
+                }
+            }
             surface(next);
             log.info("social: ingested {}, kept {}, dropped {} dup / {} shill, corroborated {}, pump-flagged {}",
                     posts.size(), result.kept().size(),
