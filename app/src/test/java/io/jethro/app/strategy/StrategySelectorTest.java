@@ -8,6 +8,7 @@ import java.math.BigDecimal;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /** The pure per-instrument choice (ADR-0043): higher positive-median algo wins; neither positive
  *  → NO_TRADE; a positive median with zero trades does not qualify. */
@@ -35,10 +36,21 @@ class StrategySelectorTest {
     }
 
     @Test
-    void neitherPositiveIsNoTrade() {
+    void neitherPositiveButTradedIsNoTrade() {
+        // Both algos DID trade and both lost → a genuine measured no-edge → NO_TRADE.
         var mom = Map.of("ZN", ir("ZN", 5, "-40"));
         var mr = Map.of("ZN", ir("ZN", 5, "-10"));
         assertEquals(SelectingStrategy.NO_TRADE, StrategySelector.choose(mom, mr).get("ZN").algo());
+    }
+
+    @Test
+    void noMeasurementIsAbsentSoTheDefaultAlgoRuns() {
+        // Neither algo traded in the backtest → NOT measured → leave it out of the map so the
+        // live SelectingStrategy falls back to the default and keeps trading (not suppressed).
+        var mom = Map.of("AAPL", ir("AAPL", 0, "0"));
+        var mr = Map.of("AAPL", ir("AAPL", 0, "0"));
+        var choices = StrategySelector.choose(mom, mr);
+        assertFalse(choices.containsKey("AAPL"), "a no-measurement name must not be in the selection");
     }
 
     @Test

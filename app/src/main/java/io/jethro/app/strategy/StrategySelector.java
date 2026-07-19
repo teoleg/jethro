@@ -103,10 +103,19 @@ public final class StrategySelector implements AutoCloseable {
         for (String id : ids) {
             BacktestResult.InstrumentResult m = momentum.get(id);
             BacktestResult.InstrumentResult r = meanReversion.get(id);
+            int momTrades = m != null ? m.trades() : 0;
+            int mrTrades = r != null ? r.trades() : 0;
+            // NO MEASUREMENT: if neither algo traded in the backtest, we have not measured this
+            // name's edge — that is NOT "no edge". Leave it OUT of the map so the live strategy
+            // runs the DEFAULT algo and keeps trading, while later/longer runs accumulate real
+            // data. Only a name that DID trade and still lost on both algos is a true NO-TRADE.
+            if (momTrades == 0 && mrTrades == 0) {
+                continue;
+            }
             BigDecimal mPnl = median(m);
             BigDecimal rPnl = median(r);
-            boolean mOk = m != null && m.trades() > 0 && mPnl.signum() > 0;
-            boolean rOk = r != null && r.trades() > 0 && rPnl.signum() > 0;
+            boolean mOk = momTrades > 0 && mPnl.signum() > 0;
+            boolean rOk = mrTrades > 0 && rPnl.signum() > 0;
             String algo;
             if (mOk && rOk) {
                 algo = mPnl.compareTo(rPnl) >= 0 ? "momentum" : "mean-reversion";
@@ -115,10 +124,9 @@ public final class StrategySelector implements AutoCloseable {
             } else if (rOk) {
                 algo = "mean-reversion";
             } else {
-                algo = SelectingStrategy.NO_TRADE;
+                algo = SelectingStrategy.NO_TRADE; // measured (traded) but neither positive
             }
-            out.put(id, new Choice(algo, mPnl, m != null ? m.trades() : 0,
-                    rPnl, r != null ? r.trades() : 0));
+            out.put(id, new Choice(algo, mPnl, momTrades, rPnl, mrTrades));
         }
         return out;
     }
