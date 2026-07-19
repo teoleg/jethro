@@ -37,16 +37,20 @@ public final class StrategySelector implements AutoCloseable {
     private final int seedCount;
     private final int ticks;
     private final long intervalMinutes;
+    private final long initialDelaySeconds;
 
     private volatile Map<String, Choice> choices = Map.of();
     private volatile long lastRunMillis;
+    private volatile String lastError; // surfaced in the API/export so a dead run is visible
     private ScheduledExecutorService scheduler;
 
-    public StrategySelector(BacktestService backtest, int seedCount, int ticks, long intervalMinutes) {
+    public StrategySelector(BacktestService backtest, int seedCount, int ticks, long intervalMinutes,
+                            long initialDelaySeconds) {
         this.backtest = backtest;
         this.seedCount = Math.max(3, seedCount | 1); // odd ≥3 so a median is a strict majority
         this.ticks = ticks;
         this.intervalMinutes = Math.max(1, intervalMinutes);
+        this.initialDelaySeconds = Math.max(5, initialDelaySeconds);
     }
 
     public void start() {
@@ -55,24 +59,33 @@ public final class StrategySelector implements AutoCloseable {
             t.setDaemon(true);
             return t;
         });
-        // First run shortly after boot (marks/history need to exist), then on the interval.
-        scheduler.scheduleWithFixedDelay(this::refresh, 30, intervalMinutes * 60, TimeUnit.SECONDS);
-        log.info("strategy selector started (ADR-0043): {} OOS seeds × {} ticks per algo, every {} min",
-                seedCount, ticks, intervalMinutes);
+        // First run a bit after boot (let the app finish starting; the backtest is CPU-heavy),
+        // then on the interval. Kicked off on the pool thread so start() never blocks.
+        scheduler.scheduleWithFixedDelay(this::refresh, initialDelaySeconds, intervalMinutes * 60,
+                TimeUnit.SECONDS);
+        log.info("strategy selector started (ADR-0043): {} OOS seeds × {} ticks per algo, first run in {}s, then every {} min",
+                seedCount, ticks, initialDelaySeconds, intervalMinutes);
     }
 
     private void refresh() {
+        long t0 = System.currentTimeMillis();
         try {
             var momentum = backtest.oosByInstrument(ticks, seedCount, "momentum");
             var meanReversion = backtest.oosByInstrument(ticks, seedCount, "mean-reversion");
             Map<String, Choice> next = choose(momentum, meanReversion);
             choices = next;
             lastRunMillis = System.currentTimeMillis();
+            lastError = null;
             long traded = next.values().stream().filter(c -> !SelectingStrategy.NO_TRADE.equals(c.algo())).count();
-            log.info("strategy selection refreshed: {} instruments, {} tradable, {} no-edge — {}",
-                    next.size(), traded, next.size() - traded, summarize(next));
-        } catch (Exception e) {
-            log.warn("strategy selection refresh failed ({}) — keeping the last selection", e.toString());
+            log.info("strategy selection refreshed in {}ms: {} instruments, {} tradable, {} no-edge — {}",
+                    lastRunMillis - t0, next.size(), traded, next.size() - traded, summarize(next));
+        } catch (Throwable t) {
+            lastError = t.toString();
+            // Catch THROWABLE, not just Exception: an Error (e.g. OOM on a small box) escaping here
+            // would cancel the scheduled task for good — the selector would silently never run again.
+            // Swallow it, keep the last selection, and stay scheduled.
+            log.warn("strategy selection refresh failed after {}ms ({}) — keeping the last selection; "
+                    + "the strategy runs the default algo meanwhile", System.currentTimeMillis() - t0, t.toString());
         }
     }
 
@@ -133,6 +146,11 @@ public final class StrategySelector implements AutoCloseable {
 
     public long lastRunMillis() {
         return lastRunMillis;
+    }
+
+    /** The last refresh error (e.g. an OOM), or null if the last run succeeded / none yet. */
+    public String lastError() {
+        return lastError;
     }
 
     @Override

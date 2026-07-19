@@ -45,13 +45,14 @@ public class StrategyConfig {
     StrategySelector strategySelector(
             ObjectProvider<io.jethro.app.backtest.BacktestService> backtest,
             @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.seed-count:9}") int seedCount,
-            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.ticks:8000}") int ticks,
-            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.interval-minutes:60}") long intervalMinutes) {
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.ticks:5000}") int ticks,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.interval-minutes:60}") long intervalMinutes,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.selection.initial-delay-seconds:90}") long initialDelaySeconds) {
         var svc = backtest.getIfAvailable();
         if (svc == null) {
             return null; // no backtest service (persistence off) — falls back to the single-algo bean
         }
-        var selector = new StrategySelector(svc, seedCount, ticks, intervalMinutes);
+        var selector = new StrategySelector(svc, seedCount, ticks, intervalMinutes, initialDelaySeconds);
         selector.start();
         return selector;
     }

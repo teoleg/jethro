@@ -26,14 +26,15 @@ public final class StrategySelectionController {
                       BigDecimal meanReversionMedianPnl, int meanReversionTrades) {
     }
 
-    public record SelectionView(boolean available, long lastRunMillis, List<Row> rows) {
+    public record SelectionView(boolean available, boolean measuring, String error,
+                                long lastRunMillis, List<Row> rows) {
     }
 
     @GetMapping("/api/strategy/selection")
     public SelectionView selection() {
         StrategySelector s = selector.getIfAvailable();
         if (s == null) {
-            return new SelectionView(false, 0, List.of());
+            return new SelectionView(false, false, null, 0, List.of());
         }
         List<Row> rows = s.selection().entrySet().stream()
                 .map(e -> {
@@ -43,6 +44,7 @@ public final class StrategySelectionController {
                 })
                 .sorted(java.util.Comparator.comparing(Row::instrument))
                 .toList();
-        return new SelectionView(true, s.lastRunMillis(), rows);
+        boolean measuring = s.lastRunMillis() == 0 && s.lastError() == null;
+        return new SelectionView(true, measuring, s.lastError(), s.lastRunMillis(), rows);
     }
 }

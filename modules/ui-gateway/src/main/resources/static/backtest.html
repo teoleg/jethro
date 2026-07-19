@@ -180,9 +180,10 @@
   // ---- live per-instrument strategy selection (ADR-0043) ----
   function renderSelection(v) {
     const as = document.getElementById("stratselAsOf");
-    if (as) as.textContent = v.available
-      ? (v.lastRunMillis ? " — measured " + new Date(v.lastRunMillis).toLocaleTimeString() + "; the live strategy trades each instrument's winner (nothing where neither has edge)" : " — measuring… (first run ~30s after boot)")
-      : " — selection off (jethro.strategy.selection.enabled=false)";
+    if (as) as.textContent = !v.available ? " — selection off (jethro.strategy.selection.enabled=false)"
+      : v.error ? " — last measurement FAILED: " + v.error + " (running the default algo meanwhile)"
+      : v.lastRunMillis ? " — measured " + new Date(v.lastRunMillis).toLocaleTimeString() + "; the live strategy trades each instrument's winner (nothing where neither has edge)"
+      : " — measuring… (first run ~90s after boot; a few seconds of backtests)";
     const rows = v.rows || [];
     const badge = a => a === "momentum" ? '<b class="up">momentum</b>'
       : a === "mean-reversion" ? '<b class="down">mean-rev</b>'
