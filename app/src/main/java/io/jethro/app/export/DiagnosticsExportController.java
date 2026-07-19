@@ -21,8 +21,9 @@ import java.util.List;
 /**
  * One-click diagnostics export (the strategy post-mortem workbook): a single {@code .xlsx} with a
  * sheet per view — firm summary, P&L by book and asset class, open positions, recent fills with
- * fees, TCA slippage, AI-hypothesis outcomes, and the hedge-order timeline (so a hedge runaway is
- * visible at a glance). Built with the dependency-free {@link Xlsx} writer. Read-only; DB sheets
+ * fees, TCA slippage, AI-hypothesis outcomes, the hedge-order timeline (so a hedge runaway is
+ * visible at a glance), and the live strategy tuning params + their audited change history (ADR-0052,
+ * so a dial change lines up against outcomes). Built with the dependency-free {@link Xlsx} writer. Read-only; DB sheets
  * are row-capped so the file stays attachable. Persistence-gated: without a datasource the
  * DB-backed sheets are simply omitted (the live risk sheets still export).
  */
@@ -37,17 +38,20 @@ public final class DiagnosticsExportController {
     private final ObjectProvider<JdbcTemplate> jdbc;
     private final ObjectProvider<io.jethro.app.strategy.StrategySelector> selector;
     private final ObjectProvider<io.jethro.trading.algo.strategy.Strategy> tradingStrategy;
+    private final ObjectProvider<io.jethro.app.strategy.StrategyControl> strategyControl;
 
     public DiagnosticsExportController(ObjectProvider<RiskProjection> projection,
                                        ObjectProvider<VarService> varService,
                                        ObjectProvider<JdbcTemplate> jdbc,
                                        ObjectProvider<io.jethro.app.strategy.StrategySelector> selector,
-                                       ObjectProvider<io.jethro.trading.algo.strategy.Strategy> tradingStrategy) {
+                                       ObjectProvider<io.jethro.trading.algo.strategy.Strategy> tradingStrategy,
+                                       ObjectProvider<io.jethro.app.strategy.StrategyControl> strategyControl) {
         this.projection = projection;
         this.varService = varService;
         this.jdbc = jdbc;
         this.selector = selector;
         this.tradingStrategy = tradingStrategy;
+        this.strategyControl = strategyControl;
     }
 
     @GetMapping("/api/export/diagnostics.xlsx")
@@ -64,12 +68,14 @@ public final class DiagnosticsExportController {
             positionsSheet(wb, snap.positions());
         }
         selectionSheet(wb);
+        strategyParamsSheet(wb);
         JdbcTemplate db = jdbc.getIfAvailable();
         if (db != null) {
             fillsSheet(db, wb);
             tcaSheet(db, wb);
             hypothesesSheet(db, wb);
             hedgeOrdersSheet(db, wb);
+            strategyChangesSheet(db, wb);
         }
 
         String name = "jethro-diagnostics-" + LocalDateTime.now().format(STAMP) + ".xlsx";
@@ -137,6 +143,37 @@ public final class DiagnosticsExportController {
         }
         wb.sheet("Strategy selection", List.of("instrument", "chosen", "live_regime", "efficiency_ratio",
                 "momentum_median", "momentum_trades", "meanrev_median", "meanrev_trades"), rows);
+    }
+
+    /** The effective strategy dials at export time (ADR-0052): config default vs live value, and
+     *  whether each is overridden — so any analysis reading this workbook knows what the strategy was
+     *  actually configured with, not just what the file says. Pairs with the "Strategy changes" sheet. */
+    private void strategyParamsSheet(Xlsx wb) {
+        io.jethro.app.strategy.StrategyControl ctl = strategyControl.getIfAvailable();
+        List<List<Object>> rows = new ArrayList<>();
+        if (ctl == null) {
+            rows.add(List.of("(strategy control unavailable — jethro.strategy.enabled=false)"));
+        } else {
+            for (var d : ctl.state()) {
+                rows.add(List.of(d.key(), d.group(), d.defaultValue(), d.effective(),
+                        d.overridden() ? "Y" : "N", d.gatesRisk() ? "Y" : "N"));
+            }
+        }
+        wb.sheet("Strategy params", List.of("dial", "group", "config_default", "effective",
+                "overridden", "gates_risk"), rows);
+    }
+
+    /** The audited history of live tuning changes (ADR-0052): old→new, who, when — so a threshold or
+     *  sizing change can be lined up against the Fills / P&L sheets to see how the book responded. */
+    private void strategyChangesSheet(JdbcTemplate db, Xlsx wb) {
+        List<List<Object>> rows = query(db,
+                "select changed_at, param, old_value, new_value, actor, note "
+                        + "from strategy_param_change order by changed_at desc limit " + ROW_CAP,
+                rs -> List.of(str(rs.getObject("changed_at")), str(rs.getString("param")),
+                        str(rs.getString("old_value")), str(rs.getString("new_value")),
+                        str(rs.getString("actor")), str(rs.getString("note"))));
+        wb.sheet("Strategy changes", List.of("changed_at", "param", "old_value", "new_value",
+                "actor", "note"), rows);
     }
 
     /** The live strategy's trend detector when the ADR-0044 regime-aware path is wired, else null. */
