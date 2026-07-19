@@ -28,12 +28,13 @@
   main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
   .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; }
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
-  .tiles { display:grid; gap:12px; grid-template-columns:repeat(6, 1fr); margin-bottom:18px; }
-  @media (max-width:900px) { .tiles { grid-template-columns:repeat(3, 1fr); } }
-  .tile { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
-  .tile .k { font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:var(--dim); }
-  .tile .v { font-size:22px; font-weight:650; margin-top:4px; }
-  .tile .v.mono { font-variant-numeric:tabular-nums; }
+  /* compact per-section key/value tables (replaces the big tile grid — denser, colour-coded) */
+  .tiles { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:6px 8px; margin-bottom:16px; overflow-x:auto; }
+  .kv { border-collapse:collapse; font-size:12.5px; }
+  .kv td { border:0; padding:3px 8px; line-height:1.5; white-space:nowrap; text-align:left; }
+  .kv td.k { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.06em; padding-right:2px; }
+  .kv td.v { font-weight:600; padding-right:22px; font-variant-numeric:tabular-nums; }
+  .kv tbody tr:hover { background:transparent; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:right; padding:4px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
   th:first-child, td:first-child { text-align:left; }
@@ -98,18 +99,33 @@
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const ms = v => v == null ? "—" : (v >= 1000 ? (v/1000).toFixed(1) + "s" : v + "ms");
-  const tile = (k, v, cls) => `<div class="tile"><div class="k">${k}</div><div class="v mono ${cls||''}">${v}</div></div>`;
+  // compact key/value table: several pairs per row so a section stays small in both dimensions.
+  const kv = (k, v, cls) => ({ k, v, cls: cls || "" });
+  function kvTable(items, perRow) {
+    perRow = perRow || 4;
+    let rows = "";
+    for (let i = 0; i < items.length; i += perRow) {
+      rows += "<tr>";
+      for (let j = 0; j < perRow; j++) {
+        const it = items[i + j];
+        rows += it ? `<td class="k">${it.k}</td><td class="v ${it.cls}">${it.v}</td>`
+                   : '<td class="k"></td><td class="v"></td>';
+      }
+      rows += "</tr>";
+    }
+    return `<table class="kv"><tbody>${rows}</tbody></table>`;
+  }
 
   function render(data) {
     const s = data.summary;
     document.getElementById("asof").textContent = s.lastRunMillis ? "· last " + new Date(s.lastRunMillis).toLocaleTimeString() : "";
-    document.getElementById("tiles").innerHTML =
-      tile("Model", `<span style="font-size:15px">${esc(s.model || "—")}</span>`) +
-      tile("Calls (window)", s.total) +
-      tile("Failures", s.failures, s.failures > 0 ? "down" : "up") +
-      tile("Avg latency", ms(s.avgLatencyMillis)) +
-      tile("p95 latency", ms(s.p95LatencyMillis)) +
-      tile("Avg tok/s", s.avgTokensPerSecond ? s.avgTokensPerSecond.toFixed(1) : "—");
+    document.getElementById("tiles").innerHTML = kvTable([
+      kv("Model", esc(s.model || "—")),
+      kv("Calls", s.total),
+      kv("Failures", s.failures, s.failures > 0 ? "down" : "up"),
+      kv("Avg lat", ms(s.avgLatencyMillis)),
+      kv("p95 lat", ms(s.p95LatencyMillis)),
+      kv("Avg tok/s", s.avgTokensPerSecond ? s.avgTokensPerSecond.toFixed(1) : "—")]);
 
     const rows = data.runs;
     document.getElementById("runs").outerHTML = '<div id="runs" class="muted">' + (rows.length ?
@@ -135,13 +151,13 @@
       lastTraffic = t;
       document.getElementById("trafficAsOf").textContent =
         t.up ? "— " + esc(t.provider) + " · regime " + esc(t.regime) : "— feed down";
-      document.getElementById("trafficTiles").innerHTML =
-        tile("Ticks / s", `<span class="${t.up?'up':''}">${rate}</span>`) +
-        tile("Ticks in", (t.ticksIn||0).toLocaleString()) +
-        tile("Dropped", (t.ticksDropped||0).toLocaleString(), t.ticksDropped>0 ? "down" : "up") +
-        tile("Instruments", t.instruments||0) +
-        tile("Marks flushed", (t.marksFlushed||0).toLocaleString()) +
-        tile("Provider", `<span style="font-size:14px">${esc(t.provider)}</span>`);
+      document.getElementById("trafficTiles").innerHTML = kvTable([
+        kv("Ticks/s", rate, t.up ? "up" : ""),
+        kv("Ticks in", (t.ticksIn||0).toLocaleString()),
+        kv("Dropped", (t.ticksDropped||0).toLocaleString(), t.ticksDropped>0 ? "down" : "up"),
+        kv("Instruments", t.instruments||0),
+        kv("Marks flushed", (t.marksFlushed||0).toLocaleString()),
+        kv("Provider", esc(t.provider))]);
     } catch (e) {}
   }
 
@@ -165,13 +181,13 @@
         : '<span class="up">on</span>';
       document.getElementById("ragAsOf").textContent =
         r.enabled ? "— semantic dedup + outcome memory (ADR-0035)" : "— disabled (jethro.rag.enabled=false)";
-      document.getElementById("ragTiles").innerHTML =
-        tile("Status", status) +
-        tile("Embed model", `<span style="font-size:14px">${esc(r.model || "—")}</span>`) +
-        tile("Embedding dim", r.embeddingDim > 0 ? r.embeddingDim : "—") +
-        tile("Chunks indexed", `${r.totalChunks} <span class="muted" style="font-size:11px">(${r.dedupChunks} dedup · ${r.outcomeChunks} outcome)</span>`) +
-        tile("Recall hit-rate", pct(r.recallHitRate), r.recallHitRate > 0 ? "up" : "") +
-        tile("Embed failures", r.embedFailures, r.embedFailures > 0 ? "down" : "up");
+      document.getElementById("ragTiles").innerHTML = kvTable([
+        kv("Status", status),
+        kv("Embed model", esc(r.model || "—")),
+        kv("Embed dim", r.embeddingDim > 0 ? r.embeddingDim : "—"),
+        kv("Chunks", `${r.totalChunks} <span class="muted" style="font-size:11px">(${r.dedupChunks} dedup · ${r.outcomeChunks} outcome)</span>`),
+        kv("Recall hit", pct(r.recallHitRate), r.recallHitRate > 0 ? "up" : ""),
+        kv("Embed fails", r.embedFailures, r.embedFailures > 0 ? "down" : "up")]);
       const failing = r.enabled && r.embeddingDim < 0 && r.embedFailures > 0;
       document.getElementById("ragHint").innerHTML = !r.enabled
         ? "retrieval is off — theses fall back to the deterministic id/text de-dup guard; pull the embedding model and set jethro.rag.enabled=true"
@@ -208,15 +224,15 @@
         : sel.lastError ? '<span class="down" style="font-size:13px">error</span>'
         : `${sel.tradable}/${sel.measured} <span class="muted" style="font-size:11px">tradable · ${since(sel.lastRunMillis)}</span>`;
       document.getElementById("jvmAsOf").textContent = "— heap, GC + the hourly-backtest heap guard (35% floor)";
-      document.getElementById("jvmTiles").innerHTML =
-        tile("Heap used", `<span class="${heapCls}">${j.heapUsedMb} / ${j.heapMaxMb} MB</span> <span class="muted" style="font-size:11px">(${j.heapUsedPct}%)</span>`) +
-        tile("Headroom", `<span class="${j.guardTripping?'down':'up'}">${j.headroomPct}%</span> <span class="muted" style="font-size:11px">guard ${j.guardPct}%</span>`) +
-        tile("Committed", j.heapCommittedMb + " MB") +
-        tile("Non-heap", j.nonHeapUsedMb + " MB") +
-        tile("GC", `${j.gcCount} <span class="muted" style="font-size:11px">(${j.gcTimeMs} ms)</span>`) +
-        tile("Threads", j.threads) +
-        tile("Uptime", uptime(j.uptimeSeconds)) +
-        tile("OOS selector", selVal);
+      document.getElementById("jvmTiles").innerHTML = kvTable([
+        kv("Heap", `<span class="${heapCls}">${j.heapUsedMb}/${j.heapMaxMb} MB</span> <span class="muted" style="font-size:11px">${j.heapUsedPct}%</span>`),
+        kv("Headroom", `<span class="${j.guardTripping?'down':'up'}">${j.headroomPct}%</span> <span class="muted" style="font-size:11px">guard ${j.guardPct}%</span>`),
+        kv("Committed", j.heapCommittedMb + " MB"),
+        kv("Non-heap", j.nonHeapUsedMb + " MB"),
+        kv("GC", `${j.gcCount} <span class="muted" style="font-size:11px">${j.gcTimeMs}ms</span>`),
+        kv("Threads", j.threads),
+        kv("Uptime", uptime(j.uptimeSeconds)),
+        kv("OOS selector", selVal)]);
       document.getElementById("jvmHint").innerHTML = j.guardTripping
         ? `<span class="down">heap headroom below the ${j.guardPct}% guard</span> — the hourly OOS strategy backtest is being SKIPPED to avoid an allocation stall (the ~1h freeze). Give the JVM more heap (run with <span class="mono">HEAP=1g</span>) so the selector refreshes again.`
         : `heap guard OK — the hourly OOS backtest runs while headroom stays above ${j.guardPct}%. It's skipped (last selection kept) if the heap gets tight, so the box can't freeze.`;
