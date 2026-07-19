@@ -51,6 +51,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0045](0045-news-advisory-signals.md) | News-driven advisory signals — RSS → SLM verdict → bounded, audited overlay | Proposed |
 | [0046](0046-no-sim-tick-archive.md) | Don't archive SIM ticks — a seeded sim run is reproducible, not stored | Proposed |
 | [0047](0047-postgres-vs-lmdb-role-split.md) | Keep PostgreSQL as the system-of-record; LMDB stays derived-only (re-evaluation) | Proposed |
+| [0048](0048-persist-strategy-actions.md) | Persist deterministic strategy actions (entries/exits + reasons) so the UI survives restart | Proposed |
 
 ## Lifecycle
 
