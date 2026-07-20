@@ -30,6 +30,8 @@
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
   /* per-section metric tables use the app's standard table styling below (like every other page) */
   .tiles { margin-bottom:16px; overflow-x:auto; }
+  /* KV sections are 2-column Metric|Value tables — keep them readable, not stretched across the page */
+  .tiles table { max-width:440px; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:right; padding:4px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
   th:first-child, td:first-child { text-align:left; }
@@ -98,13 +100,13 @@
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const ms = v => v == null ? "—" : (v >= 1000 ? (v/1000).toFixed(1) + "s" : v + "ms");
-  // standard data table (same format as every other page): metric names as column headers, one row
-  // of values. Colour class on each value cell. Uses the shared table CSS.
+  // Standard vertical data table (same rhythm as every other page — markets/books): a Metric | Value
+  // header, then one row per metric going down. Metric name left, value right (shared table CSS).
   const kv = (k, v, cls) => ({ k, v, cls: cls || "" });
   function gridKV(items) {
-    const head = items.map(it => `<th>${it.k}</th>`).join("");
-    const row = items.map(it => `<td class="mono ${it.cls}">${it.v}</td>`).join("");
-    return `<table><thead><tr>${head}</tr></thead><tbody><tr>${row}</tr></tbody></table>`;
+    const rows = items.map(it =>
+      `<tr><td>${it.k}</td><td class="mono ${it.cls}">${it.v}</td></tr>`).join("");
+    return `<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   function render(data) {
