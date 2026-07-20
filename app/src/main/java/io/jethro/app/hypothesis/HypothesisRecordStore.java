@@ -56,13 +56,14 @@ public interface HypothesisRecordStore {
                     insert into hypothesis_record
                       (id, created_at, instrument, direction, horizon, conviction, thesis, book,
                        quantity, backtest_supported, order_id, order_status,
-                       entry_price, horizon_expires_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       entry_price, horizon_expires_at, feed_mode)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     on conflict (id) do nothing
                     """,
                     r.id(), ts(r.timestampMillis()), r.instrumentId(), r.direction(), r.horizon(),
                     r.conviction(), r.thesis(), r.book(), r.quantity(), r.backtestSupported(),
-                    r.orderId(), r.orderStatus(), r.entryPrice(), ts(r.expiresAtMillis()));
+                    r.orderId(), r.orderStatus(), r.entryPrice(), ts(r.expiresAtMillis()),
+                    io.jethro.messaging.Provenance.mode().name()); // ADR-0029: tag the thesis's feed mode
         }
 
         @Override
@@ -84,7 +85,7 @@ public interface HypothesisRecordStore {
                     select id, created_at, instrument, direction, horizon, conviction, thesis, book,
                            quantity, backtest_supported, order_id, order_status,
                            entry_price, horizon_expires_at, outcome, outcome_pnl, exit_price
-                    from hypothesis_record order by created_at desc limit ?
+                    from hypothesis_record where feed_mode = ? order by created_at desc limit ?
                     """,
                     (rs, i) -> new HypothesisRecord(
                             rs.getString("id"),
@@ -100,7 +101,7 @@ public interface HypothesisRecordStore {
                             rs.getString("outcome"),
                             rs.getBigDecimal("outcome_pnl"),
                             rs.getBigDecimal("exit_price")),
-                    limit);
+                    io.jethro.messaging.Provenance.mode().name(), limit);
         }
 
         private static OffsetDateTime ts(long epochMillis) {
