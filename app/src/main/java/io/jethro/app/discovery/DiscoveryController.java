@@ -30,7 +30,14 @@ public final class DiscoveryController {
     public record NewsStatusView(String name, boolean healthy, long lastPollMillis, int lastCount, String detail) {
     }
 
-    public record DiscoveryView(boolean available, NewsStatusView news, List<CandidateView> candidates) {
+    /** One recent headline as a financial-data source: outlet, time, title (link), and the instruments
+     *  it mentions — {@code untracked} being the subset that are discovery candidates. */
+    public record HeadlineView(long atMillis, String outlet, String title, String url,
+                               List<String> tickers, List<String> untracked) {
+    }
+
+    public record DiscoveryView(boolean available, NewsStatusView news, List<CandidateView> candidates,
+                                List<HeadlineView> headlines) {
     }
 
     @GetMapping("/api/discovery")
@@ -41,10 +48,14 @@ public final class DiscoveryController {
                 .toList();
         DiscoveryLifecycle live = lifecycle.getIfAvailable();
         NewsStatusView news = null;
+        List<HeadlineView> headlines = List.of();
         if (live != null) {
             var s = live.newsStatus();
             news = new NewsStatusView(s.name(), s.healthy(), s.lastPollMillis(), s.lastCount(), s.detail());
+            headlines = live.recentNews().stream()
+                    .map(h -> new HeadlineView(h.atMillis(), h.outlet(), h.title(), h.url(), h.tickers(), h.untracked()))
+                    .toList();
         }
-        return new DiscoveryView(true, news, rows);
+        return new DiscoveryView(true, news, rows, headlines);
     }
 }
