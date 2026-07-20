@@ -53,8 +53,9 @@ public class SessionConfig {
             return today;
         }
         try {
-            LocalDate last = jdbc.query("select max(day) as day from firm_equity",
-                    rs -> rs.next() ? rs.getObject("day", LocalDate.class) : null);
+            LocalDate last = jdbc.query("select max(day) as day from firm_equity where feed_mode = ?",
+                    rs -> rs.next() ? rs.getObject("day", LocalDate.class) : null,
+                    io.jethro.messaging.Provenance.mode().name());
             return last != null && !last.plusDays(1).isBefore(today) ? last.plusDays(1) : today;
         } catch (Exception e) {
             return today; // table missing/unreachable — anchor at today, upserts stay consistent

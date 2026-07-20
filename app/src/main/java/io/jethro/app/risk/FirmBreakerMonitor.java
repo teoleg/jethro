@@ -47,7 +47,8 @@ public final class FirmBreakerMonitor implements AutoCloseable {
         if (jdbcOrNull != null) {
             try {
                 BigDecimal persisted = jdbcOrNull.queryForObject(
-                        "select coalesce(max(total_pnl), 0) from firm_equity", BigDecimal.class);
+                        "select coalesce(max(total_pnl), 0) from firm_equity where feed_mode = ?",
+                        BigDecimal.class, io.jethro.messaging.Provenance.mode().name());
                 if (persisted != null && persisted.compareTo(peak) > 0) {
                     peak = persisted; // the high-water mark survives restarts
                 }
