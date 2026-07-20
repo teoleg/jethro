@@ -133,8 +133,16 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.forecastRegistry = forecastRegistry;
     }
 
+    // ADR-0055 phase 5: when the fusion layer is the sole order origin, the strategy's OWN auto-exec
+    // (entries and managed exits) stands down — it becomes a forecast source, not an order source.
+    private volatile boolean fusionRoutingActive;
+
+    public void setFusionRoutingActive(boolean active) {
+        this.fusionRoutingActive = active;
+    }
+
     private boolean autoExecuting() {
-        return control.autoExecute() && orderService != null;
+        return control.autoExecute() && orderService != null && !fusionRoutingActive;
     }
 
     /** The SENSED volatility regime (ADR-0051) — CALM/ELEVATED/UNKNOWN, price-derived (never a sim

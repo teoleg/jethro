@@ -39,6 +39,7 @@ public final class FusionLifecycle implements AutoCloseable {
     private final FusionWeights weights;
     private final FusionPlanner.Params params;
     private final boolean routeOrders;
+    private final FusionExecutor executor; // null ⇒ shadow only (no order path available)
     private final long intervalSeconds;
 
     private volatile TargetBook lastBook = TargetBook.empty();
@@ -46,14 +47,21 @@ public final class FusionLifecycle implements AutoCloseable {
 
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
                            Supplier<Map<String, BigDecimal>> positionsSupplier, FusionWeights weights,
-                           FusionPlanner.Params params, boolean routeOrders, long intervalSeconds) {
+                           FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
+                           long intervalSeconds) {
         this.registry = registry;
         this.priceFor = priceFor;
         this.positionsSupplier = positionsSupplier;
         this.weights = weights;
         this.params = params;
-        this.routeOrders = routeOrders;
+        this.executor = executor;
+        this.routeOrders = routeOrders && executor != null;
         this.intervalSeconds = Math.max(5, intervalSeconds);
+    }
+
+    /** True when this loop is actually placing orders (route-orders set AND an order path is wired). */
+    public boolean live() {
+        return routeOrders;
     }
 
     public void start() {
@@ -63,9 +71,9 @@ public final class FusionLifecycle implements AutoCloseable {
             return t;
         });
         scheduler.scheduleWithFixedDelay(this::tick, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
-        log.info("fusion loop started (every {}s) — ADR-0055 phase 4 SHADOW MODE (computes the target "
-                + "book, places NO orders){}", intervalSeconds,
-                routeOrders ? " [route-orders set but live routing is not wired yet]" : "");
+        log.info("fusion loop started (every {}s) — ADR-0055 {}", intervalSeconds,
+                routeOrders ? "LIVE (sim-only): the sole order origin, gated by ADR-0049/guardrail/breaker"
+                        : "SHADOW MODE (computes the target book, places NO orders)");
     }
 
     private void tick() {
@@ -75,11 +83,20 @@ public final class FusionLifecycle implements AutoCloseable {
             Map<String, BigDecimal> positions = positionsSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, weights::weightFor, priceFor,
                     id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
-            lastBook = new TargetBook(now, false, targets.size(), targets);
+            lastBook = new TargetBook(now, routeOrders, targets.size(), targets);
             if (routeOrders) {
-                long actionable = targets.stream().filter(t -> t.deltaQty().signum() != 0).count();
-                log.warn("fusion: route-orders=true but live routing is NOT wired (shadow only, ADR-0055 "
-                        + "phase 4) — {} delta(s) would route once enabled with Oleg's dials", actionable);
+                int routed = 0;
+                for (FusionPlanner.Target t : targets) {
+                    if (t.deltaQty().signum() == 0) {
+                        continue; // inside the no-trade band — nothing to do
+                    }
+                    if (executor.route(t.instrument(), t.deltaQty()).routed()) {
+                        routed++;
+                    }
+                }
+                if (routed > 0) {
+                    log.info("fusion: routed {} sole-origin delta order(s) this cycle (sim)", routed);
+                }
             }
         } catch (Exception e) {
             log.debug("fusion tick failed: {}", e.toString());

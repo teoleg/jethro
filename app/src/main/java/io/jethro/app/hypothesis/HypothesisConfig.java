@@ -152,7 +152,8 @@ public class HypothesisConfig {
                                             ObjectProvider<RefDataRepository> refData,
                                             HypothesisMemory hypothesisMemory,
                                             ObjectProvider<io.jethro.app.signal.SignalTelemetry> signalTelemetry,
-                                            ObjectProvider<io.jethro.app.fusion.ForecastRegistry> forecastRegistry) {
+                                            ObjectProvider<io.jethro.app.fusion.ForecastRegistry> forecastRegistry,
+                                            @org.springframework.beans.factory.annotation.Value("${jethro.fusion.route-orders:false}") boolean fusionRouting) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
         // the broker is wired — every hypothesis-generation run is an audited AiDecision.
         DecisionSink sink = decision -> {
@@ -174,6 +175,7 @@ public class HypothesisConfig {
                 tradingHaltSwitch, names, hypothesisMemory);
         lifecycle.setSignalTelemetry(signalTelemetry.getIfAvailable()); // ADR-0055 phase 1: optional observer
         lifecycle.setForecastRegistry(forecastRegistry.getIfAvailable()); // ADR-0055 phase 4: optional observer
+        lifecycle.setFusionRoutingActive(fusionRouting); // ADR-0055 phase 5: autonomy stands down when fusion routes
         return lifecycle;
     }
 

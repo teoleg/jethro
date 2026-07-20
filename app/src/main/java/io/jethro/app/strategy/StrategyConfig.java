@@ -120,6 +120,7 @@ public class StrategyConfig {
                                         ObjectProvider<io.jethro.app.order.MeasuredAdvSource> measuredAdv,
                                         ObjectProvider<io.jethro.app.signal.SignalTelemetry> signalTelemetry,
                                         ObjectProvider<io.jethro.app.fusion.ForecastRegistry> forecastRegistry,
+                                        @org.springframework.beans.factory.annotation.Value("${jethro.fusion.route-orders:false}") boolean fusionRouting,
                                         @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.window:30}") int volWindow,
                                         @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.upper-factor:1.5}") String volUpper,
                                         @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.lower-factor:1.1}") String volLower,
@@ -139,6 +140,7 @@ public class StrategyConfig {
                 measuredAdv.getIfAvailable(), volRegime);
         lifecycle.setSignalTelemetry(signalTelemetry.getIfAvailable()); // ADR-0055 phase 1: optional observer
         lifecycle.setForecastRegistry(forecastRegistry.getIfAvailable()); // ADR-0055 phase 4: optional observer
+        lifecycle.setFusionRoutingActive(fusionRouting); // ADR-0055 phase 5: stand down when fusion is sole origin
         return lifecycle;
     }
 }

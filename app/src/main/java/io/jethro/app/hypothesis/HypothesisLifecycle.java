@@ -122,6 +122,14 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         this.forecastRegistry = forecastRegistry;
     }
 
+    // ADR-0055 phase 5: when fusion is the sole order origin, the hypothesis layer's OWN autonomy stands
+    // down — theses still surface as advisory cards, but the fusion layer decides and places any order.
+    private volatile boolean fusionRoutingActive;
+
+    public void setFusionRoutingActive(boolean active) {
+        this.fusionRoutingActive = active;
+    }
+
     /** The hypothesis event ledger, newest first — every distinct thesis the model proposed,
      *  retained (not just the current cycle), for the /api/hypotheses surface. */
     public List<HypothesisEvent> ledger() {
@@ -446,8 +454,8 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private Set<String> runAutonomy(List<HypothesisEvaluator.Evaluated> evaluated, long now) {
         Set<String> traded = new HashSet<>();
         var auto = props.autonomyOrDefault();
-        if (!auto.enabledOrDefault() || orderService == null) {
-            return traded;
+        if (!auto.enabledOrDefault() || orderService == null || fusionRoutingActive) {
+            return traded; // ADR-0055 phase 5: fusion is the sole order origin — autonomy stands down
         }
         if (halt.isHalted()) {
             return traded; // firm breaker (ADR-0027): no NEW autonomy entries while halted

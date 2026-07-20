@@ -36,11 +36,29 @@ public class FusionConfig {
         return new ForecastRegistry(params, freshnessSeconds * 1_000);
     }
 
+    /** The sole-origin order path (ADR-0055 §5), present only when the order module is wired
+     *  (persistence on). Absent → the fusion loop can only run in shadow. */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.fusion", name = "enabled", havingValue = "true", matchIfMissing = true)
+    FusionExecutor fusionExecutor(io.jethro.app.strategy.StrategyProperties props,
+                                  io.jethro.trading.riskpnl.InstrumentRefSource refs,
+                                  io.jethro.trading.riskpnl.PreTradeGuardrail guardrail,
+                                  io.jethro.app.risk.TradingHaltSwitch halt,
+                                  ObjectProvider<io.jethro.order.OrderService> orderService,
+                                  ObjectProvider<io.jethro.app.strategy.StrategySelector> selector) {
+        io.jethro.order.OrderService os = orderService.getIfAvailable();
+        if (os == null) {
+            return null; // no order path — the lifecycle falls back to shadow
+        }
+        return new FusionExecutor(props, refs, guardrail, halt, os, selector);
+    }
+
     @Bean(destroyMethod = "close")
     @ConditionalOnProperty(prefix = "jethro.fusion", name = "enabled", havingValue = "true", matchIfMissing = true)
     FusionLifecycle fusionLifecycle(ForecastRegistry registry,
                                     ObjectProvider<TradingCoreLifecycle> tradingCore,
                                     ObjectProvider<RiskProjection> risk,
+                                    ObjectProvider<FusionExecutor> executor,
                                     @Value("${jethro.fusion.assumed-correlation:0.5}") double assumedCorrelation,
                                     @Value("${jethro.fusion.unit-notional-usd:10000}") BigDecimal unitNotional,
                                     @Value("${jethro.fusion.buffer-fraction:0.2}") double bufferFraction,
@@ -51,7 +69,7 @@ public class FusionConfig {
         var lifecycle = new FusionLifecycle(registry,
                 instrument -> priceFor(tradingCore, instrument),
                 () -> firmPositions(risk),
-                FusionWeights.equal(), params, routeOrders, intervalSeconds);
+                FusionWeights.equal(), params, routeOrders, executor.getIfAvailable(), intervalSeconds);
         lifecycle.start();
         return lifecycle;
     }
