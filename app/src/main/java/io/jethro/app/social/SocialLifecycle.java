@@ -72,9 +72,14 @@ public final class SocialLifecycle implements SmartLifecycle {
 
     // ADR-0055 phase 1: optional health telemetry — an observer social never depends on.
     private volatile io.jethro.app.signal.SignalTelemetry signalTelemetry;
+    private volatile io.jethro.app.fusion.ForecastRegistry forecastRegistry; // ADR-0055 phase 4 (shadow)
 
     public void setSignalTelemetry(io.jethro.app.signal.SignalTelemetry signalTelemetry) {
         this.signalTelemetry = signalTelemetry;
+    }
+
+    public void setForecastRegistry(io.jethro.app.fusion.ForecastRegistry forecastRegistry) {
+        this.forecastRegistry = forecastRegistry;
     }
 
     @Override
@@ -136,17 +141,24 @@ public final class SocialLifecycle implements SmartLifecycle {
             signals = next;
             lastRunMillis = now;
 
-            // ADR-0055 phase 1: record each tracked, directional (non-pump) social signal for health
-            // telemetry — scored later by realised forward return. Observational; social never orders.
-            if (signalTelemetry != null) {
+            // ADR-0055: record each tracked, directional (non-pump) social signal — phase 1 health
+            // telemetry (scored by forward return) + phase 4 current forecast for the fusion layer.
+            // Observational; social never orders.
+            if (signalTelemetry != null || forecastRegistry != null) {
                 for (SocialSignal sig : next) {
                     if (!sig.tracked() || sig.manipulationSuspected()) {
                         continue; // untracked (no mark) or a suspected pump — never a measured call
                     }
                     Side side = "BULLISH".equals(sig.direction()) ? Side.BUY
                             : "BEARISH".equals(sig.direction()) ? Side.SELL : null;
-                    if (side != null) {
+                    if (side == null) {
+                        continue; // NEUTRAL — no view
+                    }
+                    if (signalTelemetry != null) {
                         signalTelemetry.record("social", sig.instrumentId(), side); // mark from live cache
+                    }
+                    if (forecastRegistry != null) {
+                        forecastRegistry.submitSocial(sig); // current forecast for the fusion layer
                     }
                 }
             }

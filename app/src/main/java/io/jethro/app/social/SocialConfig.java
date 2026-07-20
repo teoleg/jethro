@@ -84,12 +84,14 @@ public class SocialConfig {
                                     SseBroadcaster sse, SocialProperties props,
                                     org.springframework.beans.factory.ObjectProvider<io.jethro.app.discovery.UniverseCandidates> candidates,
                                     org.springframework.beans.factory.ObjectProvider<io.jethro.app.signal.SignalTelemetry> signalTelemetry,
+                                    org.springframework.beans.factory.ObjectProvider<io.jethro.app.fusion.ForecastRegistry> forecastRegistry,
                                     @org.springframework.beans.factory.annotation.Value("${jethro.discovery.social-weight:1.0}") double discoverySocialWeight) {
         // The discovery register (ADR-0050 §7) is present only when jethro.discovery.enabled — social
         // feeds untracked corroborated names into it; without it, social runs unchanged.
         var lifecycle = new SocialLifecycle(feed, channels, spamFilter, refs, attention, sse, props,
                 candidates.getIfAvailable(), discoverySocialWeight);
         lifecycle.setSignalTelemetry(signalTelemetry.getIfAvailable()); // ADR-0055 phase 1: optional observer
+        lifecycle.setForecastRegistry(forecastRegistry.getIfAvailable()); // ADR-0055 phase 4: optional observer
         return lifecycle;
     }
 }

@@ -123,9 +123,14 @@ public final class StrategyLifecycle implements SmartLifecycle {
     // ADR-0055 phase 1: optional health telemetry — wired post-construction so it stays an observer
     // the strategy never depends on (null when signals telemetry is disabled).
     private volatile io.jethro.app.signal.SignalTelemetry signalTelemetry;
+    private volatile io.jethro.app.fusion.ForecastRegistry forecastRegistry; // ADR-0055 phase 4 (shadow)
 
     public void setSignalTelemetry(io.jethro.app.signal.SignalTelemetry signalTelemetry) {
         this.signalTelemetry = signalTelemetry;
+    }
+
+    public void setForecastRegistry(io.jethro.app.fusion.ForecastRegistry forecastRegistry) {
+        this.forecastRegistry = forecastRegistry;
     }
 
     private boolean autoExecuting() {
@@ -214,6 +219,9 @@ public final class StrategyLifecycle implements SmartLifecycle {
                 // later by realised forward return. Observational only; never gates or sizes this signal.
                 if (signalTelemetry != null) {
                     signalTelemetry.record(signal.kind(), signal.instrumentId(), signal.side(), signal.price());
+                }
+                if (forecastRegistry != null) {
+                    forecastRegistry.submitStrategy(signal); // ADR-0055: current forecast for the fusion layer
                 }
                 String book = bookFor(signal.instrumentId()); // route by asset class, not all to one book
                 Optional<BigDecimal> sized = size(signal, regimeScale);

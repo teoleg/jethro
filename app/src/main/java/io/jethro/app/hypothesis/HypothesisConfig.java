@@ -151,7 +151,8 @@ public class HypothesisConfig {
                                             io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch,
                                             ObjectProvider<RefDataRepository> refData,
                                             HypothesisMemory hypothesisMemory,
-                                            ObjectProvider<io.jethro.app.signal.SignalTelemetry> signalTelemetry) {
+                                            ObjectProvider<io.jethro.app.signal.SignalTelemetry> signalTelemetry,
+                                            ObjectProvider<io.jethro.app.fusion.ForecastRegistry> forecastRegistry) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
         // the broker is wired — every hypothesis-generation run is an audited AiDecision.
         DecisionSink sink = decision -> {
@@ -172,6 +173,7 @@ public class HypothesisConfig {
                 tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable(), recordStore,
                 tradingHaltSwitch, names, hypothesisMemory);
         lifecycle.setSignalTelemetry(signalTelemetry.getIfAvailable()); // ADR-0055 phase 1: optional observer
+        lifecycle.setForecastRegistry(forecastRegistry.getIfAvailable()); // ADR-0055 phase 4: optional observer
         return lifecycle;
     }
 

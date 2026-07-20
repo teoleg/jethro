@@ -98,6 +98,10 @@
   <div id="sigHealth" style="overflow-x:auto;margin-bottom:4px"><div class="muted" style="padding:12px">loading…</div></div>
   <div id="sigHint" class="muted" style="margin:6px 2px 16px;font-size:12px"></div>
 
+  <div class="section-h">Fusion target book <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0055 phase 4 SHADOW: all sources combined into one target per name; computed, not traded (places no orders)</span></div>
+  <div id="fusionBook" style="overflow-x:auto;margin-bottom:4px"><div class="muted" style="padding:12px">loading…</div></div>
+  <div id="fusionHint" class="muted" style="margin:6px 2px 16px;font-size:12px"></div>
+
   <div class="section-h">Model load <span class="muted" id="asof"></span></div>
   <div class="tiles" id="tiles"></div>
 
@@ -333,12 +337,49 @@
     } catch (e) {}
   }
 
+  // ADR-0055 phase 4 (shadow): the fused target book — one combined target per instrument, no orders.
+  async function loadFusion() {
+    try {
+      const book = await (await fetch("/api/fusion/targets")).json();
+      const ts = book.targets || [];
+      if (!ts.length) {
+        document.getElementById("fusionBook").innerHTML =
+          '<div class="muted" style="padding:12px">no fused targets yet — sources push forecasts as they fire; the loop combines them every 30s.</div>';
+        document.getElementById("fusionHint").innerHTML = "";
+        return;
+      }
+      const q = v => v == null ? "—" : Number(v).toLocaleString(undefined, {maximumFractionDigits: 2});
+      const body = ts.map(t => {
+        const fCls = t.combinedForecast > 0 ? "up" : (t.combinedForecast < 0 ? "down" : "muted");
+        const dCls = Number(t.deltaQty) > 0 ? "up" : (Number(t.deltaQty) < 0 ? "down" : "muted");
+        const contribs = (t.contributions || [])
+          .map(c => `${esc(c.source)} ${c.forecast > 0 ? "+" : ""}${c.forecast.toFixed(0)}`).join(", ");
+        return `<tr><td>${esc(t.instrument)}</td>
+          <td class="mono ${fCls}">${t.combinedForecast.toFixed(1)}</td>
+          <td class="mono">${t.sources}</td>
+          <td class="mono">${q(t.price)}</td>
+          <td class="mono">${q(t.targetQty)}</td>
+          <td class="mono muted">${q(t.currentQty)}</td>
+          <td class="mono ${dCls}">${Number(t.deltaQty) === 0 ? "— band" : q(t.deltaQty)}</td>
+          <td class="muted" style="font-size:11px">${esc(contribs)}</td></tr>`;
+      }).join("");
+      document.getElementById("fusionBook").innerHTML =
+        `<table><thead><tr><th>instr</th><th>forecast</th><th>src</th><th>price</th>
+         <th>target</th><th>current</th><th>Δ order</th><th>contributions</th></tr></thead><tbody>${body}</tbody></table>`;
+      document.getElementById("fusionHint").innerHTML =
+        `combined forecast on Carver's [-20,+20] scale (× diversification multiplier); target = forecast/10 × unit-notional / price; `
+        + `Δ order is the Gârleanu-Pedersen partial move toward target ("— band" = inside the no-trade band). `
+        + `<span class="warn">SHADOW — computed, never sent.</span> Sizing dials are placeholders until set (ADR-0055).`;
+    } catch (e) {}
+  }
+
   async function refresh() {
     try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
     loadJvm();
     loadTraining();
     loadBacktest();
     loadSignalHealth();
+    loadFusion();
     loadTraffic();
     loadBalance();
     loadRag();

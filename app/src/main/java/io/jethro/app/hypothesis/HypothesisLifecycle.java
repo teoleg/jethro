@@ -112,9 +112,14 @@ public final class HypothesisLifecycle implements SmartLifecycle {
 
     // ADR-0055 phase 1: optional health telemetry — an observer the hypothesis layer never depends on.
     private volatile io.jethro.app.signal.SignalTelemetry signalTelemetry;
+    private volatile io.jethro.app.fusion.ForecastRegistry forecastRegistry; // ADR-0055 phase 4 (shadow)
 
     public void setSignalTelemetry(io.jethro.app.signal.SignalTelemetry signalTelemetry) {
         this.signalTelemetry = signalTelemetry;
+    }
+
+    public void setForecastRegistry(io.jethro.app.fusion.ForecastRegistry forecastRegistry) {
+        this.forecastRegistry = forecastRegistry;
     }
 
     /** The hypothesis event ledger, newest first — every distinct thesis the model proposed,
@@ -403,6 +408,10 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                         signalTelemetry.record("hypothesis", e.hypothesis().instrumentId(),
                                 e.hypothesis().direction(), mark);
                     }
+                }
+                if (forecastRegistry != null) {
+                    forecastRegistry.submitHypothesis(e.hypothesis().instrumentId(),
+                            e.hypothesis().direction(), e.hypothesis().conviction()); // ADR-0055 phase 4
                 }
             }
             Set<String> autoTraded = runAutonomy(fresh, now);
