@@ -91,6 +91,10 @@
   <div class="tiles" id="ragTiles"></div>
   <div id="ragHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
 
+  <div class="section-h">Training data <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0053: real Tiingo daily bars for the learned advisory signal (rebuilt on empty; training only)</span></div>
+  <div class="tiles" id="trainTiles"></div>
+  <div id="trainHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
+
   <div class="section-h">Model load <span class="muted" id="asof"></span></div>
   <div class="tiles" id="tiles"></div>
 
@@ -243,9 +247,26 @@
     } catch (e) {}
   }
 
+  // ADR-0053 training-bars store: real Tiingo daily history for the learned advisory signal.
+  async function loadTraining() {
+    try {
+      const t = await (await fetch("/api/training/bars")).json();
+      const ok = t.rows > 0;
+      document.getElementById("trainTiles").innerHTML = gridKV([
+        kv("Rows", ok ? t.rows.toLocaleString() : "0", ok ? "up" : ""),
+        kv("Instruments", t.instruments || 0),
+        kv("From", t.firstDay || "—"),
+        kv("To", t.lastDay || "—")]);
+      document.getElementById("trainHint").innerHTML = ok
+        ? `real daily bars loaded from Tiingo — the ADR-0053 training set (never a number into live sizing/risk).`
+        : `empty — set <span class="mono">TIINGO_API_TOKEN</span> and restart; the loader rebuilds from Tiingo (skipped without a token).`;
+    } catch (e) {}
+  }
+
   async function refresh() {
     try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
     loadJvm();
+    loadTraining();
     loadTraffic();
     loadBalance();
     loadRag();
