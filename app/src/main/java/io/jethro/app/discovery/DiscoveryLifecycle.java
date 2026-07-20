@@ -30,14 +30,16 @@ public final class DiscoveryLifecycle implements SmartLifecycle {
     private final UniverseCandidates candidates;
     private final InstrumentRefSource refs;
     private final DiscoveryProperties props;
+    private final CompanyDirectory companies;
     private ScheduledExecutorService scheduler;
 
     public DiscoveryLifecycle(RssNewsFeed news, UniverseCandidates candidates,
-                              InstrumentRefSource refs, DiscoveryProperties props) {
+                              InstrumentRefSource refs, DiscoveryProperties props, CompanyDirectory companies) {
         this.news = news;
         this.candidates = candidates;
         this.refs = refs;
         this.props = props;
+        this.companies = companies;
     }
 
     @Override
@@ -50,8 +52,9 @@ public final class DiscoveryLifecycle implements SmartLifecycle {
         });
         long interval = props.intervalSecondsOrDefault();
         scheduler.scheduleWithFixedDelay(this::runOnce, INITIAL_DELAY_SECONDS, interval, TimeUnit.SECONDS);
-        log.info("universe discovery started (ADR-0050 §7): {} news outlet(s), first poll in {}s then every {}s, suggestions only",
-                props.outletsOrEmpty().size(), INITIAL_DELAY_SECONDS, interval);
+        log.info("universe discovery started (ADR-0050 §7): {} news outlet(s), {} companies in the name directory, "
+                        + "first poll in {}s then every {}s, suggestions only",
+                props.outletsOrEmpty().size(), companies.size(), INITIAL_DELAY_SECONDS, interval);
     }
 
     private void runOnce() {
@@ -61,7 +64,11 @@ public final class DiscoveryLifecycle implements SmartLifecycle {
             var items = news.poll(now);
             int discovered = 0;
             for (NewsItem item : items) {
-                for (String ticker : Cashtags.extractNewsTickers(item.text())) {
+                // Tickers named three ways: $cashtags, exchange-qualified "(NASDAQ: X)", and bare
+                // company NAMES resolved via the curated directory (what most headlines actually use).
+                Set<String> mentioned = Cashtags.extractNewsTickers(item.text());
+                mentioned.addAll(companies.resolve(item.text()));
+                for (String ticker : mentioned) {
                     if (!tracked.contains(ticker)) { // only propose names we DON'T already track
                         candidates.observe(ticker, "news:" + item.outlet(), props.newsWeightOrDefault(),
                                 item.title(), now);
