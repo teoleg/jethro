@@ -8,7 +8,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.util.Map;
 
 /**
  * Seeds the hedger's return history from REAL market history via a {@link HistoryClient} (Tiingo by
@@ -27,16 +26,6 @@ import java.util.Map;
 public final class HistorySeeder {
 
     private static final Logger log = LoggerFactory.getLogger(HistorySeeder.class);
-
-    /** instrument id → provider history symbol. Equities/ETFs are the plain ticker (ETF proxy for
-     *  index futures); FX pairs are the lowercase pair the FX endpoint keys on. */
-    private static final Map<String, String> SYMBOL = Map.ofEntries(
-            Map.entry("AAPL", "AAPL"), Map.entry("MSFT", "MSFT"), Map.entry("AMZN", "AMZN"),
-            Map.entry("GOOG", "GOOGL"), Map.entry("SAP", "SAP"), Map.entry("JNJ", "JNJ"),
-            Map.entry("NVDA", "NVDA"), Map.entry("JPM", "JPM"),
-            Map.entry("ES", "SPY"), Map.entry("NQ", "QQQ"),
-            Map.entry("EURUSD", "eurusd"), Map.entry("GBPUSD", "gbpusd"),
-            Map.entry("AUDUSD", "audusd"), Map.entry("USDJPY", "usdjpy"));
 
     private final JdbcTemplate jdbc;
     private final TradingCoreProperties props;
@@ -74,7 +63,7 @@ public final class HistorySeeder {
             LocalDate today = LocalDate.now();
             int names = 0, rows = 0;
             for (String id : props.simInstruments()) {
-                String sym = SYMBOL.get(id);
+                String sym = HistorySymbols.PROXY.get(id);
                 if (sym == null) {
                     continue; // no history proxy for this one (e.g. Treasury futures) — skip
                 }
