@@ -1,176 +1,181 @@
 # Jethro — Architecture Overview
 
-Status: design phase. Decisions referenced as ADR-XXXX live in [`docs/adr/`](../adr/README.md).
-The risk/pricing analytics layer has its own target architecture (north star):
-[`quant-engine.md`](quant-engine.md).
+**Status: built and running** (single-JVM modular monolith). This document is the *current*
+architecture — reconciled against the code on 2026-07-20, not the original design. Decisions live in
+[`docs/adr/`](../adr/README.md) (through ADR-0055); the runtime resource/contention picture and the
+freeze analysis live in [`system-footprint-analysis.md`](system-footprint-analysis.md); the analytics
+north star in [`quant-engine.md`](quant-engine.md).
 
-## System at a glance
+> **Maintenance rule:** when you change a seam (a module boundary, a shared singleton, a transport, a
+> lifecycle), update this file in the *same* change. A stale architecture doc is worse than none — it
+> misleads the next reader (human or agent) with confidence. This map is only useful if it's true.
 
-The market path is **one process** — `trading-core` (ADR-0014): feed adapters, the
-AI-driven algo engine, and risk/PnL communicate over an in-process ring buffer;
-microseconds from tick to decision. The **durable log** (Kafka API via Redpanda,
-ADR-0012) carries only transactional flow and snapshots: orders, fills, AI decisions,
-conflated marks and risk snapshots — at-least-once, idempotent consumers. Ticks are
-archived write-behind to S3 Parquet; backtests replay the archive through the same
-pipeline via the feed SPI (ADR-0009). UI is server-served static pages polling
-`ui-gateway` REST (ADR-0028; React/streaming deferred behind concrete triggers). **All modules currently assemble into a single JVM
-(`app`, ADR-0015)** — the diagram below shows logical module boundaries; every arrow
-touching the log is a real Redpanda topic even in-process, so extraction later is
-mechanical. Dev runs the whole stack (app + Redpanda + Postgres) on one EC2 node; ECS
-Fargate/Aurora/ALB are the production shape (ADR-0007/0013).
+## The three transport planes (read this first)
+
+The single most common confusion is stacking three *separate* transports into one. They are distinct:
+
+1. **Browser ↔ backend (UI plane) — pure HTTP.** The UI is a thin, read-only client: ~58 polled
+   `/api/*` REST endpoints **plus one SSE stream** (`/api/stream`, `EventSource`) that pushes the
+   attention feed. **No websocket, no Redpanda touches the browser.** (ADR-0028; ADR-0017 attention-first.)
+2. **Backend ↔ external providers (ingest plane).** Exactly **one websocket** in the whole system —
+   the inbound Finnhub trade feed (`wss://ws.finnhub.io`, only on the Finnhub feed). Everything else is
+   REST out: Tiingo (history), Yahoo (indicators), RSS (news), Ollama (local LLM), StockTwits/Telegram.
+3. **Inside the backend (internal plane) — invisible to the browser.** Hot ticks flow over an
+   **in-process ring buffer** (never brokered, ADR-0014). Cross-module events flow over **Redpanda**
+   topics (`fills`, `md.marks`, `risk.snapshots`, `ai.decisions`, `orders.*`, `cost.snapshots`) — all
+   inside one JVM today, so most are the app messaging itself (see the "do we still need the broker?"
+   open question, ADR-0012). Durable state: **Postgres** (system of record) + **LMDB** (warm-restart,
+   derived-only).
 
 ```mermaid
-flowchart LR
-    subgraph ext[Market Data Providers]
-        P1[sim adapter]
-        P2[real provider]
+flowchart TB
+    subgraph browser[Browser — thin read-only client]
+        UI[13 static pages: Overview, Signals, Ops, Markets, Rates, Books, Orders, Backtest, Strategy, Social, Discover, Config, Sim]
     end
-
-    subgraph core[trading-core — one JVM, in-proc ring buffer]
-        MDG[market-data module<br/>provider SPI]
-        ALGO[algo module<br/>model-inference SPI]
-        RISK[risk-pnl module]
-        ARCH[tick archiver]
-        LMDB[(LMDB: dedupe,<br/>warm cache)]
+    subgraph jvm[app — ONE JVM, all modules - ADR-0015]
+        EDGE[:8080 edge — REST controllers + SSE /api/stream]
+        subgraph coreproc[trading-core — in-proc ring buffer, ADR-0014]
+            MDG[market-data<br/>provider SPI]
+            ALGO[algo-engine<br/>strategies + model-inference SPI]
+            RISK[risk-pnl<br/>RiskProjection — the shared lock]
+        end
+        FUSION[fusion — combine all sources → one target/name, ADR-0055]
+        AISVC[ai / hypothesis / chat / social / discovery / signal / training]
+        ORD[order — sim execution, extraction seam ADR-0015]
+        LOG([Redpanda topics — internal event bus])
     end
+    ext[Finnhub WS in · Tiingo/Yahoo/RSS/Ollama REST]
+    PG[(PostgreSQL — source of truth)]
+    LMDB[(LMDB — warm-restart, derived only)]
 
-    P1 --> MDG
-    P2 --> MDG
+    ext --> MDG
     MDG --> ALGO
     MDG --> RISK
-    MDG --> ARCH
-
-    S3[(S3 Parquet<br/>tick archive)]
-    ARCH -. write-behind .-> S3
-
-    subgraph log[Redpanda - transactional + snapshots]
-        T2([orders.new / orders.events / fills])
-        T3([risk.snapshots / md.marks / ai.decisions])
-    end
-
-    ALGO --> T2
-    T2 --> ORD[order-service]
-    ORD --> T2
-    T2 --> RISK
-    ALGO --> T3
-    RISK --> T3
-
-    REF[reference-data-service] -.REST.- core
-
-    T2 --> UIG[ui-gateway]
-    T3 --> UIG
-    REF -.REST.- UIG
-
-    PG[(PostgreSQL)]
-    ORD --> PG
+    ALGO --> FUSION
+    AISVC --> FUSION
+    FUSION -->|sole order origin when routing| ORD
+    ORD --> LOG
+    LOG --> RISK
     RISK --> PG
-    REF --> PG
-
-    UIG -- REST, polled --> SPA[static HTML pages<br/>served by the app]
+    ORD --> PG
+    RISK -. warm state .-> LMDB
+    EDGE -->|REST poll + SSE push| UI
+    RISK --> EDGE
 ```
 
 ## Modules (one deployable JVM — ADR-0015)
 
 | Module | Role | Key ADRs | Extraction trigger |
 |---|---|---|---|
-| `trading-core` cluster (market-data, algo-engine, risk-pnl, runtime) | Fused market path: feed adapters (provider SPI), AI algo engine (model-inference SPI), risk/PnL over the ring buffer; tick archiver; LMDB local state | 0009, 0010, 0014 | measured GC interference |
-| `order` | Order lifecycle; simulated execution until a broker is wired | 0003, 0008, 0012 | **hard: before any real-money broker connection** |
-| `reference-data` | Instruments, symbology, book tree | 0008 | on need |
-| `ui-gateway` | BFF: REST snapshots + the static UI pages (polled; streaming deferred with ADR-0028) | 0006, 0028 | streaming fan-out load |
-| `finops` | PLANNED, not built (empty shell): cost telemetry — Cost Explorer polling, LLM token pricing from `ai.decisions`, budget alerts | 0011 | on need |
+| `common-domain` | Dependency-free shared types (`Instrument`, `Book`, `Side`, scaled-long `Decimals`) | 0008 | — |
+| `common-messaging` | Avro schemas + serde + `Topics` + `Provenance` (feedMode/epoch) | 0012, 0029, 0030 | — |
+| `trading-core:{market-data, algo-engine, risk-pnl, runtime}` | Fused market path: feed adapters (provider SPI), algo engine (model-inference SPI), risk/PnL, ring buffer + LMDB + tick archiver | 0009, 0010, 0014 | measured GC interference |
+| `modules:order` | Order lifecycle + simulated execution (spread/fee/impact) | 0003, 0025 | **hard: before any real-money broker (ADR-0015)** |
+| `modules:reference-data` | Instruments, symbology, book tree, attributes | 0008 | on need |
+| `modules:ui-gateway` | REST snapshots + SSE + the static UI pages | 0028 | streaming fan-out load |
+| `modules:finops` | **Not built** — empty shell (no Java). Planned: cost telemetry from `ai.decisions` + Cost Explorer | 0011 | on need |
+| `app` | Single-JVM assembly + the `:8080` edge + all the subsystems below | 0015 | — |
 
-Module isolation is build-enforced (Gradle constraints + ArchUnit): modules depend only
-on `common-domain`, `common-messaging`, and published interfaces — never internals.
+Isolation is build-enforced (Gradle constraints + ArchUnit): modules depend only on `common-*` and
+published interfaces.
 
-## UI views (attention-first — ADR-0017)
+## Subsystems in `app` (purpose + what each depends on)
 
-Landing page (`/`) is the **attention feed**: ranked cards from deterministic triggers
-(always surface) annotated/grouped by agents (never suppress). Every card links to its
-evidence. Detail views are drill-down behind the feed, each with a "show everything"
-mode:
+`app` wires 21 subsystems. Each is an independent lifecycle on its own cadence — see
+[`system-footprint-analysis.md`](system-footprint-analysis.md) for the full thread/scheduler inventory
+and why so many of them funnelling through `RiskProjection` is the freeze hazard.
 
-| Route | Drill-down view | Primary data |
+| Package | Purpose | Main runtime + cadence | Reads / depends on | ADRs |
+|---|---|---|---|---|
+| `trading` | The fused market path host: feed adapters (sim/Yahoo/Finnhub), ring buffer, `MarkCache` — the source of marks for everyone | `TradingCoreLifecycle` (tick loop) | provider feeds; publishes `md.marks` | 0009, 0014, 0023, 0024, 0032 |
+| `risk` | **The shared risk core.** `RiskProjection` (positions/PnL/exposure — ONE synchronized lock, ~23 callers) + monitors (limit, firm breaker, scenario), VaR, DV01, mark quarantine | `RiskDataConsumer`, `RiskLimitMonitor`, `FirmBreakerMonitor`, `ScenarioMonitor`, `RiskSnapshotPublisher` (~2–5s) | `fills` (source of truth), marks | 0005, 0008, 0020, 0027, 0041 |
+| `strategy` | Deterministic momentum/mean-reversion; hourly OOS algo selection; price-derived vol regime; live tuning | `StrategyLifecycle` (5s), `StrategySelector` (60min, heap-guarded) | marks, risk, guardrail, order | 0019, 0043, 0044, 0051, 0052 |
+| `hypothesis` | LLM thesis layer: narrative → structured theses → quant sizes/gates; RAG memory; event-keyed dedup | `HypothesisLifecycle` (20s) | Ollama, marks, risk, backtest, narrative feed | 0022, 0035, 0049, 0054 |
+| `fusion` | **The decision layer (ADR-0055):** combine every source's forecast → one target/name → netted delta; sole order origin when routing (sim-gated) | `FusionLifecycle` (30s) + `ForecastRegistry` + `FusionExecutor` | forecasts from strategy/hypothesis/social/learned, marks, risk snapshot | 0055 |
+| `signal` | Per-signal health telemetry: score each source's live call by realised forward return | `SignalTelemetryResolver` (60s) | marks; DB `signal_observations` | 0055 |
+| `training` | Learned advisory signal: Tiingo training bars → features/labels → purged walk-forward gate | `TrainingBarsLoader`, `LearnedSignalService` | Tiingo, DB | 0053 |
+| `social` | Adversarial social pipeline: spam/credibility/corroboration → advisory signals | `SocialLifecycle` (60s) | StockTwits/Telegram/news feeds, refdata | 0050 |
+| `discovery` | Universe discovery from RSS financial news + social candidates | `DiscoveryLifecycle` (300s) | RSS, refdata | 0045, 0050 |
+| `ai` | Local-SLM risk commentary onto the attention feed; Ollama warmup; inference metrics | `RiskCommentatorLifecycle` (60s) | Ollama, risk | 0016 |
+| `chat` | Operational chat: SLM parses the question, deterministic code answers, every turn audited | `ChatResponder` (on demand) | Ollama, risk, refdata | 0021 |
+| `hedge` | Minimum-variance proxy hedge advisor (equity axis built; DV01/FX deferred) | `HedgeLifecycle` | risk, marks, correlations | 0038–0042 |
+| `order` (wiring) | Wires the `order` module — sim execution, the pre-real-broker extraction seam | `OrderConfig` | — | 0015, 0025 |
+| `session` | Session calendar + EOD day boundary; session-day supplier for valuation | `EodService` | risk, calendar | 0027 |
+| `indicators` | Top-strip market indicators (delayed Yahoo indices, or sim) | `IndicatorsService` (300s) | Yahoo (live) / sim | 0023 |
+| `backtest` | Multi-seed OOS backtest harness (the ADR-0049 hard gate) | `BacktestService` (on demand) | algo engine, sim | 0027, 0043, 0049 |
+| `export` | One-click diagnostics `.xlsx` (P&L, positions, fills, TCA, AI outcomes, fusion, telemetry) | `DiagnosticsExportController` | risk, DB, strategy | — |
+| `kafka` | The internal event bus impl: publishers + consumers over Redpanda | `KafkaEventPublisher`, consumers | Redpanda | 0012, 0030 |
+| `persistence` | Hikari datasource (**pool = 8**) + Flyway migrations | `PersistenceConfig` | Postgres | 0005 |
+| `refdata` (wiring) | Wires reference-data | `RefDataConfig` | Postgres | 0008 |
+| `ops` | JVM/heap/GC + heap-guard status for the Ops page | `SystemOpsController` | JVM MX beans | — |
+
+## Shared singletons / choke points
+
+- **`RiskProjection`** — one bean, 10 `synchronized` methods, ~23 callers (most lifecycles + every UI
+  risk poll). `snapshot()` re-marks all positions *under the lock*, so a slow holder (a GC pause, a
+  large book) parks everyone → looks like a whole-server freeze. **This is the leading freeze
+  suspect, not the heap alone.** Planned fix: publish an immutable snapshot to a `volatile`; readers go
+  lock-free (footprint §7.1).
+- **`MarkCache`** (in `trading-core` runtime) — the live mark source, read by strategy, hypothesis,
+  fusion, signal, indicators, risk. Concurrent, cheap reads.
+- **Hikari pool = 8** shared across ~28 background threads + web threads — a contention risk under load.
+
+## UI pages (attention-first — ADR-0017)
+
+Landing (`/`) is the attention feed + the **fused "combined view"** (every source → one target/name).
+Detail pages drill down; each has a "show everything" mode.
+
+| Route | View | Primary data |
 |---|---|---|
-| `/` | attention feed: alerts, anomalies, AI commentary, "all quiet" digests | `ui.attention`, `ai.decisions` |
-| `/market` | live marks, movers, mini-charts | `md.marks` (1Hz conflated) |
-| `/orders` | order blotter with lifecycle states, fills | `orders.events`, `fills` |
-| `/books` | book tree → positions → instrument details | reference data + positions |
-| `/risk/:bookId` | per-book PnL (realized/unrealized), exposures, shocks | `risk.snapshots` |
-| `/costs` | spend by service vs budget, burn rate, live LLM token spend, running resources | `cost.snapshots` (infra ~24h lag; LLM spend live) |
+| `/` | attention feed + fusion combined view + hedging + P&L/orders | `ui.attention`, `/api/fusion/targets`, risk |
+| `/signals.html` | **AI/strategy drill-down**: fused target book + AI hypotheses + strategy actions | fusion, hypotheses, strategy |
+| `/markets.html` `/rates.html` | live marks/movers; swap book + curve DV01 | `md.marks`, rates |
+| `/books.html` `/orders.html` | book tree → positions; order blotter + fills | refdata, positions, `fills` |
+| `/backtest.html` `/strategy.html` | OOS selection; strategy signals/tuning/regime | backtest, strategy |
+| `/social.html` `/social-sources.html` `/discovery.html` | social signals, source health, universe discovery | social, discovery |
+| `/ollama.html` (Ops) | LLM load, JVM/heap guard, RAG, training, learned-signal gate, signal health, fusion book | ops, training, signal, fusion |
+| `/config.html` `/sim.html` | config; sim control panel (ADR-0031) | config, sim |
 
-The landing page also carries two deterministic right-column panels beside the attention feed:
-the **Strategy actions** log (momentum entries/exits with reasons) and the **Hedging** panel
-(ADR-0038/0039) — per-axis exposure vs cap, the sized minimum-variance proxy hedge and its worked
-math (`h* = Cov(book, r_F)/Var(r_F)`, effectiveness ρ²), served from `/api/hedging`.
+## Data flow invariants (violations are bugs)
 
-## Data flow invariants
+1. External symbology never crosses the `market-data` boundary; internal code keys on `instrumentId` (0009).
+2. `fills` is the source of truth for positions; only `risk-pnl` writes the projection (0005/0008).
+3. Hot ticks flow over the in-process ring buffer; cross-module flow is a Redpanda event even in-process,
+   so extraction stays mechanical (0014). (One JVM today — most events are intra-process.)
+4. Every event carries provider + ingest timestamps; marks restored from LMDB are flagged stale (0014).
+5. No binary floating point for money — `BigDecimal`/Avro decimal/`NUMERIC` at boundaries, scaled-long
+   fixed-point in the hot path (invariant 1).
+6. Everything runs locally via Docker Compose (Redpanda + Postgres + sim feed), no AWS dependency (0013).
+7. AI never sits on the tick path; risk guardrails are deterministic code; every AI decision is an event
+   on `ai.decisions` embedding its context snapshot (0010/0016). No model number reaches PnL/risk.
+8. Delivery is at-least-once; consumers are idempotent (stable `eventId`, duplicate-delivery test) (0012).
+9. LMDB holds derived data only — losing it costs restart time, never data (0014). Dropped ticks/marks
+   are counted and exposed, never silent.
+10. Sim/live/replay never aggregate across modes: every event carries `feedMode` + `sessionEpoch`; a
+    sim↔live switch rolls a new epoch/namespace (0029). Serde resolves the writer schema (0030).
+11. **Signals stop placing orders (ADR-0055):** when fusion routing is on (sim-only), the fusion layer
+    is the *sole* order origin — strategy auto-exec and hypothesis autonomy stand down; orders are the
+    netted delta between the combined target and the current book, through the ADR-0049 gate chain.
 
-1. External symbology never crosses the market-data module boundary (ADR-0009); enforced
-   in review now that it is a module, not a process (ADR-0014).
-2. `fills` is the source of truth for positions; the risk-pnl module owns the projection
-   (ADR-0005, ADR-0008).
-3. Events are the only **inter-process** data path; inside `trading-core` the ring buffer
-   rules (ADR-0014). Anything crossing a process boundary is an event on the log.
-4. Every event carries provider + ingest timestamps; staleness is always measurable.
-   Marks restored from LMDB are flagged stale until the feed refreshes them.
-5. No binary floating point for money — exact decimal semantics end to end (ADR-0008):
-   `BigDecimal`/Avro decimal/`NUMERIC` at boundaries, scaled-long decimal fixed-point in
-   the allocation-free hot path (declared scale per field).
-6. Everything runs locally via Docker Compose (Redpanda + Postgres + sim market data)
-   with no AWS dependency (ADR-0007/0013).
-7. AI never sits on the tick path; risk guardrails are deterministic Java code; every AI
-   decision is an event on `ai.decisions` **embedding the market-context snapshot it
-   decided on** — replay/backtests consume recorded decisions (ADR-0010, 0014).
-8. Delivery is at-least-once; consumers are idempotent (stable `eventId`, dedupe/upsert,
-   duplicate-delivery test per service). Never rely on broker exactly-once (ADR-0012).
-9. Embedded local state (LMDB) holds **derived data only** — losing it may cost restart
-   time, never data (ADR-0014). Ticks/marks are droppable under pressure, but drops and
-   archive gaps are always counted and exposed as metrics — never silent.
-10. Sim, live, and replay data are never aggregated across modes (ADR-0029): every event
-    carries `feedMode` + `sessionEpoch`; one mode per session, and a sim↔live switch rolls
-    a new epoch/namespace. Serde resolves the writer schema via the registry so
-    backward-compatible evolution actually decodes across versions (ADR-0030).
-
-## Repository layout (planned)
+## Repository layout (actual)
 
 ```
 jethro/
-├── docs/                    # ADRs, architecture
-├── common-domain/           # shared types: Instrument, Book, Position... (ADR-0008)
-├── common-messaging/        # Avro schemas + serde for all topics (ADR-0012)
-├── trading-core/            # fused market path module cluster (ADR-0014)
-│   ├── market-data/         #   provider SPI + adapters (sim first)
-│   ├── algo-engine/         #   strategies + model-inference SPI (ADR-0010)
-│   ├── risk-pnl/            #   positions, PnL, exposures
-│   └── runtime/             #   ring buffer, LMDB state, tick archiver, wiring
-├── modules/
-│   ├── order/
-│   ├── reference-data/
-│   ├── ui-gateway/
-│   └── finops/
-├── app/                     # single-JVM assembly of all modules (ADR-0015)
-├── infra/packer/            # DEFAULT deploy (ADR-0013): bake the full stack into an x86 AMI; 'Bake AMI' spawns it
-├── infra/                   # AWS CDK (ADR-0007/0013): cost guardrails ($100 budget, stop-when-idle), IAM, EIP
-├── deploy/                  # alternatives: quickstart (manual) + managed compose rollout with Caddy TLS
-└── docker-compose.yml       # local topology
+├── docs/{adr, architecture}         # decisions + this map + footprint analysis
+├── common-domain/                   # dependency-free shared types (ADR-0008)
+├── common-messaging/                # Avro schemas + serde + Topics + Provenance (0012/0029/0030)
+├── trading-core/{market-data, algo-engine, risk-pnl, runtime}   # fused market path (ADR-0014)
+├── modules/{order, reference-data, ui-gateway, finops(shell)}
+├── app/                             # single-JVM assembly + 21 subsystems + :8080 edge (ADR-0015)
+├── infra/  infra/packer/            # AWS CDK + AMI bake (ADR-0007/0013)
+├── deploy/                          # compose rollout alternatives
+└── docker-compose.yml               # local topology
 ```
 
-## Build order (proposed)
+## What is NOT built / partial
 
-1. `common-domain` + `common-messaging` (types and schemas first, incl. `eventId` base
-   and the `ai.decisions` context-snapshot field) + `app` shell with ArchUnit boundary
-   rules (ADR-0015)
-2. `trading-core` skeleton in the app: ring buffer + sim adapter behind the feed SPI →
-   ticks flowing in-process; LMDB dedupe/warm-cache wiring
-3. model-inference SPI (`algo-engine`) + Ollama adapter (local SLM) + risk commentator
-   agent emitting `AiDecision` events (ADR-0016) — AI in the loop before pixels
-4. `ui-gateway` module + UI skeleton (landing tiles + Market Monitor with AI
-   commentary panel) fed by `md.marks`; AiDecision events move onto the broker here
-5. `reference-data` module (instruments, books) + Book Structure view
-6. `order` module (simulated fills) + Order View
-7. `risk-pnl` module + `risk.snapshots` + Risk & PnL view; scenario-proposer agent
-8. `algo-engine` toy strategy + frontier-API adapter (ADR-0010); tick archiver +
-   replay adapter (backtest loop closes here)
-9. `infra/` CDK + first AWS deploy: single dev node running the compose stack, tagging,
-   AWS Budgets backstop, stop-when-idle schedule (ADR-0013)
-10. `finops` module + Costs view (LLM token pricing can land earlier, with step 8)
+`finops` (empty shell, ADR-0011) · the S3 Parquet tick archiver (ADR-0014) · the external frontier AI
+tier (ADR-0010, behind cost triggers) · hedge DV01/FX axes + AUTO submission (ADR-0038/0039) · the
+runtime feed-switch endpoint (ADR-0029, restart-to-switch today) · `daily_closes`/`mark_quarantine`
+feed-mode scoping (ADR-0029). See [`deferred-register.md`](../deferred-register.md) and the ADR index
+Implementation column for the full list.
