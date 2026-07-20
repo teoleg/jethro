@@ -40,7 +40,7 @@ class HypothesisEvaluatorTest {
 
     private static Hypothesis h(String instrument, Side dir) {
         return new Hypothesis("h1", instrument, dir, Hypothesis.Horizon.SWING,
-                Hypothesis.Conviction.MEDIUM, "thesis", List.of());
+                Hypothesis.Conviction.MEDIUM, "thesis", List.of(), null);
     }
 
     private HypothesisEvaluator evaluator(RiskLimitSource limits, RiskProjection projection) {

@@ -1,6 +1,6 @@
 # ADR-0054: Event-keyed hypothesis identity — the model classifies the catalyst, deterministic code dedups on it
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-20
 - **Deciders:** Oleg
 - **Tags:** ai, strategy, risk

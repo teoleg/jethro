@@ -57,7 +57,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0051](0051-price-derived-volatility-regime.md) | Risk-off sizing from a price-derived volatility regime (no sim-regime oracle) | Accepted | ✅ Implemented |
 | [0052](0052-live-strategy-tuning-panel.md) | Live, DB-persisted strategy tuning — every dial editable, every change audited as its own provenance | Accepted | ✅ Implemented |
 | [0053](0053-learned-advisory-signal.md) | Learned advisory signal — a model predicts a tradeable label, backtest-gated (no price-curve oracle) | Accepted | ◐ Partial |
-| [0054](0054-event-keyed-hypothesis-identity.md) | Event-keyed hypothesis identity — the model classifies the catalyst, deterministic code dedups on it | Proposed | ○ Not started |
+| [0054](0054-event-keyed-hypothesis-identity.md) | Event-keyed hypothesis identity — the model classifies the catalyst, deterministic code dedups on it | Accepted | ✅ Implemented |
 
 ## Status vs Implementation
 

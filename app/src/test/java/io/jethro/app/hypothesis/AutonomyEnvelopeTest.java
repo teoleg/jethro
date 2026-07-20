@@ -27,7 +27,7 @@ class AutonomyEnvelopeTest {
             new AutonomyEnvelope.TrackRecord(12, new BigDecimal("-300"));
 
     private static Hypothesis hyp(Hypothesis.Conviction conv) {
-        return new Hypothesis("h", "AAPL", Side.BUY, Hypothesis.Horizon.SWING, conv, "thesis", List.of());
+        return new Hypothesis("h", "AAPL", Side.BUY, Hypothesis.Horizon.SWING, conv, "thesis", List.of(), null);
     }
 
     private static HypothesisEvaluator.Evaluated evaluated(Hypothesis.Conviction conv, String qty, String price) {

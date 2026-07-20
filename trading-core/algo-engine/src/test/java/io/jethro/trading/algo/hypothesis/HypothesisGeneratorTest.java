@@ -69,6 +69,34 @@ class HypothesisGeneratorTest {
     }
 
     @Test
+    void parsesTheClassifiedEventKey() {
+        String reply = """
+                [{"instrument":"AAPL","direction":"BUY","horizon":"SWING","conviction":"MEDIUM",
+                  "thesis":"Earnings beat","sources":["sim-news-1"],
+                  "event":{"catalyst":"EARNINGS","entity":"AAPL","date":"2026-07-20"}}]
+                """;
+        var generator = new HypothesisGenerator(new FakeModel(reply), sink, 3, 400);
+        Hypothesis h = generator.generate(context()).get(0);
+        assertEquals(Hypothesis.EventKey.Catalyst.EARNINGS, h.eventKey().catalyst());
+        assertEquals("AAPL", h.eventKey().entity());
+        assertTrue(h.eventKey().classified());
+        assertEquals("EARNINGS|AAPL|2026-07-20", h.eventKey().token());
+    }
+
+    @Test
+    void missingEventDegradesToOtherNotNull() {
+        String reply = """
+                [{"instrument":"ES","direction":"SELL","horizon":"SWING","conviction":"LOW",
+                  "thesis":"soft tape","sources":[]}]
+                """;
+        var generator = new HypothesisGenerator(new FakeModel(reply), sink, 3, 400);
+        Hypothesis h = generator.generate(context()).get(0);
+        assertEquals(Hypothesis.EventKey.Catalyst.OTHER, h.eventKey().catalyst(),
+                "no event object → OTHER (unclassified), so the guard falls back to the news key");
+        assertTrue(!h.eventKey().classified());
+    }
+
+    @Test
     void nonJsonReplyYieldsNoHypothesesButStillAudits() {
         var generator = new HypothesisGenerator(new FakeModel("I have no strong views today."), sink, 3, 400);
         assertTrue(generator.generate(context()).isEmpty());

@@ -51,11 +51,15 @@ public final class HypothesisGenerator {
                "horizon": <one of INTRADAY, SWING, POSITION>,
                "conviction": <one of LOW, MEDIUM, HIGH>,
                "thesis": <one short sentence, your reasoning>,
-               "sources": <array of narrative item ids that informed this, or []>}
+               "sources": <array of narrative item ids that informed this, or []>,
+               "event": {"catalyst": <one of FOMC, EARNINGS, MERGER_ACQUISITION, GUIDANCE, RATING, MACRO_PRINT, PRICE_ACTION, OTHER>,
+                         "entity": <the ticker the event concerns, or MARKET for market-wide macro>,
+                         "date": <the event date as YYYY-MM-DD if known, else omit>}}
 
             Example output:
               [{"instrument":"AAPL","direction":"BUY","horizon":"SWING","conviction":"MEDIUM",
-                "thesis":"Upbeat earnings headline and a firm price support a long.","sources":["sim-news-3"]}]
+                "thesis":"Upbeat earnings headline and a firm price support a long.","sources":["sim-news-3"],
+                "event":{"catalyst":"EARNINGS","entity":"AAPL","date":"2026-07-20"}}]
 
             Rules:
             - Choose "instrument" ONLY from tradableInstruments. Never invent a ticker.
@@ -70,10 +74,16 @@ public final class HypothesisGenerator {
             - Base each thesis on the narrative and marks. Prefer names with the strongest recent \
             move or a matching headline; aim to return at least one hypothesis when a headline is \
             clearly directional. Use [] only if truly nothing is actionable.
+            - EVENT: classify the ONE underlying market event driving each call into "event" — its \
+            catalyst type, the entity it concerns (a ticker, or MARKET for market-wide macro), and its \
+            date. Many headlines about the SAME event (e.g. an FOMC cut reported by five outlets) are \
+            ONE event: identical catalyst + entity + date. This is how the desk recognises a repeat, so \
+            a reworded thesis about the same event is NOT a new call. Use PRICE_ACTION for a pure \
+            technical move and OTHER only when no discrete catalyst applies.
             - IDEMPOTENCY: alreadyProposed lists calls already live from earlier cycles. Do NOT \
-            re-propose the same call (same instrument + direction) on the SAME news — only add a \
-            hypothesis when genuinely new information or a materially different reason justifies it. \
-            Repeating a live call on unchanged news is an error.
+            re-propose the same call (same instrument + direction) on the SAME event — only add a \
+            hypothesis when a genuinely NEW event (different catalyst, entity, or date) justifies it. \
+            Repeating a live call on the same event is an error.
             - MEMORY: pastOutcomes is YOUR OWN track record on similar past setups (thesis → \
             WIN/LOSS/FLAT with P&L). Learn from it — lean into patterns that won, and be sceptical \
             of a call that resembles past losers. It is context, not a rule.
@@ -192,7 +202,51 @@ public final class HypothesisGenerator {
             });
         }
         return new Hypothesis(UUID.randomUUID().toString(), instrument, direction, horizon, conviction,
-                thesis, List.copyOf(sources));
+                thesis, List.copyOf(sources), parseEventKey(node.path("event"), instrument));
+    }
+
+    /**
+     * Parses the model's event classification (ADR-0054): catalyst enum, entity (defaults to the
+     * instrument, or MARKET for macro catalysts), and date (defaults to today — the news is being
+     * reacted to now, day-grained). Anything unrecognised degrades to OTHER, which the deterministic
+     * guard treats as "unclassified" and falls back to the news-id/thesis key.
+     */
+    private static Hypothesis.EventKey parseEventKey(JsonNode node, String instrument) {
+        Hypothesis.EventKey.Catalyst catalyst = node.isObject()
+                ? parseEnumOr(Hypothesis.EventKey.Catalyst.class, node.path("catalyst").asText(null),
+                        Hypothesis.EventKey.Catalyst.OTHER)
+                : Hypothesis.EventKey.Catalyst.OTHER;
+        String entity = node.path("entity").asText("").strip();
+        if (entity.isEmpty()) {
+            boolean macro = catalyst == Hypothesis.EventKey.Catalyst.FOMC
+                    || catalyst == Hypothesis.EventKey.Catalyst.MACRO_PRINT;
+            entity = macro ? "MARKET" : instrument;
+        }
+        java.time.LocalDate date = parseIsoDate(node.path("date").asText(null));
+        if (date == null) {
+            date = java.time.LocalDate.now(); // day-grain the event to now when the model omits it
+        }
+        return new Hypothesis.EventKey(catalyst, entity, date);
+    }
+
+    private static java.time.LocalDate parseIsoDate(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String s = raw.trim();
+        if (s.length() < 10) {
+            return null;
+        }
+        try {
+            return java.time.LocalDate.parse(s.substring(0, 10));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static <E extends Enum<E>> E parseEnumOr(Class<E> type, String raw, E fallback) {
+        E parsed = parseEnum(type, raw);
+        return parsed != null ? parsed : fallback;
     }
 
     private static String validInstrument(String value, java.util.Set<String> tradable) {
@@ -232,13 +286,16 @@ public final class HypothesisGenerator {
     private void record(String contextJson, List<Hypothesis> hypotheses, InferenceResult result) {
         ArrayNode actions = JSON.createArrayNode();
         for (Hypothesis h : hypotheses) {
-            actions.addObject()
+            ObjectNode a = actions.addObject()
                     .put("hypothesisId", h.hypothesisId())
                     .put("instrument", h.instrumentId())
                     .put("direction", h.direction().name())
                     .put("horizon", h.horizon().name())
                     .put("conviction", h.conviction().name())
                     .put("thesis", h.thesis());
+            if (h.eventKey() != null) {
+                a.put("eventKey", h.eventKey().token()); // ADR-0054: the classified event, for audit
+            }
         }
         Instant now = Instant.now();
         sink.record(AiDecision.newBuilder()
