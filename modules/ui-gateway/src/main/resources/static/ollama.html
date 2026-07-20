@@ -230,19 +230,34 @@
     } catch (e) {}
   }
 
-  // ADR-0053 training-bars store: real Tiingo daily history for the learned advisory signal.
+  // ADR-0053 training-bars store: real Tiingo daily history for the learned advisory signal, plus the
+  // derived feature/label matrix — label BALANCE is the first health check before any model exists.
   async function loadTraining() {
     try {
       const t = await (await fetch("/api/training/bars")).json();
       const ok = t.rows > 0;
-      document.getElementById("trainTiles").innerHTML = gridKV([
-        kv("Rows", ok ? t.rows.toLocaleString() : "0", ok ? "up" : ""),
+      let f = null;
+      try { f = await (await fetch("/api/training/features")).json(); } catch (e) {}
+      const items = [
+        kv("Bars", ok ? t.rows.toLocaleString() : "0", ok ? "up" : ""),
         kv("Instruments", t.instruments || 0),
         kv("From", t.firstDay || "—"),
-        kv("To", t.lastDay || "—")]);
-      document.getElementById("trainHint").innerHTML = ok
-        ? `real daily bars loaded from Tiingo — the ADR-0053 training set (never a number into live sizing/risk).`
-        : `empty — set <span class="mono">TIINGO_API_TOKEN</span> and restart; the loader rebuilds from Tiingo (skipped without a token).`;
+        kv("To", t.lastDay || "—")];
+      if (f && f.totalRows > 0) {
+        const pctOf = n => Math.round(100 * n / f.totalRows) + "%";
+        items.push(
+          kv("Labelled rows", f.totalRows.toLocaleString()),
+          kv("Up", `${f.up.toLocaleString()} <span class="muted" style="font-size:11px">${pctOf(f.up)}</span>`, "up"),
+          kv("Down", `${f.down.toLocaleString()} <span class="muted" style="font-size:11px">${pctOf(f.down)}</span>`, "down"),
+          kv("Flat", `${f.flat.toLocaleString()} <span class="muted" style="font-size:11px">${pctOf(f.flat)}</span>`, "muted"));
+      }
+      document.getElementById("trainTiles").innerHTML = gridKV(items);
+      document.getElementById("trainHint").innerHTML = !ok
+        ? `empty — set <span class="mono">TIINGO_API_TOKEN</span> and restart; the loader rebuilds from Tiingo (skipped without a token).`
+        : (f && f.totalRows > 0)
+        ? `${f.instruments} instruments yield ${f.totalRows.toLocaleString()} labelled point-in-time rows at a ${f.labelThresholdBps.toFixed(0)} bps next-day floor (ADR-0053). `
+          + `Label balance is the first thing that kills a naive classifier — a set dominated by FLAT trains a model that always says FLAT. Feature/label math only, never a number into live sizing/risk.`
+        : `real daily bars loaded from Tiingo — the ADR-0053 training set (never a number into live sizing/risk). Feature matrix builds once enough history is on file.`;
     } catch (e) {}
   }
 

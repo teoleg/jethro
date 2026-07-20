@@ -57,6 +57,37 @@ public final class TrainingBarsStore {
         return written;
     }
 
+    /** One bar for feature building: epoch-day, adjusted close (as double — analytics, not the money
+     *  ledger; a return/vol indicator never feeds positions/PnL, ADR-0016), and volume. */
+    public record Bar(long epochDay, double adjClose, long volume) {
+    }
+
+    /** Instruments present, sorted — the training universe actually on file. */
+    public java.util.List<String> instruments() {
+        try {
+            return jdbc.query("select distinct instrument from training_bars order by instrument",
+                    (rs, i) -> rs.getString(1));
+        } catch (Exception e) {
+            return java.util.List.of();
+        }
+    }
+
+    /** One instrument's daily bars, ascending by day (point-in-time order for feature building). */
+    public java.util.List<Bar> series(String instrument) {
+        try {
+            return jdbc.query("""
+                    select day, adj_close, volume from training_bars
+                    where instrument = ? order by day
+                    """, (rs, i) -> new Bar(
+                    rs.getObject("day", LocalDate.class).toEpochDay(),
+                    rs.getBigDecimal("adj_close").doubleValue(),
+                    rs.getLong("volume")), instrument);
+        } catch (Exception e) {
+            log.warn("training_bars series({}) failed: {}", instrument, e.toString());
+            return java.util.List.of();
+        }
+    }
+
     public record Status(long rows, int instruments, String firstDay, String lastDay) {
     }
 

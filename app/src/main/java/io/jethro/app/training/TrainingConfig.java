@@ -26,6 +26,13 @@ public class TrainingConfig {
         return new TrainingBarsStore(jdbc);
     }
 
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.training", name = "enabled", havingValue = "true", matchIfMissing = true)
+    FeatureService featureService(TrainingBarsStore store,
+                                  @Value("${jethro.training.label-threshold-bps:10}") double labelThresholdBps) {
+        return new FeatureService(store, labelThresholdBps);
+    }
+
     @Bean(destroyMethod = "stop")
     @ConditionalOnProperty(prefix = "jethro.training", name = "enabled", havingValue = "true", matchIfMissing = true)
     TrainingBarsLoader trainingBarsLoader(TrainingBarsStore store, TradingCoreProperties props,
