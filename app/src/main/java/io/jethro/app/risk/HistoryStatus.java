@@ -7,7 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * many days are on file, the latest day, how many instruments, whether that's enough to size a
  * hedge (≥ the covariance minimum), and — for the UI — whether it seeded, is still trying, or
  * FAILED (with why). The counts are read straight from {@code daily_close} so they're always the
- * truth; the seed state is set by {@link io.jethro.app.trading.YahooHistorySeeder}.
+ * truth; the seed state is set by {@link io.jethro.app.trading.HistorySeeder}.
  */
 public final class HistoryStatus {
 
