@@ -28,6 +28,14 @@
   .led.ok { background:var(--up); box-shadow:0 0 8px var(--up); } .led.bad { background:var(--alert); } .led.idle { background:var(--warn); }
   .dim{color:var(--dim)} .src { font-size:10px; border:1px solid var(--line-2); border-radius:4px; padding:1px 5px; color:var(--dim); margin-right:4px; }
   .empty { color:var(--dim); text-align:center; padding:20px 0; }
+  a { color:var(--brand); text-decoration:none; } a:hover { text-decoration:underline; }
+  .head { display:flex; align-items:baseline; gap:8px; padding:6px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  .head:last-child { border-bottom:0; }
+  .head .t { font-size:11px; color:var(--dim); font-variant-numeric:tabular-nums; min-width:62px; }
+  .head .o { font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); border:1px solid var(--line-2); border-radius:4px; padding:1px 5px; }
+  .head .ttl { flex:1; min-width:220px; }
+  .tag { font-size:10px; border:1px solid var(--line-2); border-radius:4px; padding:1px 5px; color:var(--dim); }
+  .tag.new { color:var(--up); border-color:var(--up); }
 </style>
 </head>
 <body>
@@ -58,6 +66,10 @@
   <div class="section-h">Candidate additions to the tracked list
     <span class="note" style="text-transform:none;letter-spacing:0">— ADR-0050 §7: untracked names credible news/social are talking about, ranked. Suggestions only — nothing is added or traded. News outlets propose; social adds one when it's really cooking.</span></div>
   <div class="panel"><div id="cands"><div class="empty">loading…</div></div></div>
+
+  <div class="section-h">Latest headlines
+    <span class="note" style="text-transform:none;letter-spacing:0">— the news itself, newest first; tags are instruments each item mentions (green = untracked, i.e. a discovery candidate). Context only — never a number into risk, never an order.</span></div>
+  <div class="panel"><div id="heads"><div class="empty">loading…</div></div></div>
 </main>
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
@@ -83,7 +95,17 @@
         <td class="dim mono">${x.firstSeenMillis ? new Date(x.firstSeenMillis).toLocaleTimeString() : "—"}</td>
         <td class="dim" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.sample)}">${esc(x.sample)}</td>
       </tr>`).join("") + "</table>"
-      : '<div class="empty">no candidates yet — configure news outlets (jethro.discovery.outlets) and/or let social run; untracked names credible sources discuss will appear here</div>') + '</div>';
+      : '<div class="empty">no candidates yet — untracked names that credible sources name will appear here (news names companies; social adds one when it\'s really cooking)</div>') + '</div>';
+
+    const h = v.headlines || [];
+    document.getElementById("heads").outerHTML = '<div id="heads">' + (h.length ?
+      h.map(x => `<div class="head">
+          <span class="t">${x.atMillis ? new Date(x.atMillis).toLocaleTimeString() : "—"}</span>
+          <span class="o">${esc(x.outlet)}</span>
+          <span class="ttl">${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}</span>
+          ${(x.tickers||[]).map(t => `<span class="tag ${(x.untracked||[]).includes(t) ? "new" : ""}">${esc(t)}</span>`).join("")}
+        </div>`).join("")
+      : '<div class="empty">no headlines yet — the first poll runs ~20s after startup</div>') + '</div>';
   }
   async function load() { try { render(await (await pollFetch("/api/discovery")).json()); } catch (e) {} }
   poll(load, 5000);

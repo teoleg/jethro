@@ -1,0 +1,67 @@
+# Company name -> ticker directory for news universe discovery (ADR-0045/0050 §7).
+# News prose names companies by NAME ("Nvidia jumps"), not by $cashtag or exchange-qualified ticker,
+# so a bare-name resolver is what makes candidates actually surface from headlines. This is a curated
+# DEV directory of well-known, distinctive large caps — deterministic, no SLM, no scraping. Extend it
+# freely; the long tail (any company, plain name) is the deferred SLM entity-extraction path (ADR-0045 P3).
+# A resolved ticker is only a SUGGESTION to track (untracked ones surface as candidates); it is never
+# added or traded, and never a number into risk (invariant 7 / ADR-0049).
+#
+# Format:  TICKER,name|alias|alias   (names matched case-insensitively as whole phrases)
+# Kept to distinctive proper nouns to limit false positives; ambiguous single words (e.g. "Target",
+# "Gap", "Visa" as a document) are deliberately omitted or aliased carefully.
+TSLA,Tesla
+META,Meta Platforms|Facebook
+GOOGL,Alphabet|Google
+NFLX,Netflix
+AMD,Advanced Micro Devices|AMD
+INTC,Intel
+AVGO,Broadcom
+QCOM,Qualcomm
+MU,Micron
+PLTR,Palantir
+SNOW,Snowflake
+CRM,Salesforce
+ORCL,Oracle
+ADBE,Adobe
+NOW,ServiceNow
+UBER,Uber
+ABNB,Airbnb
+SHOP,Shopify
+PYPL,PayPal
+HOOD,Robinhood
+COIN,Coinbase
+GS,Goldman Sachs
+MS,Morgan Stanley
+BAC,Bank of America
+WFC,Wells Fargo
+C,Citigroup
+BLK,BlackRock
+BRK.B,Berkshire Hathaway|Berkshire
+MA,Mastercard
+AXP,American Express
+BA,Boeing
+CAT,Caterpillar
+LMT,Lockheed Martin
+RTX,Raytheon|RTX
+HON,Honeywell
+XOM,ExxonMobil|Exxon Mobil|Exxon
+CVX,Chevron
+COP,ConocoPhillips
+OXY,Occidental Petroleum|Occidental
+PFE,Pfizer
+MRNA,Moderna
+MRK,Merck
+ABBV,AbbVie
+LLY,Eli Lilly
+UNH,UnitedHealth
+WMT,Walmart
+COST,Costco
+SBUX,Starbucks
+MCD,McDonald's
+NKE,Nike
+DIS,Disney|Walt Disney
+CMCSA,Comcast
+VZ,Verizon
+KO,Coca-Cola
+PEP,PepsiCo
+PG,Procter & Gamble

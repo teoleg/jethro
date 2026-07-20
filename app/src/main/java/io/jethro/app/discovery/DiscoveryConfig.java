@@ -29,8 +29,14 @@ public class DiscoveryConfig {
     }
 
     @Bean
+    CompanyDirectory companyDirectory() {
+        return CompanyDirectory.fromClasspath("discovery/company-tickers.csv");
+    }
+
+    @Bean
     DiscoveryLifecycle discoveryLifecycle(RssNewsFeed news, UniverseCandidates candidates,
-                                          InstrumentRefSource refs, DiscoveryProperties props) {
-        return new DiscoveryLifecycle(news, candidates, refs, props);
+                                          InstrumentRefSource refs, DiscoveryProperties props,
+                                          CompanyDirectory companies) {
+        return new DiscoveryLifecycle(news, candidates, refs, props, companies);
     }
 }

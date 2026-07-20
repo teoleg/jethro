@@ -17,9 +17,12 @@ import java.util.Map;
  *
  * <p>Signal: a sqrt-free relative-volatility proxy per instrument — mean absolute step move over a
  * rolling window ÷ the current price ({@code (Σ|Δp|/N) / P}). The market reading is the mean across
- * names with a full window, compared to its own slow EWMA baseline: {@code ELEVATED} when the ratio
- * crosses the upper band, back to {@code CALM} under the lower band (hysteresis, so it doesn't flap).
- * Until a name's window fills the regime is {@link Regime#UNKNOWN} (caller applies no shrink).
+ * names with a full window, compared to a slow EWMA baseline of the CALM/normal level: {@code ELEVATED}
+ * when the ratio crosses the upper band, back to {@code CALM} under the lower band (hysteresis, so it
+ * doesn't flap). The baseline adapts freely when calm but does NOT chase a spike upward while ELEVATED,
+ * so a SUSTAINED turbulent regime stays flagged (risk-off persists) instead of the baseline catching up
+ * and reverting to CALM within a halflife. Until a name's window fills the regime is
+ * {@link Regime#UNKNOWN} (caller applies no shrink).
  *
  * <p>All price arithmetic is exact {@link BigDecimal} (invariant 1); the vol proxy and the ratio are
  * dimensionless indicators, not money. Not thread-safe: updated/read from the single sizing thread.
@@ -86,9 +89,23 @@ public final class VolatilityRegime {
                 : marketVol.divide(baseline, MC);
         lastRatio = ratio;
         regime = classify(ratio, regime);
-        // Update the slow baseline AFTER classifying, so a spike is measured against the prior trend.
-        baseline = baseline == null ? marketVol
-                : lambda.multiply(baseline).add(BigDecimal.ONE.subtract(lambda).multiply(marketVol));
+        // The baseline is meant to be the CALM/normal vol the current reading is judged against. Update
+        // it AFTER classifying so a spike is measured against the prior trend — and asymmetrically:
+        //   • not ELEVATED → adapt normally (EWMA), tracking the calm level up or down;
+        //   • ELEVATED     → allow it to fall but NOT to chase the spike UPWARD.
+        // Without the freeze, a SUSTAINED turbulent regime is washed out in ~a baseline halflife (~2 min
+        // at the 5s cadence with λ=0.97): the baseline climbs to the new high, the ratio returns to ~1,
+        // and it silently reverts to CALM while the market is still turbulent. Freezing the upward drift
+        // keeps it ELEVATED until vol actually subsides (risk-off persists through the whole stretch,
+        // ADR-0051). A genuinely permanent higher-vol regime therefore stays ELEVATED — the conservative
+        // reading, consistent with vol-targeting (higher vol → smaller size).
+        if (baseline == null) {
+            baseline = marketVol;
+        } else {
+            BigDecimal ewma = lambda.multiply(baseline)
+                    .add(BigDecimal.ONE.subtract(lambda).multiply(marketVol));
+            baseline = regime == Regime.ELEVATED ? ewma.min(baseline) : ewma;
+        }
     }
 
     /** Mean absolute step move over the window ÷ current price — a sqrt-free relative-vol proxy. */

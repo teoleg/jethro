@@ -15,6 +15,14 @@ public final class Cashtags {
 
     private static final Pattern CASHTAG = Pattern.compile("\\$([A-Za-z]{1,6})");
 
+    // News prose almost never uses $cashtags; it writes the ticker exchange-qualified, e.g.
+    // "Nvidia (NASDAQ: NVDA)" or "(NYSE: JPM)". Match that so news items yield real ticker mentions.
+    // Deliberately exchange-QUALIFIED only — a bare "(GDP)"/"(FOMC)"/"(CEO)" in a press release is not a
+    // ticker, and requiring the exchange prefix avoids that false-positive flood.
+    private static final Pattern EXCHANGE_TICKER = Pattern.compile(
+            "(?i)\\b(?:NYSE(?:\\s+American|\\s+Arca)?|NASDAQ|AMEX|OTC(?:MKTS)?|CBOE|BATS|LON|LSE|ETR|FRA|EPA|"
+                    + "TSX|TSXV|ASX|HKG|TYO|SIX|BME)\\s*:\\s*([A-Za-z]{1,6}(?:\\.[A-Za-z]{1,2})?)");
+
     private Cashtags() {
     }
 
@@ -26,6 +34,21 @@ public final class Cashtags {
             return out;
         }
         Matcher m = CASHTAG.matcher(text);
+        while (m.find()) {
+            out.add(m.group(1).toUpperCase());
+        }
+        return out;
+    }
+
+    /** Ticker mentions in NEWS prose: any {@code $CASHTAG} (rare in news) PLUS every exchange-qualified
+     *  ticker like {@code (NASDAQ: NVDA)} / {@code NYSE: JPM}. Exchange-qualified only, so common
+     *  non-ticker abbreviations in parentheses (GDP, FOMC, CEO…) are not mistaken for symbols. */
+    public static Set<String> extractNewsTickers(String text) {
+        Set<String> out = extractCashtags(text);
+        if (text == null || text.isBlank()) {
+            return out;
+        }
+        Matcher m = EXCHANGE_TICKER.matcher(text);
         while (m.find()) {
             out.add(m.group(1).toUpperCase());
         }

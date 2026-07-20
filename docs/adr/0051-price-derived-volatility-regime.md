@@ -65,3 +65,13 @@ scale; a richer estimator can replace it behind measured evidence.
 - Follow-ups: expose the sensed regime + vol ratio on the UI/telemetry; validate the bands against
   measured OOS behaviour; a richer volatility estimator if evidence warrants; per-regime effectiveness
   telemetry (does the risk-off shrink earn its keep).
+
+**Refinement (2026-07-19, implementation, not a decision change).** The baseline is now updated
+*asymmetrically*: it adapts freely when calm but does not chase a spike **upward** while ELEVATED
+(it may still fall). The original symmetric EWMA meant a *sustained* turbulent regime washed out
+within ~a baseline halflife — the baseline climbed to the new high, the ratio returned to ~1, and the
+detector reverted to CALM while the market was still turbulent (observed as "sim set to VOLATILE but
+the badge shows CALM after a few minutes"). The freeze makes the detector hold ELEVATED for the whole
+turbulent stretch and recalibrate to CALM only once vol actually subsides — this is the intended
+"in an elevated-volatility state" semantics. Consequence: a genuinely permanent higher-vol regime
+stays ELEVATED indefinitely (the conservative reading, consistent with vol-targeting).

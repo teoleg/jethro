@@ -36,13 +36,20 @@ public final class RssNewsFeed {
 
     private static final Logger log = LoggerFactory.getLogger(RssNewsFeed.class);
 
+    // Some outlets (notably SEC.gov) reject the default Java-http-client User-Agent with a 403 and
+    // require a descriptive one with a contact URL — send one for every request.
+    private static final String USER_AGENT = "jethro-discovery/1.0 (+https://github.com/teoleg/jethro)";
+
     private final Map<String, String> outlets; // outlet name → RSS URL
     private final HttpClient http;
     private volatile SocialSourceStatus status = new SocialSourceStatus("news:rss", false, 0, 0, "not polled yet");
 
     public RssNewsFeed(Map<String, String> outlets, Duration timeout) {
         this.outlets = Map.copyOf(outlets);
-        this.http = HttpClient.newBuilder().proxy(ProxySelector.getDefault()).connectTimeout(timeout).build();
+        // followRedirects(NORMAL): many feeds 301 http→https or to a CDN path; without it a redirect
+        // reads as a non-2xx "unreachable". proxy(getDefault) keeps it working behind a corporate proxy.
+        this.http = HttpClient.newBuilder().proxy(ProxySelector.getDefault())
+                .followRedirects(HttpClient.Redirect.NORMAL).connectTimeout(timeout).build();
     }
 
     public SocialSourceStatus status() {
@@ -61,7 +68,8 @@ public final class RssNewsFeed {
         for (var e : outlets.entrySet()) {
             try {
                 HttpRequest req = HttpRequest.newBuilder(URI.create(e.getValue()))
-                        .timeout(Duration.ofSeconds(8)).header("Accept", "application/rss+xml, application/xml").GET().build();
+                        .timeout(Duration.ofSeconds(8)).header("User-Agent", USER_AGENT)
+                        .header("Accept", "application/rss+xml, application/xml, application/atom+xml").GET().build();
                 HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
                 if (resp.statusCode() / 100 != 2) {
                     lastError = "HTTP " + resp.statusCode() + " on " + e.getKey();
