@@ -17,10 +17,13 @@ public final class TrainingBarsController {
 
     private final ObjectProvider<TrainingBarsStore> store;
     private final ObjectProvider<FeatureService> features;
+    private final ObjectProvider<LearnedSignalService> backtest;
 
-    public TrainingBarsController(ObjectProvider<TrainingBarsStore> store, ObjectProvider<FeatureService> features) {
+    public TrainingBarsController(ObjectProvider<TrainingBarsStore> store, ObjectProvider<FeatureService> features,
+                                  ObjectProvider<LearnedSignalService> backtest) {
         this.store = store;
         this.features = features;
+        this.backtest = backtest;
     }
 
     @GetMapping("/api/training/bars")
@@ -42,5 +45,12 @@ public final class TrainingBarsController {
                                                   @RequestParam(defaultValue = "10") int limit) {
         FeatureService f = features.getIfAvailable();
         return f == null ? List.of() : f.sample(instrument, limit);
+    }
+
+    /** The ADR-0053 gate verdict — purged walk-forward, cost-aware, vs coin-flip + momentum/mean-rev. */
+    @GetMapping("/api/training/backtest")
+    public LearnedSignalService.Result backtest() {
+        LearnedSignalService b = backtest.getIfAvailable();
+        return b == null ? LearnedSignalService.Result.idle() : b.current();
     }
 }

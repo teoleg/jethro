@@ -66,7 +66,7 @@
   </div>
 </div>
 <main>
-  <div class="section-h">Diagnostics export <span class="muted" style="text-transform:none;letter-spacing:0">— one .xlsx: P&amp;L by book, positions, fills+fees, TCA, AI outcomes, hedge orders, strategy params + tuning changes</span></div>
+  <div class="section-h">Diagnostics export <span class="muted" style="text-transform:none;letter-spacing:0">— one .xlsx: P&amp;L by book, positions, fills+fees, TCA, AI outcomes, hedge orders, strategy params + tuning changes, learned-signal gate</span></div>
   <div class="panel" style="padding:14px;margin-bottom:16px">
     <a id="exportBtn" href="/api/export/diagnostics.xlsx" download
        style="display:inline-block;padding:9px 16px;border-radius:8px;background:var(--brand,#5b8cff);
@@ -89,6 +89,10 @@
   <div class="section-h">Training data <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0053: real Tiingo daily bars for the learned advisory signal (rebuilt on empty; training only)</span></div>
   <div class="tiles" id="trainTiles"></div>
   <div id="trainHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
+
+  <div class="section-h">Learned signal — backtest gate <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0053: purged walk-forward, cost-aware; must beat coin-flip AND momentum/mean-rev OOS or it doesn't ship</span></div>
+  <div class="tiles" id="btTiles"></div>
+  <div id="btHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
 
   <div class="section-h">Model load <span class="muted" id="asof"></span></div>
   <div class="tiles" id="tiles"></div>
@@ -263,10 +267,41 @@
     } catch (e) {}
   }
 
+  // ADR-0053 gate: purged walk-forward, cost-aware; ships only if it beats coin-flip + momentum/mean-rev.
+  async function loadBacktest() {
+    try {
+      const b = await (await fetch("/api/training/backtest")).json();
+      const r = b.result;
+      if (!r || !r.sufficient) {
+        document.getElementById("btTiles").innerHTML = gridKV([
+          kv("State", b.state === "running" ? '<span class="warn">computing…</span>' : '<span class="muted">idle</span>')]);
+        document.getElementById("btHint").innerHTML = r && r.verdict
+          ? esc(r.verdict)
+          : `not enough real history yet — the gate runs once the training bars have built up (rebuilds from Tiingo). Compute is background, staleness-gated (never on a timer — the box can't freeze).`;
+        return;
+      }
+      const bps = v => (v >= 0 ? "+" : "") + v.toFixed(2) + " bps";
+      const netCls = r.ships ? "up" : (r.learned.netReturnBps > 0 ? "warn" : "down");
+      document.getElementById("btTiles").innerHTML = gridKV([
+        kv("Verdict", r.ships ? '<span class="up">ships</span>' : '<span class="down">vetoed</span>'),
+        kv("Learned (net/opp)", bps(r.learned.netReturnBps), netCls),
+        kv("Coin-flip", bps(r.coinFlip.netReturnBps)),
+        kv("Momentum", bps(r.momentum.netReturnBps)),
+        kv("Mean-rev", bps(r.meanReversion.netReturnBps)),
+        kv("Hit rate", (r.learned.hitRate * 100).toFixed(1) + "%"),
+        kv("Coverage", (r.learned.coverage * 100).toFixed(0) + "%"),
+        kv("Cost charged", r.costBps.toFixed(0) + " bps"),
+        kv("Folds", `${r.trainableFolds}/${r.folds} <span class="muted" style="font-size:11px">${r.testRows.toLocaleString()} OOS rows</span>`)]);
+      document.getElementById("btHint").innerHTML = esc(r.verdict)
+        + ` <span class="muted">— net/opportunity is the realised edge per test row (flat = 0), net of a ${r.costBps.toFixed(0)} bps round-trip. Advisory only; a model number never sizes a position or reaches PnL/risk (ADR-0016).</span>`;
+    } catch (e) {}
+  }
+
   async function refresh() {
     try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
     loadJvm();
     loadTraining();
+    loadBacktest();
     loadTraffic();
     loadBalance();
     loadRag();

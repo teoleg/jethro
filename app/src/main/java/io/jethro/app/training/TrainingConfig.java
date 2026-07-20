@@ -33,6 +33,21 @@ public class TrainingConfig {
         return new FeatureService(store, labelThresholdBps);
     }
 
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.training", name = "enabled", havingValue = "true", matchIfMissing = true)
+    LearnedSignalService learnedSignalService(
+            FeatureService features,
+            @Value("${jethro.training.backtest.folds:5}") int folds,
+            @Value("${jethro.training.backtest.embargo-days:2}") int embargoDays,
+            @Value("${jethro.training.backtest.cost-bps:10}") double costBps,
+            @Value("${jethro.training.backtest.min-train-rows:200}") int minTrainRows,
+            @Value("${jethro.training.backtest.iterations:400}") int iterations,
+            @Value("${jethro.training.backtest.learning-rate:0.3}") double learningRate,
+            @Value("${jethro.training.backtest.l2:0.001}") double l2) {
+        var cfg = new WalkForwardBacktest.Config(folds, embargoDays, costBps, minTrainRows, iterations, learningRate, l2);
+        return new LearnedSignalService(features, cfg);
+    }
+
     @Bean(destroyMethod = "stop")
     @ConditionalOnProperty(prefix = "jethro.training", name = "enabled", havingValue = "true", matchIfMissing = true)
     TrainingBarsLoader trainingBarsLoader(TrainingBarsStore store, TradingCoreProperties props,

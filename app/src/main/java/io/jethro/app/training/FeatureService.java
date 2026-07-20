@@ -63,6 +63,15 @@ public final class FeatureService {
         return new Summary(thresholdReturn * 10_000.0, per.size(), up + down + flat, up, down, flat, per);
     }
 
+    /** Every instrument's labelled rows pooled into one time-orderable set — the backtest's input. */
+    public List<FeatureBuilder.FeatureRow> allRows() {
+        List<FeatureBuilder.FeatureRow> out = new ArrayList<>();
+        for (String id : store.instruments()) {
+            out.addAll(FeatureBuilder.build(id, store.series(id), thresholdReturn));
+        }
+        return out;
+    }
+
     /** The most recent {@code limit} feature rows for one instrument — a spot-check the maths is sane. */
     public List<FeatureBuilder.FeatureRow> sample(String instrument, int limit) {
         List<FeatureBuilder.FeatureRow> rows = FeatureBuilder.build(instrument, store.series(instrument), thresholdReturn);
