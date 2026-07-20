@@ -25,9 +25,19 @@ import java.util.Map;
 @ConditionalOnProperty(prefix = "jethro.social", name = "enabled", havingValue = "true", matchIfMissing = true)
 public class SocialConfig {
 
+    // News outlets flow through the pipeline as credible channels (ADR-0050 merge): central banks /
+    // the regulator / the stats agency are TRUSTED (authoritative); market media are STANDARD (credible
+    // but judged like an organic account). Keyed on the jethro.discovery.outlets names; override any of
+    // these in jethro.social.channel-tiers.
+    private static final Map<String, String> NEWS_TIERS = Map.of(
+            "fed", "TRUSTED", "sec", "TRUSTED", "boe", "TRUSTED", "bls", "TRUSTED",
+            "cnbc", "STANDARD", "yahoo", "STANDARD");
+
     @Bean
     SocialChannels socialChannels(SocialProperties props) {
         Map<String, SocialChannels.Tier> tiers = new LinkedHashMap<>();
+        NEWS_TIERS.forEach((channel, tier) -> tiers.put(channel, SocialChannels.Tier.valueOf(tier)));
+        // Explicit config wins over the news defaults above.
         props.channelTiersOrDefault().forEach((channel, tier) ->
                 tiers.put(channel, SocialChannels.Tier.valueOf(tier.trim().toUpperCase())));
         return new SocialChannels(tiers, props.defaultTierOrDefault(),
@@ -35,7 +45,8 @@ public class SocialConfig {
     }
 
     @Bean
-    SocialFeed socialFeed(SocialProperties props) {
+    SocialFeed socialFeed(SocialProperties props,
+                          org.springframework.beans.factory.ObjectProvider<io.jethro.app.discovery.DiscoveryLifecycle> discovery) {
         // REAL sources only (ADR-0050) — social media is an always-online external source with NO
         // relation to the market-data sim. There is deliberately no synthetic runtime feed; a failing
         // source never sinks the cycle and shows "unreachable" on the Sources page.
@@ -55,6 +66,10 @@ public class SocialConfig {
             sources.add(new StockTwitsSocialFeed(props.stocktwitsBaseUrlOrDefault(),
                     props.stocktwitsSymbolsPerCycleOrDefault(), Duration.ofSeconds(8)));
         }
+        // RSS news joins the SAME pipeline (ADR-0050 merge): its already-fetched headlines become
+        // credible posts, so news + social cross-corroborate. Reuses discovery's fetch (no extra HTTP);
+        // idle when discovery is disabled. Kept as an extra source so social config is unchanged.
+        sources.add(new NewsSocialFeed(discovery));
         return sources.size() == 1 ? sources.get(0) : new CompositeSocialFeed(sources);
     }
 
