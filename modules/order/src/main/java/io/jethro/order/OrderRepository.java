@@ -39,14 +39,15 @@ public class OrderRepository implements OrderStore {
         int rows = jdbc.update("""
                 insert into orders (order_id, idempotency_key, book_id, instrument_id, side,
                                     order_type, quantity, limit_price, time_in_force, status,
-                                    created_at, updated_at, parent_order_id)
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    created_at, updated_at, parent_order_id, feed_mode)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict (idempotency_key) do nothing
                 """,
                 order.orderId(), order.idempotencyKey(), order.bookId().value(),
                 order.instrumentId().value(), order.side().name(), order.type().name(),
                 order.quantity(), order.limitPrice().orElse(null), order.timeInForce().name(),
-                order.status().name(), ts(order.createdAt()), ts(now), parentOrderId);
+                order.status().name(), ts(order.createdAt()), ts(now), parentOrderId,
+                io.jethro.messaging.Provenance.mode().name()); // ADR-0029: tag the order's feed mode
         return rows == 1;
     }
 
@@ -99,13 +100,19 @@ public class OrderRepository implements OrderStore {
                 OrderRepository::mapOrder, orderId).stream().findFirst();
     }
 
+    /** The running session's feed mode (ADR-0029) — reads that display or drive matching filter by it
+     *  so one mode never sees or matches another's orders. Id lookups stay unfiltered (globally unique). */
+    private static String mode() {
+        return io.jethro.messaging.Provenance.mode().name();
+    }
+
     @Override
     public List<Order> findWorkingLimitOrders(String instrumentId) {
         return jdbc.query("""
                 select * from orders
-                where instrument_id = ? and status = 'ROUTED' and order_type = 'LIMIT'
+                where instrument_id = ? and status = 'ROUTED' and order_type = 'LIMIT' and feed_mode = ?
                 order by created_at
-                """, OrderRepository::mapOrder, instrumentId);
+                """, OrderRepository::mapOrder, instrumentId, mode());
     }
 
     @Override
@@ -123,8 +130,8 @@ public class OrderRepository implements OrderStore {
     @Override
     public List<Order> findAllWorkingLimitOrders() {
         return jdbc.query(
-                "select * from orders where status = 'ROUTED' and order_type = 'LIMIT' order by created_at",
-                OrderRepository::mapOrder);
+                "select * from orders where status = 'ROUTED' and order_type = 'LIMIT' and feed_mode = ? order by created_at",
+                OrderRepository::mapOrder, mode());
     }
 
     /** Orders created on {@code day} (server zone), newest first, paginated. */
@@ -134,17 +141,17 @@ public class OrderRepository implements OrderStore {
         return jdbc.query("""
                 select order_id, book_id, instrument_id, side, order_type, quantity,
                        limit_price, time_in_force, status, reason, created_at, parent_order_id
-                from orders where created_at >= ? and created_at < ?
+                from orders where created_at >= ? and created_at < ? and feed_mode = ?
                 order by created_at desc offset ? limit ?
-                """, OrderRepository::mapRow, start, end, offset, limit);
+                """, OrderRepository::mapRow, start, end, mode(), offset, limit);
     }
 
     /** Count of orders created on {@code day} (server zone). */
     public long countOrdersForDay(java.time.LocalDate day) {
         OffsetDateTime start = day.atStartOfDay(java.time.ZoneId.systemDefault()).toOffsetDateTime();
         Long count = jdbc.queryForObject(
-                "select count(*) from orders where created_at >= ? and created_at < ?",
-                Long.class, start, start.plusDays(1));
+                "select count(*) from orders where created_at >= ? and created_at < ? and feed_mode = ?",
+                Long.class, start, start.plusDays(1), mode());
         return count == null ? 0 : count;
     }
 
@@ -152,19 +159,19 @@ public class OrderRepository implements OrderStore {
         return jdbc.query("""
                 select order_id, book_id, instrument_id, side, order_type, quantity,
                        limit_price, time_in_force, status, reason, created_at, parent_order_id
-                from orders order by created_at desc limit ?
-                """, OrderRepository::mapRow, limit);
+                from orders where feed_mode = ? order by created_at desc limit ?
+                """, OrderRepository::mapRow, mode(), limit);
     }
 
     public List<FillRow> recentFills(int limit) {
         return jdbc.query("""
                 select fill_id, order_id, instrument_id, side, quantity, price, executed_at
-                from fills order by executed_at desc limit ?
+                from fills where feed_mode = ? order by executed_at desc limit ?
                 """, (rs, i) -> new FillRow(
                 rs.getString("fill_id"), rs.getString("order_id"), rs.getString("instrument_id"),
                 rs.getString("side"), rs.getBigDecimal("quantity").toPlainString(),
                 rs.getBigDecimal("price").toPlainString(),
-                rs.getTimestamp("executed_at").toInstant().toEpochMilli()), limit);
+                rs.getTimestamp("executed_at").toInstant().toEpochMilli()), mode(), limit);
     }
 
     /** Boundary DTOs: decimals as strings (invariant 1 — never a JS float). */
