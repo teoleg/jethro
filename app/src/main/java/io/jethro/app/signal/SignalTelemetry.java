@@ -63,6 +63,14 @@ public final class SignalTelemetry {
                 Instant.now(), horizonSeconds);
     }
 
+    /** Records a call, resolving the entry mark from the live cache (for callers without one to hand). */
+    public void record(String source, String instrument, Side side) {
+        if (instrument == null || side == null) {
+            return;
+        }
+        marks.markFor(instrument).ifPresent(mark -> record(source, instrument, side, mark));
+    }
+
     /** Resolves every due observation against the current mark. Off the request path (scheduled). */
     public int resolveDue() {
         List<SignalTelemetryStore.Open> due = store.due(Instant.now());

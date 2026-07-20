@@ -110,6 +110,13 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         this.names = names != null ? names : InstrumentNameSource.NONE;
     }
 
+    // ADR-0055 phase 1: optional health telemetry — an observer the hypothesis layer never depends on.
+    private volatile io.jethro.app.signal.SignalTelemetry signalTelemetry;
+
+    public void setSignalTelemetry(io.jethro.app.signal.SignalTelemetry signalTelemetry) {
+        this.signalTelemetry = signalTelemetry;
+    }
+
     /** The hypothesis event ledger, newest first — every distinct thesis the model proposed,
      *  retained (not just the current cycle), for the /api/hypotheses surface. */
     public List<HypothesisEvent> ledger() {
@@ -388,6 +395,15 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 idempotency.markFired(e.hypothesis(), now); // also de-dups within this cycle
                 memory.remember(e.hypothesis());
                 fresh.add(e);
+                // ADR-0055 phase 1: record the model's directional call for health telemetry — scored
+                // later by realised forward return. The deduped (fresh) call, so one event = one signal.
+                if (signalTelemetry != null) {
+                    BigDecimal mark = priceMap.get(e.hypothesis().instrumentId());
+                    if (mark != null) {
+                        signalTelemetry.record("hypothesis", e.hypothesis().instrumentId(),
+                                e.hypothesis().direction(), mark);
+                    }
+                }
             }
             Set<String> autoTraded = runAutonomy(fresh, now);
             autoTradedIds = autoTraded;

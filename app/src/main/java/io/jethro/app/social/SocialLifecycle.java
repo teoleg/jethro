@@ -1,5 +1,6 @@
 package io.jethro.app.social;
 
+import io.jethro.domain.Side;
 import io.jethro.trading.riskpnl.InstrumentRef;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import io.jethro.uigateway.AttentionFeed;
@@ -69,6 +70,13 @@ public final class SocialLifecycle implements SmartLifecycle {
         this.discoverySocialWeight = discoverySocialWeight;
     }
 
+    // ADR-0055 phase 1: optional health telemetry — an observer social never depends on.
+    private volatile io.jethro.app.signal.SignalTelemetry signalTelemetry;
+
+    public void setSignalTelemetry(io.jethro.app.signal.SignalTelemetry signalTelemetry) {
+        this.signalTelemetry = signalTelemetry;
+    }
+
     @Override
     public void start() {
         scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -127,6 +135,21 @@ public final class SocialLifecycle implements SmartLifecycle {
             trimSeen();
             signals = next;
             lastRunMillis = now;
+
+            // ADR-0055 phase 1: record each tracked, directional (non-pump) social signal for health
+            // telemetry — scored later by realised forward return. Observational; social never orders.
+            if (signalTelemetry != null) {
+                for (SocialSignal sig : next) {
+                    if (!sig.tracked() || sig.manipulationSuspected()) {
+                        continue; // untracked (no mark) or a suspected pump — never a measured call
+                    }
+                    Side side = "BULLISH".equals(sig.direction()) ? Side.BUY
+                            : "BEARISH".equals(sig.direction()) ? Side.SELL : null;
+                    if (side != null) {
+                        signalTelemetry.record("social", sig.instrumentId(), side); // mark from live cache
+                    }
+                }
+            }
 
             // Feed UNTRACKED corroborated names to the discovery register (ADR-0050 §7) as candidate
             // additions — social "adds more if something is cooking". A suspected pump is NEVER a
