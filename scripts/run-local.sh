@@ -142,6 +142,13 @@ if [ -n "$FINNHUB" ]; then
   echo "==> Finnhub key set: real news + live Treasury curve enabled (bond data may be premium —"
   echo "    check the log line 'RATES CURVE:' to see if the live curve or the sim curve is active)."
 fi
+# Tiingo history seed (ADR-0038): grounds the hedger covariance in REAL daily history (even in sim).
+# Auto-exported from local.env above, so the app reads jethro.hedge.tiingo-token=${TIINGO_API_TOKEN:}.
+if [ -n "${TIINGO_API_TOKEN:-}" ]; then
+  echo "==> HISTORY SEED: Tiingo token set — real daily history for the hedger covariance (dev/demo, ADR-0023)."
+else
+  echo "==> HISTORY SEED: no TIINGO_API_TOKEN — covariance warms from the live feed. Set it in local.env for real history."
+fi
 
 mkdir -p logs
 LOG="logs/jethro-app.log"
