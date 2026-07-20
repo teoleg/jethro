@@ -28,15 +28,8 @@
   main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
   .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; }
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
-  /* per-section grid tables (ruled metric/value cells, header row) */
+  /* per-section metric tables use the app's standard table styling below (like every other page) */
   .tiles { margin-bottom:16px; overflow-x:auto; }
-  .grid { border-collapse:collapse; font-size:12.5px; }
-  .grid th { color:var(--dim); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.06em;
-             padding:6px 14px; border:1px solid var(--line-2); background:var(--surface-2); text-align:left; }
-  .grid td { padding:6px 14px; border:1px solid var(--line); white-space:nowrap; }
-  .grid td.k { color:var(--dim); text-align:left; }
-  .grid td.v { font-weight:600; text-align:right; font-variant-numeric:tabular-nums; }
-  .grid tbody tr:hover { background:transparent; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:right; padding:4px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
   th:first-child, td:first-child { text-align:left; }
@@ -105,23 +98,13 @@
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const ms = v => v == null ? "—" : (v >= 1000 ? (v/1000).toFixed(1) + "s" : v + "ms");
-  // ruled grid table: a header row + metric/value cells, two pairs per row so it stays compact.
+  // standard data table (same format as every other page): metric names as column headers, one row
+  // of values. Colour class on each value cell. Uses the shared table CSS.
   const kv = (k, v, cls) => ({ k, v, cls: cls || "" });
-  function gridKV(items, pairsPerRow) {
-    pairsPerRow = pairsPerRow || 2;
-    let head = "";
-    for (let p = 0; p < pairsPerRow; p++) head += "<th>Metric</th><th>Value</th>";
-    let body = "";
-    for (let i = 0; i < items.length; i += pairsPerRow) {
-      body += "<tr>";
-      for (let j = 0; j < pairsPerRow; j++) {
-        const it = items[i + j];
-        body += it ? `<td class="k">${it.k}</td><td class="v ${it.cls}">${it.v}</td>`
-                   : '<td class="k"></td><td class="v"></td>';
-      }
-      body += "</tr>";
-    }
-    return `<table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  function gridKV(items) {
+    const head = items.map(it => `<th>${it.k}</th>`).join("");
+    const row = items.map(it => `<td class="mono ${it.cls}">${it.v}</td>`).join("");
+    return `<table><thead><tr>${head}</tr></thead><tbody><tr>${row}</tr></tbody></table>`;
   }
 
   function render(data) {
