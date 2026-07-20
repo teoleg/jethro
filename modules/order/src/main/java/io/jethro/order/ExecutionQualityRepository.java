@@ -36,13 +36,14 @@ public final class ExecutionQualityRepository implements TcaRecorder {
             jdbc.update("""
                     insert into execution_quality
                         (order_id, instrument, side, quantity, arrival_price, fill_price,
-                         slippage_bps, rate_quoted, fee, filled_at)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         slippage_bps, rate_quoted, fee, filled_at, feed_mode)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     on conflict (order_id) do nothing
                     """,
                     fill.orderId(), fill.instrumentId().value(), fill.side().name(), fill.quantity(),
                     arrivalPrice, fill.price(), slippage, rateQuoted, fill.fee(),
-                    java.sql.Timestamp.from(fill.executedAt() != null ? fill.executedAt() : Instant.now()));
+                    java.sql.Timestamp.from(fill.executedAt() != null ? fill.executedAt() : Instant.now()),
+                    mode()); // ADR-0029: tag the TCA row's feed mode
         } catch (Exception e) {
             log.warn("TCA record failed for {} (fill stands, TCA row lost): {}", fill.orderId(), e.toString());
         }
@@ -64,23 +65,28 @@ public final class ExecutionQualityRepository implements TcaRecorder {
         return jdbc.query("""
                 select order_id, instrument, side, quantity, arrival_price, fill_price,
                        slippage_bps, rate_quoted, fee, filled_at
-                from execution_quality order by filled_at desc limit ?
+                from execution_quality where feed_mode = ? order by filled_at desc limit ?
                 """, (rs, i) -> new Row(
                 rs.getString("order_id"), rs.getString("instrument"), rs.getString("side"),
                 rs.getBigDecimal("quantity"), rs.getBigDecimal("arrival_price"),
                 rs.getBigDecimal("fill_price"), rs.getBigDecimal("slippage_bps"),
                 rs.getBoolean("rate_quoted"), rs.getBigDecimal("fee"),
-                rs.getTimestamp("filled_at").toInstant()), limit);
+                rs.getTimestamp("filled_at").toInstant()), mode(), limit);
     }
 
     public List<Aggregate> aggregates() {
         return jdbc.query("""
                 select instrument, rate_quoted, count(*) as fills,
                        avg(slippage_bps) as avg_bps, max(slippage_bps) as worst_bps
-                from execution_quality group by instrument, rate_quoted
+                from execution_quality where feed_mode = ? group by instrument, rate_quoted
                 order by avg_bps desc
                 """, (rs, i) -> new Aggregate(
                 rs.getString("instrument"), rs.getBoolean("rate_quoted"), rs.getLong("fills"),
-                rs.getBigDecimal("avg_bps"), rs.getBigDecimal("worst_bps")));
+                rs.getBigDecimal("avg_bps"), rs.getBigDecimal("worst_bps")), mode());
+    }
+
+    /** The running session's feed mode (ADR-0029) — scopes TCA reads to this mode only. */
+    private static String mode() {
+        return io.jethro.messaging.Provenance.mode().name();
     }
 }
