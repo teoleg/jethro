@@ -1,6 +1,6 @@
 # ADR-0053: Learned advisory signal — a model predicts a tradeable label, backtest-gated (no price-curve oracle)
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-19
 - **Deciders:** Oleg
 - **Tags:** ai, strategy, data, risk
