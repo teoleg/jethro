@@ -56,6 +56,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0050](0050-social-media-adversarial-source.md) | Social media as an adversarial source — spam/credibility/corroboration controls | Accepted | ◐ Partial |
 | [0051](0051-price-derived-volatility-regime.md) | Risk-off sizing from a price-derived volatility regime (no sim-regime oracle) | Accepted | ✅ Implemented |
 | [0052](0052-live-strategy-tuning-panel.md) | Live, DB-persisted strategy tuning — every dial editable, every change audited as its own provenance | Accepted | ✅ Implemented |
+| [0053](0053-learned-advisory-signal.md) | Learned advisory signal — a model predicts a tradeable label, backtest-gated (no price-curve oracle) | Proposed | ○ Not started |
 
 ## Status vs Implementation
 
