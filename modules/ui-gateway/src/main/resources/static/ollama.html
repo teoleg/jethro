@@ -94,6 +94,10 @@
   <div class="tiles" id="btTiles"></div>
   <div id="btHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
 
+  <div class="section-h">Signal health <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0055 phase 1: each source's live calls scored by realised forward return; the evidence future fusion weights sources by</span></div>
+  <div id="sigHealth" style="overflow-x:auto;margin-bottom:4px"><div class="muted" style="padding:12px">loading…</div></div>
+  <div id="sigHint" class="muted" style="margin:6px 2px 16px;font-size:12px"></div>
+
   <div class="section-h">Model load <span class="muted" id="asof"></span></div>
   <div class="tiles" id="tiles"></div>
 
@@ -297,11 +301,44 @@
     } catch (e) {}
   }
 
+  // ADR-0055 phase 1: per-source signal health — hit-rate + avg realised return of following each call.
+  async function loadSignalHealth() {
+    try {
+      const rows = await (await fetch("/api/signals/telemetry")).json();
+      if (!rows.length) {
+        document.getElementById("sigHealth").innerHTML =
+          '<div class="muted" style="padding:12px">no resolved calls yet — sources record a call, then it scores one horizon later (default 1h).</div>';
+        document.getElementById("sigHint").innerHTML = "";
+        return;
+      }
+      rows.sort((a, b) => b.avgReturnBps - a.avgReturnBps);
+      const bps = v => (v >= 0 ? "+" : "") + v.toFixed(1);
+      const body = rows.map(r => {
+        const decisive = r.wins + r.losses;
+        const hitCls = decisive === 0 ? "muted" : (r.hitRate >= 0.5 ? "up" : "down");
+        const retCls = r.avgReturnBps > 0 ? "up" : (r.avgReturnBps < 0 ? "down" : "muted");
+        return `<tr><td>${esc(r.source)}</td>
+          <td class="mono">${r.resolved}</td>
+          <td class="mono ${hitCls}">${decisive === 0 ? "—" : (r.hitRate * 100).toFixed(0) + "%"}</td>
+          <td class="mono ${retCls}">${bps(r.avgReturnBps)}</td>
+          <td class="mono">${r.wins}/${r.losses}/${r.flats}</td>
+          <td class="mono muted">${r.open}</td></tr>`;
+      }).join("");
+      document.getElementById("sigHealth").innerHTML =
+        `<table><thead><tr><th>source</th><th>scored</th><th>hit-rate</th><th>avg ret (bps)</th>
+         <th>W/L/F</th><th>open</th></tr></thead><tbody>${body}</tbody></table>`;
+      document.getElementById("sigHint").innerHTML =
+        `hit-rate excludes FLATs (no bet); avg ret is per resolved call, net of nothing (gross, forward-return of following the call). `
+        + `Measurement only — no number here sizes or gates an order (ADR-0016). This is the evidence ADR-0055 phase 2+ will weight sources by.`;
+    } catch (e) {}
+  }
+
   async function refresh() {
     try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
     loadJvm();
     loadTraining();
     loadBacktest();
+    loadSignalHealth();
     loadTraffic();
     loadBalance();
     loadRag();

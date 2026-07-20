@@ -120,6 +120,14 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.volRegime = volRegime;
     }
 
+    // ADR-0055 phase 1: optional health telemetry — wired post-construction so it stays an observer
+    // the strategy never depends on (null when signals telemetry is disabled).
+    private volatile io.jethro.app.signal.SignalTelemetry signalTelemetry;
+
+    public void setSignalTelemetry(io.jethro.app.signal.SignalTelemetry signalTelemetry) {
+        this.signalTelemetry = signalTelemetry;
+    }
+
     private boolean autoExecuting() {
         return control.autoExecute() && orderService != null;
     }
@@ -202,6 +210,11 @@ public final class StrategyLifecycle implements SmartLifecycle {
             java.util.List<DiagSignal> outcomes = new ArrayList<>();
             for (TradeSignal signal : strategy.evaluate(observations)) {
                 signals++;
+                // ADR-0055 phase 1: record this source's directional call for health telemetry — scored
+                // later by realised forward return. Observational only; never gates or sizes this signal.
+                if (signalTelemetry != null) {
+                    signalTelemetry.record(signal.kind(), signal.instrumentId(), signal.side(), signal.price());
+                }
                 String book = bookFor(signal.instrumentId()); // route by asset class, not all to one book
                 Optional<BigDecimal> sized = size(signal, regimeScale);
                 if (sized.isEmpty()) {

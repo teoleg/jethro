@@ -118,6 +118,7 @@ public class StrategyConfig {
                                         ObjectProvider<io.jethro.app.risk.InstrumentVolSource> vols,
                                         ObjectProvider<io.jethro.app.risk.PortfolioCorrelationSource> correlations,
                                         ObjectProvider<io.jethro.app.order.MeasuredAdvSource> measuredAdv,
+                                        ObjectProvider<io.jethro.app.signal.SignalTelemetry> signalTelemetry,
                                         @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.window:30}") int volWindow,
                                         @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.upper-factor:1.5}") String volUpper,
                                         @org.springframework.beans.factory.annotation.Value("${jethro.strategy.volregime.lower-factor:1.1}") String volLower,
@@ -130,10 +131,12 @@ public class StrategyConfig {
         var volRegime = new io.jethro.trading.algo.strategy.VolatilityRegime(
                 volWindow, new java.math.BigDecimal(volUpper), new java.math.BigDecimal(volLower),
                 new java.math.BigDecimal(volLambda));
-        return new StrategyLifecycle(strategy, tradingCore, refs, guardrail, risk, limits, feed, sse, props,
+        var lifecycle = new StrategyLifecycle(strategy, tradingCore, refs, guardrail, risk, limits, feed, sse, props,
                 control, orderService.getIfAvailable(), tradingHaltSwitch,
                 vols.getIfAvailable(() -> io.jethro.app.risk.InstrumentVolSource.NONE),
                 correlations.getIfAvailable(() -> io.jethro.app.risk.PortfolioCorrelationSource.NONE),
                 measuredAdv.getIfAvailable(), volRegime);
+        lifecycle.setSignalTelemetry(signalTelemetry.getIfAvailable()); // ADR-0055 phase 1: optional observer
+        return lifecycle;
     }
 }

@@ -1,6 +1,6 @@
 # ADR-0055: Signal fusion and a target portfolio — signals stop placing orders
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-20
 - **Deciders:** Oleg
 - **Tags:** strategy, ai, risk, architecture
