@@ -59,6 +59,7 @@ public class FusionConfig {
                                     ObjectProvider<TradingCoreLifecycle> tradingCore,
                                     ObjectProvider<RiskProjection> risk,
                                     ObjectProvider<FusionExecutor> executor,
+                                    @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
                                     @Value("${jethro.fusion.assumed-correlation:0.5}") double assumedCorrelation,
                                     @Value("${jethro.fusion.unit-notional-usd:10000}") BigDecimal unitNotional,
                                     @Value("${jethro.fusion.buffer-fraction:0.2}") double bufferFraction,
@@ -69,7 +70,7 @@ public class FusionConfig {
         var lifecycle = new FusionLifecycle(registry,
                 instrument -> priceFor(tradingCore, instrument),
                 () -> firmPositions(risk),
-                FusionWeights.equal(), params, routeOrders, executor.getIfAvailable(), intervalSeconds);
+                FusionWeights.equal(), params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds);
         lifecycle.start();
         return lifecycle;
     }

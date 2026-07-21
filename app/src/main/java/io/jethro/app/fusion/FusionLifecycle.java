@@ -6,7 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -40,21 +40,23 @@ public final class FusionLifecycle implements AutoCloseable {
     private final FusionPlanner.Params params;
     private final boolean routeOrders;
     private final FusionExecutor executor; // null ⇒ shadow only (no order path available)
+    private final ScheduledExecutorService scheduler;
     private final long intervalSeconds;
 
     private volatile TargetBook lastBook = TargetBook.empty();
-    private ScheduledExecutorService scheduler;
+    private Future<?> task;
 
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
                            Supplier<Map<String, BigDecimal>> positionsSupplier, FusionWeights weights,
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
-                           long intervalSeconds) {
+                           ScheduledExecutorService scheduler, long intervalSeconds) {
         this.registry = registry;
         this.priceFor = priceFor;
         this.positionsSupplier = positionsSupplier;
         this.weights = weights;
         this.params = params;
         this.executor = executor;
+        this.scheduler = scheduler;
         this.routeOrders = routeOrders && executor != null;
         this.intervalSeconds = Math.max(5, intervalSeconds);
     }
@@ -65,12 +67,7 @@ public final class FusionLifecycle implements AutoCloseable {
     }
 
     public void start() {
-        scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "fusion-plan");
-            t.setDaemon(true);
-            return t;
-        });
-        scheduler.scheduleWithFixedDelay(this::tick, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
+        task = scheduler.scheduleWithFixedDelay(this::tick, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
         log.info("fusion loop started (every {}s) — ADR-0055 {}", intervalSeconds,
                 routeOrders ? "LIVE (sim-only): the sole order origin, gated by ADR-0049/guardrail/breaker"
                         : "SHADOW MODE (computes the target book, places NO orders)");
@@ -109,9 +106,8 @@ public final class FusionLifecycle implements AutoCloseable {
 
     @Override
     public void close() {
-        if (scheduler != null) {
-            scheduler.shutdownNow();
-            scheduler = null;
+        if (task != null) {
+            task.cancel(false); // cancel our task only — the shared pool is owned elsewhere
         }
     }
 }

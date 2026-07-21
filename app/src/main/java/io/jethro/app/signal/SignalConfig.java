@@ -44,8 +44,9 @@ public class SignalConfig {
     @ConditionalOnProperty(prefix = "jethro.signals", name = "enabled", havingValue = "true", matchIfMissing = true)
     SignalTelemetryResolver signalTelemetryResolver(
             SignalTelemetry telemetry,
+            @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
             @Value("${jethro.signals.resolve-interval-seconds:60}") long intervalSeconds) {
-        var resolver = new SignalTelemetryResolver(telemetry, intervalSeconds);
+        var resolver = new SignalTelemetryResolver(telemetry, scheduler, intervalSeconds);
         resolver.start();
         return resolver;
     }

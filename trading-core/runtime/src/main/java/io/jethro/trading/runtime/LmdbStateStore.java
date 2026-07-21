@@ -3,6 +3,7 @@ package io.jethro.trading.runtime;
 import org.lmdbjava.Dbi;
 import org.lmdbjava.DbiFlags;
 import org.lmdbjava.Env;
+import org.lmdbjava.EnvFlags;
 import org.lmdbjava.PutFlags;
 import org.lmdbjava.Txn;
 
@@ -38,10 +39,14 @@ public final class LmdbStateStore implements AutoCloseable {
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IllegalStateException("cannot create LMDB directory " + directory);
         }
+        // MDB_NOSYNC: don't fsync on commit. This store is DERIVED data only (invariant 9 — losing it
+        // costs restart time, never data), so durability buys nothing, and the default fsync-per-commit
+        // put a synchronous disk write on the single writer thread (a stall source on slow/loaded disk).
+        // Non-writemap mode keeps ACI integrity — a crash can only lose the last (rebuildable) writes.
         Env<ByteBuffer> env = Env.create()
                 .setMapSize(maxSizeBytes)
                 .setMaxDbs(2)
-                .open(dir);
+                .open(dir, EnvFlags.MDB_NOSYNC);
         Dbi<ByteBuffer> dedupe = env.openDbi(DEDUPE_DB, DbiFlags.MDB_CREATE);
         Dbi<ByteBuffer> marks = env.openDbi(MARKS_DB, DbiFlags.MDB_CREATE);
         return new LmdbStateStore(env, dedupe, marks);
