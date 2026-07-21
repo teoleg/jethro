@@ -173,7 +173,9 @@ already carries these:
 # smaller, faster model; give slow CPU inference room and breathe less often
 jethro.ai.model=qwen2.5:0.5b
 jethro.ai.interval-seconds=180
-jethro.ai.request-timeout-seconds=120
+# 180s covers a slow 3b generate + a post-recycle cold reload (run-local.sh defaults MODEL=qwen2.5:3b);
+# ample for 0.5b. A tighter value kills valid slow calls as "ollama unreachable".
+jethro.ai.request-timeout-seconds=180
 # Footprint dials — keep llama-server out of swap. keep-alive short so an idle box unloads the
 # model and reclaims its memory; num-ctx caps the KV cache; recycle-minutes force-unloads on a
 # cadence so llama-server's slow native growth can't climb into swap and freeze the box.

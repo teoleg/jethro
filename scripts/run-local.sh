@@ -10,12 +10,13 @@
 # Usage:
 #   ./scripts/run-local.sh                       # everything on (AI + auto-execute)
 #   AI=off AUTOEXEC=off ./scripts/run-local.sh   # market path + UI only, no AI, no trading
-#   MODEL=qwen2.5:3b ./scripts/run-local.sh      # stronger text (needs 8GB+ headroom)
+#   MODEL=qwen2.5:1.5b ./scripts/run-local.sh    # lighter/faster text for a tighter box
+#   MODEL=qwen2.5:0.5b ./scripts/run-local.sh    # smallest, for very tight RAM
 #   PROVIDER=yahoo ./scripts/run-local.sh        # real (delayed) prices from Yahoo (ADR-0023)
 #   PROFILE=default HEAP=1g ./scripts/run-local.sh
 #
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
-#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:1.5b),
+#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b),
 #            PROVIDER (sim|yahoo|finnhub, default: yahoo), AUTONOMY (off|on, default: on),
 #            RAG (off|on, default: on). Set them once in local.env — a plain KEY=value file
 #            (copy local.env.example); command-line env still overrides it.
@@ -41,17 +42,21 @@ fi
 PROFILE="${PROFILE:-pi}"
 # 512m was too tight: the hourly OOS strategy-selector backtest is a large TRANSIENT allocation
 # spike, and on a 512m ZGC heap it drove allocation stalls that froze the whole JVM for the run's
-# duration (~1h cadence). 768m gives that spike headroom while staying Pi-friendly alongside a 1.5b
+# duration (~1h cadence). 768m gives that spike headroom while staying Pi-friendly alongside the
 # Ollama model. A pre-run heap guard (StrategySelector) is the backstop — it SKIPS the backtest when
 # headroom is thin rather than freezing. On an 8GB+ box set HEAP=1g so the selector always refreshes.
 HEAP="${HEAP:-768m}"
 AI="${AI:-on}"
-MODEL="${MODEL:-qwen2.5:1.5b}" # 1.5b fits a Pi (frees ~1.5GB + CPU vs 3b, so you stay out of swap).
-                               # MODEL=qwen2.5:3b for better text on an 8GB+ box; :0.5b for very tight RAM.
+MODEL="${MODEL:-qwen2.5:3b}"   # 3b = stronger narration; viable on an 8GB box now that the ChatModelRecycler
+                               # + short jethro.ai.keep-alive cap llama-server's growth (it used to climb into
+                               # swap). Slower per call on Pi CPU (~60-70s) — that's why the pi profile's
+                               # request-timeout is 180s. MODEL=qwen2.5:1.5b (lighter) or :0.5b (tightest RAM).
+                               # Keep the browser dashboard OFF this box (view from a laptop) so 3b has headroom.
 RAG="${RAG:-on}"               # on = RAG retrieval (ADR-0035); needs the embedding model below.
 EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}" # RAG embeddings (~275MB); the chat MODEL can't embed.
-# Ollama unloads the model this long after the last call (flows into the ollama container via compose).
-# Frees GBs when the app is idle/off; shorten it (e.g. 30s) on a very tight box to unload between bursts.
+# Container-level idle unload for the EMBEDDING model. The CHAT model's keep-alive is now sent per
+# request by the app (jethro.ai.keep-alive, default 5m) and OVERRIDES this — plus ChatModelRecycler
+# force-unloads it on a cadence — so this mainly governs the embedding model. Frees GBs when idle.
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-5m}"
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
