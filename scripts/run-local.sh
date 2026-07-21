@@ -50,6 +50,9 @@ MODEL="${MODEL:-qwen2.5:1.5b}" # 1.5b fits a Pi (frees ~1.5GB + CPU vs 3b, so yo
                                # MODEL=qwen2.5:3b for better text on an 8GB+ box; :0.5b for very tight RAM.
 RAG="${RAG:-on}"               # on = RAG retrieval (ADR-0035); needs the embedding model below.
 EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}" # RAG embeddings (~275MB); the chat MODEL can't embed.
+# Ollama unloads the model this long after the last call (flows into the ollama container via compose).
+# Frees GBs when the app is idle/off; shorten it (e.g. 30s) on a very tight box to unload between bursts.
+export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-5m}"
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
 PROVIDER="${PROVIDER:-yahoo}"  # sim | yahoo (delayed, ADR-0023) | finnhub (real-time WS, ADR-0024)

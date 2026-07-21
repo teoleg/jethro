@@ -56,6 +56,12 @@ services:
       - "11434:11434"
     volumes:
       - ollama-models:/root/.ollama
+    environment:
+      # Unload the model this long after the last request, freeing its (GB-scale) RAM when the app is
+      # idle or stopped — the difference between fitting and swapping on a tight box (footprint de-load).
+      # Caveat: while the app is calling Ollama more often than this (hypothesis cadence ~20s), the model
+      # stays resident — for real relief on a small box use a smaller MODEL (run-local.sh) or AI=off.
+      OLLAMA_KEEP_ALIVE: "${OLLAMA_KEEP_ALIVE:-5m}"
     # first run: docker exec jethro-ollama-1 ollama pull qwen2.5:3b
 
   app:

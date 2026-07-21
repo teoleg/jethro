@@ -234,6 +234,7 @@
   function renderFeed(items) {
     const feed = document.getElementById("feed");
     if (!items.length) { feed.innerHTML = '<div class="empty">all quiet</div>'; return; }
+    if (items.length > 50) { items = items.slice(0, 50); } // cap DOM in a long-open tab (memory de-load)
     feed.innerHTML = items.map(i =>
       `<div class="card ${esc(i.severity)}"><div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
          <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()}</div></div>`).join("");
@@ -596,9 +597,9 @@
   // refresh on return — so backgrounded tabs stop hammering the JVM and a backend stall can't
   // pile up pending fetches. The initial call inside each loadX above stays; poll runs its own
   // immediate tick too (idempotent). Replaces raw setInterval, which wedged tabs overnight.
-  poll(loadRisk, 2000);
+  poll(loadRisk, 5000);       // was 2s — hits the shared risk lock; 5s is plenty for a dashboard
   poll(loadMarketState, 5000);
-  poll(loadTicker, 2000);
+  poll(loadTicker, 3000);     // was 2s — cosmetic marquee
   poll(loadFeeds, 5000);
   poll(loadIndicators, 30000);
   poll(loadFusionPanel, 10000);

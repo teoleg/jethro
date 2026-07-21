@@ -374,19 +374,26 @@
     } catch (e) {}
   }
 
+  // Fast tick: the light, live panels. The HEAVY, slow-changing ones (training feature-matrix rebuild,
+  // learned-signal backtest) move to a 30s cadence — they were recomputing every 3s, which pinned the
+  // box and the browser for no benefit (footprint de-load).
   async function refresh() {
     try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
     loadJvm();
-    loadTraining();
-    loadBacktest();
     loadSignalHealth();
     loadFusion();
     loadTraffic();
     loadBalance();
     loadRag();
   }
+  function refreshSlow() {
+    loadTraining();   // /api/training/features rebuilds the whole matrix — not a per-3s job
+    loadBacktest();
+  }
   refresh();
-  poll(refresh, 3000); // poll.js: no-overlap, pauses while hidden (see index.html)
+  refreshSlow();
+  poll(refresh, 8000);      // light live panels (was 3s — halved+ the request rate)
+  poll(refreshSlow, 30000); // heavy recompute panels — 10× slower
 </script>
 </body>
 </html>
