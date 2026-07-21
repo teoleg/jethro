@@ -236,15 +236,20 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         }
         // Background for what Finnhub doesn't stream. Prefer Yahoo (real, delayed) for the
         // price-quoted rest (futures/FX/SAP), else sim; the curve rides the background either way.
+        // ADR-0056: keep the Finnhub-covered names on the Yahoo background too, as a DELAYED FALLBACK
+        // (do NOT remove them). The MarkCache freshness guard makes a live Finnhub mark always win over
+        // Yahoo's delayed poll; but when the Finnhub WS is quiet (off-hours) or drops, Yahoo keeps the
+        // name marked so the position never goes dark (0 exposure — the ALPHA/JPM phantom-flat bug).
+        // Overlap cost is bounded by the small universe.
         Map<String, String> yahooRest = yahooSymbolMap();
-        covered.keySet().forEach(yahooRest::remove); // equities are on Finnhub now
         MarketDataAdapter background;
         if (!yahooRest.isEmpty()) {
             long spacing = properties.yahooRequestSpacingMillisOrDefault();
             background = new YahooMarketDataAdapter(
                     new YahooQuoteClient(Duration.ofSeconds(10)), yahooRest, curveSim, spacing);
-            log.warn("MARKET DATA: Finnhub real-time WS for {} equities + Yahoo (delayed) for {} others "
-                    + "+ sim curve. Dev/demo only, never production/real-money (ADR-0024).",
+            log.warn("MARKET DATA: Finnhub real-time WS for {} equities + Yahoo (delayed) poll for {} "
+                    + "price-quoted names (incl. the Finnhub names as fallback) + sim curve. "
+                    + "Dev/demo only, never production/real-money (ADR-0024/0056).",
                     covered.size(), yahooRest.size());
         } else {
             List<String> uncovered = properties.simInstruments().stream()
