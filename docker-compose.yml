@@ -5,6 +5,10 @@
 services:
   redpanda:
     image: redpandadata/redpanda:v24.2.18
+    # Run tini as PID 1 so orphaned children (the rpk health-check subprocesses seastar spawns) get
+    # REAPED instead of piling up as defunct <zombie> entries. The watchdog identified redpanda (not the
+    # JVM — our app forks nothing) as the parent of the slowly-accumulating zombies; init:true clears it.
+    init: true
     command:
       - redpanda
       - start
