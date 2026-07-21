@@ -164,9 +164,16 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; the
 fi
 
 echo "==> Starting app in background: profile=$PROFILE heap=$HEAP ai=$AI"
+# One-shot leak diagnosis: CLASSLOAD_LOG=1 logs every class load so a runtime class-generation leak
+# names itself (NMT showed Metaspace/Code climbing). Verbose — enable for one run, then:
+#   grep -oE "GeneratedMethodAccessor|GeneratedConstructorAccessor|[$][$]Lambda|Proxy[0-9]" logs/classload.log | sort | uniq -c
+CLASSLOAD_FLAG=()
+[ -n "${CLASSLOAD_LOG:-}" ] && CLASSLOAD_FLAG=("-Xlog:class+load=info:file=logs/classload.log:uptime,tags")
+
 nohup java -Xmx"$HEAP" -XX:+UseZGC \
   -XX:NativeMemoryTracking=summary \
   -XX:MaxDirectMemorySize="${MAX_DIRECT:-256m}" \
+  "${CLASSLOAD_FLAG[@]}" \
   --add-opens java.base/java.nio=ALL-UNNAMED \
   --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
   -jar "$JAR" \

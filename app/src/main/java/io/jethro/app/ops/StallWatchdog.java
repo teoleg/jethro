@@ -71,7 +71,7 @@ public final class StallWatchdog implements AutoCloseable {
         // Native-memory trend: log an NMT summary every 20 min so a native leak (RSS climbing while heap
         // stays flat) localises itself — the category that grows over the run names the culprit. Needs
         // -XX:NativeMemoryTracking=summary at launch (run-local.sh sets it), else this logs "not enabled".
-        beat.scheduleWithFixedDelay(() -> log.info("NATIVE MEMORY (NMT) trend:\n{}", nmtSummary()),
+        beat.scheduleWithFixedDelay(() -> log.info("NATIVE MEMORY (NMT) trend: {}\n{}", classLoadingLine(), nmtSummary()),
                 2, 20, TimeUnit.MINUTES);
         // Max-priority watcher: runs even under contention, so it can observe (and dump) a full stall.
         watcher = new Thread(this::loop, "stall-watchdog");
@@ -238,6 +238,14 @@ public final class StallWatchdog implements AutoCloseable {
     /** JVM Native Memory Tracking summary via the diagnostic-command MBean — the category breakdown
      *  (Thread / Class / Code / GC / Internal / Other / direct buffers) that localises a native leak.
      *  Requires {@code -XX:NativeMemoryTracking=summary} at launch; otherwise reports it's off. */
+    /** Loaded/unloaded class counts — if loaded climbs while unloaded stays ~0, classes are generated
+     *  and never reclaimed (a metaspace/class leak, the NMT "Class"/"Code" growth). */
+    private static String classLoadingLine() {
+        var cl = ManagementFactory.getClassLoadingMXBean();
+        return String.format("classes loaded(total)=%d currently=%d unloaded=%d",
+                cl.getTotalLoadedClassCount(), cl.getLoadedClassCount(), cl.getUnloadedClassCount());
+    }
+
     private static String nmtSummary() {
         try {
             var name = new javax.management.ObjectName("com.sun.management:type=DiagnosticCommand");

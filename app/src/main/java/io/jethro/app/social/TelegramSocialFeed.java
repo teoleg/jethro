@@ -27,6 +27,7 @@ public final class TelegramSocialFeed implements SocialFeed {
 
     private static final Logger log = LoggerFactory.getLogger(TelegramSocialFeed.class);
 
+    private static final ObjectMapper MAPPER = new ObjectMapper(); // one shared parser, not one per poll
     private final String baseUrl;
     private final String token;
     private final HttpClient http;
@@ -80,7 +81,7 @@ public final class TelegramSocialFeed implements SocialFeed {
     /** Map a getUpdates response to posts (channel posts + messages). Static for fixture testing. */
     static List<SocialPost> parse(String json, long nowMillis) throws Exception {
         List<SocialPost> out = new ArrayList<>();
-        JsonNode result = new ObjectMapper().readTree(json).path("result");
+        JsonNode result = MAPPER.readTree(json).path("result");
         if (!result.isArray()) {
             return out;
         }
@@ -107,7 +108,7 @@ public final class TelegramSocialFeed implements SocialFeed {
 
     static long maxUpdateId(String json) throws Exception {
         long max = 0;
-        for (JsonNode u : new ObjectMapper().readTree(json).path("result")) {
+        for (JsonNode u : MAPPER.readTree(json).path("result")) {
             max = Math.max(max, u.path("update_id").asLong(0));
         }
         return max;
