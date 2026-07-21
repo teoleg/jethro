@@ -165,6 +165,8 @@ fi
 
 echo "==> Starting app in background: profile=$PROFILE heap=$HEAP ai=$AI"
 nohup java -Xmx"$HEAP" -XX:+UseZGC \
+  -XX:NativeMemoryTracking=summary \
+  -XX:MaxDirectMemorySize="${MAX_DIRECT:-256m}" \
   --add-opens java.base/java.nio=ALL-UNNAMED \
   --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
   -jar "$JAR" \

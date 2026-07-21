@@ -68,6 +68,11 @@ public final class StallWatchdog implements AutoCloseable {
             return t;
         });
         beat.scheduleWithFixedDelay(heartbeat::incrementAndGet, checkMillis, checkMillis, TimeUnit.MILLISECONDS);
+        // Native-memory trend: log an NMT summary every 20 min so a native leak (RSS climbing while heap
+        // stays flat) localises itself — the category that grows over the run names the culprit. Needs
+        // -XX:NativeMemoryTracking=summary at launch (run-local.sh sets it), else this logs "not enabled".
+        beat.scheduleWithFixedDelay(() -> log.info("NATIVE MEMORY (NMT) trend:\n{}", nmtSummary()),
+                2, 20, TimeUnit.MINUTES);
         // Max-priority watcher: runs even under contention, so it can observe (and dump) a full stall.
         watcher = new Thread(this::loop, "stall-watchdog");
         watcher.setDaemon(true);
@@ -143,6 +148,7 @@ public final class StallWatchdog implements AutoCloseable {
             sb.append("threads=").append(all.length).append("  states=").append(hist).append("\n\n");
             appendMemory(sb);
             appendProcAndSwap(sb);
+            sb.append("--- native memory (NMT summary) ---\n").append(nmtSummary()).append("\n\n");
             sb.append("--- full thread dump ---\n");
             for (ThreadInfo ti : all) {
                 sb.append(ti);
@@ -226,6 +232,21 @@ public final class StallWatchdog implements AutoCloseable {
             sb.append('\n');
         } catch (Exception ignore) {
             // not Linux / not readable
+        }
+    }
+
+    /** JVM Native Memory Tracking summary via the diagnostic-command MBean — the category breakdown
+     *  (Thread / Class / Code / GC / Internal / Other / direct buffers) that localises a native leak.
+     *  Requires {@code -XX:NativeMemoryTracking=summary} at launch; otherwise reports it's off. */
+    private static String nmtSummary() {
+        try {
+            var name = new javax.management.ObjectName("com.sun.management:type=DiagnosticCommand");
+            Object out = ManagementFactory.getPlatformMBeanServer().invoke(name, "vmNativeMemory",
+                    new Object[]{new String[]{"summary"}}, new String[]{String[].class.getName()});
+            return String.valueOf(out);
+        } catch (Exception e) {
+            return "NMT unavailable (" + e.getClass().getSimpleName() + ") — launch with "
+                    + "-XX:NativeMemoryTracking=summary to enable";
         }
     }
 
