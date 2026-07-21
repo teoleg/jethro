@@ -8,12 +8,14 @@ import io.jethro.trading.algo.agent.RiskCommentator;
 import io.jethro.trading.algo.inference.ModelInferenceClient;
 import io.jethro.trading.algo.inference.OllamaClient;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.Duration;
+import java.util.concurrent.ScheduledExecutorService;
 
 @Configuration
 @EnableConfigurationProperties(AiProperties.class)
@@ -46,7 +48,8 @@ public class AiConfig {
         // ops view) → circuit breaker (a wedged Ollama trips it and backs off, so we don't hammer a
         // sick model with 120s-hanging calls every cycle) → Ollama.
         var ollama = new OllamaClient(properties.baseUrl(), properties.model(),
-                Duration.ofSeconds(properties.requestTimeoutSeconds()));
+                Duration.ofSeconds(properties.requestTimeoutSeconds()),
+                properties.keepAlive(), properties.numCtx());
         var breaker = new CircuitBreakerInferenceClient(ollama, 3, Duration.ofSeconds(60));
         return new SingleFlightInferenceClient(new MonitoringInferenceClient(breaker, monitor), gate);
     }
@@ -56,6 +59,18 @@ public class AiConfig {
     @ConditionalOnProperty(prefix = "jethro.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
     OllamaWarmup ollamaWarmup(ModelInferenceClient client) {
         return new OllamaWarmup(client);
+    }
+
+    /** Periodic force-unload of the chat model so llama-server's native growth resets (ADR-0016 ops
+     *  hygiene). Shares the ops scheduler and the single-model gate; disabled via jethro.ai.recycle-minutes=0. */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.ai", name = "enabled", havingValue = "true", matchIfMissing = true)
+    ChatModelRecycler chatModelRecycler(@Qualifier("sharedScheduler") ScheduledExecutorService scheduler,
+                                        OllamaGate gate, AiProperties properties) {
+        var recycler = new ChatModelRecycler(scheduler, gate, properties.baseUrl(),
+                properties.model(), properties.recycleMinutes());
+        recycler.start();
+        return recycler;
     }
 
     @Bean
