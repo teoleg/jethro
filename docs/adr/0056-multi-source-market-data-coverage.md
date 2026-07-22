@@ -43,6 +43,14 @@ Finnhub-covered name out of the Yahoo background, so each went dark whenever the
 (off-hours) or dropped. The full declarative priority table replaces the hardcoded composition once
 this ADR is Accepted.
 
+**First real second source (Alpaca):** `PROVIDER=alpaca` adds Alpaca's genuinely-free (no credit card)
+real-time US-equities WebSocket (IEX tier) as an alternative to Finnhub, composed the same way —
+Alpaca-covered names on the Yahoo background as a delayed fallback, freshness-guarded so the live and
+delayed marks never mix. It's the concrete second source this ADR was written to make cheap to add:
+one adapter behind the ADR-0009 port + `alpaca` symbology rows (V44) + the coverage priority. (Alpaca's
+v2 stream can emit msgpack; this adapter expects JSON text and fails a binary frame loudly rather than
+silently — a msgpack decoder is the follow-up if a connection lands on that format.)
+
 ## Alternatives considered
 
 - **Keep the bespoke per-provider hybrid (status quo).** Every source is surgery in `buildXAdapter`;

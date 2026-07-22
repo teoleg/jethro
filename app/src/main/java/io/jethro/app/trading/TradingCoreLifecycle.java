@@ -5,6 +5,7 @@ import io.jethro.domain.Instrument;
 import io.jethro.refdata.RefDataRepository;
 import io.jethro.trading.marketdata.FeedStatus;
 import io.jethro.trading.marketdata.MarketDataAdapter;
+import io.jethro.trading.marketdata.alpaca.AlpacaMarketDataAdapter;
 import io.jethro.trading.marketdata.finnhub.FinnhubMarketDataAdapter;
 import io.jethro.trading.marketdata.sim.CorrelatedMarketDataAdapter;
 import io.jethro.trading.marketdata.sim.CurveFactorSimulator;
@@ -128,6 +129,14 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                 return finnhub;
             }
             // token missing or nothing mapped — buildFinnhubAdapter logged why; fall through to sim.
+        }
+
+        if ("alpaca".equalsIgnoreCase(provider)) {
+            MarketDataAdapter alpaca = buildAlpacaAdapter(curveSim);
+            if (alpaca != null) {
+                return alpaca;
+            }
+            // key/secret missing or nothing mapped — buildAlpacaAdapter logged why; fall through to sim.
         }
 
         if ("yahoo".equalsIgnoreCase(provider)) {
@@ -259,6 +268,45 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                     + "Dev/demo only (ADR-0024).", covered.size(), uncovered.size());
         }
         return new FinnhubMarketDataAdapter(token, covered, background);
+    }
+
+    /** Alpaca real-time equities (WebSocket, IEX tier) composed with Yahoo (delayed) for everything
+     *  Alpaca's free tier doesn't stream — FX, futures, and the equities as a fallback — plus the sim
+     *  curve. Null if no key/secret or symbology; caller falls back to sim (ADR-0056). */
+    private MarketDataAdapter buildAlpacaAdapter(CurveMarkSource curveSim) {
+        String key = properties.alpacaKeyIdOrEmpty();
+        String secret = properties.alpacaSecretOrEmpty();
+        Map<String, String> covered = alpacaSymbolMap();
+        if (key.isEmpty() || secret.isEmpty()) {
+            log.warn("provider=alpaca but jethro.trading.alpaca-key-id / -secret is blank — falling back to "
+                    + "the sim feed. Get a free key at alpaca.markets and set ALPACA_KEY_ID / ALPACA_SECRET.");
+            return null;
+        }
+        if (covered.isEmpty()) {
+            log.warn("provider=alpaca but no 'alpaca' symbology found — falling back to the sim feed");
+            return null;
+        }
+        // Same composition shape as Finnhub (ADR-0056): keep the Alpaca-covered names on the Yahoo
+        // background as a DELAYED FALLBACK; the freshness guard keeps the live Alpaca mark winning, so the
+        // two never mix — Yahoo only fills when Alpaca is quiet (off-hours). Curve rides the background.
+        Map<String, String> yahooRest = yahooSymbolMap();
+        MarketDataAdapter background;
+        if (!yahooRest.isEmpty()) {
+            long spacing = properties.yahooRequestSpacingMillisOrDefault();
+            background = new YahooMarketDataAdapter(
+                    new YahooQuoteClient(Duration.ofSeconds(10)), yahooRest, curveSim, spacing);
+            log.warn("MARKET DATA: Alpaca real-time WS (IEX) for {} equities + Yahoo (delayed) poll for {} "
+                    + "price-quoted names (incl. the Alpaca names as fallback) + sim curve. "
+                    + "Dev/demo only, never production/real-money (ADR-0056).",
+                    covered.size(), yahooRest.size());
+        } else {
+            List<String> uncovered = properties.simInstruments().stream()
+                    .filter(id -> !covered.containsKey(id)).toList();
+            background = buildSimAdapter(curveSim, uncovered);
+            log.warn("MARKET DATA: Alpaca real-time WS (IEX) for {} equities + sim for {} others. "
+                    + "Dev/demo only (ADR-0056).", covered.size(), uncovered.size());
+        }
+        return new AlpacaMarketDataAdapter(key, secret, covered, background);
     }
 
     /** The sim feed: the correlated cross-asset factor engine (ADR-0026) by default —
@@ -515,6 +563,22 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         }
         for (Instrument i : refData.findAllInstruments()) {
             String symbol = i.symbology().get("finnhub");
+            if (symbol != null) {
+                map.put(i.id().value(), symbol);
+            }
+        }
+        return map;
+    }
+
+    /** instrumentId → Alpaca symbol for the covered US equities. Reads 'alpaca' symbology (invariant 2);
+     *  Alpaca's free IEX tier streams US stock trades only, so FX/futures/rates ride the background. */
+    private Map<String, String> alpacaSymbolMap() {
+        Map<String, String> map = new LinkedHashMap<>();
+        if (refData == null) {
+            return map;
+        }
+        for (Instrument i : refData.findAllInstruments()) {
+            String symbol = i.symbology().get("alpaca");
             if (symbol != null) {
                 map.put(i.id().value(), symbol);
             }

@@ -13,11 +13,12 @@
 #   MODEL=qwen2.5:1.5b ./scripts/run-local.sh    # lighter/faster text for a tighter box
 #   MODEL=qwen2.5:0.5b ./scripts/run-local.sh    # smallest, for very tight RAM
 #   PROVIDER=yahoo ./scripts/run-local.sh        # real (delayed) prices from Yahoo (ADR-0023)
+#   ALPACA_KEY_ID=xx ALPACA_SECRET=yy PROVIDER=alpaca ./scripts/run-local.sh  # free real-time equities (ADR-0056)
 #   PROFILE=default HEAP=1g ./scripts/run-local.sh
 #
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
 #            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b),
-#            PROVIDER (sim|yahoo|finnhub, default: yahoo), AUTONOMY (off|on, default: on),
+#            PROVIDER (sim|yahoo|finnhub|alpaca, default: yahoo), AUTONOMY (off|on, default: on),
 #            RAG (off|on, default: on). Set them once in local.env — a plain KEY=value file
 #            (copy local.env.example); command-line env still overrides it.
 #
@@ -141,6 +142,16 @@ fi
 if [ "$PROVIDER" = "finnhub" ] && [ -z "$FINNHUB" ]; then
   echo "!! PROVIDER=finnhub needs a token: FINNHUB=your_key PROVIDER=finnhub ./scripts/run-local.sh"
   echo "   (free key at https://finnhub.io) — falling back to sim until set."
+fi
+# Alpaca (ADR-0056): free real-time US equities over WS. Keys flow via the ALPACA_KEY_ID/ALPACA_SECRET
+# env placeholders in application.properties (set them here or in local.env). Yahoo covers the rest.
+if [ "$PROVIDER" = "alpaca" ]; then
+  if [ -z "${ALPACA_KEY_ID:-}" ] || [ -z "${ALPACA_SECRET:-}" ]; then
+    echo "!! PROVIDER=alpaca needs a key + secret: ALPACA_KEY_ID=xx ALPACA_SECRET=yy PROVIDER=alpaca ./scripts/run-local.sh"
+    echo "   (free, no credit card, at https://alpaca.markets) — falling back to sim until set."
+  else
+    echo "==> MARKET DATA: Alpaca real-time WS (IEX, free) for US equities + Yahoo (delayed) fallback — ADR-0056."
+  fi
 fi
 # A token enables the real-time WS feed (PROVIDER=finnhub) AND — independent of the price
 # provider — real news + a LIVE US Treasury yield curve (ADR-0024). All share one 60/min budget.
