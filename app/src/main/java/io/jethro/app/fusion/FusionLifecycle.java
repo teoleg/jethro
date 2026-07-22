@@ -26,17 +26,18 @@ public final class FusionLifecycle implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(FusionLifecycle.class);
 
-    /** The latest fused target book — routing is always false in phase 4 (shadow). */
-    public record TargetBook(long atMillis, boolean routing, int instruments, List<FusionPlanner.Target> targets) {
+    /** The latest fused target book, with the per-source weights it was combined at (ADR-0055). */
+    public record TargetBook(long atMillis, boolean routing, int instruments,
+                             Map<String, Double> weights, List<FusionPlanner.Target> targets) {
         static TargetBook empty() {
-            return new TargetBook(0, false, 0, List.of());
+            return new TargetBook(0, false, 0, Map.of(), List.of());
         }
     }
 
     private final ForecastRegistry registry;
     private final Function<String, BigDecimal> priceFor;
     private final Supplier<Map<String, BigDecimal>> positionsSupplier;
-    private final FusionWeights weights;
+    private final Supplier<FusionWeights> weightsSupplier;
     private final FusionPlanner.Params params;
     private final boolean routeOrders;
     private final FusionExecutor executor; // null ⇒ shadow only (no order path available)
@@ -47,13 +48,13 @@ public final class FusionLifecycle implements AutoCloseable {
     private Future<?> task;
 
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
-                           Supplier<Map<String, BigDecimal>> positionsSupplier, FusionWeights weights,
+                           Supplier<Map<String, BigDecimal>> positionsSupplier, Supplier<FusionWeights> weightsSupplier,
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
                            ScheduledExecutorService scheduler, long intervalSeconds) {
         this.registry = registry;
         this.priceFor = priceFor;
         this.positionsSupplier = positionsSupplier;
-        this.weights = weights;
+        this.weightsSupplier = weightsSupplier;
         this.params = params;
         this.executor = executor;
         this.scheduler = scheduler;
@@ -78,9 +79,10 @@ public final class FusionLifecycle implements AutoCloseable {
             long now = System.currentTimeMillis();
             Map<String, List<Forecast>> forecasts = registry.byInstrument(now);
             Map<String, BigDecimal> positions = positionsSupplier.get();
+            FusionWeights weights = weightsSupplier.get(); // re-estimated from live telemetry each cycle (ADR-0055)
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, weights::weightFor, priceFor,
                     id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
-            lastBook = new TargetBook(now, routeOrders, targets.size(), targets);
+            lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets);
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {

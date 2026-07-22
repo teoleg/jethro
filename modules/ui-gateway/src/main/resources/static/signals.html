@@ -145,7 +145,14 @@
         : '— <span class="warn">shadow</span>: computed, not traded';
       const ts = book.targets || [];
       const q = v => v == null ? "—" : Number(v).toLocaleString(undefined, {maximumFractionDigits: 2});
-      document.getElementById("fusionBook").innerHTML = ts.length
+      // Per-source combination weights (ADR-0055): evidence-based, re-estimated from telemetry each cycle.
+      const wts = book.weights || {};
+      const wKeys = Object.keys(wts).sort();
+      const weightsHtml = wKeys.length
+        ? '<div class="muted" style="padding:8px 12px 0;font-size:11px">source weights <span style="opacity:.7">(evidence-based, shrunk toward equal — ADR-0055)</span>: '
+          + wKeys.map(k => `${esc(k)} <span class="mono">${Number(wts[k]).toFixed(2)}</span>`).join(" · ") + '</div>'
+        : '<div class="muted" style="padding:8px 12px 0;font-size:11px">source weights: <span class="mono">equal</span> (cold start / mode=equal)</div>';
+      document.getElementById("fusionBook").innerHTML = weightsHtml + (ts.length
         ? `<table><thead><tr><th>instr</th><th>forecast</th><th>src</th><th>price</th><th>target</th>
            <th>current</th><th>Δ order</th><th>contributions</th></tr></thead><tbody>` +
           ts.map(t => {
@@ -159,7 +166,7 @@
               <td class="mono ${dCls}">${d===0?'— band':q(t.deltaQty)}</td>
               <td class="muted" style="font-size:11px">${esc(contribs)}</td></tr>`;
           }).join("") + "</tbody></table>"
-        : '<div class="muted" style="padding:12px">no fused targets yet — sources push a forecast as they fire; the loop combines them every 30s.</div>';
+        : '<div class="muted" style="padding:12px">no fused targets yet — sources push a forecast as they fire; the loop combines them every 30s.</div>');
     } catch (e) {}
   }
 

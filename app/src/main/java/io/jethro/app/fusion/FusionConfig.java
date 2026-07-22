@@ -65,12 +65,29 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.buffer-fraction:0.2}") double bufferFraction,
                                     @Value("${jethro.fusion.adjustment-rate:0.5}") double adjustmentRate,
                                     @Value("${jethro.fusion.route-orders:false}") boolean routeOrders,
-                                    @Value("${jethro.fusion.interval-seconds:30}") long intervalSeconds) {
+                                    @Value("${jethro.fusion.interval-seconds:30}") long intervalSeconds,
+                                    ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
+                                    @Value("${jethro.fusion.weights.mode:telemetry}") String weightsMode,
+                                    @Value("${jethro.fusion.weights.shrinkage-k:20}") double shrinkageK,
+                                    @Value("${jethro.fusion.weights.min:0.25}") double weightMin,
+                                    @Value("${jethro.fusion.weights.max:3.0}") double weightMax) {
         var params = new FusionPlanner.Params(assumedCorrelation, unitNotional, bufferFraction, adjustmentRate);
+        // ADR-0055 item 6: per-source weights are re-estimated from the phase-1 telemetry each cycle
+        // (evidence, not decree), shrunk toward equal so a thin sample can't dominate. mode=equal forces
+        // the flat placeholder; telemetry (default) falls back to equal when the store is absent or cold.
+        var weightParams = new TelemetryWeights.Params(shrinkageK, weightMin, weightMax);
+        java.util.function.Supplier<FusionWeights> weightsSupplier =
+                "equal".equalsIgnoreCase(weightsMode)
+                        ? FusionWeights::equal
+                        : () -> {
+                            var t = telemetry.getIfAvailable();
+                            return t == null ? FusionWeights.equal()
+                                    : FusionWeights.fromTelemetry(t.stats(), weightParams);
+                        };
         var lifecycle = new FusionLifecycle(registry,
                 instrument -> priceFor(tradingCore, instrument),
                 () -> firmPositions(risk),
-                FusionWeights.equal(), params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds);
+                weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds);
         lifecycle.start();
         return lifecycle;
     }
