@@ -37,9 +37,11 @@ becomes: one adapter + its symbology rows + a coverage priority — data, not su
 
 **Interim step (shipped with this ADR, within ADR-0024's shape):** (a) the freshness guard lands in
 `MarkCache`; (b) the Finnhub-covered names **stay** on the Yahoo background as a fallback instead of
-being removed; (c) the liquid US majors (JPM/NVDA/JNJ) get a `finnhub` symbology row so they have a
-real-time primary **and** a delayed fallback. The full declarative priority table replaces the
-hardcoded composition once this ADR is Accepted.
+being removed — the actual cure for the blackout. Those names (incl. JPM/NVDA/JNJ, which already
+carry a `finnhub` symbol from V34) were Finnhub-*only*: the old composition stripped every
+Finnhub-covered name out of the Yahoo background, so each went dark whenever the WS was quiet
+(off-hours) or dropped. The full declarative priority table replaces the hardcoded composition once
+this ADR is Accepted.
 
 ## Alternatives considered
 
