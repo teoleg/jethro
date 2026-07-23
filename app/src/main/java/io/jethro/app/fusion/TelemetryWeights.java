@@ -36,7 +36,7 @@ public final class TelemetryWeights {
      * shrinkage toward equal). min/max bound each weight around the 1.0 null so no source is silenced or
      * dominates on thin evidence (the analogue of Carver's diversification-multiplier cap).
      */
-    public record Params(double shrinkageK, double min, double max) {
+    public record Params(double shrinkageK, double min, double max, int minSample) {
         public Params {
             shrinkageK = shrinkageK > 0 ? shrinkageK : 20.0;
             if (min <= 0) {
@@ -45,6 +45,14 @@ public final class TelemetryWeights {
             if (max < min) {
                 max = Math.max(min, 3.0);
             }
+            if (minSample < 0) {
+                minSample = 20;
+            }
+        }
+
+        /** Back-compat 3-arg (minSample defaults to 20). */
+        public Params(double shrinkageK, double min, double max) {
+            this(shrinkageK, min, max, 20);
         }
     }
 
@@ -59,11 +67,13 @@ public final class TelemetryWeights {
         }
         Map<String, Double> advantage = new HashMap<>();
         Map<String, Double> credibility = new HashMap<>();
+        Map<String, Long> decisive = new HashMap<>();
         double poolSum = 0;
         for (SignalScoring.Stats s : stats) {
             double adv = Math.max(0.0, 2.0 * s.hitRate() - 1.0);
-            double nDecisive = s.wins() + s.losses();
+            long nDecisive = s.wins() + s.losses();
             advantage.put(s.source(), adv);
+            decisive.put(s.source(), nDecisive);
             credibility.put(s.source(), nDecisive / (nDecisive + p.shrinkageK()));
             poolSum += adv;
         }
@@ -86,7 +96,13 @@ public final class TelemetryWeights {
             return out;
         }
         for (var e : shrunk.entrySet()) {
-            out.put(e.getKey(), clamp(e.getValue() / meanShrunk, p.min(), p.max()));
+            // Min-sample floor: a source with too few decisive observations sits at NEUTRAL (1.0) — thin
+            // evidence (e.g. 3 lucky social calls) must not up- or down-weight it. It differentiates only
+            // once it has earned enough decisive samples. Well-sampled sources get the shrunk weight.
+            double w = decisive.getOrDefault(e.getKey(), 0L) < p.minSample()
+                    ? 1.0
+                    : clamp(e.getValue() / meanShrunk, p.min(), p.max());
+            out.put(e.getKey(), w);
         }
         return out;
     }

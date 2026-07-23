@@ -71,12 +71,13 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.weights.mode:telemetry}") String weightsMode,
                                     @Value("${jethro.fusion.weights.shrinkage-k:20}") double shrinkageK,
                                     @Value("${jethro.fusion.weights.min:0.25}") double weightMin,
-                                    @Value("${jethro.fusion.weights.max:3.0}") double weightMax) {
+                                    @Value("${jethro.fusion.weights.max:3.0}") double weightMax,
+                                    @Value("${jethro.fusion.weights.min-sample:20}") int weightMinSample) {
         var params = new FusionPlanner.Params(assumedCorrelation, unitNotional, bufferFraction, adjustmentRate);
         // ADR-0055 item 6: per-source weights are re-estimated from the phase-1 telemetry each cycle
         // (evidence, not decree), shrunk toward equal so a thin sample can't dominate. mode=equal forces
         // the flat placeholder; telemetry (default) falls back to equal when the store is absent or cold.
-        var weightParams = new TelemetryWeights.Params(shrinkageK, weightMin, weightMax);
+        var weightParams = new TelemetryWeights.Params(shrinkageK, weightMin, weightMax, weightMinSample);
         java.util.function.Supplier<FusionWeights> weightsSupplier =
                 "equal".equalsIgnoreCase(weightsMode)
                         ? FusionWeights::equal

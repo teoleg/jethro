@@ -76,6 +76,18 @@ class TelemetryWeightsTest {
     }
 
     @Test
+    void aThinHighHitRateSourceStaysNeutralUntilItEarnsTheSample() {
+        // The 2-day report bug: social hit 2/3 on 3 decisive calls and got up-weighted to ~1.28.
+        // With the min-sample floor (default 20 decisive), a thin source sits at neutral 1.0.
+        var w = TelemetryWeights.compute(List.of(
+                stat("social", 0.667, 2, 1),      // 3 decisive < 20 → neutral, no over-weighting on luck
+                stat("momentum", 0.60, 60, 40)),  // 100 decisive → differentiates
+                K20);
+        assertEquals(1.0, w.get("social"), 1e-9, "thin lucky source must not up-weight");
+        assertTrue(w.get("momentum") != 1.0, "a well-sampled source still differentiates");
+    }
+
+    @Test
     void singleSourceGetsTheNeutralWeight() {
         var w = TelemetryWeights.compute(List.of(stat("A", 0.9, 90, 10)), K20);
         assertEquals(1.0, w.get("A"), 1e-9);
