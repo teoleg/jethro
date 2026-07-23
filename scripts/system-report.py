@@ -36,8 +36,8 @@ ENDPOINTS = {
 
 # ---- durable DB aggregates (behaviour over the run; complements the diagnostics fills/tca sheets) ----
 DB_QUERIES = {
-    "turnover_cost_by_name": "select instrument, count(*) fills, sum(abs(qty)) shares, "
-        "round(sum(fee)::numeric,2) total_fee from fills group by instrument order by fills desc",
+    "turnover_cost_by_name": "select instrument_id instrument, count(*) fills, sum(abs(qty)) shares, "
+        "round(sum(fee)::numeric,2) total_fee from fills group by instrument_id order by fills desc",
     "orders_by_status": "select status, count(*) n from orders group by status order by n desc",
     "fills_by_day": "select date(executed_at) d, count(*) fills, round(sum(fee)::numeric,2) fee "
         "from fills group by 1 order by 1",
