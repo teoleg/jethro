@@ -243,36 +243,10 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
             log.warn("provider=finnhub but no 'finnhub' symbology found — falling back to the sim feed");
             return null;
         }
-        // Background for what Finnhub doesn't stream. Prefer Yahoo (real, delayed) for the
-        // price-quoted rest (futures/FX/SAP), else sim; the curve rides the background either way.
-        // ADR-0056: keep the Finnhub-covered names on the Yahoo background too, as a DELAYED FALLBACK
-        // (do NOT remove them). The MarkCache freshness guard makes a live Finnhub mark always win over
-        // Yahoo's delayed poll; but when the Finnhub WS is quiet (off-hours) or drops, Yahoo keeps the
-        // name marked so the position never goes dark (0 exposure — the ALPHA/JPM phantom-flat bug).
-        // Overlap cost is bounded by the small universe.
-        Map<String, String> yahooRest = yahooSymbolMap();
-        MarketDataAdapter background;
-        if (!yahooRest.isEmpty()) {
-            long spacing = properties.yahooRequestSpacingMillisOrDefault();
-            background = new YahooMarketDataAdapter(
-                    new YahooQuoteClient(Duration.ofSeconds(10)), yahooRest, curveSim, spacing);
-            log.warn("MARKET DATA: Finnhub real-time WS for {} equities + Yahoo (delayed) poll for {} "
-                    + "price-quoted names (incl. the Finnhub names as fallback) + sim curve. "
-                    + "Dev/demo only, never production/real-money (ADR-0024/0056).",
-                    covered.size(), yahooRest.size());
-        } else {
-            List<String> uncovered = properties.simInstruments().stream()
-                    .filter(id -> !covered.containsKey(id)).toList();
-            background = buildSimAdapter(curveSim, uncovered);
-            log.warn("MARKET DATA: Finnhub real-time WS for {} equities + sim for {} others. "
-                    + "Dev/demo only (ADR-0024).", covered.size(), uncovered.size());
-        }
-        return new FinnhubMarketDataAdapter(token, covered, background);
+        return new FinnhubMarketDataAdapter(token, covered, liveBackground(curveSim, "Finnhub", covered));
     }
 
-    /** Alpaca real-time equities (WebSocket, IEX tier) composed with Yahoo (delayed) for everything
-     *  Alpaca's free tier doesn't stream — FX, futures, and the equities as a fallback — plus the sim
-     *  curve. Null if no key/secret or symbology; caller falls back to sim (ADR-0056). */
+    /** Alpaca real-time equities (WebSocket, IEX tier). Null if no key/secret or symbology (ADR-0056). */
     private MarketDataAdapter buildAlpacaAdapter(CurveMarkSource curveSim) {
         String key = properties.alpacaKeyIdOrEmpty();
         String secret = properties.alpacaSecretOrEmpty();
@@ -286,27 +260,32 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
             log.warn("provider=alpaca but no 'alpaca' symbology found — falling back to the sim feed");
             return null;
         }
-        // Same composition shape as Finnhub (ADR-0056): keep the Alpaca-covered names on the Yahoo
-        // background as a DELAYED FALLBACK; the freshness guard keeps the live Alpaca mark winning, so the
-        // two never mix — Yahoo only fills when Alpaca is quiet (off-hours). Curve rides the background.
+        return new AlpacaMarketDataAdapter(key, secret, covered, liveBackground(curveSim, "Alpaca", covered));
+    }
+
+    /**
+     * The shared background for ANY real-time WebSocket source (ADR-0056 — the declarative composition
+     * that replaced the per-provider hybrid builders): Yahoo (delayed) poll over ALL price-quoted names,
+     * so a WS-covered name also gets a delayed FALLBACK — the MarkCache freshness guard keeps the live WS
+     * mark winning, so the two never mix, and Yahoo only fills when the WS is quiet (off-hours) or drops
+     * (fixes the single-source blackout: ALPHA/JPM 0-exposure). Else sim; the SOFR curve rides the
+     * background either way. Adding a WS source is now its symbology map + adapter — no bespoke builder.
+     */
+    private MarketDataAdapter liveBackground(CurveMarkSource curveSim, String label, Map<String, String> covered) {
         Map<String, String> yahooRest = yahooSymbolMap();
-        MarketDataAdapter background;
         if (!yahooRest.isEmpty()) {
             long spacing = properties.yahooRequestSpacingMillisOrDefault();
-            background = new YahooMarketDataAdapter(
+            log.warn("MARKET DATA: {} real-time WS for {} equities + Yahoo (delayed) poll for {} price-quoted "
+                    + "names (incl. the {} names as fallback) + sim curve. Dev/demo only, never "
+                    + "production/real-money (ADR-0056).", label, covered.size(), yahooRest.size(), label);
+            return new YahooMarketDataAdapter(
                     new YahooQuoteClient(Duration.ofSeconds(10)), yahooRest, curveSim, spacing);
-            log.warn("MARKET DATA: Alpaca real-time WS (IEX) for {} equities + Yahoo (delayed) poll for {} "
-                    + "price-quoted names (incl. the Alpaca names as fallback) + sim curve. "
-                    + "Dev/demo only, never production/real-money (ADR-0056).",
-                    covered.size(), yahooRest.size());
-        } else {
-            List<String> uncovered = properties.simInstruments().stream()
-                    .filter(id -> !covered.containsKey(id)).toList();
-            background = buildSimAdapter(curveSim, uncovered);
-            log.warn("MARKET DATA: Alpaca real-time WS (IEX) for {} equities + sim for {} others. "
-                    + "Dev/demo only (ADR-0056).", covered.size(), uncovered.size());
         }
-        return new AlpacaMarketDataAdapter(key, secret, covered, background);
+        List<String> uncovered = properties.simInstruments().stream()
+                .filter(id -> !covered.containsKey(id)).toList();
+        log.warn("MARKET DATA: {} real-time WS for {} equities + sim for {} others. Dev/demo only (ADR-0056).",
+                label, covered.size(), uncovered.size());
+        return buildSimAdapter(curveSim, uncovered);
     }
 
     /** The sim feed: the correlated cross-asset factor engine (ADR-0026) by default —

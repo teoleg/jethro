@@ -1,6 +1,6 @@
 # ADR-0056: Multi-source market-data coverage — declarative per-instrument source precedence
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-21
 - **Deciders:** Oleg
 - **Tags:** market-data, data, trading-core, ops
@@ -74,8 +74,25 @@ silently — a msgpack decoder is the follow-up if a connection lands on that fo
   threshold (mitigated: the freshness guard drops the laggard *before* the jump check, so cross-source
   noise can't false-quarantine); the declarative priority table is a refdata schema addition every
   source path must honour.
-- **Follow-ups:** the per-instrument source-priority table (replaces the hardcoded composition); a
-  refdata coverage guard test (every price-quoted name has ≥1 source's symbology — folds into the
-  existing deferred attribute-coverage item); extend `/api/feeds` per-instrument ("which source is
-  marking this now"). Supersedes the *composition* half of ADR-0024 on acceptance (its Finnhub feed
-  stays).
+- **Follow-ups:** a refdata coverage guard test (every price-quoted name has ≥1 source's symbology —
+  folds into the existing deferred attribute-coverage item, blocked on a Flyway/Testcontainers harness);
+  extend `/api/feeds` per-instrument ("which source is marking this now"). Supersedes the *composition*
+  half of ADR-0024 (its Finnhub feed stays).
+
+## Implementation status (2026-07-21)
+
+Accepted and implemented:
+- **Freshness guard** — `MarkCache.update` rejects a mark whose *provider* timestamp is older than the
+  stored live one (`supersededTicks` counted). This is what lets sources overlap without mixing.
+- **Fallback coverage** — every real-time WS source keeps its covered names on the Yahoo delayed poll,
+  so a quiet WS never blanks a position. Realized as the shared `TradingCoreLifecycle.liveBackground`
+  helper: a new WS source is now its symbology map + a `MarketDataAdapter` (one line), **not** a bespoke
+  hybrid builder — Alpaca (`PROVIDER=alpaca`, V44 symbology) is the first source added this way.
+
+**Decision — no per-instrument priority *table*.** The ADR floated an ordered `(source, symbol, priority)`
+table per instrument. In implementation this proved unnecessary: the **freshness guard already resolves
+precedence** (freshest provider timestamp wins), and "primary" is simply the configured `provider` with
+Yahoo as the universal delayed fallback. A priority column would only tie-break equal timestamps — not
+worth a schema addition every source path must honour. Precedence stays: *live provider ▸ delayed Yahoo
+▸ sim/curve*, arbitrated by timestamp. If a future source needs explicit ordering beyond freshness (e.g.
+two real-time feeds on one name), revisit then.
