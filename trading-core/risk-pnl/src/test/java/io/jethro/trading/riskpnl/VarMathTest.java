@@ -67,16 +67,34 @@ class VarMathTest {
     }
 
     @Test
-    void anInstrumentWithoutFullHistoryIsSkippedAndCounted() {
+    void anInstrumentWithTooLittleHistoryIsSkippedAndCounted() {
         List<VarMath.DayVector> days = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
-            // SAP missing on day 0 → excluded entirely, its exposure reported as skipped.
+            // SAP present on only 19 of 20 days → below minObs (20) → excluded, its |exposure| disclosed.
             days.add(day(i, i == 0 ? Map.of("AAPL", -0.01) : Map.of("AAPL", -0.01, "SAP", 0.01)));
         }
         var r = VarMath.historicalVar(
                 Map.of("AAPL", new BigDecimal("100000"), "SAP", new BigDecimal("50000")), days, 20);
         assertEquals(0, new BigDecimal("100000.00").compareTo(r.coveredExposure()));
         assertEquals(0, new BigDecimal("50000.00").compareTo(r.skippedExposure()),
-                "missing history is DISCLOSED, never silently riskless");
+                "too-thin history is DISCLOSED, never silently riskless");
+    }
+
+    @Test
+    void aGappyNameWithEnoughHistoryIsIncludedOnTheCommonWindow() {
+        // ADR-0058 regression: the exact 2-day-live bug — an equity with ample history but a short
+        // sim-contaminated tail gap must NOT be dropped from VaR (which had left it on AUDUSD alone).
+        List<VarMath.DayVector> days = new ArrayList<>();
+        for (int i = 0; i < 30; i++) {
+            // MSFT present on 28 of 30 days (missing the last two "sim-tail" days); AUDUSD on all 30.
+            days.add(i >= 28 ? day(i, Map.of("AUDUSD", 0.001))
+                             : day(i, Map.of("AUDUSD", 0.001, "MSFT", -0.01)));
+        }
+        var r = VarMath.historicalVar(
+                Map.of("AUDUSD", new BigDecimal("10000"), "MSFT", new BigDecimal("50000")), days, 20);
+        assertEquals(0, new BigDecimal("60000.00").compareTo(r.coveredExposure()),
+                "MSFT (28 ≥ 20 days) is included, not skipped for a 2-day gap");
+        assertEquals(0, BigDecimal.ZERO.compareTo(r.skippedExposure()));
+        assertEquals(28, r.observations(), "revalued on the 28 common days — the gappy tail drops, not MSFT");
     }
 }
