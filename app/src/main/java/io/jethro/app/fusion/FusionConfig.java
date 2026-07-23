@@ -66,6 +66,7 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.adjustment-rate:0.5}") double adjustmentRate,
                                     @Value("${jethro.fusion.route-orders:false}") boolean routeOrders,
                                     @Value("${jethro.fusion.interval-seconds:30}") long intervalSeconds,
+                                    @Value("${jethro.fusion.min-forecast-to-route:5.0}") double minForecastToRoute,
                                     ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
                                     @Value("${jethro.fusion.weights.mode:telemetry}") String weightsMode,
                                     @Value("${jethro.fusion.weights.shrinkage-k:20}") double shrinkageK,
@@ -87,7 +88,8 @@ public class FusionConfig {
         var lifecycle = new FusionLifecycle(registry,
                 instrument -> priceFor(tradingCore, instrument),
                 () -> firmPositions(risk),
-                weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds);
+                weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
+                minForecastToRoute);
         lifecycle.start();
         return lifecycle;
     }

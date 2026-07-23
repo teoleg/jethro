@@ -62,6 +62,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0056](0056-multi-source-market-data-coverage.md) | Multi-source market-data coverage — source precedence via a freshness-guarded merge | Accepted | ✅ Implemented (guard + Yahoo fallback + Alpaca; no priority table — freshness subsumes it) |
 | [0057](0057-intraday-strategy-family.md) | Intraday strategy family — VWAP-deviation reversion first, pairs deferred | Proposed | ☐ Not started |
 | [0058](0058-var-partial-history-coverage.md) | VaR coverage — include names with sufficient history, revalue on the common window | Proposed | ✅ Implemented (Oleg-directed batch) |
+| [0059](0059-fusion-execution-gate.md) | Fusion execution gate — trade only OOS-validated, convicted names (stop the churn) | Proposed | ✅ Implemented (Oleg-directed batch) |
 
 ## Status vs Implementation
 

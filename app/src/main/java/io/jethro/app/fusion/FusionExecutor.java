@@ -104,13 +104,19 @@ public final class FusionExecutor {
         }
     }
 
-    /** ADR-0049: a name is tradable only if the OOS selector picked an algo for it (when present). */
+    /**
+     * ADR-0049/0059: a name is tradable only when the OOS selector has a POSITIVE-EDGE algo for it.
+     * FAIL-CLOSED for the sole-origin path (ADR-0059): an empty selection (not measured yet), an absent
+     * name, or a NO_TRADE verdict (traded in the backtest and lost on both algos) all VETO — fusion must
+     * not churn an unvalidated or explicitly-rejected name. (The direct strategy path stays fail-open;
+     * fusion is higher-stakes.) No selector wired (persistence off) → the sim-gate + guardrail still protect.
+     */
     private boolean backtestSupported(String instrument) {
         StrategySelector s = selector.getIfAvailable();
         if (s == null) {
-            return true; // no selector wired (persistence off) — sim-gate + guardrail still protect
+            return true;
         }
-        var selection = s.selection();
-        return selection.isEmpty() || selection.containsKey(instrument);
+        var choice = s.selection().get(instrument);
+        return choice != null && !io.jethro.trading.algo.strategy.SelectingStrategy.NO_TRADE.equals(choice.algo());
     }
 }

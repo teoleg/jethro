@@ -43,6 +43,7 @@ public final class FusionLifecycle implements AutoCloseable {
     private final FusionExecutor executor; // null ⇒ shadow only (no order path available)
     private final ScheduledExecutorService scheduler;
     private final long intervalSeconds;
+    private final double minForecastToRoute; // ADR-0059: conviction floor — don't route weak/oscillating signals
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -50,7 +51,7 @@ public final class FusionLifecycle implements AutoCloseable {
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
                            Supplier<Map<String, BigDecimal>> positionsSupplier, Supplier<FusionWeights> weightsSupplier,
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
-                           ScheduledExecutorService scheduler, long intervalSeconds) {
+                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute) {
         this.registry = registry;
         this.priceFor = priceFor;
         this.positionsSupplier = positionsSupplier;
@@ -60,6 +61,7 @@ public final class FusionLifecycle implements AutoCloseable {
         this.scheduler = scheduler;
         this.routeOrders = routeOrders && executor != null;
         this.intervalSeconds = Math.max(5, intervalSeconds);
+        this.minForecastToRoute = Math.max(0, minForecastToRoute);
     }
 
     /** True when this loop is actually placing orders (route-orders set AND an order path is wired). */
@@ -88,6 +90,9 @@ public final class FusionLifecycle implements AutoCloseable {
                 for (FusionPlanner.Target t : targets) {
                     if (t.deltaQty().signum() == 0) {
                         continue; // inside the no-trade band — nothing to do
+                    }
+                    if (Math.abs(t.combinedForecast()) < minForecastToRoute) {
+                        continue; // ADR-0059: below the conviction floor — don't churn a weak/oscillating signal
                     }
                     if (executor.route(t.instrument(), t.deltaQty()).routed()) {
                         routed++;
