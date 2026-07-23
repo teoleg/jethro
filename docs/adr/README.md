@@ -60,6 +60,7 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0054](0054-event-keyed-hypothesis-identity.md) | Event-keyed hypothesis identity — the model classifies the catalyst, deterministic code dedups on it | Accepted | ✅ Implemented |
 | [0055](0055-signal-fusion-target-portfolio.md) | Signal fusion and a target portfolio — signals stop placing orders | Accepted | ✅ Implemented |
 | [0056](0056-multi-source-market-data-coverage.md) | Multi-source market-data coverage — source precedence via a freshness-guarded merge | Accepted | ✅ Implemented (guard + Yahoo fallback + Alpaca; no priority table — freshness subsumes it) |
+| [0057](0057-intraday-strategy-family.md) | Intraday strategy family — VWAP-deviation reversion first, pairs deferred | Proposed | ☐ Not started |
 
 ## Status vs Implementation
 
