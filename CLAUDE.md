@@ -91,6 +91,15 @@ the UI as a rule; a `β=1.0` placeholder; a sped-up sim clock).
 8. Sim, live, and replay data are never aggregated across modes (ADR-0029): every event
    carries `feedMode` (SIM/LIVE/REPLAY) + `sessionEpoch` in `EventMeta`; one mode per
    session, and a sim↔live switch starts a new epoch/namespace rather than continuing.
+9. **Sim isolation — the simulator is a TEST tool, never part of the trading platform.**
+   The sim is NOT the default (`jethro.trading.provider` defaults to a real feed) and runs
+   only when explicitly testing. Nothing sim-specific may *define* the real platform: the
+   tradable **universe is the reference-data master** (never a `sim-instruments` list — that
+   name is legacy and must not gate real trading), and risk/positions/order routing key off
+   **refdata + real `fills`**. Direction is one-way: the sim may CONSUME the real universe
+   (tick refdata names when testing), but the platform must never DEPEND on the sim, and sim
+   constructs (sim calibration, sim control panel, sim news) stay behind `feedMode==SIM` gates.
+   A discovery-promoted name is refdata, so it is first-class everywhere **without** any sim edit.
 
 ## Code conventions
 

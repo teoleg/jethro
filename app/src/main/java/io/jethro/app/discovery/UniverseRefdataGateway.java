@@ -14,7 +14,7 @@ public interface UniverseRefdataGateway {
     /** True if the instrument already exists in the master (promotion is then a no-op — idempotent). */
     boolean exists(String instrumentId);
 
-    /** Write a discovery-promoted instrument as MONITOR_ONLY (base row + symbology + attributes). */
+    /** Write a discovery-promoted instrument (base row + symbology + attributes) — a first-class name. */
     void writeMonitored(String instrumentId, String assetClass, String currency, BigDecimal multiplier,
                         Map<String, String> symbology, Map<String, String> attributes);
 

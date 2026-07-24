@@ -15,14 +15,4 @@ public interface InstrumentRefSource {
     default Set<String> instrumentIds() {
         return Set.of();
     }
-
-    /**
-     * Whether the instrument is monitor-only (ADR-0060): a discovery-promoted name that flows into
-     * marks/indicators/signals but MUST NOT trade until its ADV is measured and it clears the OOS gate.
-     * Default false — normal (core) instruments are tradable. The order path (fusion, the sole origin)
-     * vetoes any monitor-only name, so growth never bleeds risk.
-     */
-    default boolean monitorOnly(String instrumentId) {
-        return false;
-    }
 }

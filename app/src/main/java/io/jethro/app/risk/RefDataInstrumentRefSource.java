@@ -19,22 +19,16 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
 
     private final RefDataRepository repository;
     private volatile Map<String, InstrumentRef> cache = Map.of();
-    private volatile java.util.Set<String> monitorOnly = java.util.Set.of();
 
     public RefDataInstrumentRefSource(RefDataRepository repository) {
         this.repository = repository;
         reload();
     }
 
-    /** Re-read reference data after a runtime write (ADR-0060 promotion/eviction) so new monitored
-     *  names — and the monitor-only set — become visible to every reader without a restart. */
+    /** Re-read reference data after a runtime write (ADR-0060 promotion/eviction) so a newly promoted
+     *  instrument becomes visible to every reader without a restart. */
     public void refresh() {
         reload();
-    }
-
-    @Override
-    public boolean monitorOnly(String instrumentId) {
-        return monitorOnly.contains(instrumentId);
     }
 
     @Override
@@ -61,13 +55,9 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
     private synchronized void reload() {
         Map<String, Map<String, String>> attributes = repository.findAllAttributes();
         Map<String, InstrumentRef> next = new HashMap<>();
-        java.util.Set<String> monitored = new java.util.HashSet<>();
         for (Instrument i : repository.findAllInstruments()) {
             String id = i.id().value();
             Map<String, String> attrs = attributes.getOrDefault(id, Map.of());
-            if (RefDataRepository.STATUS_MONITOR_ONLY.equals(attrs.get(RefDataRepository.ATTR_UNIVERSE_STATUS))) {
-                monitored.add(id); // ADR-0060: marked but not tradable — the fusion order gate vetoes it
-            }
             next.put(id, new InstrumentRef(id, i.assetClass().name(), i.currency(),
                     i.contractMultiplier(),
                     decimalAttribute(attrs, "mod_duration"),
@@ -79,7 +69,6 @@ public final class RefDataInstrumentRefSource implements InstrumentRefSource {
                     decimalAttribute(attrs, "hedge_beta")));
         }
         cache = next;
-        monitorOnly = java.util.Set.copyOf(monitored);
     }
 
     /** A decimal instrument attribute (e.g. mod_duration for rates scenarios), or null. */

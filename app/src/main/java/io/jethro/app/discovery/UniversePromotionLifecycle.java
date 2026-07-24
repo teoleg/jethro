@@ -18,14 +18,15 @@ import java.util.stream.Collectors;
 /**
  * The ADR-0060 daily universe controller. On a daily cadence it runs the {@link UniversePromotionPolicy}
  * over the live discovery candidates and either records what it WOULD promote (dry-run) or actually writes
- * each passing name into reference data as MONITOR_ONLY and evicts the stalest to stay within the cap.
+ * each passing name into reference data (becoming a first-class instrument) and evicts the stalest to stay
+ * within the cap.
  *
  * <ul>
  *   <li><b>Dry-run</b> ({@code jethro.universe.dynamic.write=false}, the default): decides + audits
- *       PROPOSED rows, writes nothing to refdata, trades nothing.</li>
- *   <li><b>Write</b> ({@code write=true}): promotes via {@link UniversePromotionService} — a promoted name
- *       is MONITOR_ONLY, so it flows into marks/indicators/signals but the fusion order gate vetoes it
- *       until its ADV is measured. Growth never bleeds risk.</li>
+ *       PROPOSED rows, writes nothing to refdata.</li>
+ *   <li><b>Write</b> ({@code write=true}): promotes via {@link UniversePromotionService} — the name joins
+ *       the reference-data master and, from the next session, the trading universe; it trades through the
+ *       same gates as any other name (OOS backtest, guardrail, sim-only + breaker).</li>
  * </ul>
  *
  * <p>Gated on {@code jethro.universe.dynamic.enabled} (default false). Off the tick path (MIN_PRIORITY).
@@ -111,7 +112,8 @@ public final class UniversePromotionLifecycle implements SmartLifecycle {
         var t = props.toThresholds();
         log.info("ADR-0060 universe promotion gate started in {} mode: score>={}, sustained>={}d, sources>={}, "
                         + "budget={}/day, cap={}; first eval in {}s then every {}s",
-                props.writeEnabled() ? "WRITE (promotes MONITOR_ONLY names, no trading)" : "DRY-RUN (writes nothing)",
+                props.writeEnabled() ? "WRITE (promotes discovered names into refdata → tradable next session)"
+                        : "DRY-RUN (writes nothing)",
                 t.minScore(), t.minSustainedDays(), t.minSources(), t.maxPromotionsPerDay(),
                 props.maxMonitoredOrDefault(), INITIAL_DELAY_SECONDS, interval);
     }

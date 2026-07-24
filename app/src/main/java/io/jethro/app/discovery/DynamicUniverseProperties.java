@@ -35,8 +35,8 @@ public record DynamicUniverseProperties(
         List<String> blacklist,
         /** Names a human has pinned — protected from eviction (Phase 2). */
         List<String> pinList,
-        /** When false (default), the gate runs but writes NOTHING to refdata — the Phase 1 dry-run. Set
-         *  true to let promotions actually write MONITOR_ONLY instruments (Phase 2). */
+        /** When false (default), the gate runs but writes NOTHING to refdata — dry-run. Set true to let
+         *  promotions actually write the discovered instrument into reference data. */
         boolean write,
         /** PROVISIONAL adv in USD stamped on a promoted name until measured from our own tape. */
         BigDecimal provisionalAdvUsd,
