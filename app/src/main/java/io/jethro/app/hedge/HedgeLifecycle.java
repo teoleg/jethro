@@ -5,8 +5,6 @@ import io.jethro.app.risk.VarService;
 import io.jethro.domain.InstrumentId;
 import io.jethro.domain.OrderType;
 import io.jethro.domain.Side;
-import io.jethro.messaging.FeedMode;
-import io.jethro.messaging.Provenance;
 import io.jethro.order.LastPriceCache;
 import io.jethro.order.NewOrder;
 import io.jethro.order.OrderService;
@@ -30,8 +28,8 @@ import java.util.function.Predicate;
  * AUTO hedging (ADR-0039): when the advisor is in AUTO and an axis carries net exposure above its
  * rebalance floor, this submits the sized hedge-to-flat as a simulated MARKET order through the
  * ordinary order path —
- * the pre-trade gate and ADV slicer apply, and it is hard-gated to {@code feedMode == SIM} (ADR-0019)
- * and suspended while the firm halt switch is tripped. A per-axis cooldown stops a re-hedge before
+ * the pre-trade gate and ADV slicer apply; fills are internal paper (SimulatedExecutor) so it runs on any
+ * feed, suspended while the firm halt switch is tripped. A per-axis cooldown stops a re-hedge before
  * the fill has repriced the book. OFF/ADVISE do nothing here (the panel still shows the proposal).
  */
 public final class HedgeLifecycle {
@@ -87,9 +85,9 @@ public final class HedgeLifecycle {
             if (advisor.mode() != HedgeAdvisor.Mode.AUTO) {
                 return; // OFF/ADVISE: the panel still shows proposals, but nothing auto-trades
             }
-            if (Provenance.mode() != FeedMode.SIM) {
-                return; // ADR-0019: auto-execution is sim-only
-            }
+            // Execution is internal paper fills (SimulatedExecutor) on any feed — no real broker exists,
+            // so AUTO hedging runs on a LIVE feed too (paper trading on real marks). Real-money guard is
+            // ADR-0015 (order-module extraction), not a feed-mode check.
             OrderService os = orderService.getIfAvailable();
             VarService vs = varService.getIfAvailable();
             if (os == null || vs == null) {

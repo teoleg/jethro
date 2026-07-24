@@ -11,19 +11,23 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The ADR-0060 Phase 2 write path: turns a passing promotion verdict into an actual MONITOR_ONLY
- * reference-data entry, and evicts the stalest discovered name when the monitored set is over its cap.
+ * The ADR-0060 Phase 2 write path: turns a passing promotion verdict into a real, tradable
+ * reference-data entry, and evicts the stalest discovered name when the discovered set is over its cap.
  * Pure orchestration over a {@link UniverseRefdataGateway} + audit log — no JDBC here, so it is unit
  * tested against an in-memory gateway.
  *
- * <p>Conservatism the ADR mandates and this class enforces:
+ * <p>A promoted name is a FIRST-CLASS instrument: it joins the sim/backtest universe at the next session
+ * (so it ticks, gets indicators/signals, is OOS-evaluated) and trades through the SAME gates as every
+ * other name (OOS backtest gate ADR-0049, pre-trade guardrail, sim-only + firm breaker) — no special
+ * probation. This is deliberate: running discovered names through the real order/risk path is the whole
+ * point (it validates the config, the risk limits and the strategy stack on live-discovered names).
+ *
  * <ul>
  *   <li><b>Idempotent</b> — a name already in the master is never re-written (a restart re-promotes to a
  *       no-op).</li>
- *   <li><b>Monitor-only</b> — the written name carries {@code universe_status=MONITOR_ONLY}; it flows into
- *       marks/indicators/signals but the fusion order gate vetoes it, so it cannot trade until measured.</li>
- *   <li><b>Provisional money dials</b> — adv/spread are stamped with a {@code PROVISIONAL} provenance, never
- *       a silent default (money-dial rule); they gate nothing while monitor-only.</li>
+ *   <li><b>Provisional money dials, flagged</b> — adv/spread are stamped with a {@code PROVISIONAL}
+ *       provenance (money-dial rule: never a silent default). They size/cost the name's orders until its
+ *       ADV is measured from our own tape — an honest starting assumption, not a hidden invented rule.</li>
  *   <li><b>Bounded</b> — eviction removes only {@code source=discovered} names (core is protected by
  *       construction), never a pinned name, never a name that has traded.</li>
  * </ul>
@@ -48,8 +52,8 @@ public final class UniversePromotionService {
     }
 
     /**
-     * Write one promoted candidate as a MONITOR_ONLY instrument. Idempotent: returns false (no write, no
-     * audit row) if it already exists. Returns true when a new instrument was written.
+     * Write one promoted candidate as a first-class reference-data instrument. Idempotent: returns false
+     * (no write, no audit row) if it already exists. Returns true when a new instrument was written.
      */
     public boolean promote(UniverseCandidate c, UniversePromotionPolicy.Verdict verdict,
                            String sessionEpoch, String feedMode, long now) {
@@ -60,10 +64,10 @@ public final class UniversePromotionService {
         String name = companies.displayName(id);
         String displayName = (name != null ? name : id) + " (discovered)";
 
-        // Yahoo covers virtually every US ticker (delayed) — enough to MARK a monitored name at the next
-        // session. We deliberately do NOT write alpaca/finnhub symbology here: keeping the discovered name
-        // off the real-time WS subscribe set avoids the free-tier symbol-limit churn, and the delayed
-        // Yahoo fallback is sufficient for a name that cannot trade anyway.
+        // Yahoo covers virtually every US ticker (delayed), so a discovered name gets live marks under a
+        // live provider; under the SIM feed it joins the ticked sim universe at boot. We deliberately do
+        // NOT write alpaca/finnhub symbology here — keeping it off the real-time WS subscribe set avoids
+        // the free-tier symbol-limit churn; the Yahoo/sim path is enough to price and trade it.
         Map<String, String> symbology = new LinkedHashMap<>();
         symbology.put("yahoo", id);
         symbology.put("discovered", id); // marker source; ignored by every market adapter
@@ -75,7 +79,6 @@ public final class UniversePromotionService {
         attributes.put("spread_bps", props.provisionalSpreadBpsOrDefault().toPlainString());
         attributes.put("spread_provenance", PROVISIONAL);
         attributes.put(RefDataRepository.ATTR_SOURCE, RefDataRepository.SOURCE_DISCOVERED);
-        attributes.put(RefDataRepository.ATTR_UNIVERSE_STATUS, RefDataRepository.STATUS_MONITOR_ONLY);
         attributes.put("discovered_at", Long.toString(now));
         attributes.put("discovery_evidence",
                 "score=%.1f days=%d sources=%s".formatted(c.score(), c.distinctDays(), String.join("/", c.sources())));
@@ -84,7 +87,8 @@ public final class UniversePromotionService {
         audit.record(now, sessionEpoch, feedMode, id, "PROMOTED", verdict.outcome().name(), c.score(),
                 c.distinctDays(), String.join(",", c.sources()), verdict.reason(), false);
         refdata.refresh();
-        log.info("ADR-0060 PROMOTED {} → MONITOR_ONLY refdata (provisional adv/spread; cannot trade until measured)", id);
+        log.info("ADR-0060 PROMOTED {} → tradable refdata (provisional adv/spread until measured); "
+                + "joins the sim/OOS universe at the next session", id);
         return true;
     }
 

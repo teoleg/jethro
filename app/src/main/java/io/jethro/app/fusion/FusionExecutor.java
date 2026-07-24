@@ -23,8 +23,10 @@ import java.util.UUID;
  * §5), so the fusion layer replaces the sources as the order ORIGIN without weakening any guardrail:
  *
  * <ol>
- *   <li><b>Sim-only</b> (ADR-0019): never routes unless the running feed mode is SIM — a hard gate, the
- *       fusion layer can no more reach a real broker than the strategy could.</li>
+ *   <li><b>Paper execution</b>: fills are ALWAYS internal ({@code SimulatedExecutor}) — there is no
+ *       real-broker path — so routing runs on any feed (incl. a LIVE feed = paper trading on real marks).
+ *       The real-money guard is ADR-0015 (extract the {@code order} module before wiring a real broker),
+ *       not a feed-mode check.</li>
  *   <li><b>Firm breaker</b> (ADR-0027): no new exposure while halted.</li>
  *   <li><b>Backtest support</b> (ADR-0049): only names the OOS selector found a tradable algo for — the
  *       deterministic backtest stays the hard gate; AI/social never order an unvalidated name.</li>
@@ -67,9 +69,12 @@ public final class FusionExecutor {
     /** Routes one instrument's fused delta through the gates; returns what happened (never throws). */
     public Result route(String instrument, BigDecimal deltaQty) {
         try {
-            if (!"SIM".equals(io.jethro.messaging.Provenance.mode().name())) {
-                return Result.vetoed(instrument, "not SIM — fusion routing is sim-only (ADR-0019)");
-            }
+            // Execution is ALWAYS internal simulated fills (OrderService → SimulatedExecutor); there is no
+            // real-broker path in the codebase, so routing under a LIVE feed is PAPER TRADING against real
+            // marks — no real money. That is the whole point of a live test. The real-money guard is not a
+            // feed-mode check here but ADR-0015: the `order` module MUST be extracted to its own JVM before
+            // any real broker is wired, and that is where a live-execution gate belongs. (Supersedes the
+            // old ADR-0019 sim-only routing restriction, which needlessly blocked testing on a real feed.)
             if (halt.isHalted()) {
                 return Result.vetoed(instrument, "firm breaker halted (ADR-0027)");
             }
@@ -80,12 +85,6 @@ public final class FusionExecutor {
             InstrumentRef ref = refs.find(instrument).orElse(null);
             if (ref == null) {
                 return Result.vetoed(instrument, "not in the instrument master");
-            }
-            if (refs.monitorOnly(instrument)) {
-                // ADR-0060 §3: a discovery-promoted name is monitor-only — it flows into marks/indicators/
-                // signals but cannot trade until its ADV is measured and it clears the OOS gate. Growth
-                // never bleeds risk. (The OOS backtest gate below would also veto it, but this is explicit.)
-                return Result.vetoed(instrument, "monitor-only (ADR-0060) — discovered name not yet graduated to trading");
             }
             if (!backtestSupported(instrument)) {
                 return Result.vetoed(instrument, "not backtest-supported (ADR-0049) — no tradable OOS algo");

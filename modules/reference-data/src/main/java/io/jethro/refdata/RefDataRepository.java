@@ -18,12 +18,10 @@ public class RefDataRepository {
 
     /** Attribute name marking a runtime-added (ADR-0060) instrument's provenance. */
     public static final String ATTR_SOURCE = "source";
-    /** Attribute value for a discovery-promoted instrument (ADR-0060) — never migration-seeded. */
+    /** Attribute value for a discovery-promoted instrument (ADR-0060) — never migration-seeded. A
+     *  discovered name is a first-class, tradable instrument; this only records where it came from
+     *  (and marks it as the evictable set). */
     public static final String SOURCE_DISCOVERED = "discovered";
-    /** Attribute name gating trading (ADR-0060): MONITOR_ONLY = marked but not tradable. */
-    public static final String ATTR_UNIVERSE_STATUS = "universe_status";
-    /** Attribute value: the name flows into marks/indicators/signals but cannot trade (ADR-0060 §3). */
-    public static final String STATUS_MONITOR_ONLY = "MONITOR_ONLY";
 
     private final JdbcTemplate jdbc;
 
@@ -75,7 +73,7 @@ public class RefDataRepository {
                         symbology.getOrDefault(rs.getString("instrument_id"), Map.of())));
     }
 
-    // --- Runtime write path (ADR-0060): promotion of discovery candidates into a MONITOR_ONLY set. ---
+    // --- Runtime write path (ADR-0060): promotion of discovery candidates into the instrument master. ---
 
     public boolean instrumentExists(String instrumentId) {
         Integer n = jdbc.queryForObject(
@@ -84,8 +82,8 @@ public class RefDataRepository {
     }
 
     /**
-     * Idempotently write a discovery-promoted instrument as MONITOR_ONLY (ADR-0060 §2/§3): the base row,
-     * its feed symbology, display name, and PROVISIONAL adv/spread (flagged — never a silent default). All
+     * Idempotently write a discovery-promoted instrument into the master (ADR-0060 §2): the base row, its
+     * feed symbology, display name, and PROVISIONAL adv/spread (flagged — never a silent default). All
      * inserts are conflict-safe so a re-promotion (e.g. after a restart) is a no-op, not a crash. The
      * caller (the promotion service) has already confirmed the name is not core and clears the gate.
      */

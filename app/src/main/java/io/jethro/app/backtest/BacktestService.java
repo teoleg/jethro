@@ -164,17 +164,39 @@ public final class BacktestService {
 
     private List<BacktestConfig.Instrument> universe() {
         List<BacktestConfig.Instrument> out = new ArrayList<>();
+        java.util.Set<String> seen = new java.util.LinkedHashSet<>();
+        // Core universe first, in config order, so existing per-instrument OOS paths are byte-for-byte
+        // unchanged. (The list name is legacy; the universe itself is really the reference-data master.)
         for (String id : sim.simInstruments()) {
-            Optional<InstrumentRef> ref = refs.find(id);
-            if (ref.isEmpty()) {
-                continue;
+            if (addTradable(out, seen, id)) {
+                seen.add(id);
             }
-            String assetClass = ref.get().assetClass();
-            if ("EQUITY".equals(assetClass) || "FUTURE".equals(assetClass) || "FX".equals(assetClass)) {
-                out.add(new BacktestConfig.Instrument(id, sim.startPriceFor(id),
-                        sim.annualVolFor(id), ref.get().multiplier()));
+        }
+        // ADR-0060: any tradable name in the reference-data master NOT already in the core list — i.e. a
+        // discovery-promoted name — is first-class, so it is OOS-evaluated too (the gate that lets fusion
+        // trade it). Sorted for a deterministic tape. Invariant 9: the universe is refdata, not sim.
+        List<String> extra = new ArrayList<>(refs.instrumentIds());
+        java.util.Collections.sort(extra);
+        for (String id : extra) {
+            if (!seen.contains(id) && addTradable(out, seen, id)) {
+                seen.add(id);
             }
         }
         return out;
+    }
+
+    /** Append {@code id} to the backtest universe if it is a tradable (EQUITY/FUTURE/FX) refdata name. */
+    private boolean addTradable(List<BacktestConfig.Instrument> out, java.util.Set<String> seen, String id) {
+        Optional<InstrumentRef> ref = refs.find(id);
+        if (ref.isEmpty()) {
+            return false;
+        }
+        String assetClass = ref.get().assetClass();
+        if ("EQUITY".equals(assetClass) || "FUTURE".equals(assetClass) || "FX".equals(assetClass)) {
+            out.add(new BacktestConfig.Instrument(id, sim.startPriceFor(id),
+                    sim.annualVolFor(id), ref.get().multiplier()));
+            return true;
+        }
+        return false;
     }
 }

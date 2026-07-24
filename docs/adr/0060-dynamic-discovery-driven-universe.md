@@ -1,4 +1,4 @@
-# ADR-0060: Dynamic discovery-driven universe — daily promotion, provisional refdata, monitor-only probation
+# ADR-0060: Dynamic discovery-driven universe — daily promotion into the refdata master, provisional refdata
 
 - **Status:** Accepted
 - **Date:** 2026-07-24
@@ -21,8 +21,9 @@ nothing keeps the platform blind to emerging names.
 
 ## Decision
 
-A **daily universe controller** promotes discovery candidates into a **bounded, monitor-only** tracked set,
-backed by a **runtime refdata write path**:
+A **daily universe controller** promotes discovery candidates into a **bounded** tracked set (the
+reference-data master), backed by a **runtime refdata write path**. A promoted name is a first-class,
+tradable instrument (see §3, revised):
 
 1. **Conservative promotion gate.** Once per session-day, promote a candidate only if it clears ALL of:
    score ≥ threshold; **sustained** (mentions span ≥ N distinct days); **corroborated** (≥ M distinct
@@ -33,9 +34,15 @@ backed by a **runtime refdata write path**:
    (Alpaca assets / Finnhub profile); write **provisional** `adv`/`spread` flagged
    `PROVISIONAL — liquidity-tier default, not measured`; stamp `source=discovered` + the evidence. The
    migration-seeded **core** is pinned and never overwritten or evicted.
-3. **Monitor-only probation.** A discovered name flows into marks / indicators / signals but **cannot
-   trade** until (a) its ADV is **measured from our own tape** and (b) it clears the OOS gate
-   (ADR-0049/0059). Growth never bleeds risk.
+3. **First-class, not probationary** (revised — owner direction, 2026-07-24). A promoted name is a
+   normal instrument in the reference-data universe: it flows into marks / indicators / signals **and
+   trades**, through the SAME universal gates as every other name (OOS backtest ADR-0049/0059, pre-trade
+   guardrail, sim-only execution ADR-0019 + firm breaker) — no monitor-only special-casing. Running
+   discovered names through the real order/risk path is the point: it validates the config, the risk
+   limits and the strategy stack on live-discovered names. *(The original draft proposed a monitor-only
+   probation until measured ADV; the owner dropped it — a self-imposed gate that defeated the "test it
+   end-to-end" goal. The provisional adv/spread it trades on until measured is a tracked follow-up, not a
+   trading gate.)*
 4. **Bounded + accumulative.** A hard cap `max-monitored`; when full, evict the **stalest** discovered name
    (least-recent mention, no open position) to admit a stronger one — accumulates, can't balloon.
 5. **Reversible + audited.** Every promotion/eviction is a row (who/when/why/evidence); a **pin-list**
@@ -43,8 +50,12 @@ backed by a **runtime refdata write path**:
 
 ## Alternatives considered
 
-- **Auto-promote top-N by score, trade immediately.** Rejected: trades unvetted names on thin evidence —
-  exactly the phantom-flat / cost-churn bug class we just fixed. Conservatism (probation) is the point.
+- **Auto-promote top-N by score with NO gate.** Rejected: trades on thin evidence — the phantom-flat /
+  cost-churn bug class. The conservatism lives in the PROMOTION gate (score + sustained ≥N days +
+  corroborated ≥M sources + feed-coverage + rate limit), not in a post-promotion probation. Once a name
+  clears that gate it is a real instrument and trades like any other (through the universal OOS/guardrail
+  gates). *(An earlier draft added a monitor-only probation on top; the owner removed it — the promotion
+  gate is the conservatism, and probation defeated the goal of validating names through the real path.)*
 - **Stay advisory-only (a human promotes).** Rejected as the goal: the ask is *programmatic daily*
   re-evaluation; manual promotion doesn't scale and isn't "dynamic".
 - **Unbounded accumulation.** Rejected: the box + mark/poll budget can't monitor thousands; a cap +
@@ -56,7 +67,7 @@ backed by a **runtime refdata write path**:
 ## Consequences
 
 - **Positive:** the platform tracks what the market is actually discussing, not a frozen list; growth is
-  bounded, conservative, audited, and can neither trade nor even admit an unvetted / unmarkable name;
+  bounded, conservative (at the promotion gate), audited, and cannot admit an unmarkable name;
   refdata stops being migration-only.
 - **Negative:** the runtime refdata write path is new surface — every refdata *reader* must honour the
   `provisional` flag / `discovered` provenance or a discovered name reads as authoritative when it isn't;

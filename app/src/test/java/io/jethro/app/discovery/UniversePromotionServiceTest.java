@@ -83,7 +83,7 @@ class UniversePromotionServiceTest {
             new UniversePromotionPolicy.Verdict("X", UniversePromotionPolicy.Outcome.PROMOTE, "clears all gates");
 
     @Test
-    void promotionWritesAMonitorOnlyProvisionalInstrument() {
+    void promotionWritesATradableDiscoveredInstrumentWithFlaggedProvisionalDials() {
         FakeGateway gw = new FakeGateway();
         RecordingAudit audit = new RecordingAudit();
         var svc = new UniversePromotionService(gw, companies, audit, props(50));
@@ -92,17 +92,16 @@ class UniversePromotionServiceTest {
 
         assertTrue(written);
         Map<String, String> a = gw.attrs.get("PLTR");
-        assertEquals(RefDataRepository.STATUS_MONITOR_ONLY, a.get(RefDataRepository.ATTR_UNIVERSE_STATUS),
-                "promoted name is monitor-only — cannot trade");
-        assertEquals(RefDataRepository.SOURCE_DISCOVERED, a.get(RefDataRepository.ATTR_SOURCE));
+        assertEquals(RefDataRepository.SOURCE_DISCOVERED, a.get(RefDataRepository.ATTR_SOURCE),
+                "provenance recorded — the evictable set, but a first-class tradable instrument");
         assertTrue(a.get("adv_provenance").startsWith("PROVISIONAL"), "adv is flagged provisional, not silent");
         assertTrue(a.get("spread_provenance").startsWith("PROVISIONAL"));
         assertEquals("50000000", a.get("adv_usd"));
         assertEquals("yahoo", gw.symbology.get("PLTR").keySet().iterator().next(),
-                "gets a delayed Yahoo symbol so it can be MARKED, but no real-time WS symbol");
+                "gets a Yahoo symbol so it can be marked/traded, but no real-time WS symbol");
         assertFalse(gw.symbology.get("PLTR").containsKey("alpaca"), "not added to the real-time WS subscribe set");
         assertEquals(List.of("PROMOTED:PLTR"), audit.actions);
-        assertEquals(1, gw.refreshes, "cache refreshed so the monitor-only name is visible");
+        assertEquals(1, gw.refreshes, "cache refreshed so the new instrument is visible");
     }
 
     @Test
