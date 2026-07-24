@@ -10,10 +10,10 @@ import java.util.Set;
  * Config for the dynamic discovery-driven universe (ADR-0060), prefix {@code jethro.universe.dynamic}.
  * Governs the daily promotion gate that turns discovery candidates into monitored names.
  *
- * <p><b>Money-dial provenance (CLAUDE.md):</b> the gate thresholds and the monitored cap gate admission
- * to the tracked set and, downstream, to trading. Their values are Oleg's, not mine — the defaults here
- * are conservative {@code PLACEHOLDER}s so a mis-set (missing) config fails SAFE (admits nothing) rather
- * than admitting on an invented number. See {@code application.properties} for the provenance comments.
+ * <p>The gate thresholds and the cap gate admission to the tracked universe (promotion = inclusion, not a
+ * trade). Values live in {@code application.properties} and are tuned on the running system; the defaults
+ * below are the fallback when a key is unset. Promotion does not force a trade — that is gated downstream
+ * (OOS backtest, guardrail, breaker).
  */
 @ConfigurationProperties(prefix = "jethro.universe.dynamic")
 public record DynamicUniverseProperties(
@@ -43,31 +43,30 @@ public record DynamicUniverseProperties(
         /** PROVISIONAL bid/ask spread in bps stamped on a promoted name until measured. */
         BigDecimal provisionalSpreadBps) {
 
-    // --- Conservative PLACEHOLDER defaults (Oleg to set). Chosen to admit almost nothing until tuned. ---
+    // --- Fallback defaults when a key is unset (tuned in application.properties on the running system). ---
 
     public double minScoreOrDefault() {
-        // PLACEHOLDER — Oleg. High bar: a cross-source name (2 outlets → +10 bonus) plus sustained
-        // mention weight must clear this before it is even eligible. Arbitrary until Oleg tunes.
+        // Minimum credibility-weighted cross-source score to be eligible.
         return minScore > 0 ? minScore : 25.0;
     }
 
     public int minSustainedDaysOrDefault() {
-        // PLACEHOLDER — Oleg. Must recur across at least this many distinct days (not a one-day spike).
-        return minSustainedDays > 0 ? minSustainedDays : 3;
+        // Distinct calendar days a name must recur on. 1 = promote immediately on the checks (Oleg, 2026-07-24).
+        return minSustainedDays > 0 ? minSustainedDays : 1;
     }
 
     public int minSourcesOrDefault() {
-        // PLACEHOLDER — Oleg. At least this many independent sources must corroborate.
+        // At least this many independent sources must corroborate (single-source-pump guard).
         return minSources > 0 ? minSources : 2;
     }
 
     public int maxPromotionsPerDayOrDefault() {
-        // PLACEHOLDER — Oleg. Slow, auditable growth: at most this many names admitted per day.
+        // Rate limit: at most this many names admitted per session-day.
         return maxPromotionsPerDay > 0 ? maxPromotionsPerDay : 2;
     }
 
     public int maxMonitoredOrDefault() {
-        // PLACEHOLDER — Oleg. Upper bound on monitored discovered names (Pi + Yahoo-poll budget).
+        // Upper bound on tracked discovered names (box + poll budget); stalest evicted when full.
         return maxMonitored > 0 ? maxMonitored : 50;
     }
 
@@ -88,14 +87,13 @@ public record DynamicUniverseProperties(
     }
 
     public BigDecimal provisionalAdvUsdOrDefault() {
-        // PLACEHOLDER — Oleg (ADR-0060 §2): a conservative small-cap liquidity-tier ADV, stamped PROVISIONAL
-        // and never used to size a trade (the name is monitor-only until ADV is measured from our own tape).
+        // Provisional small-cap liquidity-tier ADV stamped on a promoted name (flagged in refdata) until its
+        // ADV is measured from its own tape; sizes/costs its orders meanwhile.
         return provisionalAdvUsd != null ? provisionalAdvUsd : new BigDecimal("50000000"); // $50M
     }
 
     public BigDecimal provisionalSpreadBpsOrDefault() {
-        // PLACEHOLDER — Oleg (ADR-0060 §2): a conservative WIDE spread tier, stamped PROVISIONAL. Gates
-        // nothing until the name graduates to trading.
+        // Provisional wide spread tier stamped on a promoted name (flagged) until measured from its own tape.
         return provisionalSpreadBps != null ? provisionalSpreadBps : new BigDecimal("20"); // 20 bps
     }
 
