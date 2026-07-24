@@ -116,14 +116,21 @@ the **live** average is **−21.8 bps**. That gap is the canonical backtest-over
 **Implication:** the OOS-on-sim gate (ADR-0049) is necessary but **not sufficient**. Routing must also be
 gated on **live, cost-aware** signal performance.
 
-### E. The regime detector is non-functional (engineering bug)
+### E. The regime detector reads ER=0 everywhere — **unconfirmed** (snapshot was post-close)
 
-`efficiency_ratio = 0` for **every** instrument, `volRatio = 0.0`, regime = CHOP universally. Kaufman's
-Efficiency Ratio (Kaufman, *Trading Systems and Methods*, 5th ed. 2013) = |net change| / Σ|changes| ∈
-(0,1]; an identical 0 across all names is a stuck/uninitialised computation, not a market read. Because it
-is pinned to CHOP, the regime-aware selector (ADR-0044) **always** favours mean-reversion — it never
-switches to momentum on the trending names, so it fades every rally by construction. **This is a bug to
-fix, and it is materially contributing to the loss.**
+`efficiency_ratio = 0` for **every** instrument, `volRatio = 0.0`, regime = CHOP universally. That *looks*
+like a stuck detector (Kaufman's Efficiency Ratio = |net| / Σ|steps| ∈ (0,1]; Kaufman, *Trading Systems
+and Methods*, 5th ed. 2013). **Caveat, important:** this bundle was generated at **18:14 ET, ~2 h after the
+16:00 close**, so equity marks are frozen at their closing prints (provider timestamps ~2 h old) and a
+flat window trivially yields ER=0 — which is *expected*, not necessarily a bug. **We cannot conclude the
+detector is broken from a post-close snapshot.** Action: capture an **intraday** (market-hours) report; the
+`Strategy selection` sheet already carries per-name ER, so an intraday capture will show whether ER is
+genuinely stuck at 0 while prices move (a real bug) or was just the after-hours freeze. Only then fix.
+
+Related, and worth noting regardless: the free **Alpaca IEX tier carries ~2–3% of consolidated volume**, so
+individual names print sparsely intraday — a thin, gappy series that both depresses ER and invites
+adverse-selection churn (Lo & MacKinlay 1990). Whether that materially bit *this* session also needs the
+intraday capture to confirm.
 
 ### F. Data-quality contamination
 
