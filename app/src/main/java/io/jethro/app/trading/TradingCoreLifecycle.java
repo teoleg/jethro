@@ -154,7 +154,26 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
                         new YahooQuoteClient(Duration.ofSeconds(10)), map, curveSim, spacing);
             }
         }
-        return buildSimAdapter(curveSim, properties.simInstruments());
+        return buildSimAdapter(curveSim, effectiveSimInstruments());
+    }
+
+    /**
+     * The names the sim TEST feed ticks: the configured core plus any discovery-promoted name in the
+     * reference-data master (ADR-0060, invariant 9 — the sim consumes the refdata universe, it does not
+     * define it). Core order is preserved so the seeded core tape is unchanged; discovered names are
+     * appended and priced from the graceful sim defaults (start price / 20% vol). Only relevant in sim
+     * mode — under a live feed a discovered name is marked by the Yahoo background like any refdata name.
+     */
+    private List<String> effectiveSimInstruments() {
+        List<String> ids = new ArrayList<>(properties.simInstruments());
+        if (refData != null) {
+            for (String id : refData.discoveredInstrumentIds()) {
+                if (!ids.contains(id)) {
+                    ids.add(id);
+                }
+            }
+        }
+        return ids;
     }
 
     /** The curve source: a live US Treasury curve via Finnhub when enabled and a token is set
