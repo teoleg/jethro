@@ -14,15 +14,15 @@ import java.util.stream.Collectors;
  * once a per-instrument autonomy cooldown lapses, re-trades it. That is the "reacts on the same
  * news multiple times" bug.
  *
- * <p>The floor is deterministic (invariant 7), keyed by the NEWS that drove the call:
- * {@code instrument | direction | sorted source-news ids}. That is the reliable mechanism — the
- * model is prompted to cite the narrative ids it used, so the same news never fires twice and
- * genuinely new news (a new id) fires once. When the model omits sources, the fallback is the
- * NORMALIZED thesis text, which only collapses near-identical repeats; recognising a *reworded*
- * same-story call is a semantic judgement, left to the model (told the live calls via context
- * {@code alreadyProposed}, with a prompt rule not to repeat them). Deterministic guard as the
- * backstop, the model as the assist. Entries expire after a window so a recurring theme can
- * legitimately re-trigger later.
+ * <p>The floor is deterministic (invariant 7), keyed by the rare market EVENT that drove the call
+ * (ADR-0054): {@code instrument | direction | eventKey}, where the model CLASSIFIES the event into a
+ * categorical {@code catalyst|entity|date} token. One event spawns many reworded headlines, so keying
+ * on the event — not the prose or the article ids — collapses every rewording of it while a genuinely
+ * new event (new catalyst, entity, or date) still fires once. The model only supplies the label; the
+ * decision stays deterministic code. When the model cannot classify a discrete catalyst (OTHER), the
+ * fallback is the prior guard: {@code sorted source-news ids}, or the NORMALIZED thesis text when even
+ * those are absent — degrade the guard, never remove it. RAG semantic dedup (ADR-0035) is a secondary
+ * assist, not this floor. Entries expire after a window so a recurring theme can legitimately re-trigger.
  */
 final class HypothesisIdempotency {
 
@@ -53,8 +53,13 @@ final class HypothesisIdempotency {
         }
     }
 
-    /** The trigger key: instrument + direction + the news that drove it (or a thesis signature). */
+    /** The trigger key: instrument + direction + the EVENT that drove it (ADR-0054), falling back to
+     *  the driving news ids, then a thesis signature, when the model couldn't classify the event. */
     static String key(Hypothesis h) {
+        Hypothesis.EventKey event = h.eventKey();
+        if (event != null && event.classified()) {
+            return h.instrumentId() + "|" + h.direction().name() + "|EVT:" + event.token();
+        }
         String signature = "";
         if (h.sources() != null && !h.sources().isEmpty()) {
             signature = h.sources().stream()

@@ -63,6 +63,7 @@ services:
       JETHRO_AI_MODEL: ${JETHRO_AI_MODEL:-qwen2.5:1.5b}
       JETHRO_TRADING_PROVIDER: ${JETHRO_TRADING_PROVIDER:-sim}
       FINNHUB_TOKEN: ${FINNHUB_TOKEN:-}
+      TIINGO_API_TOKEN: ${TIINGO_API_TOKEN:-}
     depends_on:
       redpanda:
         condition: service_healthy

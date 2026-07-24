@@ -69,6 +69,19 @@ class OllamaClientTest {
         assertTrue(body.contains("\"system\":\"the system prompt\""));
         assertTrue(body.contains("\"stream\":false"));
         assertTrue(body.contains("\"num_predict\":64"));
+        // Footprint dials: default keep_alive is SHORT (5m, not the old hardcoded 30m) and num_ctx is capped.
+        assertTrue(body.contains("\"keep_alive\":\"5m\""), body);
+        assertTrue(body.contains("\"num_ctx\":2048"), body);
+    }
+
+    @Test
+    void keepAliveAndNumCtxAreConfigurable() {
+        var configured = new OllamaClient("http://127.0.0.1:" + server.getAddress().getPort(),
+                "test-model", Duration.ofSeconds(5), "90s", 1024);
+        configured.complete(new InferenceRequest(null, "hi", 16));
+        String body = lastRequestBody.get();
+        assertTrue(body.contains("\"keep_alive\":\"90s\""), body);
+        assertTrue(body.contains("\"num_ctx\":1024"), body);
     }
 
     @Test

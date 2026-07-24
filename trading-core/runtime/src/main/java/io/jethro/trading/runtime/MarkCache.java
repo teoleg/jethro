@@ -23,6 +23,12 @@ import java.util.concurrent.ConcurrentHashMap;
  * update after a warm/stale load is exempt (the market legitimately moved while we were
  * down). Ordinary dividends (~0.5–2%) are BELOW any sane threshold and are not detected —
  * that needs a real corporate-action data source, tracked, not faked.
+ *
+ * <p><b>Multi-source freshness guard (ADR-0056):</b> when more than one source marks an instrument
+ * (e.g. a real-time Finnhub WS with a delayed Yahoo fallback), an update whose PROVIDER timestamp is
+ * older than the stored live mark's is skipped-and-counted, so a delayed source can never regress a
+ * fresher mark backwards in time. A stale/warm or first mark is exempt, so a fallback still fills a
+ * genuine gap — the property that keeps a single-source hiccup from blanking a position's exposure.
  */
 public final class MarkCache {
 
@@ -108,6 +114,7 @@ public final class MarkCache {
     private final JumpThresholds thresholds;
     private final QuarantineStore quarantineStore;
     private final java.util.concurrent.atomic.LongAdder rejectedTicks = new java.util.concurrent.atomic.LongAdder();
+    private final java.util.concurrent.atomic.LongAdder supersededTicks = new java.util.concurrent.atomic.LongAdder();
 
     public MarkCache() {
         this(JumpThresholds.DISABLED);
@@ -147,6 +154,17 @@ public final class MarkCache {
         if (holder.quarantined) {
             holder.suspectPriceScaled = priceScaled; // keep the freshest suspect level visible
             rejectedTicks.increment();
+            return;
+        }
+        // Freshness guard (ADR-0056): with more than one source on an instrument (e.g. a real-time
+        // Finnhub WS with a delayed Yahoo fallback), a laggard mark must never regress a fresher one
+        // backwards in time. Reject an update whose PROVIDER timestamp is strictly older than the stored
+        // live mark's — provider time is the market's honest clock (invariant 5), unlike ingest time which
+        // only reflects our poll cadence. A stale/warm holder or a first mark (priceScaled==0) is exempt,
+        // so a fallback still fills a genuine gap. Counted, never silently dropped (data-path rule).
+        if (!holder.stale && holder.priceScaled > 0
+                && providerTimestampMillis < holder.providerTimestampMillis) {
+            supersededTicks.increment();
             return;
         }
         long prev = holder.priceScaled;
@@ -207,6 +225,12 @@ public final class MarkCache {
     /** Total ticks rejected by the guard — the "never silently drop" counter. */
     public long rejectedTicks() {
         return rejectedTicks.sum();
+    }
+
+    /** Ticks skipped by the freshness guard (ADR-0056): a laggard/delayed source's mark that arrived
+     *  after a fresher one — observed, not an error. Expected to be non-zero once sources overlap. */
+    public long supersededTicks() {
+        return supersededTicks.sum();
     }
 
     /** Warm-restart load (LMDB): flagged stale until the feed refreshes (invariant 4). */

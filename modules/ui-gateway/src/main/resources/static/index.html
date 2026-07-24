@@ -139,6 +139,7 @@
       <a class="tab" href="/sim.html">Sim</a>
       <a class="tab" href="/backtest.html">Backtest</a>
       <a class="tab" href="/strategy.html">Strategy</a>
+      <a class="tab" href="/signals.html">Signals</a>
       <a class="tab" href="/social.html">Social</a>
       <a class="tab" href="/social-sources.html">Sources</a>
       <a class="tab" href="/discovery.html">Discover</a>
@@ -180,11 +181,9 @@
   <div class="col">
     <div class="section-h">Needs your attention</div>
     <div id="feed" class="feed"><div class="empty">all quiet</div></div>
-    <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM thesis → quant sizes/gates it; scored at horizon expiry (ADR-0022/0027)</span></div>
-    <div class="panel pad hypo-panel"><div id="hypotheses" class="muted" style="padding:14px">loading…</div></div>
-    <div id="hypoStats" class="muted" style="font-size:11px;padding:2px 4px"></div>
-    <div class="section-h">Strategy actions <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic signal engine (ALPHA/MACRO), entries &amp; exits with reasons</span></div>
-    <div class="panel pad quant-panel"><div id="quant" class="muted" style="padding:14px">loading…</div></div>
+    <div class="section-h">Signals — combined view <span class="muted" id="fusionMode" style="text-transform:none;letter-spacing:0">— ADR-0055: every source fused into one target per name</span></div>
+    <div class="panel pad hypo-panel"><div id="fusionPanel" class="muted" style="padding:14px">loading…</div></div>
+    <div id="fusionFoot" class="muted" style="font-size:11px;padding:2px 4px"></div>
   </div>
 </main>
 
@@ -235,6 +234,7 @@
   function renderFeed(items) {
     const feed = document.getElementById("feed");
     if (!items.length) { feed.innerHTML = '<div class="empty">all quiet</div>'; return; }
+    if (items.length > 50) { items = items.slice(0, 50); } // cap DOM in a long-open tab (memory de-load)
     feed.innerHTML = items.map(i =>
       `<div class="card ${esc(i.severity)}"><div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
          <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()}</div></div>`).join("");
@@ -435,6 +435,40 @@
   }
   async function loadQuant() { try { renderQuant(await (await pollFetch("/api/strategy/actions")).json()); } catch (e) {} }
 
+  // ---- ADR-0055: the combined view — every source fused into one target per name (easy comparison) ----
+  async function loadFusionPanel() {
+    try {
+      const book = await (await pollFetch("/api/fusion/targets")).json();
+      const ts = (book.targets || []).slice(0, 12);
+      const modeEl = document.getElementById("fusionMode");
+      if (modeEl) modeEl.innerHTML = book.routing
+        ? '— <span class="up">LIVE (sim)</span>: fusion is the sole order origin'
+        : '— <span class="warn">shadow</span>: computed, not traded';
+      const el = document.getElementById("fusionPanel");
+      if (!ts.length) {
+        el.outerHTML = '<div id="fusionPanel" class="muted" style="padding:14px">no fused targets yet — sources push a forecast as they fire; the loop combines them every 30s.</div>';
+        document.getElementById("fusionFoot").textContent = "";
+        return;
+      }
+      const chip = c => `<span class="ktag" title="${esc(c.source)}">${esc(c.source).slice(0,4)} ${c.forecast>0?'+':''}${c.forecast.toFixed(0)}</span>`;
+      el.outerHTML = '<div id="fusionPanel">' +
+        '<table><tr><th>instr</th><th>fcst</th><th>sources</th><th>Δ order</th></tr>' +
+        ts.map(t => {
+          const fCls = t.combinedForecast>0?'up':(t.combinedForecast<0?'down':'muted');
+          const d = Number(t.deltaQty);
+          const dTxt = d===0 ? '<span class="muted">— band</span>' : (d>0?'up':'down');
+          const dVal = d===0 ? '' : `<span class="${d>0?'up':'down'}">${d.toLocaleString(undefined,{maximumFractionDigits:1})}</span>`;
+          return `<tr><td class="cls">${esc(t.instrument)}</td>
+            <td class="mono ${fCls}">${t.combinedForecast.toFixed(1)}</td>
+            <td>${(t.contributions||[]).map(chip).join(" ")}</td>
+            <td class="mono">${d===0?'<span class="muted">— band</span>':dVal}</td></tr>`;
+        }).join("") + "</table></div>";
+      document.getElementById("fusionFoot").innerHTML =
+        'combined forecast on the [−20,+20] scale; Δ is the partial move toward target ("band" = no-trade zone). '
+        + 'Full drill-down — AI hypotheses, strategy actions, per-source forecasts: <a href="/signals.html">Signals →</a>';
+    } catch (e) {}
+  }
+
   // ---- hedging: net equity held target-flat, the sized min-variance hedge and its math (ADR-0038) ----
   function fmtUsd(v) {
     if (v === null || v === undefined) return "—";
@@ -553,8 +587,7 @@
   es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
   bootstrap();
   loadOrders();
-  loadHypotheses();
-  loadQuant();
+  loadFusionPanel();
   loadHedging();
   loadHistory();
   loadTicker();
@@ -564,13 +597,12 @@
   // refresh on return — so backgrounded tabs stop hammering the JVM and a backend stall can't
   // pile up pending fetches. The initial call inside each loadX above stays; poll runs its own
   // immediate tick too (idempotent). Replaces raw setInterval, which wedged tabs overnight.
-  poll(loadRisk, 2000);
+  poll(loadRisk, 5000);       // was 2s — hits the shared risk lock; 5s is plenty for a dashboard
   poll(loadMarketState, 5000);
-  poll(loadTicker, 2000);
+  poll(loadTicker, 3000);     // was 2s — cosmetic marquee
   poll(loadFeeds, 5000);
   poll(loadIndicators, 30000);
-  poll(loadHypotheses, 15000);
-  poll(loadQuant, 5000);
+  poll(loadFusionPanel, 10000);
   poll(loadHedging, 5000);
   poll(loadHistory, 15000);
   const loadVar = () => pollFetch("/api/var").then(r => r.json()).then(v => { lastVar = v; }).catch(() => {});

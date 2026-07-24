@@ -1,8 +1,8 @@
 package io.jethro.app.risk;
 
+import io.jethro.app.trading.HistorySeeder;
+import io.jethro.app.trading.TiingoHistoryClient;
 import io.jethro.app.trading.TradingCoreProperties;
-import io.jethro.app.trading.YahooHistoryClient;
-import io.jethro.app.trading.YahooHistorySeeder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -13,8 +13,9 @@ import java.time.Duration;
 
 /**
  * Daily-return history status + boot seed (ADR-0038). DB-backed, so gated on persistence. The
- * seeder pulls REAL history from the existing Yahoo channel — even in sim mode — on a background
- * thread, so it never blocks boot and a network failure is harmless.
+ * seeder pulls REAL history from Tiingo (free, API-key gated — the Yahoo channel is defunct), even in
+ * sim mode, on a background thread, so it never blocks boot and a missing token / network failure is
+ * harmless (the covariance just warms from the live feed).
  */
 @Configuration
 @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
@@ -26,14 +27,15 @@ public class HistoryConfig {
     }
 
     @Bean(destroyMethod = "stop")
-    @ConditionalOnProperty(prefix = "jethro.hedge", name = "history-seed", havingValue = "yahoo", matchIfMissing = true)
-    YahooHistorySeeder yahooHistorySeeder(JdbcTemplate jdbc, TradingCoreProperties props, HistoryStatus status,
-                                          @Value("${jethro.hedge.history-seed-days:60}") int windowDays,
-                                          @Value("${jethro.hedge.history-range:5y}") String range,
-                                          @Value("${jethro.hedge.history-request-spacing-millis:800}") long spacingMillis) {
-        var client = new YahooHistoryClient(Duration.ofSeconds(15), range);
-        var seeder = new YahooHistorySeeder(jdbc, props, status, client, windowDays, spacingMillis);
-        seeder.start(); // background thread; no-op-ish when a full window already exists
+    @ConditionalOnProperty(prefix = "jethro.hedge", name = "history-seed", havingValue = "tiingo", matchIfMissing = true)
+    HistorySeeder historySeeder(JdbcTemplate jdbc, TradingCoreProperties props, HistoryStatus status,
+                                @Value("${jethro.hedge.tiingo-token:}") String token,
+                                @Value("${jethro.hedge.history-seed-days:60}") int windowDays,
+                                @Value("${jethro.hedge.history-range-years:5}") int years,
+                                @Value("${jethro.hedge.history-request-spacing-millis:800}") long spacingMillis) {
+        var client = new TiingoHistoryClient(token, Duration.ofSeconds(15), years);
+        var seeder = new HistorySeeder(jdbc, props, status, client, windowDays, spacingMillis);
+        seeder.start(); // background thread; no-op-ish when a full window already exists / no token
         return seeder;
     }
 }

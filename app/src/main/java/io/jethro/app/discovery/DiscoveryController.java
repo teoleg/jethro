@@ -24,7 +24,7 @@ public final class DiscoveryController {
     }
 
     public record CandidateView(String instrument, double score, int mentions, List<String> sources,
-                                long firstSeenMillis, long lastSeenMillis, String sample) {
+                                long firstSeenMillis, long lastSeenMillis, int distinctDays, String sample) {
     }
 
     public record NewsStatusView(String name, boolean healthy, long lastPollMillis, int lastCount, String detail) {
@@ -44,7 +44,8 @@ public final class DiscoveryController {
     public DiscoveryView discovery() {
         List<CandidateView> rows = candidates.ranked(50).stream()
                 .map(c -> new CandidateView(c.instrumentId(), c.score(), c.mentions(),
-                        c.sources().stream().sorted().toList(), c.firstSeenMillis(), c.lastSeenMillis(), c.sample()))
+                        c.sources().stream().sorted().toList(), c.firstSeenMillis(), c.lastSeenMillis(),
+                        c.distinctDays(), c.sample()))
                 .toList();
         DiscoveryLifecycle live = lifecycle.getIfAvailable();
         NewsStatusView news = null;

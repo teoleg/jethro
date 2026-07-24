@@ -110,6 +110,26 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         this.names = names != null ? names : InstrumentNameSource.NONE;
     }
 
+    // ADR-0055 phase 1: optional health telemetry — an observer the hypothesis layer never depends on.
+    private volatile io.jethro.app.signal.SignalTelemetry signalTelemetry;
+    private volatile io.jethro.app.fusion.ForecastRegistry forecastRegistry; // ADR-0055 phase 4 (shadow)
+
+    public void setSignalTelemetry(io.jethro.app.signal.SignalTelemetry signalTelemetry) {
+        this.signalTelemetry = signalTelemetry;
+    }
+
+    public void setForecastRegistry(io.jethro.app.fusion.ForecastRegistry forecastRegistry) {
+        this.forecastRegistry = forecastRegistry;
+    }
+
+    // ADR-0055 phase 5: when fusion is the sole order origin, the hypothesis layer's OWN autonomy stands
+    // down — theses still surface as advisory cards, but the fusion layer decides and places any order.
+    private volatile boolean fusionRoutingActive;
+
+    public void setFusionRoutingActive(boolean active) {
+        this.fusionRoutingActive = active;
+    }
+
     /** The hypothesis event ledger, newest first — every distinct thesis the model proposed,
      *  retained (not just the current cycle), for the /api/hypotheses surface. */
     public List<HypothesisEvent> ledger() {
@@ -388,6 +408,19 @@ public final class HypothesisLifecycle implements SmartLifecycle {
                 idempotency.markFired(e.hypothesis(), now); // also de-dups within this cycle
                 memory.remember(e.hypothesis());
                 fresh.add(e);
+                // ADR-0055 phase 1: record the model's directional call for health telemetry — scored
+                // later by realised forward return. The deduped (fresh) call, so one event = one signal.
+                if (signalTelemetry != null) {
+                    BigDecimal mark = priceMap.get(e.hypothesis().instrumentId());
+                    if (mark != null) {
+                        signalTelemetry.record("hypothesis", e.hypothesis().instrumentId(),
+                                e.hypothesis().direction(), mark);
+                    }
+                }
+                if (forecastRegistry != null) {
+                    forecastRegistry.submitHypothesis(e.hypothesis().instrumentId(),
+                            e.hypothesis().direction(), e.hypothesis().conviction()); // ADR-0055 phase 4
+                }
             }
             Set<String> autoTraded = runAutonomy(fresh, now);
             autoTradedIds = autoTraded;
@@ -421,8 +454,8 @@ public final class HypothesisLifecycle implements SmartLifecycle {
     private Set<String> runAutonomy(List<HypothesisEvaluator.Evaluated> evaluated, long now) {
         Set<String> traded = new HashSet<>();
         var auto = props.autonomyOrDefault();
-        if (!auto.enabledOrDefault() || orderService == null) {
-            return traded;
+        if (!auto.enabledOrDefault() || orderService == null || fusionRoutingActive) {
+            return traded; // ADR-0055 phase 5: fusion is the sole order origin — autonomy stands down
         }
         if (halt.isHalted()) {
             return traded; // firm breaker (ADR-0027): no NEW autonomy entries while halted

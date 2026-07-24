@@ -7,6 +7,7 @@ import io.jethro.domain.Instrument;
 import io.jethro.domain.InstrumentId;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,15 @@ import java.util.Optional;
 
 /** JDBC access to reference data. Exact decimals come back as BigDecimal from NUMERIC. */
 public class RefDataRepository {
+
+    /** Attribute name marking a runtime-added (ADR-0060) instrument's provenance. */
+    public static final String ATTR_SOURCE = "source";
+    /** Attribute value for a discovery-promoted instrument (ADR-0060) — never migration-seeded. */
+    public static final String SOURCE_DISCOVERED = "discovered";
+    /** Attribute name gating trading (ADR-0060): MONITOR_ONLY = marked but not tradable. */
+    public static final String ATTR_UNIVERSE_STATUS = "universe_status";
+    /** Attribute value: the name flows into marks/indicators/signals but cannot trade (ADR-0060 §3). */
+    public static final String STATUS_MONITOR_ONLY = "MONITOR_ONLY";
 
     private final JdbcTemplate jdbc;
 
@@ -63,5 +73,73 @@ public class RefDataRepository {
                         rs.getString("currency"),
                         rs.getBigDecimal("contract_multiplier"),
                         symbology.getOrDefault(rs.getString("instrument_id"), Map.of())));
+    }
+
+    // --- Runtime write path (ADR-0060): promotion of discovery candidates into a MONITOR_ONLY set. ---
+
+    public boolean instrumentExists(String instrumentId) {
+        Integer n = jdbc.queryForObject(
+                "select count(*) from instrument where instrument_id = ?", Integer.class, instrumentId);
+        return n != null && n > 0;
+    }
+
+    /**
+     * Idempotently write a discovery-promoted instrument as MONITOR_ONLY (ADR-0060 §2/§3): the base row,
+     * its feed symbology, display name, and PROVISIONAL adv/spread (flagged — never a silent default). All
+     * inserts are conflict-safe so a re-promotion (e.g. after a restart) is a no-op, not a crash. The
+     * caller (the promotion service) has already confirmed the name is not core and clears the gate.
+     */
+    public void writeMonitoredInstrument(String instrumentId, String assetClass, String currency,
+                                         BigDecimal multiplier, Map<String, String> symbology,
+                                         Map<String, String> attributes) {
+        jdbc.update("insert into instrument (instrument_id, asset_class, currency, contract_multiplier) "
+                        + "values (?, ?, ?, ?) on conflict (instrument_id) do nothing",
+                instrumentId, assetClass, currency, multiplier);
+        symbology.forEach((source, symbol) -> jdbc.update(
+                "insert into instrument_symbology (instrument_id, source, symbol) values (?, ?, ?) "
+                        + "on conflict (instrument_id, source) do nothing",
+                instrumentId, source, symbol));
+        attributes.forEach((name, value) -> jdbc.update(
+                "insert into instrument_attributes (instrument_id, name, value) values (?, ?, ?) "
+                        + "on conflict (instrument_id, name) do update set value = excluded.value",
+                instrumentId, name, value));
+    }
+
+    /** InstrumentIds written by the ADR-0060 runtime path (source=discovered) — the evictable set. */
+    public List<String> discoveredInstrumentIds() {
+        return jdbc.queryForList(
+                "select instrument_id from instrument_attributes where name = ? and value = ? order by instrument_id",
+                String.class, ATTR_SOURCE, SOURCE_DISCOVERED);
+    }
+
+    /** True if the instrument carries the discovered provenance — the ONLY names eviction may remove
+     *  (a migration-seeded core name has no such row and is protected by construction, ADR-0060 §2). */
+    public boolean isDiscovered(String instrumentId) {
+        Integer n = jdbc.queryForObject(
+                "select count(*) from instrument_attributes where instrument_id = ? and name = ? and value = ?",
+                Integer.class, instrumentId, ATTR_SOURCE, SOURCE_DISCOVERED);
+        return n != null && n > 0;
+    }
+
+    /** Whether any fill exists for the instrument — eviction guard (never evict a name with a position/tape). */
+    public boolean hasFills(String instrumentId) {
+        Integer n = jdbc.queryForObject(
+                "select count(*) from fills where instrument_id = ?", Integer.class, instrumentId);
+        return n != null && n > 0;
+    }
+
+    /**
+     * Remove a discovered instrument and its attribute/symbology rows (ADR-0060 §4 eviction). Refuses to
+     * touch a name that is NOT discovered — a core name can never be evicted through this path. Ordered
+     * deletes respect the FK from symbology/attributes → instrument.
+     */
+    public boolean evictDiscoveredInstrument(String instrumentId) {
+        if (!isDiscovered(instrumentId)) {
+            return false; // core / unknown — never evict through the discovery path
+        }
+        jdbc.update("delete from instrument_attributes where instrument_id = ?", instrumentId);
+        jdbc.update("delete from instrument_symbology where instrument_id = ?", instrumentId);
+        jdbc.update("delete from instrument where instrument_id = ?", instrumentId);
+        return true;
     }
 }

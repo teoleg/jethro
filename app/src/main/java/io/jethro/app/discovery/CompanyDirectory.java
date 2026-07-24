@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -27,12 +28,38 @@ public final class CompanyDirectory {
 
     /** Name matcher → ticker, ordered longest-name-first so "Goldman Sachs" wins over any "Goldman". */
     private final List<Entry> entries;
+    /** All tickers in the directory — the set of US-listed names we can resolve from prose. */
+    private final Set<String> tickers;
+    /** ticker → canonical company name (the first name listed) — for the promoted name's display_name. */
+    private final Map<String, String> canonicalNames;
 
     private record Entry(Pattern pattern, String ticker, int len) {
     }
 
-    private CompanyDirectory(List<Entry> entries) {
+    private CompanyDirectory(List<Entry> entries, Map<String, String> canonicalNames) {
         this.entries = entries;
+        Set<String> t = new LinkedHashSet<>();
+        for (Entry e : entries) {
+            t.add(e.ticker);
+        }
+        this.tickers = Set.copyOf(t);
+        this.canonicalNames = Map.copyOf(canonicalNames);
+    }
+
+    /** The canonical company name for a ticker (its first listed name), or null if unknown. Used to give
+     *  a discovery-promoted instrument (ADR-0060) a real display_name instead of a blank/generic one. */
+    public String displayName(String ticker) {
+        return ticker == null ? null : canonicalNames.get(ticker.toUpperCase());
+    }
+
+    /**
+     * Whether this directory knows the ticker. Used by the ADR-0060 promotion gate as a conservative
+     * feed-coverage proxy: the directory is the SEC company-tickers list, so a ticker in it is a real
+     * US-listed equity that the Alpaca IEX / Finnhub free tiers can stream. Not a live provider-asset
+     * confirmation (that is Phase 2) — a deliberately strict floor that never over-admits.
+     */
+    public boolean covers(String ticker) {
+        return ticker != null && tickers.contains(ticker.toUpperCase());
     }
 
     /** Tickers whose company name appears (as a whole phrase, case-insensitive) in the text. */
@@ -56,10 +83,11 @@ public final class CompanyDirectory {
     /** Loads the bundled directory; an absent/empty resource yields an empty (no-op) directory. */
     public static CompanyDirectory fromClasspath(String resource) {
         List<Entry> entries = new ArrayList<>();
+        java.util.Map<String, String> canonical = new java.util.LinkedHashMap<>();
         try (InputStream in = CompanyDirectory.class.getClassLoader().getResourceAsStream(resource)) {
             if (in == null) {
                 log.warn("company directory resource {} not found — name resolution disabled", resource);
-                return new CompanyDirectory(List.of());
+                return new CompanyDirectory(List.of(), java.util.Map.of());
             }
             try (BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
                 String line;
@@ -73,11 +101,16 @@ public final class CompanyDirectory {
                         continue;
                     }
                     String ticker = line.substring(0, comma).strip().toUpperCase();
-                    for (String name : line.substring(comma + 1).split("\\|")) {
+                    String[] names = line.substring(comma + 1).split("\\|");
+                    for (String name : names) {
                         String n = name.strip();
                         if (n.length() >= 3) {
                             entries.add(new Entry(wholePhrase(n), ticker, n.length()));
                         }
+                    }
+                    String first = names.length > 0 ? names[0].strip() : "";
+                    if (!first.isEmpty()) {
+                        canonical.putIfAbsent(ticker, first); // first listed name is the canonical one
                     }
                 }
             }
@@ -85,7 +118,7 @@ public final class CompanyDirectory {
             log.warn("could not load company directory {}: {}", resource, e.toString());
         }
         entries.sort((a, b) -> Integer.compare(b.len, a.len)); // longest phrase first
-        return new CompanyDirectory(entries);
+        return new CompanyDirectory(entries, canonical);
     }
 
     /** Case-insensitive whole-phrase matcher: the name not flanked by letters/digits (so "Intel" does

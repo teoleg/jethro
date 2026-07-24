@@ -165,20 +165,36 @@ throttling, not a deadlock.
 
 ## 7. Pi-tuned configuration
 
-The defaults target a laptop (3B model, 60s interval). Override for the Pi — create
-`app/src/main/resources/application-pi.properties`:
+The defaults target a laptop (1.5B model, 60s commentator / 20s hypothesis interval).
+Override for the Pi — the checked-in `app/src/main/resources/application-pi.properties`
+already carries these:
 
 ```properties
 # smaller, faster model; give slow CPU inference room and breathe less often
 jethro.ai.model=qwen2.5:0.5b
 jethro.ai.interval-seconds=180
-jethro.ai.request-timeout-seconds=120
-# 2 sim instruments instead of 4 to lighten the load (optional)
-jethro.trading.sim-instruments=AAPL,MSFT
+# 180s covers a slow 3b generate + a post-recycle cold reload (run-local.sh defaults MODEL=qwen2.5:3b);
+# ample for 0.5b. A tighter value kills valid slow calls as "ollama unreachable".
+jethro.ai.request-timeout-seconds=180
+# Footprint dials — keep llama-server out of swap. keep-alive short so an idle box unloads the
+# model and reclaims its memory; num-ctx caps the KV cache; recycle-minutes force-unloads on a
+# cadence so llama-server's slow native growth can't climb into swap and freeze the box.
+jethro.ai.keep-alive=2m
+jethro.ai.num-ctx=1024
+jethro.ai.recycle-minutes=15
+# the hypothesis loop is the heaviest Ollama caller — slow it right down on a Pi
+jethro.hypothesis.interval-seconds=120
 ```
 
 Then run with the `pi` profile (step 9). On a **2 GB** Pi, also set
 `jethro.ai.enabled=false` and skip Ollama entirely.
+
+> **Note on the "whole-box freeze" symptom.** If RAM creeps up over hours with no market
+> traffic until swap fills and the Pi locks up, the culprit is almost always `llama-server`
+> (Ollama's model process), not the JVM — check with
+> `for p in $(pgrep -f 'app-0.1.0|ollama'); do echo "$p $(($(ps -o rss= -p $p)/1024))MB"; done`
+> twice, ~20 min apart. A `llama-server` RSS climbing well above the model weights is the leak
+> the footprint dials above are there to cap.
 
 Redpanda is the other memory user. The repo's `docker-compose.yml` already pins it to
 `--smp 1 --memory 1G` (dev-container mode). On a 4 GB Pi that's fine alongside the 0.5B

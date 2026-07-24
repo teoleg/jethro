@@ -37,7 +37,7 @@ public final class StockTwitsSocialFeed implements SocialFeed {
     private final String baseUrl;
     private final int symbolsPerCycle;
     private final HttpClient http;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private int cursor; // round-robins through the universe so all names get covered over cycles
     private volatile SocialSourceStatus status =
             new SocialSourceStatus("stocktwits", false, 0, 0, "not polled yet");
@@ -97,7 +97,7 @@ public final class StockTwitsSocialFeed implements SocialFeed {
     /** Parse a StockTwits streams response into posts. Package-visible + static for fixture testing. */
     static List<SocialPost> parse(String json, long nowMillis) throws Exception {
         List<SocialPost> out = new ArrayList<>();
-        JsonNode root = new ObjectMapper().readTree(json);
+        JsonNode root = MAPPER.readTree(json); // reuse the cached mapper — don't build one per poll
         JsonNode messages = root.path("messages");
         if (!messages.isArray()) {
             return out;

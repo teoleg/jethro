@@ -24,14 +24,23 @@ public final class OllamaClient implements ModelInferenceClient {
     private final URI generateUri;
     private final String model;
     private final Duration requestTimeout;
+    private final String keepAlive;
+    private final int numCtx;
 
+    /** Defaults keepAlive/numCtx (tests + warm-restart callers): 5m resident, 2048-token context. */
     public OllamaClient(String baseUrl, String model, Duration requestTimeout) {
+        this(baseUrl, model, requestTimeout, "5m", 2048);
+    }
+
+    public OllamaClient(String baseUrl, String model, Duration requestTimeout, String keepAlive, int numCtx) {
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build();
         this.generateUri = URI.create(baseUrl.replaceAll("/$", "") + "/api/generate");
         this.model = model;
         this.requestTimeout = requestTimeout;
+        this.keepAlive = keepAlive;
+        this.numCtx = numCtx;
     }
 
     @Override
@@ -48,10 +57,15 @@ public final class OllamaClient implements ModelInferenceClient {
             body.put("system", request.systemPrompt());
         }
         body.put("stream", false);
-        // Keep the model resident between calls so a brief idle gap doesn't force a slow reload
-        // (on a Pi the cold load can take a minute+). Ollama's default unloads after 5 min idle.
-        body.put("keep_alive", "30m");
-        body.putObject("options").put("num_predict", request.maxOutputTokens());
+        // keep_alive is deliberately SHORT and configurable (jethro.ai.keep-alive): it must be long enough
+        // to stay warm across an active narration burst, but short enough that a genuinely idle box unloads
+        // the model and RECLAIMS llama-server's memory. (A hardcoded 30m here previously pinned the model
+        // resident forever under our ~20s polling, so its slow native growth never reset — the box-freeze
+        // leak.) num_ctx caps the per-request KV cache instead of using the model's larger default.
+        body.put("keep_alive", keepAlive);
+        ObjectNode options = body.putObject("options");
+        options.put("num_predict", request.maxOutputTokens());
+        options.put("num_ctx", numCtx);
 
         HttpRequest httpRequest;
         try {

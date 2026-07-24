@@ -39,19 +39,22 @@ public final class DiagnosticsExportController {
     private final ObjectProvider<io.jethro.app.strategy.StrategySelector> selector;
     private final ObjectProvider<io.jethro.trading.algo.strategy.Strategy> tradingStrategy;
     private final ObjectProvider<io.jethro.app.strategy.StrategyControl> strategyControl;
+    private final ObjectProvider<io.jethro.app.training.LearnedSignalService> learnedSignal;
 
     public DiagnosticsExportController(ObjectProvider<RiskProjection> projection,
                                        ObjectProvider<VarService> varService,
                                        ObjectProvider<JdbcTemplate> jdbc,
                                        ObjectProvider<io.jethro.app.strategy.StrategySelector> selector,
                                        ObjectProvider<io.jethro.trading.algo.strategy.Strategy> tradingStrategy,
-                                       ObjectProvider<io.jethro.app.strategy.StrategyControl> strategyControl) {
+                                       ObjectProvider<io.jethro.app.strategy.StrategyControl> strategyControl,
+                                       ObjectProvider<io.jethro.app.training.LearnedSignalService> learnedSignal) {
         this.projection = projection;
         this.varService = varService;
         this.jdbc = jdbc;
         this.selector = selector;
         this.tradingStrategy = tradingStrategy;
         this.strategyControl = strategyControl;
+        this.learnedSignal = learnedSignal;
     }
 
     @GetMapping("/api/export/diagnostics.xlsx")
@@ -69,6 +72,7 @@ public final class DiagnosticsExportController {
         }
         selectionSheet(wb);
         strategyParamsSheet(wb);
+        learnedSignalSheet(wb);
         JdbcTemplate db = jdbc.getIfAvailable();
         if (db != null) {
             fillsSheet(db, wb);
@@ -161,6 +165,40 @@ public final class DiagnosticsExportController {
         }
         wb.sheet("Strategy params", List.of("dial", "group", "config_default", "effective",
                 "overridden", "gates_risk"), rows);
+    }
+
+    /** The ADR-0053 learned-signal gate verdict: the model's cost-aware OOS edge vs the coin-flip and
+     *  momentum/mean-reversion baselines it must beat to ship. Advisory only — the numbers here are
+     *  net-of-cost basis points per opportunity, never a size/PnL/risk input (ADR-0016 / invariant 7). */
+    private void learnedSignalSheet(Xlsx wb) {
+        io.jethro.app.training.LearnedSignalService svc = learnedSignal.getIfAvailable();
+        List<List<Object>> rows = new ArrayList<>();
+        if (svc == null) {
+            rows.add(List.of("(learned signal off — jethro.training.enabled=false)"));
+        } else {
+            var res = svc.current();
+            var r = res.result();
+            if (r == null || !r.sufficient()) {
+                rows.add(List.of(r == null ? "no run yet (" + str(res.state()) + ")" : str(r.verdict())));
+            } else {
+                rows.add(List.of("verdict", r.ships() ? "SHIPS" : "VETOED", str(r.verdict()), "", "", ""));
+                rows.add(List.of("cost_bps", num(java.math.BigDecimal.valueOf(r.costBps())),
+                        "folds " + r.trainableFolds() + "/" + r.folds(), "oos_rows " + r.testRows(), "", ""));
+                rows.add(List.of("", "", "", "", "", ""));
+                rows.add(List.of("strategy", "net_bps_per_opp", "trades", "wins", "hit_rate", "coverage"));
+                addScore(rows, "learned", r.learned());
+                addScore(rows, "coin_flip", r.coinFlip());
+                addScore(rows, "momentum", r.momentum());
+                addScore(rows, "mean_reversion", r.meanReversion());
+            }
+        }
+        wb.sheet("Learned signal", List.of("row", "a", "b", "c", "d", "e"), rows);
+    }
+
+    private void addScore(List<List<Object>> rows, String name, io.jethro.app.training.WalkForwardBacktest.Score s) {
+        rows.add(List.of(name, num(java.math.BigDecimal.valueOf(s.netReturnBps())), (long) s.trades(),
+                (long) s.wins(), num(java.math.BigDecimal.valueOf(s.hitRate())),
+                num(java.math.BigDecimal.valueOf(s.coverage()))));
     }
 
     /** The audited history of live tuning changes (ADR-0052): old→new, who, when — so a threshold or

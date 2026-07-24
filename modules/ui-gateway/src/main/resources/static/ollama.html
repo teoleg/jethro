@@ -28,15 +28,10 @@
   main { max-width:1780px; margin:0 auto; padding:18px 24px 48px; }
   .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 10px; }
   .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px 16px; }
-  /* per-section grid tables (ruled metric/value cells, header row) */
+  /* per-section metric tables use the app's standard table styling below (like every other page) */
   .tiles { margin-bottom:16px; overflow-x:auto; }
-  .grid { border-collapse:collapse; font-size:12.5px; }
-  .grid th { color:var(--dim); font-weight:600; font-size:10px; text-transform:uppercase; letter-spacing:.06em;
-             padding:6px 14px; border:1px solid var(--line-2); background:var(--surface-2); text-align:left; }
-  .grid td { padding:6px 14px; border:1px solid var(--line); white-space:nowrap; }
-  .grid td.k { color:var(--dim); text-align:left; }
-  .grid td.v { font-weight:600; text-align:right; font-variant-numeric:tabular-nums; }
-  .grid tbody tr:hover { background:transparent; }
+  /* KV sections are 2-column Metric|Value tables — keep them readable, not stretched across the page */
+  .tiles table { max-width:440px; }
   table { width:100%; border-collapse:collapse; font-size:12.5px; }
   th, td { text-align:right; padding:4px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
   th:first-child, td:first-child { text-align:left; }
@@ -61,6 +56,7 @@
       <a class="tab" href="/sim.html">Sim</a>
       <a class="tab" href="/backtest.html">Backtest</a>
       <a class="tab" href="/strategy.html">Strategy</a>
+      <a class="tab" href="/signals.html">Signals</a>
       <a class="tab" href="/social.html">Social</a>
       <a class="tab" href="/social-sources.html">Sources</a>
       <a class="tab" href="/discovery.html">Discover</a>
@@ -71,7 +67,7 @@
   </div>
 </div>
 <main>
-  <div class="section-h">Diagnostics export <span class="muted" style="text-transform:none;letter-spacing:0">— one .xlsx: P&amp;L by book, positions, fills+fees, TCA, AI outcomes, hedge orders, strategy params + tuning changes</span></div>
+  <div class="section-h">Diagnostics export <span class="muted" style="text-transform:none;letter-spacing:0">— one .xlsx: P&amp;L by book, positions, fills+fees, TCA, AI outcomes, hedge orders, strategy params + tuning changes, learned-signal gate</span></div>
   <div class="panel" style="padding:14px;margin-bottom:16px">
     <a id="exportBtn" href="/api/export/diagnostics.xlsx" download
        style="display:inline-block;padding:9px 16px;border-radius:8px;background:var(--brand,#5b8cff);
@@ -91,6 +87,22 @@
   <div class="tiles" id="ragTiles"></div>
   <div id="ragHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
 
+  <div class="section-h">Training data <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0053: real Tiingo daily bars for the learned advisory signal (rebuilt on empty; training only)</span></div>
+  <div class="tiles" id="trainTiles"></div>
+  <div id="trainHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
+
+  <div class="section-h">Learned signal — backtest gate <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0053: purged walk-forward, cost-aware; must beat coin-flip AND momentum/mean-rev OOS or it doesn't ship</span></div>
+  <div class="tiles" id="btTiles"></div>
+  <div id="btHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
+
+  <div class="section-h">Signal health <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0055 phase 1: each source's live calls scored by realised forward return; the evidence future fusion weights sources by</span></div>
+  <div id="sigHealth" style="overflow-x:auto;margin-bottom:4px"><div class="muted" style="padding:12px">loading…</div></div>
+  <div id="sigHint" class="muted" style="margin:6px 2px 16px;font-size:12px"></div>
+
+  <div class="section-h">Fusion target book <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0055 phase 4 SHADOW: all sources combined into one target per name; computed, not traded (places no orders)</span></div>
+  <div id="fusionBook" style="overflow-x:auto;margin-bottom:4px"><div class="muted" style="padding:12px">loading…</div></div>
+  <div id="fusionHint" class="muted" style="margin:6px 2px 16px;font-size:12px"></div>
+
   <div class="section-h">Model load <span class="muted" id="asof"></span></div>
   <div class="tiles" id="tiles"></div>
 
@@ -101,23 +113,13 @@
 <script>
   const esc = s => { const d=document.createElement("span"); d.textContent=s??""; return d.innerHTML; };
   const ms = v => v == null ? "—" : (v >= 1000 ? (v/1000).toFixed(1) + "s" : v + "ms");
-  // ruled grid table: a header row + metric/value cells, two pairs per row so it stays compact.
+  // Standard vertical data table (same rhythm as every other page — markets/books): a Metric | Value
+  // header, then one row per metric going down. Metric name left, value right (shared table CSS).
   const kv = (k, v, cls) => ({ k, v, cls: cls || "" });
-  function gridKV(items, pairsPerRow) {
-    pairsPerRow = pairsPerRow || 2;
-    let head = "";
-    for (let p = 0; p < pairsPerRow; p++) head += "<th>Metric</th><th>Value</th>";
-    let body = "";
-    for (let i = 0; i < items.length; i += pairsPerRow) {
-      body += "<tr>";
-      for (let j = 0; j < pairsPerRow; j++) {
-        const it = items[i + j];
-        body += it ? `<td class="k">${it.k}</td><td class="v ${it.cls}">${it.v}</td>`
-                   : '<td class="k"></td><td class="v"></td>';
-      }
-      body += "</tr>";
-    }
-    return `<table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  function gridKV(items) {
+    const rows = items.map(it =>
+      `<tr><td>${it.k}</td><td class="mono ${it.cls}">${it.v}</td></tr>`).join("");
+    return `<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>`;
   }
 
   function render(data) {
@@ -243,15 +245,155 @@
     } catch (e) {}
   }
 
+  // ADR-0053 training-bars store: real Tiingo daily history for the learned advisory signal, plus the
+  // derived feature/label matrix — label BALANCE is the first health check before any model exists.
+  async function loadTraining() {
+    try {
+      const t = await (await fetch("/api/training/bars")).json();
+      const ok = t.rows > 0;
+      let f = null;
+      try { f = await (await fetch("/api/training/features")).json(); } catch (e) {}
+      const items = [
+        kv("Bars", ok ? t.rows.toLocaleString() : "0", ok ? "up" : ""),
+        kv("Instruments", t.instruments || 0),
+        kv("From", t.firstDay || "—"),
+        kv("To", t.lastDay || "—")];
+      if (f && f.totalRows > 0) {
+        const pctOf = n => Math.round(100 * n / f.totalRows) + "%";
+        items.push(
+          kv("Labelled rows", f.totalRows.toLocaleString()),
+          kv("Up", `${f.up.toLocaleString()} <span class="muted" style="font-size:11px">${pctOf(f.up)}</span>`, "up"),
+          kv("Down", `${f.down.toLocaleString()} <span class="muted" style="font-size:11px">${pctOf(f.down)}</span>`, "down"),
+          kv("Flat", `${f.flat.toLocaleString()} <span class="muted" style="font-size:11px">${pctOf(f.flat)}</span>`, "muted"));
+      }
+      document.getElementById("trainTiles").innerHTML = gridKV(items);
+      document.getElementById("trainHint").innerHTML = !ok
+        ? `empty — set <span class="mono">TIINGO_API_TOKEN</span> and restart; the loader rebuilds from Tiingo (skipped without a token).`
+        : (f && f.totalRows > 0)
+        ? `${f.instruments} instruments yield ${f.totalRows.toLocaleString()} labelled point-in-time rows at a ${f.labelThresholdBps.toFixed(0)} bps next-day floor (ADR-0053). `
+          + `Label balance is the first thing that kills a naive classifier — a set dominated by FLAT trains a model that always says FLAT. Feature/label math only, never a number into live sizing/risk.`
+        : `real daily bars loaded from Tiingo — the ADR-0053 training set (never a number into live sizing/risk). Feature matrix builds once enough history is on file.`;
+    } catch (e) {}
+  }
+
+  // ADR-0053 gate: purged walk-forward, cost-aware; ships only if it beats coin-flip + momentum/mean-rev.
+  async function loadBacktest() {
+    try {
+      const b = await (await fetch("/api/training/backtest")).json();
+      const r = b.result;
+      if (!r || !r.sufficient) {
+        document.getElementById("btTiles").innerHTML = gridKV([
+          kv("State", b.state === "running" ? '<span class="warn">computing…</span>' : '<span class="muted">idle</span>')]);
+        document.getElementById("btHint").innerHTML = r && r.verdict
+          ? esc(r.verdict)
+          : `not enough real history yet — the gate runs once the training bars have built up (rebuilds from Tiingo). Compute is background, staleness-gated (never on a timer — the box can't freeze).`;
+        return;
+      }
+      const bps = v => (v >= 0 ? "+" : "") + v.toFixed(2) + " bps";
+      const netCls = r.ships ? "up" : (r.learned.netReturnBps > 0 ? "warn" : "down");
+      document.getElementById("btTiles").innerHTML = gridKV([
+        kv("Verdict", r.ships ? '<span class="up">ships</span>' : '<span class="down">vetoed</span>'),
+        kv("Learned (net/opp)", bps(r.learned.netReturnBps), netCls),
+        kv("Coin-flip", bps(r.coinFlip.netReturnBps)),
+        kv("Momentum", bps(r.momentum.netReturnBps)),
+        kv("Mean-rev", bps(r.meanReversion.netReturnBps)),
+        kv("Hit rate", (r.learned.hitRate * 100).toFixed(1) + "%"),
+        kv("Coverage", (r.learned.coverage * 100).toFixed(0) + "%"),
+        kv("Cost charged", r.costBps.toFixed(0) + " bps"),
+        kv("Folds", `${r.trainableFolds}/${r.folds} <span class="muted" style="font-size:11px">${r.testRows.toLocaleString()} OOS rows</span>`)]);
+      document.getElementById("btHint").innerHTML = esc(r.verdict)
+        + ` <span class="muted">— net/opportunity is the realised edge per test row (flat = 0), net of a ${r.costBps.toFixed(0)} bps round-trip. Advisory only; a model number never sizes a position or reaches PnL/risk (ADR-0016).</span>`;
+    } catch (e) {}
+  }
+
+  // ADR-0055 phase 1: per-source signal health — hit-rate + avg realised return of following each call.
+  async function loadSignalHealth() {
+    try {
+      const rows = await (await fetch("/api/signals/telemetry")).json();
+      if (!rows.length) {
+        document.getElementById("sigHealth").innerHTML =
+          '<div class="muted" style="padding:12px">no resolved calls yet — sources record a call, then it scores one horizon later (default 1h).</div>';
+        document.getElementById("sigHint").innerHTML = "";
+        return;
+      }
+      rows.sort((a, b) => b.avgReturnBps - a.avgReturnBps);
+      const bps = v => (v >= 0 ? "+" : "") + v.toFixed(1);
+      const body = rows.map(r => {
+        const decisive = r.wins + r.losses;
+        const hitCls = decisive === 0 ? "muted" : (r.hitRate >= 0.5 ? "up" : "down");
+        const retCls = r.avgReturnBps > 0 ? "up" : (r.avgReturnBps < 0 ? "down" : "muted");
+        return `<tr><td>${esc(r.source)}</td>
+          <td class="mono">${r.resolved}</td>
+          <td class="mono ${hitCls}">${decisive === 0 ? "—" : (r.hitRate * 100).toFixed(0) + "%"}</td>
+          <td class="mono ${retCls}">${bps(r.avgReturnBps)}</td>
+          <td class="mono">${r.wins}/${r.losses}/${r.flats}</td>
+          <td class="mono muted">${r.open}</td></tr>`;
+      }).join("");
+      document.getElementById("sigHealth").innerHTML =
+        `<table><thead><tr><th>source</th><th>scored</th><th>hit-rate</th><th>avg ret (bps)</th>
+         <th>W/L/F</th><th>open</th></tr></thead><tbody>${body}</tbody></table>`;
+      document.getElementById("sigHint").innerHTML =
+        `hit-rate excludes FLATs (no bet); avg ret is per resolved call, net of nothing (gross, forward-return of following the call). `
+        + `Measurement only — no number here sizes or gates an order (ADR-0016). This is the evidence ADR-0055 phase 2+ will weight sources by.`;
+    } catch (e) {}
+  }
+
+  // ADR-0055 phase 4 (shadow): the fused target book — one combined target per instrument, no orders.
+  async function loadFusion() {
+    try {
+      const book = await (await fetch("/api/fusion/targets")).json();
+      const ts = book.targets || [];
+      if (!ts.length) {
+        document.getElementById("fusionBook").innerHTML =
+          '<div class="muted" style="padding:12px">no fused targets yet — sources push forecasts as they fire; the loop combines them every 30s.</div>';
+        document.getElementById("fusionHint").innerHTML = "";
+        return;
+      }
+      const q = v => v == null ? "—" : Number(v).toLocaleString(undefined, {maximumFractionDigits: 2});
+      const body = ts.map(t => {
+        const fCls = t.combinedForecast > 0 ? "up" : (t.combinedForecast < 0 ? "down" : "muted");
+        const dCls = Number(t.deltaQty) > 0 ? "up" : (Number(t.deltaQty) < 0 ? "down" : "muted");
+        const contribs = (t.contributions || [])
+          .map(c => `${esc(c.source)} ${c.forecast > 0 ? "+" : ""}${c.forecast.toFixed(0)}`).join(", ");
+        return `<tr><td>${esc(t.instrument)}</td>
+          <td class="mono ${fCls}">${t.combinedForecast.toFixed(1)}</td>
+          <td class="mono">${t.sources}</td>
+          <td class="mono">${q(t.price)}</td>
+          <td class="mono">${q(t.targetQty)}</td>
+          <td class="mono muted">${q(t.currentQty)}</td>
+          <td class="mono ${dCls}">${Number(t.deltaQty) === 0 ? "— band" : q(t.deltaQty)}</td>
+          <td class="muted" style="font-size:11px">${esc(contribs)}</td></tr>`;
+      }).join("");
+      document.getElementById("fusionBook").innerHTML =
+        `<table><thead><tr><th>instr</th><th>forecast</th><th>src</th><th>price</th>
+         <th>target</th><th>current</th><th>Δ order</th><th>contributions</th></tr></thead><tbody>${body}</tbody></table>`;
+      document.getElementById("fusionHint").innerHTML =
+        `combined forecast on Carver's [-20,+20] scale (× diversification multiplier); target = forecast/10 × unit-notional / price; `
+        + `Δ order is the Gârleanu-Pedersen partial move toward target ("— band" = inside the no-trade band). `
+        + `<span class="warn">SHADOW — computed, never sent.</span> Sizing dials are placeholders until set (ADR-0055).`;
+    } catch (e) {}
+  }
+
+  // Fast tick: the light, live panels. The HEAVY, slow-changing ones (training feature-matrix rebuild,
+  // learned-signal backtest) move to a 30s cadence — they were recomputing every 3s, which pinned the
+  // box and the browser for no benefit (footprint de-load).
   async function refresh() {
     try { render(await (await fetch("/api/llm/runs")).json()); } catch (e) {}
     loadJvm();
+    loadSignalHealth();
+    loadFusion();
     loadTraffic();
     loadBalance();
     loadRag();
   }
+  function refreshSlow() {
+    loadTraining();   // /api/training/features rebuilds the whole matrix — not a per-3s job
+    loadBacktest();
+  }
   refresh();
-  poll(refresh, 3000); // poll.js: no-overlap, pauses while hidden (see index.html)
+  refreshSlow();
+  poll(refresh, 8000);      // light live panels (was 3s — halved+ the request rate)
+  poll(refreshSlow, 30000); // heavy recompute panels — 10× slower
 </script>
 </body>
 </html>

@@ -10,13 +10,15 @@
 # Usage:
 #   ./scripts/run-local.sh                       # everything on (AI + auto-execute)
 #   AI=off AUTOEXEC=off ./scripts/run-local.sh   # market path + UI only, no AI, no trading
-#   MODEL=qwen2.5:3b ./scripts/run-local.sh      # stronger text (needs 8GB+ headroom)
+#   MODEL=qwen2.5:1.5b ./scripts/run-local.sh    # lighter/faster text for a tighter box
+#   MODEL=qwen2.5:0.5b ./scripts/run-local.sh    # smallest, for very tight RAM
 #   PROVIDER=yahoo ./scripts/run-local.sh        # real (delayed) prices from Yahoo (ADR-0023)
+#   ALPACA_KEY_ID=xx ALPACA_SECRET=yy PROVIDER=alpaca ./scripts/run-local.sh  # free real-time equities (ADR-0056)
 #   PROFILE=default HEAP=1g ./scripts/run-local.sh
 #
 # Env knobs: PROFILE (default: pi), HEAP (default: 512m), AI (off|on, default: on),
-#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:1.5b),
-#            PROVIDER (sim|yahoo|finnhub, default: yahoo), AUTONOMY (off|on, default: on),
+#            AUTOEXEC (off|on, default: on), MODEL (default: qwen2.5:3b),
+#            PROVIDER (sim|yahoo|finnhub|alpaca, default: yahoo), AUTONOMY (off|on, default: on),
 #            RAG (off|on, default: on). Set them once in local.env — a plain KEY=value file
 #            (copy local.env.example); command-line env still overrides it.
 #
@@ -41,15 +43,22 @@ fi
 PROFILE="${PROFILE:-pi}"
 # 512m was too tight: the hourly OOS strategy-selector backtest is a large TRANSIENT allocation
 # spike, and on a 512m ZGC heap it drove allocation stalls that froze the whole JVM for the run's
-# duration (~1h cadence). 768m gives that spike headroom while staying Pi-friendly alongside a 1.5b
+# duration (~1h cadence). 768m gives that spike headroom while staying Pi-friendly alongside the
 # Ollama model. A pre-run heap guard (StrategySelector) is the backstop — it SKIPS the backtest when
 # headroom is thin rather than freezing. On an 8GB+ box set HEAP=1g so the selector always refreshes.
 HEAP="${HEAP:-768m}"
 AI="${AI:-on}"
-MODEL="${MODEL:-qwen2.5:1.5b}" # 1.5b fits a Pi (frees ~1.5GB + CPU vs 3b, so you stay out of swap).
-                               # MODEL=qwen2.5:3b for better text on an 8GB+ box; :0.5b for very tight RAM.
+MODEL="${MODEL:-qwen2.5:3b}"   # 3b = stronger narration; viable on an 8GB box now that the ChatModelRecycler
+                               # + short jethro.ai.keep-alive cap llama-server's growth (it used to climb into
+                               # swap). Slower per call on Pi CPU (~60-70s) — that's why the pi profile's
+                               # request-timeout is 180s. MODEL=qwen2.5:1.5b (lighter) or :0.5b (tightest RAM).
+                               # Keep the browser dashboard OFF this box (view from a laptop) so 3b has headroom.
 RAG="${RAG:-on}"               # on = RAG retrieval (ADR-0035); needs the embedding model below.
 EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}" # RAG embeddings (~275MB); the chat MODEL can't embed.
+# Container-level idle unload for the EMBEDDING model. The CHAT model's keep-alive is now sent per
+# request by the app (jethro.ai.keep-alive, default 5m) and OVERRIDES this — plus ChatModelRecycler
+# force-unloads it on a cadence — so this mainly governs the embedding model. Frees GBs when idle.
+export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-5m}"
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
 PROVIDER="${PROVIDER:-yahoo}"  # sim | yahoo (delayed, ADR-0023) | finnhub (real-time WS, ADR-0024)
@@ -134,6 +143,16 @@ if [ "$PROVIDER" = "finnhub" ] && [ -z "$FINNHUB" ]; then
   echo "!! PROVIDER=finnhub needs a token: FINNHUB=your_key PROVIDER=finnhub ./scripts/run-local.sh"
   echo "   (free key at https://finnhub.io) — falling back to sim until set."
 fi
+# Alpaca (ADR-0056): free real-time US equities over WS. Keys flow via the ALPACA_KEY_ID/ALPACA_SECRET
+# env placeholders in application.properties (set them here or in local.env). Yahoo covers the rest.
+if [ "$PROVIDER" = "alpaca" ]; then
+  if [ -z "${ALPACA_KEY_ID:-}" ] || [ -z "${ALPACA_SECRET:-}" ]; then
+    echo "!! PROVIDER=alpaca needs a key + secret: ALPACA_KEY_ID=xx ALPACA_SECRET=yy PROVIDER=alpaca ./scripts/run-local.sh"
+    echo "   (free, no credit card, at https://alpaca.markets) — falling back to sim until set."
+  else
+    echo "==> MARKET DATA: Alpaca real-time WS (IEX, free) for US equities + Yahoo (delayed) fallback — ADR-0056."
+  fi
+fi
 # A token enables the real-time WS feed (PROVIDER=finnhub) AND — independent of the price
 # provider — real news + a LIVE US Treasury yield curve (ADR-0024). All share one 60/min budget.
 if [ -n "$FINNHUB" ]; then
@@ -141,6 +160,13 @@ if [ -n "$FINNHUB" ]; then
   [ "$PROVIDER" = "finnhub" ] && echo "==> MARKET DATA: Finnhub (real-time WebSocket, dev/demo only — ADR-0024)."
   echo "==> Finnhub key set: real news + live Treasury curve enabled (bond data may be premium —"
   echo "    check the log line 'RATES CURVE:' to see if the live curve or the sim curve is active)."
+fi
+# Tiingo history seed (ADR-0038): grounds the hedger covariance in REAL daily history (even in sim).
+# Auto-exported from local.env above, so the app reads jethro.hedge.tiingo-token=${TIINGO_API_TOKEN:}.
+if [ -n "${TIINGO_API_TOKEN:-}" ]; then
+  echo "==> HISTORY SEED: Tiingo token set — real daily history for the hedger covariance (dev/demo, ADR-0023)."
+else
+  echo "==> HISTORY SEED: no TIINGO_API_TOKEN — covariance warms from the live feed. Set it in local.env for real history."
 fi
 
 mkdir -p logs
@@ -154,7 +180,16 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; the
 fi
 
 echo "==> Starting app in background: profile=$PROFILE heap=$HEAP ai=$AI"
+# One-shot leak diagnosis: CLASSLOAD_LOG=1 logs every class load so a runtime class-generation leak
+# names itself (NMT showed Metaspace/Code climbing). Verbose — enable for one run, then:
+#   grep -oE "GeneratedMethodAccessor|GeneratedConstructorAccessor|[$][$]Lambda|Proxy[0-9]" logs/classload.log | sort | uniq -c
+CLASSLOAD_FLAG=()
+[ -n "${CLASSLOAD_LOG:-}" ] && CLASSLOAD_FLAG=("-Xlog:class+load=info:file=logs/classload.log:uptime,tags")
+
 nohup java -Xmx"$HEAP" -XX:+UseZGC \
+  -XX:NativeMemoryTracking=summary \
+  -XX:MaxDirectMemorySize="${MAX_DIRECT:-256m}" \
+  "${CLASSLOAD_FLAG[@]}" \
   --add-opens java.base/java.nio=ALL-UNNAMED \
   --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
   -jar "$JAR" \

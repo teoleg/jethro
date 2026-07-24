@@ -18,9 +18,11 @@ import java.util.Map;
  *   ES₉₅  = −mean(pnl beyond that percentile)    (average tail loss)
  * </pre>
  *
- * Percentile CONVENTION (stated): index ⌊α·K⌋ of the ascending-sorted pnl vector. Coverage is
- * strict: an instrument enters only if it has a return on EVERY usable day; otherwise its
- * |exposure| is reported as skipped — never silently treated as riskless (data-path rule).
+ * Percentile CONVENTION (stated): index ⌊α·K⌋ of the ascending-sorted pnl vector. Coverage
+ * (ADR-0058): an instrument enters if it has returns on ≥ minObs days (not every day); the P&L is
+ * revalued on the COMMON window where every included name has a return, so a gappy / sim-contaminated
+ * tail drops days, not names. Genuinely history-less names are reported as skipped, never treated as
+ * riskless (data-path rule).
  * Analytics run in double; money crosses back to {@link BigDecimal} at the boundary only
  * (invariant 1). Estimates, not ledger money.
  */
@@ -50,13 +52,16 @@ public final class VarMath {
         if (days.size() < minObs) {
             return empty(days.size(), "insufficient history: " + days.size() + " days, need " + minObs);
         }
-        // Strict coverage: instrument must have a return on every day.
+        // Coverage (ADR-0058): include an instrument with returns on >= minObs days — NOT necessarily
+        // every day. A sim-contaminated or gappy tail must not blind VaR to a name with ample real
+        // history (a 2-day live run skipped every equity this way, leaving VaR on AUDUSD alone). Its
+        // |exposure| is still disclosed as skipped when history is genuinely too thin (data-path rule).
         List<String> covered = new ArrayList<>();
         BigDecimal coveredExp = BigDecimal.ZERO;
         BigDecimal skippedExp = BigDecimal.ZERO;
         for (Map.Entry<String, BigDecimal> e : exposuresUsd.entrySet()) {
-            boolean full = days.stream().allMatch(d -> d.returns().containsKey(e.getKey()));
-            if (full) {
+            long cov = days.stream().filter(d -> d.returns().containsKey(e.getKey())).count();
+            if (cov >= minObs) {
                 covered.add(e.getKey());
                 coveredExp = coveredExp.add(e.getValue().abs());
             } else {
@@ -66,14 +71,25 @@ public final class VarMath {
         if (covered.isEmpty()) {
             return new VarResult(money(0), money(0), money(0), days.size(),
                     money(0), skippedExp.setScale(2, RoundingMode.HALF_UP),
-                    "no position has full return history yet");
+                    "no position has >= " + minObs + " days of history yet");
+        }
+        // Revalue on the COMMON window — days where EVERY included name has a return — so the gappy /
+        // sim-contaminated tail days drop out rather than the names, keeping one consistent cross-asset
+        // move per day (historical VaR's whole premise). A too-thin intersection reports, never fakes.
+        List<DayVector> usable = days.stream()
+                .filter(d -> covered.stream().allMatch(id -> d.returns().containsKey(id)))
+                .toList();
+        if (usable.size() < minObs) {
+            return new VarResult(money(0), money(0), money(0), usable.size(),
+                    coveredExp.setScale(2, RoundingMode.HALF_UP), skippedExp.setScale(2, RoundingMode.HALF_UP),
+                    "only " + usable.size() + " common days across held names, need " + minObs);
         }
 
-        double[] pnl = new double[days.size()];
-        for (int d = 0; d < days.size(); d++) {
+        double[] pnl = new double[usable.size()];
+        for (int d = 0; d < usable.size(); d++) {
             double sum = 0;
             for (String id : covered) {
-                sum += exposuresUsd.get(id).doubleValue() * days.get(d).returns().get(id);
+                sum += exposuresUsd.get(id).doubleValue() * usable.get(d).returns().get(id);
             }
             pnl[d] = sum;
         }
@@ -81,12 +97,12 @@ public final class VarMath {
 
         // Honest labeling (ADR-0041): below 100 observations, ⌊0.01·K⌋ = 0 — the "99% quantile"
         // is literally the sample's worst day. Say so rather than let it read as calibrated.
-        String note = days.size() < 100
-                ? "VaR99 = worst observed day (window " + days.size() + " < 100) — indicative only"
+        String note = usable.size() < 100
+                ? "VaR99 = worst observed day (window " + usable.size() + " < 100) — indicative only"
                 : null;
         return new VarResult(
                 lossAt(pnl, 0.05), tailMean(pnl, 0.05), lossAt(pnl, 0.01),
-                days.size(), coveredExp.setScale(2, RoundingMode.HALF_UP),
+                usable.size(), coveredExp.setScale(2, RoundingMode.HALF_UP),
                 skippedExp.setScale(2, RoundingMode.HALF_UP), note);
     }
 

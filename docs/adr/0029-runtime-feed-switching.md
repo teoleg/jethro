@@ -80,11 +80,13 @@ Built, and the invariant is now a hard invariant (CLAUDE.md #8, overview #10):
   replay→REPLAY).
 - **Topic namespacing** — producers/consumers resolve through `Topics.resolved(base)` →
   `<mode>.<topic>`; sim/live/replay never share a stream.
-- **DB scoping** — the `fills` source-of-truth carries `feed_mode` (V27); the positions rebuild
-  seeds only from the current mode's fills.
+- **DB scoping** — `feed_mode` now tags every mode-specific persisted surface, each read filtered by
+  the running `Provenance.mode()`: `fills` (V27/V29, the source of truth — positions rebuild seeds only
+  from the current mode), `orders` (V35), `hypothesis_record` (V36), firm/book `equity` (V37),
+  `swap_trades` (V40, rates book), `execution_quality`/TCA (V39), `chat_audit` (V41, provenance stamp).
 
-Deferred (decision-level, governed here): per-mode scoping of the remaining derived tables
-(`daily_closes`, `swap_trades`, `mark_quarantine`, equity) and the S3 archive prefix — triggered
-when a live feed first runs against a shared DB/bucket. The **runtime feed-switch endpoint**
-(stage 3) is deferred until (a) a correct in-process consumer re-subscription across the epoch
-roll and (b) auth on `/api/admin/*` exist; today a mode change is a restart with new config.
+Deferred (decision-level, governed here): per-mode scoping of the last two derived tables
+(`daily_closes`, `mark_quarantine`) and the S3 archive prefix — triggered when a live feed first runs
+against a shared DB/bucket. The **runtime feed-switch endpoint** (stage 3) is deferred until (a) a
+correct in-process consumer re-subscription across the epoch roll and (b) auth on `/api/admin/*` exist;
+today a mode change is a restart with new config.

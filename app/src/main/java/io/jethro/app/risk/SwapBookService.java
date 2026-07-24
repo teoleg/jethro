@@ -56,11 +56,12 @@ public final class SwapBookService {
         boolean curveLive = true;
         var rows = jdbc.query("""
                 select fill_id, instrument, book, side, lots, entry_par, trade_day
-                from swap_trades order by trade_day, fill_id
+                from swap_trades where feed_mode = ? order by trade_day, fill_id
                 """, (rs, i) -> new Object[]{
                 rs.getString("fill_id"), rs.getString("instrument"), rs.getString("book"),
                 rs.getString("side"), rs.getBigDecimal("lots"), rs.getBigDecimal("entry_par"),
-                rs.getObject("trade_day", LocalDate.class)});
+                rs.getObject("trade_day", LocalDate.class)},
+                io.jethro.messaging.Provenance.mode().name()); // ADR-0029: only this mode's swaps
         for (Object[] r : rows) {
             String instrument = (String) r[1];
             Integer tenor = tenors.tenorYears(instrument).orElse(null);

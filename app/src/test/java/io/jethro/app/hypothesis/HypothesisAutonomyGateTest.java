@@ -19,7 +19,7 @@ class HypothesisAutonomyGateTest {
 
     private static HypothesisEvaluator.Evaluated withBacktest(HypothesisEvaluator.Backtest bt) {
         var h = new Hypothesis("h", "AAPL", Side.BUY, Hypothesis.Horizon.SWING,
-                Hypothesis.Conviction.HIGH, "thesis", List.of());
+                Hypothesis.Conviction.HIGH, "thesis", List.of(), null);
         return new HypothesisEvaluator.Evaluated(h, HypothesisEvaluator.Verdict.ADMISSIBLE, "AI",
                 new BigDecimal("10"), new BigDecimal("190"), "ok", bt);
     }

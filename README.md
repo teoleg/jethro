@@ -146,7 +146,15 @@ or add *context*, but a signal can never move the book without passing the deter
 - **News → universe discovery** (ADR-0045/0050 §7) — real **RSS** from your curated outlets feeds a
   ranked **candidate-additions** register (cross-source names outrank one loud source); *Discover*
   shows what's cooking. Big outlets propose additions to the base list; social adds an emerging name.
-  Suggestions only — promoting one to reference data is a human decision.
+- **Dynamic discovery-driven universe** (ADR-0060) — a **daily promotion gate** turns those candidates
+  into tracked names *programmatically*, conservatively: a name is promoted only if it clears **score
+  ≥ threshold**, **sustained** (≥N distinct days), **corroborated** (≥M sources) and **feed-coverage**,
+  rate-limited to K/day. On promotion it's written to reference data as **monitor-only** (provisional,
+  flagged adv/spread; `source=discovered`) — it flows into marks/indicators/signals but the fusion order
+  gate **vetoes it, so it cannot trade** until its ADV is measured from our own tape. The set is bounded
+  (stalest-eviction at a cap, pin-list / blacklist), and every promotion/eviction is audited. The
+  *Discover* page shows the live gate verdicts + the audit trail; the whole feature is off by default
+  (`jethro.universe.dynamic.enabled`) and has a dry-run mode (decide + audit, write nothing).
 
 The AI/news/social feeds are **built, tested, and advisory-only**; the live external calls are opt-in
 (configure your outlets/API tokens) and fail-open — an unreachable source shows *unreachable*, it
@@ -178,7 +186,7 @@ runtime}`, `modules:{order, reference-data, ui-gateway, finops}`, `app` (assembl
 
 **UI pages** (`http://localhost:8080`): Overview (attention feed) · Markets · Rates · Books · Orders
 · Config · **Sim** (control panel) · Backtest · **Social** · **Sources** (feed health) · **Discover**
-(candidate additions) · Ops.
+(candidate additions + the ADR-0060 promotion gate & audit trail) · Ops.
 
 ---
 
@@ -218,7 +226,7 @@ your books, fills, orders, topics, and pulled models. The raw path, if you prefe
 
 ```bash
 docker compose up -d                                  # Redpanda + Postgres + Ollama
-docker compose exec -T ollama ollama pull qwen2.5:1.5b        # chat model (narration/hypotheses)
+docker compose exec -T ollama ollama pull qwen2.5:3b         # chat model (narration/hypotheses)
 docker compose exec -T ollama ollama pull nomic-embed-text    # RAG embeddings (ADR-0035)
 ./gradlew :app:bootRun                                # the single-JVM app (ADR-0015)
 ```

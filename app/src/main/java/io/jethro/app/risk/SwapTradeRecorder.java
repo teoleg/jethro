@@ -41,12 +41,13 @@ public final class SwapTradeRecorder {
                 return;
             }
             jdbc.update("""
-                    insert into swap_trades (fill_id, instrument, book, side, lots, entry_par, trade_day)
-                    values (?, ?, ?, ?, ?, ?, ?)
+                    insert into swap_trades (fill_id, instrument, book, side, lots, entry_par, trade_day, feed_mode)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
                     on conflict (fill_id) do nothing
                     """,
                     fill.fillId(), fill.instrumentId().value(), fill.bookId().value(),
-                    fill.side().name(), fill.quantity(), fill.price(), sessionDay.get());
+                    fill.side().name(), fill.quantity(), fill.price(), sessionDay.get(),
+                    io.jethro.messaging.Provenance.mode().name()); // ADR-0029: tag the swap trade's feed mode
         } catch (Exception e) {
             log.warn("swap trade record failed for {} (rates view only; positions unaffected): {}",
                     fill.fillId(), e.toString());

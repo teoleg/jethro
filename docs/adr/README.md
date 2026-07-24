@@ -56,7 +56,14 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0050](0050-social-media-adversarial-source.md) | Social media as an adversarial source — spam/credibility/corroboration controls | Accepted | ◐ Partial |
 | [0051](0051-price-derived-volatility-regime.md) | Risk-off sizing from a price-derived volatility regime (no sim-regime oracle) | Accepted | ✅ Implemented |
 | [0052](0052-live-strategy-tuning-panel.md) | Live, DB-persisted strategy tuning — every dial editable, every change audited as its own provenance | Accepted | ✅ Implemented |
-| [0053](0053-learned-advisory-signal.md) | Learned advisory signal — a model predicts a tradeable label, backtest-gated (no price-curve oracle) | Accepted | ○ Not started |
+| [0053](0053-learned-advisory-signal.md) | Learned advisory signal — a model predicts a tradeable label, backtest-gated (no price-curve oracle) | Accepted | ◐ Partial |
+| [0054](0054-event-keyed-hypothesis-identity.md) | Event-keyed hypothesis identity — the model classifies the catalyst, deterministic code dedups on it | Accepted | ✅ Implemented |
+| [0055](0055-signal-fusion-target-portfolio.md) | Signal fusion and a target portfolio — signals stop placing orders | Accepted | ✅ Implemented |
+| [0056](0056-multi-source-market-data-coverage.md) | Multi-source market-data coverage — source precedence via a freshness-guarded merge | Accepted | ✅ Implemented (guard + Yahoo fallback + Alpaca; no priority table — freshness subsumes it) |
+| [0057](0057-intraday-strategy-family.md) | Intraday strategy family — VWAP-deviation reversion first, pairs deferred | Proposed | ☐ Not started |
+| [0058](0058-var-partial-history-coverage.md) | VaR coverage — include names with sufficient history, revalue on the common window | Proposed | ✅ Implemented (Oleg-directed batch) |
+| [0059](0059-fusion-execution-gate.md) | Fusion execution gate — trade only OOS-validated, convicted names (stop the churn) | Proposed | ✅ Implemented (Oleg-directed batch) |
+| [0060](0060-dynamic-discovery-driven-universe.md) | Dynamic discovery-driven universe — daily promotion, provisional refdata, monitor-only probation | Accepted | ✅ Implemented (Phase 1 gate + dry-run proposer; Phase 2 runtime refdata write path + monitor-only order veto + eviction; enabled. Measured-ADV → tradable graduation deferred) |
 
 ## Status vs Implementation
 

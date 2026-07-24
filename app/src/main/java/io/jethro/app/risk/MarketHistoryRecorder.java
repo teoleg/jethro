@@ -70,9 +70,9 @@ public final class MarketHistoryRecorder implements AutoCloseable {
                         """, today, mark.instrumentId(), mark.price());
             }
             jdbc.update("""
-                    insert into firm_equity (day, total_pnl) values (?, ?)
-                    on conflict (day) do update set total_pnl = excluded.total_pnl
-                    """, today, risk.firmTotalPnl());
+                    insert into firm_equity (day, total_pnl, feed_mode) values (?, ?, ?)
+                    on conflict (day, feed_mode) do update set total_pnl = excluded.total_pnl
+                    """, today, risk.firmTotalPnl(), io.jethro.messaging.Provenance.mode().name());
         } catch (Exception e) {
             log.warn("market-history pass failed (retrying next cycle): {}", e.toString());
         }

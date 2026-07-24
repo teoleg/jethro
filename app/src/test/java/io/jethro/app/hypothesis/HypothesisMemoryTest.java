@@ -41,7 +41,7 @@ class HypothesisMemoryTest {
 
     private static Hypothesis h(String instrument, Side dir, String thesis) {
         return new Hypothesis(UUID.randomUUID().toString(), instrument, dir,
-                Hypothesis.Horizon.SWING, Hypothesis.Conviction.MEDIUM, thesis, List.of());
+                Hypothesis.Horizon.SWING, Hypothesis.Conviction.MEDIUM, thesis, List.of(), null);
     }
 
     private static HypothesisMemory memory(EmbeddingClient client) {

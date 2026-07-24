@@ -31,11 +31,12 @@ public interface ChatAuditStore {
         public void record(ChatResponse r, long latencyMillis) {
             jdbc.update("""
                     insert into chat_audit
-                      (id, asked_at, question, intent, book, instrument, answer, model, latency_millis)
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      (id, asked_at, question, intent, book, instrument, answer, model, latency_millis, feed_mode)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     UUID.randomUUID().toString(), OffsetDateTime.now(ZoneOffset.UTC),
-                    r.question(), r.intent(), r.book(), r.instrument(), r.answer(), r.model(), latencyMillis);
+                    r.question(), r.intent(), r.book(), r.instrument(), r.answer(), r.model(), latencyMillis,
+                    io.jethro.messaging.Provenance.mode().name()); // ADR-0029: tag the turn's feed mode
         }
     }
 }

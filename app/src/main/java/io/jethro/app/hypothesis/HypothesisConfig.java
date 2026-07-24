@@ -150,7 +150,10 @@ public class HypothesisConfig {
                                             HypothesisRecordStore recordStore,
                                             io.jethro.app.risk.TradingHaltSwitch tradingHaltSwitch,
                                             ObjectProvider<RefDataRepository> refData,
-                                            HypothesisMemory hypothesisMemory) {
+                                            HypothesisMemory hypothesisMemory,
+                                            ObjectProvider<io.jethro.app.signal.SignalTelemetry> signalTelemetry,
+                                            ObjectProvider<io.jethro.app.fusion.ForecastRegistry> forecastRegistry,
+                                            @org.springframework.beans.factory.annotation.Value("${jethro.fusion.route-orders:false}") boolean fusionRouting) {
         // Same composite sink as the commentator: in-memory buffer + ai.decisions topic when
         // the broker is wired — every hypothesis-generation run is an audited AiDecision.
         DecisionSink sink = decision -> {
@@ -167,9 +170,13 @@ public class HypothesisConfig {
         // Instrument display names from refdata (V27) — never a hardcoded map (GAP-4).
         var rd = refData.getIfAvailable();
         InstrumentNameSource names = rd != null ? InstrumentNameSource.from(rd) : InstrumentNameSource.NONE;
-        return new HypothesisLifecycle(generator, evaluator, narrativeFeed, backtest,
+        var lifecycle = new HypothesisLifecycle(generator, evaluator, narrativeFeed, backtest,
                 tradingCore, risk, refs, feed, sse, props, orderService.getIfAvailable(), recordStore,
                 tradingHaltSwitch, names, hypothesisMemory);
+        lifecycle.setSignalTelemetry(signalTelemetry.getIfAvailable()); // ADR-0055 phase 1: optional observer
+        lifecycle.setForecastRegistry(forecastRegistry.getIfAvailable()); // ADR-0055 phase 4: optional observer
+        lifecycle.setFusionRoutingActive(fusionRouting); // ADR-0055 phase 5: autonomy stands down when fusion routes
+        return lifecycle;
     }
 
     @Bean

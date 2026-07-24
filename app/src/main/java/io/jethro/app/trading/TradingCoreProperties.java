@@ -51,6 +51,10 @@ public record TradingCoreProperties(
         Long yahooRequestSpacingMillis,
         /** Finnhub API token (free key) for the real-time WebSocket feed; blank falls back to sim. */
         String finnhubToken,
+        /** Alpaca API key-id + secret (free IEX tier) for the "alpaca" provider's real-time WebSocket
+         *  equities feed (ADR-0056); either blank falls back to sim. */
+        String alpacaKeyId,
+        String alpacaSecret,
         /** Cap on Finnhub REST calls/minute shared across ALL endpoints (news + curve) — the free
          *  tier's account-wide limit is 60; default 55 leaves headroom. WS trades don't count. */
         Integer finnhubMaxCallsPerMinute,
@@ -113,6 +117,14 @@ public record TradingCoreProperties(
 
     public String finnhubTokenOrEmpty() {
         return finnhubToken != null ? finnhubToken.trim() : "";
+    }
+
+    public String alpacaKeyIdOrEmpty() {
+        return alpacaKeyId != null ? alpacaKeyId.trim() : "";
+    }
+
+    public String alpacaSecretOrEmpty() {
+        return alpacaSecret != null ? alpacaSecret.trim() : "";
     }
 
     public int finnhubMaxCallsPerMinuteOrDefault() {

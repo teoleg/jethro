@@ -21,8 +21,8 @@ import java.util.TreeSet;
  * them on the <b>intersection</b> of trading days (so the cross-section the bootstrap resamples is
  * genuinely same-day across instruments), and writes the JSON {@link HistoricalSnapshotLoader}
  * reads. The fetch source is injected so it's testable offline; production passes a
- * {@link YahooHistoryClient}. External symbols are used only to query — the snapshot keys on the
- * internal {@code instrumentId} (invariant 2).
+ * {@link TiingoHistoryClient} (Yahoo history became subscription-only — ADR-0023/Tiingo). External
+ * symbols are used only to query — the snapshot keys on the internal {@code instrumentId} (invariant 2).
  */
 public final class SnapshotCapture {
 
@@ -30,28 +30,30 @@ public final class SnapshotCapture {
 
     /** Fetches one symbol's history; empty when the source has nothing usable. */
     public interface HistorySource {
-        Optional<YahooHistoryClient.History> fetch(String yahooSymbol);
+        Optional<HistoryClient.History> fetch(String symbol);
     }
 
     public record Result(String path, int instruments, int days, String source) {
     }
 
     private final HistorySource source;
+    private final String sourceName;
 
-    public SnapshotCapture(HistorySource source) {
+    public SnapshotCapture(HistorySource source, String sourceName) {
         this.source = source;
+        this.sourceName = sourceName == null || sourceName.isBlank() ? "unknown" : sourceName;
     }
 
-    /** Fetches {@code instrumentId → yahooSymbol}, aligns, and writes the snapshot to {@code out}. */
-    public Result capture(Map<String, String> instrumentToYahoo, Path out) throws IOException {
+    /** Fetches {@code instrumentId → providerSymbol}, aligns, and writes the snapshot to {@code out}. */
+    public Result capture(Map<String, String> instrumentToSymbol, Path out) throws IOException {
         // Per instrument: epoch-day → [close, volume], sorted by date.
         Map<String, TreeMap<Long, double[]>> byId = new LinkedHashMap<>();
-        for (Map.Entry<String, String> e : instrumentToYahoo.entrySet()) {
-            Optional<YahooHistoryClient.History> h = source.fetch(e.getValue());
+        for (Map.Entry<String, String> e : instrumentToSymbol.entrySet()) {
+            Optional<HistoryClient.History> h = source.fetch(e.getValue());
             if (h.isEmpty()) {
                 continue; // no usable history for this name — leave it out of the snapshot
             }
-            YahooHistoryClient.History hist = h.get();
+            HistoryClient.History hist = h.get();
             TreeMap<Long, double[]> series = new TreeMap<>();
             for (int i = 0; i < hist.epochDays().length; i++) {
                 series.put(hist.epochDays()[i], new double[]{hist.closes()[i], hist.volumes()[i]});
@@ -76,7 +78,7 @@ public final class SnapshotCapture {
         List<Long> axis = new ArrayList<>(dates);
 
         ObjectNode root = MAPPER.createObjectNode();
-        root.put("source", "yahoo");
+        root.put("source", sourceName);
         root.put("asOf", LocalDate.now().toString());
         ArrayNode ids = root.putArray("instruments");
         ObjectNode closes = root.putObject("closes");
@@ -97,6 +99,6 @@ public final class SnapshotCapture {
             Files.createDirectories(abs.getParent());
         }
         Files.writeString(abs, MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(root));
-        return new Result(abs.toString(), byId.size(), axis.size(), "yahoo");
+        return new Result(abs.toString(), byId.size(), axis.size(), sourceName);
     }
 }

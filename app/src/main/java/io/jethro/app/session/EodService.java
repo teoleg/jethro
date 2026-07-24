@@ -77,8 +77,8 @@ public final class EodService implements AutoCloseable {
         }
         try {
             List<BigDecimal> rows = jdbc.query(
-                    "select open_pnl from firm_equity where day = ?",
-                    (rs, i) -> rs.getBigDecimal(1), day);
+                    "select open_pnl from firm_equity where day = ? and feed_mode = ?",
+                    (rs, i) -> rs.getBigDecimal(1), day, io.jethro.messaging.Provenance.mode().name());
             return rows.isEmpty() ? null : rows.get(0);
         } catch (Exception e) {
             return null; // split unavailable until the next boundary — disclosed via null
@@ -92,8 +92,8 @@ public final class EodService implements AutoCloseable {
         }
         try {
             List<BigDecimal> rows = jdbc.query(
-                    "select total_pnl from firm_equity where day < ? order by day desc limit 1",
-                    (rs, i) -> rs.getBigDecimal(1), day);
+                    "select total_pnl from firm_equity where day < ? and feed_mode = ? order by day desc limit 1",
+                    (rs, i) -> rs.getBigDecimal(1), day, io.jethro.messaging.Provenance.mode().name());
             return rows.isEmpty() ? BigDecimal.ZERO : rows.get(0);
         } catch (Exception e) {
             log.warn("could not seed previous close (starting from 0): {}", e.toString());
@@ -144,18 +144,19 @@ public final class EodService implements AutoCloseable {
                         on conflict (day, instrument) do update set close = excluded.close
                         """, ended, mark.instrumentId(), mark.price());
             }
+            String mode = io.jethro.messaging.Provenance.mode().name();
             jdbc.update("""
-                    insert into firm_equity (day, total_pnl) values (?, ?)
-                    on conflict (day) do update set total_pnl = excluded.total_pnl
-                    """, ended, closeTotal);
+                    insert into firm_equity (day, total_pnl, feed_mode) values (?, ?, ?)
+                    on conflict (day, feed_mode) do update set total_pnl = excluded.total_pnl
+                    """, ended, closeTotal, mode);
             if (snapshot != null) {
                 for (ConsolidatedRisk.Group book : snapshot.byBook()) {
                     jdbc.update("""
-                            insert into book_equity (day, book, realized_pnl, unrealized_pnl, total_pnl)
-                            values (?, ?, ?, ?, ?)
-                            on conflict (day, book) do update set realized_pnl = excluded.realized_pnl,
+                            insert into book_equity (day, book, realized_pnl, unrealized_pnl, total_pnl, feed_mode)
+                            values (?, ?, ?, ?, ?, ?)
+                            on conflict (day, feed_mode, book) do update set realized_pnl = excluded.realized_pnl,
                                 unrealized_pnl = excluded.unrealized_pnl, total_pnl = excluded.total_pnl
-                            """, ended, book.key(), book.realizedPnl(), book.unrealizedPnl(), book.comprehensivePnl());
+                            """, ended, book.key(), book.realizedPnl(), book.unrealizedPnl(), book.comprehensivePnl(), mode);
                 }
             }
         }
@@ -167,9 +168,9 @@ public final class EodService implements AutoCloseable {
         BigDecimal open = openSnapshot != null ? openSnapshot.total().comprehensivePnl() : closeTotal;
         if (jdbc != null) {
             jdbc.update("""
-                    insert into firm_equity (day, total_pnl, open_pnl) values (?, ?, ?)
-                    on conflict (day) do update set open_pnl = excluded.open_pnl
-                    """, newDay, open, open);
+                    insert into firm_equity (day, total_pnl, open_pnl, feed_mode) values (?, ?, ?, ?)
+                    on conflict (day, feed_mode) do update set open_pnl = excluded.open_pnl
+                    """, newDay, open, open, io.jethro.messaging.Provenance.mode().name());
         }
         // Anchor first, then advance the day — a crash in between re-runs the rollover (upserts
         // make that idempotent) rather than losing it.
@@ -229,9 +230,9 @@ public final class EodService implements AutoCloseable {
             return List.of();
         }
         List<Object[]> rows = jdbc.query(
-                "select day, total_pnl from firm_equity order by day desc limit ?",
+                "select day, total_pnl from firm_equity where feed_mode = ? order by day desc limit ?",
                 (rs, i) -> new Object[]{rs.getObject("day", LocalDate.class), rs.getBigDecimal("total_pnl")},
-                limit + 1); // one extra so the oldest shown row still has a day-P&L
+                io.jethro.messaging.Provenance.mode().name(), limit + 1); // one extra so the oldest shown row still has a day-P&L
         List<DailyRow> out = new java.util.ArrayList<>();
         for (int i = rows.size() - 1; i >= 0; i--) { // oldest first
             BigDecimal total = (BigDecimal) rows.get(i)[1];

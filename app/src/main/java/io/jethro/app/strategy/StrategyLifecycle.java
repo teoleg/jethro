@@ -120,8 +120,29 @@ public final class StrategyLifecycle implements SmartLifecycle {
         this.volRegime = volRegime;
     }
 
+    // ADR-0055 phase 1: optional health telemetry — wired post-construction so it stays an observer
+    // the strategy never depends on (null when signals telemetry is disabled).
+    private volatile io.jethro.app.signal.SignalTelemetry signalTelemetry;
+    private volatile io.jethro.app.fusion.ForecastRegistry forecastRegistry; // ADR-0055 phase 4 (shadow)
+
+    public void setSignalTelemetry(io.jethro.app.signal.SignalTelemetry signalTelemetry) {
+        this.signalTelemetry = signalTelemetry;
+    }
+
+    public void setForecastRegistry(io.jethro.app.fusion.ForecastRegistry forecastRegistry) {
+        this.forecastRegistry = forecastRegistry;
+    }
+
+    // ADR-0055 phase 5: when the fusion layer is the sole order origin, the strategy's OWN auto-exec
+    // (entries and managed exits) stands down — it becomes a forecast source, not an order source.
+    private volatile boolean fusionRoutingActive;
+
+    public void setFusionRoutingActive(boolean active) {
+        this.fusionRoutingActive = active;
+    }
+
     private boolean autoExecuting() {
-        return control.autoExecute() && orderService != null;
+        return control.autoExecute() && orderService != null && !fusionRoutingActive;
     }
 
     /** The SENSED volatility regime (ADR-0051) — CALM/ELEVATED/UNKNOWN, price-derived (never a sim
@@ -202,6 +223,14 @@ public final class StrategyLifecycle implements SmartLifecycle {
             java.util.List<DiagSignal> outcomes = new ArrayList<>();
             for (TradeSignal signal : strategy.evaluate(observations)) {
                 signals++;
+                // ADR-0055 phase 1: record this source's directional call for health telemetry — scored
+                // later by realised forward return. Observational only; never gates or sizes this signal.
+                if (signalTelemetry != null) {
+                    signalTelemetry.record(signal.kind(), signal.instrumentId(), signal.side(), signal.price());
+                }
+                if (forecastRegistry != null) {
+                    forecastRegistry.submitStrategy(signal); // ADR-0055: current forecast for the fusion layer
+                }
                 String book = bookFor(signal.instrumentId()); // route by asset class, not all to one book
                 Optional<BigDecimal> sized = size(signal, regimeScale);
                 if (sized.isEmpty()) {
