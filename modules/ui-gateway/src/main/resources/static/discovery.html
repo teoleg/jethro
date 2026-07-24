@@ -72,11 +72,11 @@
   <div class="panel"><div id="cands"><div class="empty">loading…</div></div></div>
 
   <div class="section-h">Promotion gate <span id="gate-badge"></span>
-    <span class="note" style="text-transform:none;letter-spacing:0">— ADR-0060: the daily gate that decides whether a candidate may enter the monitored set. <b>Dry-run</b>: it decides and audits but writes nothing to reference data and trades nothing. A name must clear every gate — score, sustained (distinct days), corroborated (sources), feed-coverage — within the daily budget.</span></div>
+    <span class="note" style="text-transform:none;letter-spacing:0">— ADR-0060: the gate that decides whether a candidate enters the tracked universe. When <b>writing</b> it promotes into reference data (a first-class instrument); in <b>dry-run</b> it only proposes. A name must clear every gate — score, corroborated (≥ sources), feed-coverage, sustained (≥ distinct days) — within the daily budget.</span></div>
   <div class="panel"><div id="gate"><div class="empty">loading…</div></div></div>
 
   <div class="section-h">Promotion audit trail
-    <span class="note" style="text-transform:none;letter-spacing:0">— durable record (universe_promotion) of what the gate proposed, newest first. Phase 1 rows are dry-run proposals only.</span></div>
+    <span class="note" style="text-transform:none;letter-spacing:0">— durable record (universe_promotion), newest first: PROPOSED = dry-run; PROMOTED / EVICTED = live writes to reference data.</span></div>
   <div class="panel"><div id="audit"><div class="empty">loading…</div></div></div>
 
   <div class="section-h">Latest headlines
@@ -131,11 +131,15 @@
     if (!g || !g.available) {
       badge.innerHTML = "";
       document.getElementById("gate").outerHTML = '<div id="gate"><div class="empty">promotion gate off '
-        + '(set <span class="mono">jethro.universe.dynamic.enabled=true</span> to run the dry-run gate)</div></div>';
+        + '(set <span class="mono">jethro.universe.dynamic.enabled=true</span> to run the gate)</div></div>';
       return;
     }
-    badge.innerHTML = `<span class="badge">dry-run</span> <span class="note" style="text-transform:none;letter-spacing:0">`
-      + `${g.wouldPromote} of ${(g.proposals||[]).length} would be promoted</span>`;
+    const modeBadge = g.dryRun
+      ? '<span class="badge">dry-run</span>'
+      : '<span class="badge" style="border-color:var(--up);color:var(--up)">writing</span>';
+    const verb = g.dryRun ? "would be promoted" : "clear the gate (written to refdata)";
+    badge.innerHTML = `${modeBadge} <span class="note" style="text-transform:none;letter-spacing:0">`
+      + `${g.wouldPromote} of ${(g.proposals||[]).length} ${verb}</span>`;
     const p = g.proposals || [];
     document.getElementById("gate").outerHTML = '<div id="gate">' + (p.length ?
       "<table><tr><th>instrument</th><th>verdict</th><th class='num'>score</th><th class='num'>days</th><th class='num'>sources</th><th>reason</th><th>last seen</th></tr>" +

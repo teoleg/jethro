@@ -7,21 +7,24 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Read-only view of the ADR-0060 promotion gate (Phase 1, dry-run). Surfaces, for every live discovery
- * candidate, the gate's verdict and the reason — so the gate can be watched working on real candidates
- * before any refdata write path is wired — plus the durable audit trail of past proposals. This endpoint
- * never promotes, evicts, or writes reference data.
+ * Read-only view of the ADR-0060 promotion gate. Surfaces, for every live discovery candidate, the gate's
+ * verdict and the reason, plus the durable audit trail. {@code dryRun} reflects the ACTUAL mode
+ * ({@code jethro.universe.dynamic.write}): false = the gate writes promotions to refdata; true = it only
+ * proposes. This endpoint itself is read-only — it never writes.
  */
 @RestController
 public final class UniversePromotionController {
 
     private final ObjectProvider<UniversePromotionLifecycle> lifecycle;
     private final ObjectProvider<UniversePromotionRepository> repository;
+    private final DynamicUniverseProperties props;
 
     public UniversePromotionController(ObjectProvider<UniversePromotionLifecycle> lifecycle,
-                                       ObjectProvider<UniversePromotionRepository> repository) {
+                                       ObjectProvider<UniversePromotionRepository> repository,
+                                       DynamicUniverseProperties props) {
         this.lifecycle = lifecycle;
         this.repository = repository;
+        this.props = props;
     }
 
     /** One candidate's live gate result. {@code promote} = would be admitted; {@code outcome}/{@code reason}
@@ -41,9 +44,10 @@ public final class UniversePromotionController {
 
     @GetMapping("/api/universe/proposals")
     public ProposalsView proposals() {
+        boolean dryRun = !props.writeEnabled(); // reflect the REAL mode, not a hardcoded flag
         UniversePromotionLifecycle live = lifecycle.getIfAvailable();
         if (live == null) {
-            return new ProposalsView(false, true, 0, List.of(), recentAudit());
+            return new ProposalsView(false, dryRun, 0, List.of(), recentAudit());
         }
         List<ProposalView> rows = live.evaluateNow().stream()
                 .map(p -> new ProposalView(
@@ -57,7 +61,7 @@ public final class UniversePromotionController {
                         p.candidate().lastSeenMillis()))
                 .toList();
         int wouldPromote = (int) rows.stream().filter(ProposalView::promote).count();
-        return new ProposalsView(true, true, wouldPromote, rows, recentAudit());
+        return new ProposalsView(true, dryRun, wouldPromote, rows, recentAudit());
     }
 
     private List<AuditView> recentAudit() {
