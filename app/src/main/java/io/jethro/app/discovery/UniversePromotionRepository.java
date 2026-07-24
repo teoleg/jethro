@@ -51,8 +51,10 @@ public final class UniversePromotionRepository implements PromotionAudit {
                         rs.getString("instrument_id"),
                         rs.getString("action"),
                         rs.getString("outcome"),
-                        (Double) rs.getObject("score"),
-                        (Integer) rs.getObject("distinct_days"),
+                        // score is NUMERIC → JDBC returns BigDecimal; distinct_days is INTEGER. Read via
+                        // Number so neither a BigDecimal nor a boxed int throws a ClassCastException.
+                        rs.getObject("score") instanceof Number sc ? sc.doubleValue() : null,
+                        rs.getObject("distinct_days") instanceof Number dd ? dd.intValue() : null,
                         rs.getString("sources"),
                         rs.getString("reason"),
                         rs.getBoolean("dry_run")),
