@@ -36,6 +36,10 @@
   .head .ttl { flex:1; min-width:220px; }
   .tag { font-size:10px; border:1px solid var(--line-2); border-radius:4px; padding:1px 5px; color:var(--dim); }
   .tag.new { color:var(--up); border-color:var(--up); }
+  .verdict { font-size:10px; font-weight:600; letter-spacing:.04em; border-radius:4px; padding:1px 6px; border:1px solid var(--line-2); color:var(--dim); }
+  .verdict.yes { color:var(--up); border-color:var(--up); }
+  .verdict.no { color:var(--warn); border-color:var(--line-2); }
+  .badge { font-size:10px; text-transform:uppercase; letter-spacing:.06em; border:1px solid var(--warn); color:var(--warn); border-radius:4px; padding:1px 6px; }
 </style>
 </head>
 <body>
@@ -67,6 +71,14 @@
     <span class="note" style="text-transform:none;letter-spacing:0">— ADR-0050 §7: untracked names credible news/social are talking about, ranked. Suggestions only — nothing is added or traded. News outlets propose; social adds one when it's really cooking.</span></div>
   <div class="panel"><div id="cands"><div class="empty">loading…</div></div></div>
 
+  <div class="section-h">Promotion gate <span id="gate-badge"></span>
+    <span class="note" style="text-transform:none;letter-spacing:0">— ADR-0060: the daily gate that decides whether a candidate may enter the monitored set. <b>Dry-run</b>: it decides and audits but writes nothing to reference data and trades nothing. A name must clear every gate — score, sustained (distinct days), corroborated (sources), feed-coverage — within the daily budget.</span></div>
+  <div class="panel"><div id="gate"><div class="empty">loading…</div></div></div>
+
+  <div class="section-h">Promotion audit trail
+    <span class="note" style="text-transform:none;letter-spacing:0">— durable record (universe_promotion) of what the gate proposed, newest first. Phase 1 rows are dry-run proposals only.</span></div>
+  <div class="panel"><div id="audit"><div class="empty">loading…</div></div></div>
+
   <div class="section-h">Latest headlines
     <span class="note" style="text-transform:none;letter-spacing:0">— the news itself, newest first; tags are instruments each item mentions (green = untracked, i.e. a discovery candidate). Context only — never a number into risk, never an order.</span></div>
   <div class="panel"><div id="heads"><div class="empty">loading…</div></div></div>
@@ -85,12 +97,13 @@
     }
     const c = v.candidates || [];
     document.getElementById("cands").outerHTML = '<div id="cands">' + (c.length ?
-      "<table><tr><th>rank</th><th>instrument</th><th class='num'>score</th><th class='num'>mentions</th><th>sources</th><th>first seen</th><th>headline</th></tr>" +
+      "<table><tr><th>rank</th><th>instrument</th><th class='num'>score</th><th class='num'>mentions</th><th class='num'>days</th><th>sources</th><th>first seen</th><th>headline</th></tr>" +
       c.map((x, i) => `<tr>
         <td class="dim mono">${i+1}</td>
         <td class="mono">${esc(x.instrument)}</td>
         <td class="num mono">${x.score.toFixed(1)}</td>
         <td class="num mono">${x.mentions}</td>
+        <td class="num mono" title="distinct calendar days mentioned — the ADR-0060 'sustained' signal">${x.distinctDays ?? "—"}</td>
         <td>${(x.sources||[]).map(s => `<span class="src">${esc(s)}</span>`).join("")}</td>
         <td class="dim mono">${x.firstSeenMillis ? new Date(x.firstSeenMillis).toLocaleTimeString() : "—"}</td>
         <td class="dim" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.sample)}">${esc(x.sample)}</td>
@@ -107,7 +120,56 @@
         </div>`).join("")
       : '<div class="empty">no headlines yet — the first poll runs ~20s after startup</div>') + '</div>';
   }
-  async function load() { try { render(await (await pollFetch("/api/discovery")).json()); } catch (e) {} }
+  const OUTCOME_LABEL = {
+    PROMOTE: "would promote", BLACKLISTED: "blacklisted", ALREADY_TRACKED: "already tracked",
+    LOW_SCORE: "score too low", NOT_SUSTAINED: "not sustained", NOT_CORROBORATED: "not corroborated",
+    NO_FEED_COVERAGE: "no feed coverage", RATE_LIMITED: "daily budget spent"
+  };
+
+  function renderGate(g) {
+    const badge = document.getElementById("gate-badge");
+    if (!g || !g.available) {
+      badge.innerHTML = "";
+      document.getElementById("gate").outerHTML = '<div id="gate"><div class="empty">promotion gate off '
+        + '(set <span class="mono">jethro.universe.dynamic.enabled=true</span> to run the dry-run gate)</div></div>';
+      return;
+    }
+    badge.innerHTML = `<span class="badge">dry-run</span> <span class="note" style="text-transform:none;letter-spacing:0">`
+      + `${g.wouldPromote} of ${(g.proposals||[]).length} would be promoted</span>`;
+    const p = g.proposals || [];
+    document.getElementById("gate").outerHTML = '<div id="gate">' + (p.length ?
+      "<table><tr><th>instrument</th><th>verdict</th><th class='num'>score</th><th class='num'>days</th><th class='num'>sources</th><th>reason</th><th>last seen</th></tr>" +
+      p.map(x => `<tr>
+        <td class="mono">${esc(x.instrument)}</td>
+        <td><span class="verdict ${x.promote ? "yes" : "no"}">${esc(OUTCOME_LABEL[x.outcome] || x.outcome)}</span></td>
+        <td class="num mono">${(x.score ?? 0).toFixed(1)}</td>
+        <td class="num mono">${x.distinctDays ?? "—"}</td>
+        <td class="num mono">${x.sources ?? "—"}</td>
+        <td class="dim" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.reason)}">${esc(x.reason)}</td>
+        <td class="dim mono">${x.lastSeenMillis ? new Date(x.lastSeenMillis).toLocaleTimeString() : "—"}</td>
+      </tr>`).join("") + "</table>"
+      : '<div class="empty">no candidates to evaluate yet</div>') + '</div>';
+
+    const a = g.recent || [];
+    document.getElementById("audit").outerHTML = '<div id="audit">' + (a.length ?
+      "<table><tr><th>time</th><th>action</th><th>instrument</th><th>outcome</th><th class='num'>score</th><th class='num'>days</th><th>reason</th><th>mode</th></tr>" +
+      a.map(x => `<tr>
+        <td class="dim mono">${x.atMillis ? new Date(x.atMillis).toLocaleString() : "—"}</td>
+        <td><span class="tag">${esc(x.action)}${x.dryRun ? " · dry" : ""}</span></td>
+        <td class="mono">${esc(x.instrument)}</td>
+        <td class="dim">${esc(OUTCOME_LABEL[x.outcome] || x.outcome)}</td>
+        <td class="num mono">${x.score != null ? Number(x.score).toFixed(1) : "—"}</td>
+        <td class="num mono">${x.distinctDays ?? "—"}</td>
+        <td class="dim" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.reason)}">${esc(x.reason)}</td>
+        <td class="dim mono">${esc(x.feedMode || "—")}</td>
+      </tr>`).join("") + "</table>"
+      : '<div class="empty">no proposals recorded yet — the gate evaluates ~60s after startup, then daily</div>') + '</div>';
+  }
+
+  async function load() {
+    try { render(await (await pollFetch("/api/discovery")).json()); } catch (e) {}
+    try { renderGate(await (await pollFetch("/api/universe/proposals")).json()); } catch (e) {}
+  }
   poll(load, 5000);
 </script>
 </body>
