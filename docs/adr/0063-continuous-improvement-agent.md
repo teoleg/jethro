@@ -27,21 +27,30 @@ running trading system is precisely the failure those rules exist to prevent —
 manufacturing silent money decisions at machine speed, on a system that just proved it can
 lose money while looking flat (post-mortem: hedge masking a bleeding book).
 
-## Objective (the KPI every change is judged against)
+## Objective (multi-dimensional — the state the agent optimizes)
 
-The agent optimizes **risk-adjusted return — PnL up per unit of exposure — not raw PnL.**
-Raw-PnL maximization just levers up until a blow-up; minimum-exposure alone goes to cash; the
-target is the **ratio** (return over risk taken — Sharpe / return-over-VaR / Grinold's IR,
-*JPM* 1989), with the firm drawdown breaker (ADR-0027) as a hard floor neither term may
-cross. Two anti-gaming rules make the KPI honest, both learned from the 2026-07-24 post-
-mortem: (a) it is measured on **strategy alpha**, read from the attribution panel (alpha vs
-hedge vs cost), **not the firm total** — a directional hedge or a lucky up-day must not be
-allowed to mask a bleeding book; and (b) **flat is an allowed, sometimes-optimal outcome** —
-when no `(name, algo)` has positive live edge (ADR-0062), doing nothing *is* the highest
-risk-adjusted return, so the objective is "risk-adjusted-return **or zero**," never "must
-act." The exact metric and the risk budget it is normalized against are owner-set money-risk
-dials (CLAUDE.md provenance rule) — this ADR fixes the *shape* (a ratio, on alpha, floored by
-the breaker, with a no-trade option), not the numbers.
+The objective is a **vector of outcomes re-measured every cycle, not a single scalar.** Its
+core dimensions are **ΔPnL** and **exposure**; the other outcome dimensions that move with
+them — realized cost/slippage, drawdown, turnover — ride alongside. The agent treats
+**everything else as free variables** (algo selection and params, position sizing, the
+universe, config, the code itself) and its job is to **plan**: search over those variables to
+move the objective vector the right way — **PnL up, exposure down** — cycle after cycle. The
+dimensions are kept **separate on purpose**: +$500 made by doubling exposure and +$500 made
+flat are different outcomes, and collapsing them into one number up front hides which one
+happened. A ratio (Sharpe / return-over-VaR / Grinold's IR, *JPM* 1989) is *one* way to
+weigh the dimensions against each other, but that weighting — or whether to scalarize at all
+— is an **owner-set** choice, not fixed here.
+
+Constraints and anti-gaming rules, both hard: (a) the **firm drawdown breaker** (ADR-0027) is
+a floor no dimension may trade away — it bounds the search, it is not a dimension to optimize;
+(b) PnL/exposure are measured on **strategy alpha** (attribution panel: alpha vs hedge vs
+cost), **not the firm total** — a directional hedge or a lucky up-day must never mask a
+bleeding book (2026-07-24 post-mortem); (c) **flat is an allowed, often-optimal plan** — when
+no `(name, algo)` has positive live edge (ADR-0062), doing nothing dominates on every
+dimension, so the agent is never forced to act. The specific metrics and the risk budget are
+owner-set money-risk dials (CLAUDE.md provenance rule); this ADR fixes the *shape* — a
+multi-dimensional objective on alpha, exposure-aware, breaker-floored, no-trade allowed — not
+the numbers.
 
 ## Decision
 
@@ -105,9 +114,10 @@ trigger (edge/cost/breaker regression vs the pre-change baseline) opens a revert
   introduce ordinary bugs, so CI must run on the agent's branch before the node pulls (green
   build is the minimum bar even when the owner isn't reviewing the diff); a chatty agent can
   bury the attention feed, so its cards obey the deterministic-floor priority (ADR-0017). The
-  agent **will try to game its KPI** (Goodhart) — the alpha-not-firm measurement, the ratio
-  (not raw PnL), the breaker floor, and the allowed no-trade outcome in the objective above
-  are the specific defenses; any new KPI added later must carry the same anti-gaming framing.
+  agent **will try to game its objective** (Goodhart) — keeping the dimensions separate
+  (ΔPnL *and* exposure, not one collapsed number), measuring on alpha-not-firm, the breaker
+  floor, and the allowed no-trade outcome are the specific defenses; any dimension or metric
+  added later must carry the same anti-gaming framing.
 - **Follow-ups:** wire CI-on-agent-branch as the pre-pull bar; define the rollback
   baseline/metric that triggers a revert commit; decide SLM-vs-frontier per ADR-0010; specify
   the node-side pull-and-restart hook (poll interval, restart safety around open positions).
