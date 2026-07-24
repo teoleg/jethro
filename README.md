@@ -180,13 +180,15 @@ is actually talking about and — conservatively, programmatically — grows the
    burst), **corroborated** (≥M distinct credible sources), and **feed-coverage confirmed** (a configured
    provider can actually mark it — never admit an unmarkable name). It is **rate-limited to K/day**, and
    a **blacklist** hard-bans names.
-5. **Monitor-only promotion** — a promoted name is written to reference data with a real `display_name`,
-   a feed symbol, and **PROVISIONAL, flagged** adv/spread (`source=discovered`, money-dial rule: never a
-   silent default). It's marked **`MONITOR_ONLY`**: it flows into marks / indicators / signals, but the
-   fusion order gate (the sole order origin) **vetoes it — it cannot trade** until its ADV is measured
-   from our own tape and it clears the OOS backtest gate. *Growth never bleeds risk*: a guessed
-   provisional number can never size a real order.
-6. **Bounded + audited + reversible** — a hard **cap** on monitored names with **stalest-eviction**
+5. **Promotion → a first-class instrument** — a promoted name is written into the **reference-data
+   master** with a real `display_name`, a feed symbol, and **PROVISIONAL, flagged** adv/spread
+   (`source=discovered`, money-dial rule: never a silent default — the flag says "not yet measured"). It
+   then behaves like **any other name**: it joins the refdata trading universe, gets marks / indicators /
+   signals, is OOS-evaluated, and **trades through the same gates as everything else** (OOS backtest gate,
+   pre-trade guardrail, sim-only execution + firm breaker). No special-casing — running discovered names
+   through the real order/risk path is the whole point (it validates the config, the risk limits and the
+   strategy stack on live-discovered names).
+6. **Bounded + audited + reversible** — a hard **cap** on discovered names with **stalest-eviction**
    (least-recent mention, never a pinned or already-traded name); a **pin-list** protects names; every
    promotion/eviction is a row in `universe_promotion`. *Discover* surfaces the live gate verdict +
    reason per candidate and the audit trail.

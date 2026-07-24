@@ -95,7 +95,7 @@ and why so many of them funnelling through `RiskProjection` is the freeze hazard
 | `signal` | Per-signal health telemetry: score each source's live call by realised forward return | `SignalTelemetryResolver` (60s) | marks; DB `signal_observations` | 0055 |
 | `training` | Learned advisory signal: Tiingo training bars → features/labels → purged walk-forward gate | `TrainingBarsLoader`, `LearnedSignalService` | Tiingo, DB | 0053 |
 | `social` | Adversarial social pipeline: spam/credibility/corroboration → advisory signals | `SocialLifecycle` (60s) | StockTwits/Telegram/news feeds, refdata | 0050 |
-| `discovery` | Universe discovery from RSS/social **+ the dynamic-universe promotion gate**: a daily controller promotes sustained/corroborated/feed-covered candidates into a bounded **monitor-only** tracked set via a runtime refdata write path (provisional adv/spread, `source=discovered`), stalest-eviction at the cap; audited to `universe_promotion` | `DiscoveryLifecycle` (300s), `UniversePromotionLifecycle` (daily) | RSS, refdata (read+write) | 0045, 0050, 0060 |
+| `discovery` | Universe discovery from RSS/social **+ the dynamic-universe promotion gate**: a daily controller promotes sustained/corroborated/feed-covered candidates into the **reference-data master** (provisional flagged adv/spread, `source=discovered`) — a first-class, tradable instrument — with stalest-eviction at a cap; audited to `universe_promotion` | `DiscoveryLifecycle` (300s), `UniversePromotionLifecycle` (daily) | RSS, refdata (read+write) | 0045, 0050, 0060 |
 | `ai` | Local-SLM risk commentary onto the attention feed; Ollama warmup; inference metrics | `RiskCommentatorLifecycle` (60s) | Ollama, risk | 0016 |
 | `chat` | Operational chat: SLM parses the question, deterministic code answers, every turn audited | `ChatResponder` (on demand) | Ollama, risk, refdata | 0021 |
 | `hedge` | Minimum-variance proxy hedge advisor (equity axis built; DV01/FX deferred) | `HedgeLifecycle` | risk, marks, correlations | 0038–0042 |
@@ -156,10 +156,11 @@ Detail pages drill down; each has a "show everything" mode.
 11. **Signals stop placing orders (ADR-0055):** when fusion routing is on (sim-only), the fusion layer
     is the *sole* order origin — strategy auto-exec and hypothesis autonomy stand down; orders are the
     netted delta between the combined target and the current book, through the ADR-0049 gate chain.
-12. **Monitor-only growth (ADR-0060):** a discovery-promoted name is written to refdata as
-    `universe_status=MONITOR_ONLY` — it flows into marks/indicators/signals but the fusion order gate
-    vetoes it, so it cannot trade until its ADV is measured from our own tape. A provisional (flagged)
-    adv/spread can never size a real order. Growth never bleeds risk.
+12. **Sim isolation (ADR-0060 / invariant 9 in CLAUDE.md):** the tradable universe is the reference-data
+    master, never the legacy `sim-instruments` list. A discovery-promoted name is written to refdata and
+    is thereby first-class everywhere — marks, indicators, signals, OOS backtest, and the order path —
+    trading through the same gates as any name (no monitor-only special-casing). The sim only *consumes*
+    that universe when testing; it never defines it.
 
 ## Repository layout (actual)
 
@@ -181,7 +182,7 @@ jethro/
 `finops` (empty shell, ADR-0011) · the S3 Parquet tick archiver (ADR-0014) · the external frontier AI
 tier (ADR-0010, behind cost triggers) · hedge DV01/FX axes + AUTO submission (ADR-0038/0039) · the
 runtime feed-switch endpoint (ADR-0029, restart-to-switch today) · `daily_closes`/`mark_quarantine`
-feed-mode scoping (ADR-0029) · the ADR-0060 **measured-ADV → tradable graduation** (a monitored name
-stays monitor-only until its ADV is measured from our own tape) and mid-session hot-subscribe (a
-promoted name gets marks at the next session, since feed symbol maps are read at boot). See
-[`deferred-register.md`](../deferred-register.md) and the ADR index Implementation column for the full list.
+feed-mode scoping (ADR-0029) · ADR-0060 mid-session hot-subscribe (a promoted name joins the trading
+universe at the next session, since feed symbol maps + the sim/OOS universe are read at boot) and the
+measured-ADV replacement of the provisional adv/spread a discovered name trades on until it has its own
+tape. See [`deferred-register.md`](../deferred-register.md) and the ADR index Implementation column for the full list.
