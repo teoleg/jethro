@@ -24,10 +24,16 @@ public final class UniverseCandidates {
     /** Cross-source bonus per distinct source — a heuristic weight, not a money/risk dial. */
     private static final double DISTINCT_SOURCE_BONUS = 5.0;
 
+    /** Millis in one UTC day — used to bucket mentions into distinct calendar days (the "sustained"
+     *  signal ADR-0060's promotion gate reads). UTC (not session-day) is fine: this is a coarse
+     *  conservatism proxy — a name must recur across days, not just spike once — not a money number. */
+    private static final long DAY_MILLIS = 86_400_000L;
+
     private static final class Agg {
         double weightSum;
         int mentions;
         final Set<String> sources = new LinkedHashSet<>();
+        final Set<Long> days = new LinkedHashSet<>();
         long firstSeen;
         long lastSeen;
         String sample;
@@ -56,6 +62,7 @@ public final class UniverseCandidates {
         a.weightSum += Math.max(0, weight);
         a.mentions++;
         a.sources.add(source);
+        a.days.add(now / DAY_MILLIS);
         a.lastSeen = now;
         if (a.sample == null) {
             a.sample = sample;
@@ -89,7 +96,7 @@ public final class UniverseCandidates {
     public synchronized List<UniverseCandidate> ranked(int limit) {
         List<UniverseCandidate> out = new ArrayList<>(byInstrument.size());
         byInstrument.forEach((id, a) -> out.add(new UniverseCandidate(
-                id, score(a), a.mentions, Set.copyOf(a.sources), a.firstSeen, a.lastSeen, a.sample)));
+                id, score(a), a.mentions, Set.copyOf(a.sources), a.firstSeen, a.lastSeen, a.days.size(), a.sample)));
         out.sort(Comparator.comparingDouble(UniverseCandidate::score).reversed());
         return out.size() > limit ? out.subList(0, limit) : out;
     }

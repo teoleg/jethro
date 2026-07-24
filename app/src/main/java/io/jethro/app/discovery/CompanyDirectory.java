@@ -27,12 +27,29 @@ public final class CompanyDirectory {
 
     /** Name matcher → ticker, ordered longest-name-first so "Goldman Sachs" wins over any "Goldman". */
     private final List<Entry> entries;
+    /** All tickers in the directory — the set of US-listed names we can resolve from prose. */
+    private final Set<String> tickers;
 
     private record Entry(Pattern pattern, String ticker, int len) {
     }
 
     private CompanyDirectory(List<Entry> entries) {
         this.entries = entries;
+        Set<String> t = new LinkedHashSet<>();
+        for (Entry e : entries) {
+            t.add(e.ticker);
+        }
+        this.tickers = Set.copyOf(t);
+    }
+
+    /**
+     * Whether this directory knows the ticker. Used by the ADR-0060 promotion gate as a conservative
+     * feed-coverage proxy: the directory is the SEC company-tickers list, so a ticker in it is a real
+     * US-listed equity that the Alpaca IEX / Finnhub free tiers can stream. Not a live provider-asset
+     * confirmation (that is Phase 2) — a deliberately strict floor that never over-admits.
+     */
+    public boolean covers(String ticker) {
+        return ticker != null && tickers.contains(ticker.toUpperCase());
     }
 
     /** Tickers whose company name appears (as a whole phrase, case-insensitive) in the text. */

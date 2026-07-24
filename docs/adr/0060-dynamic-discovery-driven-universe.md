@@ -1,6 +1,6 @@
 # ADR-0060: Dynamic discovery-driven universe — daily promotion, provisional refdata, monitor-only probation
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-07-24
 - **Deciders:** Oleg
 - **Tags:** refdata, discovery, universe, data, risk

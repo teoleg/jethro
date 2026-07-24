@@ -13,8 +13,10 @@ import java.util.Set;
  * @param sources        distinct sources naming it (e.g. reuters, stocktwits) — cross-source matters
  * @param firstSeenMillis when it first appeared
  * @param lastSeenMillis  most recent mention
+ * @param distinctDays   number of distinct UTC calendar days it was mentioned on — the "sustained"
+ *                       signal the promotion gate (ADR-0060) uses; a one-day burst has distinctDays=1
  * @param sample         a representative headline/post
  */
 public record UniverseCandidate(String instrumentId, double score, int mentions, Set<String> sources,
-                                long firstSeenMillis, long lastSeenMillis, String sample) {
+                                long firstSeenMillis, long lastSeenMillis, int distinctDays, String sample) {
 }

@@ -37,7 +37,20 @@ class UniverseCandidatesTest {
         assertEquals(100, top.firstSeenMillis());
         assertEquals(200, top.lastSeenMillis());
         assertEquals(2, top.sources().size());
+        assertEquals(1, top.distinctDays(), "both mentions land in the same UTC day");
         assertEquals("first", top.sample(), "the first sample is retained");
+    }
+
+    @Test
+    void distinctDaysCountsCalendarDaysNotMentions() {
+        var c = new UniverseCandidates(100);
+        long day = 86_400_000L;
+        c.observe("PLTR", "news:reuters", 3.0, "d0 morning", 9 * 3600_000L);   // day 0
+        c.observe("PLTR", "news:reuters", 3.0, "d0 afternoon", 15 * 3600_000L); // day 0 again
+        c.observe("PLTR", "news:reuters", 3.0, "d2", 2 * day + 3600_000L);       // day 2
+        var top = c.ranked(1).get(0);
+        assertEquals(3, top.mentions(), "three mentions");
+        assertEquals(2, top.distinctDays(), "but only two distinct calendar days — sustain, not burst");
     }
 
     @Test
