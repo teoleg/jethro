@@ -87,8 +87,24 @@ fully ours, deterministic (seedable), and controllable.
   Volume **surges with the regime and clusters with volatility** (a stress regime trades ~3× the
   calm baseline and a big-move tick prints heavier), so a regime change visibly changes the *shape
   of traffic*, not just price variance — swaps trade with real volume too, not a frozen lot.
-- **Provider abstraction** (ADR-0009) — the identical pipeline runs the **sim**, **Yahoo** (free,
-  delayed, dev/demo), and **Finnhub** (free real-time equities WS) feeds.
+- **Provider abstraction + multi-source coverage** (ADR-0009/0023/0024/0056) — the identical pipeline
+  runs the **sim** or a real feed, selected by one config knob:
+  - **Alpaca** (`provider=alpaca`) — **free real-time US-equity trades** over Alpaca's IEX WebSocket
+    (`wss://stream.data.alpaca.markets/v2/iex`), using free paper/trading-API keys. JSON stream with a
+    loud fallback if a connection lands on msgpack; auth → subscribe-on-authenticated handshake with
+    reconnect/back-off.
+  - **Finnhub** (`provider=finnhub`) — free real-time equities WebSocket (`wss://ws.finnhub.io`), plus
+    a free Treasury-curve probe when a token is set.
+  - **Yahoo** (`provider=yahoo`) — free but **~15-min delayed**, dev/demo only, polled REST.
+  - **Multi-source composition (ADR-0056):** a real-time WS source is **composed with a delayed Yahoo
+    poll** as a background — Yahoo covers the names the WS doesn't stream (FX, futures) *and* backstops
+    the WS names off-hours. A **mark-cache freshness guard** (reject an older provider timestamp) keeps
+    the live WS mark winning, so the two sources **never mix** — this fixed the single-source blackout
+    where a name on one quiet feed showed 0 exposure. FX / index & rate futures / the SOFR-Treasury
+    curve ride the sim or the **live Treasury curve** (ADR-0024) under any equity feed.
+  - External provider symbology **never leaks past the market-data gateway**; internal code keys on
+    `instrumentId`. Whatever the feed, a missing broker/model **degrades gracefully** — the market path
+    never depends on either.
 - **Hard mode separation** (ADR-0029) — every event carries `feedMode` (SIM/LIVE/REPLAY) +
   `sessionEpoch`; topics, projections and the archive are namespaced by mode, so sim and live
   numbers are never aggregated.
@@ -141,20 +157,43 @@ or add *context*, but a signal can never move the book without passing the deter
   corroboration gate** stands in front: a subject promotes only on ≥k **distinct credible** channels;
   a low-credibility burst is flagged as a **suspected pump** and ignored, never traded. Per-source
   **connection health, progress, and the live controls** are on their own *Sources* page.
-- **Unrestricted discovery** — social/news surface **any** ticker they discuss, tagged
-  tracked-or-not; a corroborated **untracked** name is a *suggestion to add*, not a filtered-out blank.
-- **News → universe discovery** (ADR-0045/0050 §7) — real **RSS** from your curated outlets feeds a
-  ranked **candidate-additions** register (cross-source names outrank one loud source); *Discover*
-  shows what's cooking. Big outlets propose additions to the base list; social adds an emerging name.
-- **Dynamic discovery-driven universe** (ADR-0060) — a **daily promotion gate** turns those candidates
-  into tracked names *programmatically*, conservatively: a name is promoted only if it clears **score
-  ≥ threshold**, **sustained** (≥N distinct days), **corroborated** (≥M sources) and **feed-coverage**,
-  rate-limited to K/day. On promotion it's written to reference data as **monitor-only** (provisional,
-  flagged adv/spread; `source=discovered`) — it flows into marks/indicators/signals but the fusion order
-  gate **vetoes it, so it cannot trade** until its ADV is measured from our own tape. The set is bounded
-  (stalest-eviction at a cap, pin-list / blacklist), and every promotion/eviction is audited. The
-  *Discover* page shows the live gate verdicts + the audit trail; the whole feature is off by default
-  (`jethro.universe.dynamic.enabled`) and has a dry-run mode (decide + audit, write nothing).
+### Autodiscovery — from a headline to a monitored name
+
+The tracked universe is no longer a frozen hardcoded list. A discovery pipeline watches what the market
+is actually talking about and — conservatively, programmatically — grows the set. End to end:
+
+1. **Sources** (ADR-0045/0050 §7) — real **RSS** from your curated outlets (central banks, the market
+   regulator, the labour-stats agency, broad market feeds) polled off the tick path, plus the real
+   **social** feeds (StockTwits/Telegram). Fail-open: a dead outlet shows *unreachable*, the rest keep
+   polling; nothing is faked.
+2. **Name extraction** — three deterministic ways, no SLM, no scraping: **$cashtags**,
+   **exchange-qualified** mentions (`(NASDAQ: X)`), and **bare company names** in prose ("Nvidia jumps")
+   resolved via a curated **SEC company-ticker directory**. Only names we do **not** already track
+   surface as candidates — a tracked name in the news is left for the advisory path.
+3. **Ranked candidate register** — each untracked mention is weighted by **source credibility** (a
+   trusted outlet > a verified social account > an anonymous post) and accumulated, with a **cross-source
+   bonus** so a name two independent outlets carry outranks one loud single source. It also tracks the
+   number of **distinct calendar days** the name recurred (the "sustained" signal) and is **bounded**
+   (the weakest candidate is evicted past a cap). *Discover* shows this live, newest headlines and all.
+4. **Daily promotion gate** (ADR-0060) — once per session-day a controller promotes a candidate **only**
+   if it clears **all** of: **score ≥ threshold**, **sustained** (≥N distinct days, not a one-day
+   burst), **corroborated** (≥M distinct credible sources), and **feed-coverage confirmed** (a configured
+   provider can actually mark it — never admit an unmarkable name). It is **rate-limited to K/day**, and
+   a **blacklist** hard-bans names.
+5. **Monitor-only promotion** — a promoted name is written to reference data with a real `display_name`,
+   a feed symbol, and **PROVISIONAL, flagged** adv/spread (`source=discovered`, money-dial rule: never a
+   silent default). It's marked **`MONITOR_ONLY`**: it flows into marks / indicators / signals, but the
+   fusion order gate (the sole order origin) **vetoes it — it cannot trade** until its ADV is measured
+   from our own tape and it clears the OOS backtest gate. *Growth never bleeds risk*: a guessed
+   provisional number can never size a real order.
+6. **Bounded + audited + reversible** — a hard **cap** on monitored names with **stalest-eviction**
+   (least-recent mention, never a pinned or already-traded name); a **pin-list** protects names; every
+   promotion/eviction is a row in `universe_promotion`. *Discover* surfaces the live gate verdict +
+   reason per candidate and the audit trail.
+
+The whole feature is **off by default** (`jethro.universe.dynamic.enabled`) with a **dry-run** mode
+(`…dynamic.write=false`: decide + audit, write nothing to refdata) so you can watch the gate work on real
+candidates before it writes anything. All thresholds are conservative, owner-set placeholders.
 
 The AI/news/social feeds are **built, tested, and advisory-only**; the live external calls are opt-in
 (configure your outlets/API tokens) and fail-open — an unreachable source shows *unreachable*, it
@@ -239,10 +278,14 @@ docker compose --profile app up --build   # run the app as a container too
 Pick the sim engine and feed with `jethro.trading.*` (properties or env):
 
 ```properties
-jethro.trading.provider=sim              # sim (default) | yahoo | finnhub
+jethro.trading.provider=sim              # sim (default) | yahoo | finnhub | alpaca
 jethro.trading.sim-engine=correlated     # correlated (default) | historical | legacy
 jethro.trading.sim-snapshot-path=/data/history.json   # for sim-engine=historical (else a synthetic seed)
 ```
+
+Real feeds need a **free key** (never committed — set via env / `local.env`): `FINNHUB=…` for Finnhub,
+or `ALPACA_KEY_ID=… ALPACA_SECRET=…` for Alpaca (paper/trading-API keys; IEX real-time data is free).
+Missing/invalid credentials **fall back to the sim feed**, logged — the app always starts.
 
 Without the broker/model running, the app **degrades gracefully** — the market path never depends
 on either.
