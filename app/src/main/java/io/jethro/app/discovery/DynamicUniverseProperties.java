@@ -21,6 +21,8 @@ public record DynamicUniverseProperties(
         boolean enabled,
         /** Minimum discovery score to be eligible (credibility-weighted cross-source rank). */
         double minScore,
+        /** Minimum total mentions accumulated — the "how much is it being talked about" check. */
+        int minMentions,
         /** Sustained: minimum distinct calendar days the name must have been mentioned on. */
         int minSustainedDays,
         /** Corroborated: minimum distinct credible sources naming it. */
@@ -47,7 +49,12 @@ public record DynamicUniverseProperties(
 
     public double minScoreOrDefault() {
         // Minimum credibility-weighted cross-source score to be eligible.
-        return minScore > 0 ? minScore : 25.0;
+        return minScore > 0 ? minScore : 250.0;
+    }
+
+    public int minMentionsOrDefault() {
+        // Minimum total mentions — how much the name is being talked about.
+        return minMentions > 0 ? minMentions : 50;
     }
 
     public int minSustainedDaysOrDefault() {
@@ -99,6 +106,7 @@ public record DynamicUniverseProperties(
 
     public UniversePromotionPolicy.Thresholds toThresholds() {
         return new UniversePromotionPolicy.Thresholds(
-                minScoreOrDefault(), minSustainedDaysOrDefault(), minSourcesOrDefault(), maxPromotionsPerDayOrDefault());
+                minScoreOrDefault(), minMentionsOrDefault(), minSustainedDaysOrDefault(), minSourcesOrDefault(),
+                maxPromotionsPerDayOrDefault());
     }
 }

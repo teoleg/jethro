@@ -22,10 +22,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class UniversePromotionPolicyTest {
 
-    private static final Thresholds T = new Thresholds(25.0, 3, 2, 2);
+    // minScore 25, minMentions 1 (non-blocking here), minSustainedDays 3, minSources 2, budget 2.
+    private static final Thresholds T = new Thresholds(25.0, 1, 3, 2, 2);
     private final UniversePromotionPolicy policy = new UniversePromotionPolicy(T);
 
-    /** A candidate with the given score, distinct-source count, and distinct-day count. */
+    /** A candidate with the given score, distinct-source count (also used as mention count), distinct days. */
     private static UniverseCandidate cand(String id, double score, int sources, int distinctDays) {
         Set<String> s = new LinkedHashSet<>();
         for (int i = 0; i < sources; i++) {
@@ -103,10 +104,28 @@ class UniversePromotionPolicyTest {
     }
 
     @Test
+    void tooFewMentionsIsRejected() {
+        // score/sources/days all fine, but only 10 mentions when 50 are required.
+        var strict = new UniversePromotionPolicy(new Thresholds(25.0, 50, 1, 1, 2));
+        var c = new UniverseCandidate("X", 300.0, 10, Set.of("s1", "s2"), 1L, 2L, 5, "sample");
+        Verdict v = strict.evaluate(c, ctx(Set.of(), Set.of(), ALL_COVERED, 0));
+        assertEquals(Outcome.LOW_MENTIONS, v.outcome());
+    }
+
+    @Test
+    void scoreAndMentionsTogetherAdmit() {
+        // The owner rule: score > threshold AND mentions > threshold → promote (other gates non-blocking).
+        var rule = new UniversePromotionPolicy(new Thresholds(250.0, 50, 1, 1, 2));
+        var c = new UniverseCandidate("TSLA", 1000.0, 330, Set.of("s1"), 1L, 2L, 1, "hot");
+        assertTrue(rule.evaluate(c, ctx(Set.of(), Set.of(), ALL_COVERED, 0)).promote());
+    }
+
+    @Test
     void thresholdsValidateTheirInputs() {
-        assertThrows(IllegalArgumentException.class, () -> new Thresholds(-1, 3, 2, 2));
-        assertThrows(IllegalArgumentException.class, () -> new Thresholds(25, 0, 2, 2));
-        assertThrows(IllegalArgumentException.class, () -> new Thresholds(25, 3, 0, 2));
-        assertThrows(IllegalArgumentException.class, () -> new Thresholds(25, 3, 2, -1));
+        assertThrows(IllegalArgumentException.class, () -> new Thresholds(-1, 0, 3, 2, 2));
+        assertThrows(IllegalArgumentException.class, () -> new Thresholds(25, -1, 3, 2, 2));
+        assertThrows(IllegalArgumentException.class, () -> new Thresholds(25, 0, 0, 2, 2));
+        assertThrows(IllegalArgumentException.class, () -> new Thresholds(25, 0, 3, 0, 2));
+        assertThrows(IllegalArgumentException.class, () -> new Thresholds(25, 0, 3, 2, -1));
     }
 }

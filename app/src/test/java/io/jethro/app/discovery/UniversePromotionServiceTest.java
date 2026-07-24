@@ -73,8 +73,8 @@ class UniversePromotionServiceTest {
     }
 
     private static DynamicUniverseProperties props(int cap) {
-        // enabled, minScore, sustained, sources, perDay, maxMonitored, interval, blacklist, pin, write, adv, spread
-        return new DynamicUniverseProperties(true, 25, 3, 2, 2, cap, 86_400, List.of(), List.of(), true,
+        // enabled, minScore, minMentions, sustained, sources, perDay, maxMonitored, interval, blacklist, pin, write, adv, spread
+        return new DynamicUniverseProperties(true, 25, 1, 3, 2, 2, cap, 86_400, List.of(), List.of(), true,
                 new BigDecimal("50000000"), new BigDecimal("20"));
     }
 
@@ -117,23 +117,23 @@ class UniversePromotionServiceTest {
     }
 
     @Test
-    void evictionRemovesTheStalestNonPinnedUntradedName() {
+    void evictionRemovesTheLowestScoringNonPinnedUntradedName() {
         FakeGateway gw = new FakeGateway();
         RecordingAudit audit = new RecordingAudit();
         var svc = new UniversePromotionService(gw, companies, audit, props(2)); // cap = 2
 
         svc.promote(cand("PLTR", 40, 3, 5, 9_000L), OK, "e", "SIM", 1L);
-        svc.promote(cand("HOOD", 40, 3, 5, 8_000L), OK, "e", "SIM", 1L);
-        svc.promote(cand("COIN", 40, 3, 5, 1_000L), OK, "e", "SIM", 1L); // stalest by lastSeen
+        svc.promote(cand("HOOD", 30, 3, 5, 8_000L), OK, "e", "SIM", 1L);
+        svc.promote(cand("COIN", 10, 3, 5, 1_000L), OK, "e", "SIM", 1L); // lowest score
         assertEquals(3, gw.discoveredInstrumentIds().size());
 
-        Map<String, Long> lastSeen = new LinkedHashMap<>();
-        lastSeen.put("PLTR", 9_000L);
-        lastSeen.put("HOOD", 8_000L);
-        lastSeen.put("COIN", 1_000L);
-        List<String> evicted = svc.enforceCap(lastSeen, Set.of(), "e", "SIM", 2_000L);
+        Map<String, Double> scores = new LinkedHashMap<>();
+        scores.put("PLTR", 40.0);
+        scores.put("HOOD", 30.0);
+        scores.put("COIN", 10.0);
+        List<String> evicted = svc.enforceCap(scores, Set.of(), "e", "SIM", 2_000L);
 
-        assertEquals(List.of("COIN"), evicted, "the least-recently-seen name is evicted to meet the cap");
+        assertEquals(List.of("COIN"), evicted, "the lowest-scoring name is evicted to meet the cap");
         assertEquals(new TreeSet<>(List.of("HOOD", "PLTR")), new TreeSet<>(gw.discoveredInstrumentIds()));
         assertTrue(audit.actions.contains("EVICTED:COIN"));
     }
@@ -145,12 +145,12 @@ class UniversePromotionServiceTest {
         var svc = new UniversePromotionService(gw, companies, audit, props(1)); // cap = 1, so 2 must go...
 
         svc.promote(cand("PLTR", 40, 3, 5, 9_000L), OK, "e", "SIM", 1L);
-        svc.promote(cand("HOOD", 40, 3, 5, 1_000L), OK, "e", "SIM", 1L); // stalest, but pinned
-        svc.promote(cand("COIN", 40, 3, 5, 2_000L), OK, "e", "SIM", 1L); // next stalest, but has traded
+        svc.promote(cand("HOOD", 10, 3, 5, 1_000L), OK, "e", "SIM", 1L); // lowest score, but pinned
+        svc.promote(cand("COIN", 20, 3, 5, 2_000L), OK, "e", "SIM", 1L); // next lowest, but has traded
         gw.withFills.add("COIN");
 
-        Map<String, Long> lastSeen = Map.of("PLTR", 9_000L, "HOOD", 1_000L, "COIN", 2_000L);
-        List<String> evicted = svc.enforceCap(lastSeen, Set.of("HOOD"), "e", "SIM", 3_000L);
+        Map<String, Double> scores = Map.of("PLTR", 40.0, "HOOD", 10.0, "COIN", 20.0);
+        List<String> evicted = svc.enforceCap(scores, Set.of("HOOD"), "e", "SIM", 3_000L);
 
         // Only PLTR is admissible for eviction (HOOD pinned, COIN traded); cap can't be fully met but
         // the protected names are never touched.
