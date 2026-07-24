@@ -1,18 +1,15 @@
 # ADR-0019: Simulated auto-execution — the deterministic strategy may auto-trade in sim, hard-gated off real brokers
 
-- **Status:** Accepted (amended 2026-07-24 — routing runs on any feed; see the amendment note)
+- **Status:** Accepted (constraint 1 amended by [ADR-0061](0061-paper-execution-any-feed.md), 2026-07-24)
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** order, risk, ai, strategy
 
-> **Amendment (2026-07-24, owner-directed).** The original decision gated auto-execution to
-> **sim feed mode**. That conflated two different things: the *safety* guarantee is that execution is
-> **simulated** (`SimulatedExecutor`, no real-broker path), which holds regardless of the market-data
-> feed. So routing now runs on **any feed — including a LIVE feed = paper trading on real marks**, which
-> is exactly how the platform is tested on a real feed. The real-money guard is unchanged and is
-> **ADR-0015** (extract the `order` module before any real broker), NOT a feed-mode check. Constraint 1
-> below is superseded accordingly; all other constraints (guardrail, deterministic/fusion source, off by
-> default, cooldown/audit) stand.
+> **Constraint 1 (sim-only routing) is amended by [ADR-0061](0061-paper-execution-any-feed.md).** Auto-
+> execution now runs on **any** feed as **paper trading** (internal `SimulatedExecutor`, no real-broker
+> path); the real-money guard is **ADR-0015** (order-module extraction), not a feed-mode check. All other
+> constraints below (guardrail downstream, deterministic/fusion source, off by default, cooldown/audit)
+> stand unchanged. See ADR-0061 for the full rationale.
 
 ## Context
 

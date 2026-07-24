@@ -145,7 +145,7 @@ register; flagging because it pollutes any live edge estimate.)
 1. **Stop routing on negative live edge.** Gate fusion routing on a **live, cost-adjusted** per-signal
    IC/expectancy that must be **positive with a real significance margin**, not just a positive *sim* OOS
    median. If nothing clears it, the correct position is **flat**. *(Grinold 1989; Harvey-Liu-Zhu 2016;
-   López de Prado 2018.)* — biggest lever.
+   López de Prado 2018.)* — biggest lever. **→ captured as [ADR-0062](../adr/0062-live-edge-gated-execution.md) (Proposed).**
 2. **Cut turnover hard.** Implement the Gârleanu-Pedersen policy properly: trade a **fraction** toward a
    **smoothed** target inside a **wide no-trade band** sized to cost; lengthen the fusion cadence (30s →
    minutes) and raise the conviction floor. *(Gârleanu-Pedersen 2013; Novy-Marx-Velikov 2016.)*
