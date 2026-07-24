@@ -27,11 +27,27 @@ running trading system is precisely the failure those rules exist to prevent —
 manufacturing silent money decisions at machine speed, on a system that just proved it can
 lose money while looking flat (post-mortem: hedge masking a bleeding book).
 
+## Objective (the KPI every change is judged against)
+
+The agent optimizes **risk-adjusted return — PnL up per unit of exposure — not raw PnL.**
+Raw-PnL maximization just levers up until a blow-up; minimum-exposure alone goes to cash; the
+target is the **ratio** (return over risk taken — Sharpe / return-over-VaR / Grinold's IR,
+*JPM* 1989), with the firm drawdown breaker (ADR-0027) as a hard floor neither term may
+cross. Two anti-gaming rules make the KPI honest, both learned from the 2026-07-24 post-
+mortem: (a) it is measured on **strategy alpha**, read from the attribution panel (alpha vs
+hedge vs cost), **not the firm total** — a directional hedge or a lucky up-day must not be
+allowed to mask a bleeding book; and (b) **flat is an allowed, sometimes-optimal outcome** —
+when no `(name, algo)` has positive live edge (ADR-0062), doing nothing *is* the highest
+risk-adjusted return, so the objective is "risk-adjusted-return **or zero**," never "must
+act." The exact metric and the risk budget it is normalized against are owner-set money-risk
+dials (CLAUDE.md provenance rule) — this ADR fixes the *shape* (a ratio, on alpha, floored by
+the breaker, with a no-trade option), not the numbers.
+
 ## Decision
 
 We will build a **continuous improvement agent** whose deploy channel is **git**: the agent
 runs the observe→diagnose→**fix**→rerun loop and ships fixes as **commits on a branch the
-running system pulls and restarts on**. Each cycle it: (1) reads the existing
+running system pulls and restarts on**, judged against the objective above. Each cycle it: (1) reads the existing
 telemetry/attribution/edge state (never the tick path — batch/near-real-time reads only);
 (2) produces an **expert diagnosis** (the recurring post-mortem, automated) + ranked
 corrections, each emitted as an `ai.decisions` event and surfaced on the attention feed;
@@ -88,7 +104,10 @@ trigger (edge/cost/breaker regression vs the pre-change baseline) opens a revert
   trigger, and ADR-0015 keeping any real broker out of reach; model-written commits can still
   introduce ordinary bugs, so CI must run on the agent's branch before the node pulls (green
   build is the minimum bar even when the owner isn't reviewing the diff); a chatty agent can
-  bury the attention feed, so its cards obey the deterministic-floor priority (ADR-0017).
+  bury the attention feed, so its cards obey the deterministic-floor priority (ADR-0017). The
+  agent **will try to game its KPI** (Goodhart) — the alpha-not-firm measurement, the ratio
+  (not raw PnL), the breaker floor, and the allowed no-trade outcome in the objective above
+  are the specific defenses; any new KPI added later must carry the same anti-gaming framing.
 - **Follow-ups:** wire CI-on-agent-branch as the pre-pull bar; define the rollback
   baseline/metric that triggers a revert commit; decide SLM-vs-frontier per ADR-0010; specify
   the node-side pull-and-restart hook (poll interval, restart safety around open positions).
