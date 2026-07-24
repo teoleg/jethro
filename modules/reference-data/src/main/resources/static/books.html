@@ -98,6 +98,9 @@
   </div>
 </div>
 <main>
+  <div class="section-h">Attribution <span class="dim" style="text-transform:none;letter-spacing:0">— strategy alpha vs the hedge (a hedge that wins on a directional day can hide a losing book); fees are the cost drag</span></div>
+  <div class="panel"><div id="attribution" class="quiet" style="padding:12px 16px">loading…</div></div>
+
   <div class="section-h">Situation by book</div>
   <div id="books" class="quiet">loading…</div>
 
@@ -180,6 +183,23 @@
 
   async function refreshRisk() { try { renderBooks(await (await fetch("/api/risk")).json()); } catch (e) {} }
 
+  function renderAttribution(a) {
+    const el = document.getElementById("attribution");
+    if (!a || !a.available) { el.textContent = "attribution unavailable"; return; }
+    const metric = (k, v, colour) => `<span class="metric">${k}<b class="${colour?cls(v):'down'} mono">${money(v)}</b></span>`;
+    const warn = a.hedgeMasking
+      ? `<span class="metric" style="color:var(--warn)">⚠ note<b style="color:var(--warn);font-weight:650">hedge is offsetting the book — the firm total is not the strategy's skill</b></span>`
+      : "";
+    el.innerHTML = `<div style="display:flex;gap:28px;flex-wrap:wrap;align-items:baseline">
+        ${metric("Strategy alpha", a.strategyAlpha, true)}
+        ${metric("Hedge P&L", a.hedgePnl, true)}
+        ${metric("Firm total", a.firmTotal, true)}
+        ${metric("Fees paid (cost drag)", a.totalFees, false)}
+        ${warn}
+      </div>`;
+  }
+  async function refreshAttribution() { try { renderAttribution(await (await fetch("/api/attribution")).json()); } catch (e) {} }
+
   function renderStress(rows) {
     const covered = rows.some(s => s.positionsCovered > 0);
     document.getElementById("stress").outerHTML = '<div id="stress" class="quiet">' + (covered ?
@@ -203,8 +223,10 @@
     } catch (e) { document.getElementById("books").textContent = "reference data unavailable: " + e; }
     try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) {}
     await refreshRisk();
+    refreshAttribution();
     refreshStress();
     setInterval(refreshRisk, 2000);
+    setInterval(refreshAttribution, 2000);
     setInterval(refreshStress, 10000);
   }
 
