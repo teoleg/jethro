@@ -81,6 +81,12 @@ public final class FusionExecutor {
             if (ref == null) {
                 return Result.vetoed(instrument, "not in the instrument master");
             }
+            if (refs.monitorOnly(instrument)) {
+                // ADR-0060 §3: a discovery-promoted name is monitor-only — it flows into marks/indicators/
+                // signals but cannot trade until its ADV is measured and it clears the OOS gate. Growth
+                // never bleeds risk. (The OOS backtest gate below would also veto it, but this is explicit.)
+                return Result.vetoed(instrument, "monitor-only (ADR-0060) — discovered name not yet graduated to trading");
+            }
             if (!backtestSupported(instrument)) {
                 return Result.vetoed(instrument, "not backtest-supported (ADR-0049) — no tradable OOS algo");
             }

@@ -9,7 +9,7 @@ import java.util.List;
  * Phase 1 writes PROPOSED / REJECTED rows in dry-run; the controller reads them back for the UI. The
  * refdata write path (Phase 2) reuses this same log for PROMOTED / EVICTED rows.
  */
-public final class UniversePromotionRepository {
+public final class UniversePromotionRepository implements PromotionAudit {
 
     /** One decision row. {@code action} ∈ PROPOSED/PROMOTED/EVICTED/REJECTED; {@code outcome} is the
      *  policy {@link UniversePromotionPolicy.Outcome} name. */
@@ -25,6 +25,7 @@ public final class UniversePromotionRepository {
     }
 
     /** Record one gate decision. Never throws into the caller's evaluation loop — audit is best-effort. */
+    @Override
     public void record(long atMillis, String sessionEpoch, String feedMode, String instrumentId, String action,
                        String outcome, Double score, Integer distinctDays, String sources, String reason,
                        boolean dryRun) {

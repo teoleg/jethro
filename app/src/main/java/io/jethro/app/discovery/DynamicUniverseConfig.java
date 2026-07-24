@@ -1,5 +1,7 @@
 package io.jethro.app.discovery;
 
+import io.jethro.app.risk.RefDataInstrumentRefSource;
+import io.jethro.refdata.RefDataRepository;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -41,13 +43,38 @@ public class DynamicUniverseConfig {
         return new UniversePromotionController(lifecycle, repository);
     }
 
+    /** Runtime refdata write port (ADR-0060 Phase 2). Present only with persistence + the concrete
+     *  refdata-backed ref source (so the promotion write path can refresh the cache). */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
+    UniverseRefdataGateway universeRefdataGateway(ObjectProvider<RefDataRepository> repo,
+                                                  ObjectProvider<RefDataInstrumentRefSource> refSource) {
+        RefDataRepository r = repo.getIfAvailable();
+        RefDataInstrumentRefSource rs = refSource.getIfAvailable();
+        return (r != null && rs != null) ? new RefDataUniverseGateway(r, rs) : null;
+    }
+
+    /** The Phase 2 promotion write service. Null (→ dry-run stays the only path) unless the gateway,
+     *  the audit repo, and the company directory are all present. */
+    @Bean
+    UniversePromotionService universePromotionService(ObjectProvider<UniverseRefdataGateway> gateway,
+                                                      ObjectProvider<CompanyDirectory> companies,
+                                                      ObjectProvider<UniversePromotionRepository> audit,
+                                                      DynamicUniverseProperties props) {
+        UniverseRefdataGateway g = gateway.getIfAvailable();
+        CompanyDirectory c = companies.getIfAvailable();
+        UniversePromotionRepository a = audit.getIfAvailable();
+        return (g != null && c != null && a != null) ? new UniversePromotionService(g, c, a, props) : null;
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "jethro.universe.dynamic", name = "enabled", havingValue = "true")
     UniversePromotionLifecycle universePromotionLifecycle(UniverseCandidates candidates,
                                                           UniversePromotionEvaluator evaluator,
                                                           InstrumentRefSource refs, CompanyDirectory companies,
                                                           DynamicUniverseProperties props,
-                                                          ObjectProvider<UniversePromotionRepository> audit) {
-        return new UniversePromotionLifecycle(candidates, evaluator, refs, companies, props, audit);
+                                                          ObjectProvider<UniversePromotionRepository> audit,
+                                                          ObjectProvider<UniversePromotionService> service) {
+        return new UniversePromotionLifecycle(candidates, evaluator, refs, companies, props, audit, service);
     }
 }

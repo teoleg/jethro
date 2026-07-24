@@ -2,6 +2,7 @@ package io.jethro.app.discovery;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Set;
 
@@ -33,7 +34,14 @@ public record DynamicUniverseProperties(
         /** Names a human has banned — never admitted regardless of score. */
         List<String> blacklist,
         /** Names a human has pinned — protected from eviction (Phase 2). */
-        List<String> pinList) {
+        List<String> pinList,
+        /** When false (default), the gate runs but writes NOTHING to refdata — the Phase 1 dry-run. Set
+         *  true to let promotions actually write MONITOR_ONLY instruments (Phase 2). */
+        boolean write,
+        /** PROVISIONAL adv in USD stamped on a promoted name until measured from our own tape. */
+        BigDecimal provisionalAdvUsd,
+        /** PROVISIONAL bid/ask spread in bps stamped on a promoted name until measured. */
+        BigDecimal provisionalSpreadBps) {
 
     // --- Conservative PLACEHOLDER defaults (Oleg to set). Chosen to admit almost nothing until tuned. ---
 
@@ -73,6 +81,22 @@ public record DynamicUniverseProperties(
 
     public Set<String> pinListOrEmpty() {
         return pinList != null ? Set.copyOf(pinList) : Set.of();
+    }
+
+    public boolean writeEnabled() {
+        return write;
+    }
+
+    public BigDecimal provisionalAdvUsdOrDefault() {
+        // PLACEHOLDER — Oleg (ADR-0060 §2): a conservative small-cap liquidity-tier ADV, stamped PROVISIONAL
+        // and never used to size a trade (the name is monitor-only until ADV is measured from our own tape).
+        return provisionalAdvUsd != null ? provisionalAdvUsd : new BigDecimal("50000000"); // $50M
+    }
+
+    public BigDecimal provisionalSpreadBpsOrDefault() {
+        // PLACEHOLDER — Oleg (ADR-0060 §2): a conservative WIDE spread tier, stamped PROVISIONAL. Gates
+        // nothing until the name graduates to trading.
+        return provisionalSpreadBps != null ? provisionalSpreadBps : new BigDecimal("20"); // 20 bps
     }
 
     public UniversePromotionPolicy.Thresholds toThresholds() {
