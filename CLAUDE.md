@@ -109,6 +109,12 @@ the UI as a rule; a `β=1.0` placeholder; a sped-up sim clock).
   futures/swaps also need contract specs. An instrument in the master without them shows
   blank/generic on the UI. (Learned: the V31 universe expansion added NVDA/JNJ/JPM/AUDUSD but
   not their attributes — backfilled in V34.)
+- Books are reference data too: any `book_id` referenced by config or order routing
+  (`jethro.hedge.book`, `jethro.strategy.book*`, `jethro.risk.books.*`) MUST have a row in the `book`
+  master — the Books view only renders books present in the tree, so a book with positions but no
+  master row is silently dropped (not skipped by risk — never shown), and its P&L never rolls up to
+  FIRM. (Learned: the HEDGE book had risk limits configured but no master row, so hedge trades were
+  invisible on the UI — the BETA demo desk was repurposed as HEDGE in V46.)
 
 ## Response & reasoning style for this repo
 

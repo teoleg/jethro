@@ -1,8 +1,8 @@
 # Jethro — Architecture Overview
 
 **Status: built and running** (single-JVM modular monolith). This document is the *current*
-architecture — reconciled against the code on 2026-07-20, not the original design. Decisions live in
-[`docs/adr/`](../adr/README.md) (through ADR-0055); the runtime resource/contention picture and the
+architecture — reconciled against the code on 2026-07-24, not the original design. Decisions live in
+[`docs/adr/`](../adr/README.md) (through ADR-0060); the runtime resource/contention picture and the
 freeze analysis live in [`system-footprint-analysis.md`](system-footprint-analysis.md); the analytics
 north star in [`quant-engine.md`](quant-engine.md).
 
@@ -95,7 +95,7 @@ and why so many of them funnelling through `RiskProjection` is the freeze hazard
 | `signal` | Per-signal health telemetry: score each source's live call by realised forward return | `SignalTelemetryResolver` (60s) | marks; DB `signal_observations` | 0055 |
 | `training` | Learned advisory signal: Tiingo training bars → features/labels → purged walk-forward gate | `TrainingBarsLoader`, `LearnedSignalService` | Tiingo, DB | 0053 |
 | `social` | Adversarial social pipeline: spam/credibility/corroboration → advisory signals | `SocialLifecycle` (60s) | StockTwits/Telegram/news feeds, refdata | 0050 |
-| `discovery` | Universe discovery from RSS financial news + social candidates | `DiscoveryLifecycle` (300s) | RSS, refdata | 0045, 0050 |
+| `discovery` | Universe discovery from RSS/social **+ the dynamic-universe promotion gate**: a daily controller promotes sustained/corroborated/feed-covered candidates into a bounded **monitor-only** tracked set via a runtime refdata write path (provisional adv/spread, `source=discovered`), stalest-eviction at the cap; audited to `universe_promotion` | `DiscoveryLifecycle` (300s), `UniversePromotionLifecycle` (daily) | RSS, refdata (read+write) | 0045, 0050, 0060 |
 | `ai` | Local-SLM risk commentary onto the attention feed; Ollama warmup; inference metrics | `RiskCommentatorLifecycle` (60s) | Ollama, risk | 0016 |
 | `chat` | Operational chat: SLM parses the question, deterministic code answers, every turn audited | `ChatResponder` (on demand) | Ollama, risk, refdata | 0021 |
 | `hedge` | Minimum-variance proxy hedge advisor (equity axis built; DV01/FX deferred) | `HedgeLifecycle` | risk, marks, correlations | 0038–0042 |
@@ -156,6 +156,10 @@ Detail pages drill down; each has a "show everything" mode.
 11. **Signals stop placing orders (ADR-0055):** when fusion routing is on (sim-only), the fusion layer
     is the *sole* order origin — strategy auto-exec and hypothesis autonomy stand down; orders are the
     netted delta between the combined target and the current book, through the ADR-0049 gate chain.
+12. **Monitor-only growth (ADR-0060):** a discovery-promoted name is written to refdata as
+    `universe_status=MONITOR_ONLY` — it flows into marks/indicators/signals but the fusion order gate
+    vetoes it, so it cannot trade until its ADV is measured from our own tape. A provisional (flagged)
+    adv/spread can never size a real order. Growth never bleeds risk.
 
 ## Repository layout (actual)
 
@@ -177,5 +181,7 @@ jethro/
 `finops` (empty shell, ADR-0011) · the S3 Parquet tick archiver (ADR-0014) · the external frontier AI
 tier (ADR-0010, behind cost triggers) · hedge DV01/FX axes + AUTO submission (ADR-0038/0039) · the
 runtime feed-switch endpoint (ADR-0029, restart-to-switch today) · `daily_closes`/`mark_quarantine`
-feed-mode scoping (ADR-0029). See [`deferred-register.md`](../deferred-register.md) and the ADR index
-Implementation column for the full list.
+feed-mode scoping (ADR-0029) · the ADR-0060 **measured-ADV → tradable graduation** (a monitored name
+stays monitor-only until its ADV is measured from our own tape) and mid-session hot-subscribe (a
+promoted name gets marks at the next session, since feed symbol maps are read at boot). See
+[`deferred-register.md`](../deferred-register.md) and the ADR index Implementation column for the full list.
