@@ -72,7 +72,7 @@ public final class FusionLifecycle implements AutoCloseable {
     public void start() {
         task = scheduler.scheduleWithFixedDelay(this::tick, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
         log.info("fusion loop started (every {}s) — ADR-0055 {}", intervalSeconds,
-                routeOrders ? "LIVE (sim-only): the sole order origin, gated by ADR-0049/guardrail/breaker"
+                routeOrders ? "LIVE ROUTING (paper — SimulatedExecutor, any feed): the sole order origin, gated by ADR-0049/guardrail/breaker"
                         : "SHADOW MODE (computes the target book, places NO orders)");
     }
 
@@ -99,7 +99,7 @@ public final class FusionLifecycle implements AutoCloseable {
                     }
                 }
                 if (routed > 0) {
-                    log.info("fusion: routed {} sole-origin delta order(s) this cycle (sim)", routed);
+                    log.info("fusion: routed {} sole-origin delta order(s) this cycle (paper fills)", routed);
                 }
             }
         } catch (Exception e) {

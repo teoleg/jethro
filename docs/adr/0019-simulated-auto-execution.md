@@ -1,9 +1,18 @@
 # ADR-0019: Simulated auto-execution — the deterministic strategy may auto-trade in sim, hard-gated off real brokers
 
-- **Status:** Accepted
+- **Status:** Accepted (amended 2026-07-24 — routing runs on any feed; see the amendment note)
 - **Date:** 2026-07-12
 - **Deciders:** Oleg
 - **Tags:** order, risk, ai, strategy
+
+> **Amendment (2026-07-24, owner-directed).** The original decision gated auto-execution to
+> **sim feed mode**. That conflated two different things: the *safety* guarantee is that execution is
+> **simulated** (`SimulatedExecutor`, no real-broker path), which holds regardless of the market-data
+> feed. So routing now runs on **any feed — including a LIVE feed = paper trading on real marks**, which
+> is exactly how the platform is tested on a real feed. The real-money guard is unchanged and is
+> **ADR-0015** (extract the `order` module before any real broker), NOT a feed-mode check. Constraint 1
+> below is superseded accordingly; all other constraints (guardrail, deterministic/fusion source, off by
+> default, cooldown/audit) stand.
 
 ## Context
 
@@ -25,9 +34,11 @@ We will allow the **deterministic strategy** to auto-submit orders through the n
 order path, behind `jethro.strategy.auto-execute` (**default OFF**), with a per-instrument
 cooldown. Hard constraints:
 
-1. **Simulated execution only.** Auto-execution is valid solely against `SimulatedExecutor`.
-   Before any real-money broker is wired (ADR-0015), this flag must be removed or re-gated
-   behind an explicit real-trading policy ADR — it must never ship enabled to a live venue.
+1. **Simulated execution only** *(amended — see note above).* Auto-execution is valid solely against
+   `SimulatedExecutor` — which is the case on **every** feed, so routing is no longer gated to sim feed
+   mode; a LIVE feed just means paper fills against real marks. Before any real-money broker is wired
+   (ADR-0015), the live-execution gate must be added at the extracted `order` module behind an explicit
+   real-trading policy ADR — it must never ship reaching a real venue.
 2. **Guardrail always downstream.** Auto-orders go through `OrderService`, which re-runs
    the deterministic pre-trade guardrail; a breaching order is rejected, not filled.
 3. **Deterministic source only.** Only the plain-code strategy may auto-execute. The
