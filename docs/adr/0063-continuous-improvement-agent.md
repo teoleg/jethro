@@ -77,8 +77,12 @@ branch the agent pushes to for full autonomy, or keep it on `main` and have the 
 to a `claude/*` branch the owner fast-forwards to stay in the loop with one command — same
 code, owner picks the coupling. Two hard engineering floors hold under **either** coupling:
 the agent **never edits the deterministic floor** (guardrails, firm breaker, the invariant-7
-/ ADR-0016 gates) — it may change strategy/analysis/config code but not the code that stops
-a bad trade; and the **real-money path stays behind ADR-0015** (order-module extraction), so
+/ ADR-0016 gates). *Above* the floor its authority is broad — it may add or alter any logic that
+improves risk-adjusted PnL: config/dials, signal computation, sizing, hedging, **new strategies and
+risk models**, and bug fixes from stack traces — one coherent, attributable change per run, and with a
+**Proposed ADR written in the same commit** for architecturally-significant additions (design-first per
+CLAUDE.md; it does not wait for approval but leaves the record). It just may never edit the code that
+stops a bad trade. And the **real-money path stays behind ADR-0015** (order-module extraction), so
 no agent commit can reach a real broker regardless of coupling — the platform is paper on
 every feed (ADR-0061), so the agent has free rein with zero money risk. Every pushed change
 is an auditable git commit (revertable) tied to its `ai.decisions` diagnosis.
