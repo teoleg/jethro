@@ -72,4 +72,24 @@ public final class TargetPlanner {
         return d.abs().min(cur.abs()).multiply(BigDecimal.valueOf(d.signum()))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
     }
+
+    /**
+     * Does trading {@code delta} leave the book with LESS absolute exposure in this name than it has
+     * now? Pure sign/magnitude arithmetic: {@code |current + delta| < |current|}.
+     *
+     * <p>Used to decide which controls a delta must clear. A control whose purpose is "is this view
+     * worth putting risk on?" — the ADR-0059 conviction floor, the ADR-0049 backtest-support gate —
+     * has nothing to say about taking risk OFF, and applying it there does not make the desk safer, it
+     * traps it: the position whose signal has gone silent is exactly the one those gates would refuse
+     * to let go of. Note a sign flip that overshoots (long 100 → short 300) is NOT reducing by this
+     * test, so a flip must still earn its conviction the ordinary way.
+     */
+    public static boolean isRiskReducing(BigDecimal delta, BigDecimal current) {
+        BigDecimal d = delta == null ? BigDecimal.ZERO : delta;
+        BigDecimal cur = current == null ? BigDecimal.ZERO : current;
+        if (d.signum() == 0 || cur.signum() == 0) {
+            return false; // nothing traded, or nothing held — opening is never a reduction
+        }
+        return cur.add(d).abs().compareTo(cur.abs()) < 0;
+    }
 }

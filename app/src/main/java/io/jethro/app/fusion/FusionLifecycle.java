@@ -43,6 +43,7 @@ public final class FusionLifecycle implements AutoCloseable {
     private final ForecastRegistry registry;
     private final Function<String, BigDecimal> priceFor;
     private final Supplier<Map<String, BigDecimal>> positionsSupplier;
+    private final Supplier<java.util.Set<String>> heldSupplier; // ADR-0065: names we must have a target for
     private final Supplier<FusionWeights> weightsSupplier;
     private final FusionPlanner.Params params;
     private final boolean routeOrders;
@@ -56,7 +57,8 @@ public final class FusionLifecycle implements AutoCloseable {
     private Future<?> task;
 
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
-                           Supplier<Map<String, BigDecimal>> positionsSupplier, Supplier<FusionWeights> weightsSupplier,
+                           Supplier<Map<String, BigDecimal>> positionsSupplier,
+                           Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
                            ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
                            Supplier<EdgeGate.Decision> edgeGate) {
@@ -64,6 +66,7 @@ public final class FusionLifecycle implements AutoCloseable {
         this.registry = registry;
         this.priceFor = priceFor;
         this.positionsSupplier = positionsSupplier;
+        this.heldSupplier = heldSupplier;
         this.weightsSupplier = weightsSupplier;
         this.params = params;
         this.executor = executor;
@@ -91,7 +94,10 @@ public final class FusionLifecycle implements AutoCloseable {
             Map<String, List<Forecast>> forecasts = registry.byInstrument(now);
             Map<String, BigDecimal> positions = positionsSupplier.get();
             FusionWeights weights = weightsSupplier.get(); // re-estimated from live telemetry each cycle (ADR-0055)
-            List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, weights::weightFor, priceFor,
+            // ADR-0065: plan over the names we HOLD as well as the names we have a view on, so a
+            // position never falls out of the target book when its sources go quiet.
+            java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
+            List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
                     id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
             // paying for are the ones that take risk OFF. Clamp before anything else sees the deltas.
@@ -106,10 +112,14 @@ public final class FusionLifecycle implements AutoCloseable {
                     if (t.deltaQty().signum() == 0) {
                         continue; // inside the no-trade band — nothing to do
                     }
-                    if (Math.abs(t.combinedForecast()) < minForecastToRoute) {
+                    // ADR-0065: the conviction floor asks "is this view strong enough to put risk ON?".
+                    // It has no business blocking a trade that takes risk OFF — and applied there it
+                    // would permanently trap exactly the positions whose view has decayed to nothing.
+                    boolean reducing = TargetPlanner.isRiskReducing(t.deltaQty(), t.currentQty());
+                    if (!reducing && Math.abs(t.combinedForecast()) < minForecastToRoute) {
                         continue; // ADR-0059: below the conviction floor — don't churn a weak/oscillating signal
                     }
-                    if (executor.route(t.instrument(), t.deltaQty()).routed()) {
+                    if (executor.route(t.instrument(), t.deltaQty(), reducing).routed()) {
                         routed++;
                     }
                 }

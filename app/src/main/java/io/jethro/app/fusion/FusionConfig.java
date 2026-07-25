@@ -76,7 +76,8 @@ public class FusionConfig {
                                     ObjectProvider<io.jethro.order.ExecutionQualityRepository> tca,
                                     @Value("${jethro.fusion.edge-gate.enabled:true}") boolean edgeGateEnabled,
                                     @Value("${jethro.fusion.edge-gate.min-sample:30}") int edgeGateMinSample,
-                                    @Value("${jethro.fusion.edge-gate.t-hurdle:2.0}") double edgeGateTHurdle) {
+                                    @Value("${jethro.fusion.edge-gate.t-hurdle:2.0}") double edgeGateTHurdle,
+                                    @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
         var params = new FusionPlanner.Params(assumedCorrelation, unitNotional, bufferFraction, adjustmentRate);
         // ADR-0055 item 6: per-source weights are re-estimated from the phase-1 telemetry each cycle
         // (evidence, not decree), shrunk toward equal so a thin sample can't dominate. mode=equal forces
@@ -116,6 +117,7 @@ public class FusionConfig {
         var lifecycle = new FusionLifecycle(registry,
                 instrument -> priceFor(tradingCore, instrument),
                 () -> firmPositions(risk),
+                () -> heldInRoutedBooks(risk, hedgeBook),
                 weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
                 minForecastToRoute, gateSupplier);
         lifecycle.start();
@@ -126,6 +128,33 @@ public class FusionConfig {
     @ConditionalOnProperty(prefix = "jethro.fusion", name = "enabled", havingValue = "true", matchIfMissing = true)
     FusionController fusionController(ObjectProvider<FusionLifecycle> fusion) {
         return new FusionController(fusion);
+    }
+
+    /**
+     * The names the fusion layer is RESPONSIBLE for (ADR-0065): every instrument it currently holds in
+     * a book it routes into. These are planned each cycle even with no fresh forecast, so a position
+     * whose sources have gone silent gets an explicit target of flat rather than being orphaned.
+     *
+     * <p>The hedge book is excluded. Its position is not a view — it is the ADR-0019 hedger's own
+     * target, maintained against the strategy books' residual exposure. Fusion routes by asset class
+     * ({@code StrategyProperties.bookFor}), so "unwinding" a hedge position would open an offsetting
+     * one in a STRATEGY book: two legs where there was one, gross exposure up, and the two loops
+     * fighting each other every cycle. The hedger already shrinks its own leg as the strategy books
+     * flatten, which is the correct direction of causality.
+     */
+    private static java.util.Set<String> heldInRoutedBooks(ObjectProvider<RiskProjection> risk, String hedgeBook) {
+        RiskProjection projection = risk.getIfAvailable();
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        if (projection == null) {
+            return out;
+        }
+        for (PositionRisk p : projection.snapshot(System.currentTimeMillis()).positions()) {
+            if (p.quantity().signum() == 0 || (hedgeBook != null && hedgeBook.equalsIgnoreCase(p.bookId()))) {
+                continue;
+            }
+            out.add(p.instrumentId());
+        }
+        return out;
     }
 
     /** Firm-wide net quantity per instrument, summed across books from the risk snapshot. */

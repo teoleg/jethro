@@ -2,6 +2,8 @@ package io.jethro.app.fusion;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -36,17 +38,35 @@ public final class FusionPlanner {
 
     /**
      * @param forecastsByInstrument fresh per-source forecasts (from {@link ForecastRegistry})
+     * @param heldInstruments       names the desk currently HOLDS in a book this layer routes into.
+     *                              Planned even with no fresh forecast — see below — so a position
+     *                              whose sources have gone silent still gets a target (ADR-0065).
      * @param weightFor             source → weight (evidence-based; equal is the phase-4 placeholder)
      * @param priceFor              instrument → current mark (null/≤0 skips sizing for that name)
      * @param currentQtyFor         instrument → current firm position quantity
      */
     public static List<Target> plan(Map<String, List<Forecast>> forecastsByInstrument,
+                                    Collection<String> heldInstruments,
                                     Function<String, Double> weightFor,
                                     Function<String, BigDecimal> priceFor,
                                     Function<String, BigDecimal> currentQtyFor,
                                     Params params) {
+        // ADR-0065: the target book spans {names with a view} ∪ {names we hold}. Planning only the
+        // first set is what orphans a position: when its sources fall silent or the OOS selector
+        // drops the name, it vanishes from the cross-section and nothing ever revisits it. A held
+        // name with no fresh view has an implicit target of ZERO — no view, no position — and is
+        // worked down by the same partial adjustment as any other target. Held names are added
+        // AFTER the forecast set so a name with a view keeps its (unchanged) treatment.
+        Map<String, List<Forecast>> spanned = new LinkedHashMap<>(forecastsByInstrument);
+        if (heldInstruments != null) {
+            for (String held : heldInstruments) {
+                if (held != null) {
+                    spanned.putIfAbsent(held, List.of());
+                }
+            }
+        }
         List<Target> out = new ArrayList<>();
-        for (var entry : forecastsByInstrument.entrySet()) {
+        for (var entry : spanned.entrySet()) {
             String instrument = entry.getKey();
             List<ForecastCombiner.Weighted> weighted = new ArrayList<>();
             List<Contribution> contributions = new ArrayList<>();

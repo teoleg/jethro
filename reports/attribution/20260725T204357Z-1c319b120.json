@@ -1,0 +1,52 @@
+{
+  "after": {
+    "alpha_pnl": "-6760.93609379",
+    "at": "2026-07-25T20:43:57Z",
+    "fees": "1924.049052",
+    "gross": "368230.93232556",
+    "net": "-7272.24191356",
+    "source": {
+      "alphaBooks": [
+        {
+          "book": "MACRO",
+          "gross": "238194.74428500",
+          "net": "-17230.41828500"
+        },
+        {
+          "book": "ALPHA",
+          "gross": "130036.18804056",
+          "net": "9958.17637144"
+        }
+      ],
+      "feedMode": "SIM",
+      "firmTotal": "-6258.74605916",
+      "hedgeBooks": [
+        "HEDGE"
+      ],
+      "hedgePnl": "502.19003463",
+      "strategyAlpha": "-6760.93609379",
+      "totalFees": "1924.049052"
+    }
+  },
+  "before": {
+    "alpha_pnl": "-10439.20348239",
+    "at": "2026-07-25T20:00:40Z",
+    "gross": "415183.73163265",
+    "net": "-192131.75163265"
+  },
+  "commit": "1c319b1200136adbf4afb8b7ed82d98449504d77",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "alpha_pnl": "3678.26738860",
+    "gross": "-46952.79930709",
+    "net": "184859.50971909"
+  },
+  "note": "PnL up, exposure not up; risk-adj (PnL/$1 gross) improved -0.02514\u2192-0.01836",
+  "revert": false,
+  "scoredAt": "2026-07-25T20:43:57Z",
+  "summary": "cost-aware edge gate: fusion goes reduce-only unless a source's measured expectancy beats measured round-trip slippage with significance (ADR-0064)",
+  "verdict": "\u2705 GOOD"
+}

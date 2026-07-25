@@ -68,6 +68,17 @@ public final class FusionExecutor {
 
     /** Routes one instrument's fused delta through the gates; returns what happened (never throws). */
     public Result route(String instrument, BigDecimal deltaQty) {
+        return route(instrument, deltaQty, false);
+    }
+
+    /**
+     * @param riskReducing the delta strictly shrinks |position| (see {@code TargetPlanner.isRiskReducing}).
+     *   Such an order skips the ADR-0049 backtest-support veto — that gate answers "may we put risk ON
+     *   this name?", and a name the selector has dropped is precisely one the desk should be getting
+     *   OUT of, so letting it veto the exit would trap the book (ADR-0065). The deterministic floor is
+     *   NOT relaxed: the firm breaker and the pre-trade guardrail below still apply unchanged.
+     */
+    public Result route(String instrument, BigDecimal deltaQty, boolean riskReducing) {
         try {
             // Execution is ALWAYS internal simulated fills (OrderService → SimulatedExecutor); there is no
             // real-broker path in the codebase, so routing under a LIVE feed is PAPER TRADING against real
@@ -86,7 +97,7 @@ public final class FusionExecutor {
             if (ref == null) {
                 return Result.vetoed(instrument, "not in the instrument master");
             }
-            if (!backtestSupported(instrument)) {
+            if (!riskReducing && !backtestSupported(instrument)) {
                 return Result.vetoed(instrument, "not backtest-supported (ADR-0049) — no tradable OOS algo");
             }
             String book = props.bookFor(ref.assetClass());

@@ -27,4 +27,4 @@ has traded under the new code.
 
 | Scored (UTC) | Commit | What changed | PnL before→after (Δ) | Gross exp before→after (Δ) | Net exp before→after (Δ) | Verdict | Note |
 |---|---|---|---|---|---|---|---|
-| _(no changes scored yet — the loop appends a row here each time it makes and then measures a change)_ | | | | | | | |
+| 2026-07-25T20:43:57Z | `1c319b120` | cost-aware edge gate: fusion goes reduce-only unless a source's measured expectancy beats measured round-trip slippage with significance (ADR-0064) | -$10,439.20 → -$6,760.94 (+$3,678.27) | $415,183.73 → $368,230.93 (-$46,952.80) | -$192,131.75 → -$7,272.24 (+$184,859.51) | ✅ GOOD | PnL up, exposure not up; risk-adj (PnL/$1 gross) improved -0.02514→-0.01836 |
