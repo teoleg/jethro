@@ -26,11 +26,17 @@ public final class FusionLifecycle implements AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(FusionLifecycle.class);
 
-    /** The latest fused target book, with the per-source weights it was combined at (ADR-0055). */
+    /**
+     * The latest fused target book, with the per-source weights it was combined at (ADR-0055) and the
+     * ADR-0064 edge-gate decision that shaped its deltas. The deltas surfaced here are the ones that
+     * will actually be routed — a book that showed an intent it then declined to trade would be a
+     * misleading operator view.
+     */
     public record TargetBook(long atMillis, boolean routing, int instruments,
-                             Map<String, Double> weights, List<FusionPlanner.Target> targets) {
+                             Map<String, Double> weights, List<FusionPlanner.Target> targets,
+                             EdgeGate.Decision edgeGate) {
         static TargetBook empty() {
-            return new TargetBook(0, false, 0, Map.of(), List.of());
+            return new TargetBook(0, false, 0, Map.of(), List.of(), null);
         }
     }
 
@@ -44,6 +50,7 @@ public final class FusionLifecycle implements AutoCloseable {
     private final ScheduledExecutorService scheduler;
     private final long intervalSeconds;
     private final double minForecastToRoute; // ADR-0059: conviction floor — don't route weak/oscillating signals
+    private final Supplier<EdgeGate.Decision> edgeGate; // ADR-0064: measured edge vs measured cost
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -51,7 +58,9 @@ public final class FusionLifecycle implements AutoCloseable {
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
                            Supplier<Map<String, BigDecimal>> positionsSupplier, Supplier<FusionWeights> weightsSupplier,
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
-                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute) {
+                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
+                           Supplier<EdgeGate.Decision> edgeGate) {
+        this.edgeGate = edgeGate;
         this.registry = registry;
         this.priceFor = priceFor;
         this.positionsSupplier = positionsSupplier;
@@ -84,7 +93,13 @@ public final class FusionLifecycle implements AutoCloseable {
             FusionWeights weights = weightsSupplier.get(); // re-estimated from live telemetry each cycle (ADR-0055)
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, weights::weightFor, priceFor,
                     id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
-            lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets);
+            // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
+            // paying for are the ones that take risk OFF. Clamp before anything else sees the deltas.
+            EdgeGate.Decision gate = edgeGate == null ? null : edgeGate.get();
+            if (gate != null && !gate.mayIncrease()) {
+                targets = reduceOnly(targets);
+            }
+            lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate);
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {
@@ -105,6 +120,19 @@ public final class FusionLifecycle implements AutoCloseable {
         } catch (Exception e) {
             log.debug("fusion tick failed: {}", e.toString());
         }
+    }
+
+    /** Every target with its delta projected onto "reduce or hold" (ADR-0064). */
+    private static List<FusionPlanner.Target> reduceOnly(List<FusionPlanner.Target> targets) {
+        List<FusionPlanner.Target> out = new java.util.ArrayList<>(targets.size());
+        for (FusionPlanner.Target t : targets) {
+            BigDecimal clamped = TargetPlanner.reduceOnly(t.deltaQty(), t.currentQty());
+            out.add(clamped.compareTo(t.deltaQty()) == 0 ? t
+                    : new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
+                            t.diversificationMultiplier(), t.price(), t.targetQty(), t.currentQty(),
+                            clamped, t.contributions()));
+        }
+        return out;
     }
 
     public TargetBook book() {

@@ -72,7 +72,11 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.weights.shrinkage-k:20}") double shrinkageK,
                                     @Value("${jethro.fusion.weights.min:0.25}") double weightMin,
                                     @Value("${jethro.fusion.weights.max:3.0}") double weightMax,
-                                    @Value("${jethro.fusion.weights.min-sample:20}") int weightMinSample) {
+                                    @Value("${jethro.fusion.weights.min-sample:20}") int weightMinSample,
+                                    ObjectProvider<io.jethro.order.ExecutionQualityRepository> tca,
+                                    @Value("${jethro.fusion.edge-gate.enabled:true}") boolean edgeGateEnabled,
+                                    @Value("${jethro.fusion.edge-gate.min-sample:30}") int edgeGateMinSample,
+                                    @Value("${jethro.fusion.edge-gate.t-hurdle:2.0}") double edgeGateTHurdle) {
         var params = new FusionPlanner.Params(assumedCorrelation, unitNotional, bufferFraction, adjustmentRate);
         // ADR-0055 item 6: per-source weights are re-estimated from the phase-1 telemetry each cycle
         // (evidence, not decree), shrunk toward equal so a thin sample can't dominate. mode=equal forces
@@ -86,11 +90,34 @@ public class FusionConfig {
                             return t == null ? FusionWeights.equal()
                                     : FusionWeights.fromTelemetry(t.stats(), weightParams);
                         };
+        // ADR-0064: the edge gate re-reads BOTH measurements every cycle — per-source realised
+        // expectancy (signal telemetry) and the desk's own realised slippage (TCA) — so it opens by
+        // itself the moment a source earns its cost, and closes again if that decays. Nothing here is
+        // a chosen number: the only dials are the significance hurdle and the minimum sample.
+        var gateParams = new EdgeGate.Params(edgeGateMinSample, edgeGateTHurdle);
+        java.util.function.Supplier<EdgeGate.Decision> gateSupplier = !edgeGateEnabled ? null
+                : () -> {
+                    var t = telemetry.getIfAvailable();
+                    var q = tca.getIfAvailable();
+                    if (t == null || q == null) {
+                        return null; // no measurement path — leave the pre-existing controls alone
+                    }
+                    try {
+                        // null ⇒ nothing filled in this mode yet; the gate stays open rather than
+                        // assume a cost. A failed read must never stop the planning loop.
+                        Double roundTripBps = q.averageSlippageBps()
+                                .map(oneWay -> oneWay.doubleValue() * 2.0)
+                                .orElse(null);
+                        return EdgeGate.evaluate(t.stats(), roundTripBps, gateParams);
+                    } catch (RuntimeException e) {
+                        return null;
+                    }
+                };
         var lifecycle = new FusionLifecycle(registry,
                 instrument -> priceFor(tradingCore, instrument),
                 () -> firmPositions(risk),
                 weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
-                minForecastToRoute);
+                minForecastToRoute, gateSupplier);
         lifecycle.start();
         return lifecycle;
     }
