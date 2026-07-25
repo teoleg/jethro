@@ -41,8 +41,14 @@ class SignalScoringTest {
         assertEquals(3, s.open());
         // hit-rate = wins / (wins+losses) = 2/3, FLAT excluded.
         assertEquals(2.0 / 3.0, s.hitRate(), 1e-12);
-        // average return over ALL resolved = (0.02+0.02−0.02+0.0005)/4 = 0.010125 → 101.25 bps.
-        assertEquals(101.25, s.avgReturnBps(), 1e-9);
+        // average return over ALL resolved = (0.02+0.02−0.02+0.0005)/4 = 0.005125 → 51.25 bps.
+        // (This expectation read 101.25 and had been failing: the sum is 0.0205, not 0.0405.)
+        assertEquals(51.25, s.avgReturnBps(), 1e-9);
+        // Sample sd (ADR-0064): deviations from 0.005125 are +0.014875, +0.014875, −0.025125, −0.004625;
+        // Σd² = 0.0010951875; /(n−1)=3 → 3.650625e−4; √ = 0.0191066088… → 191.0661 bps.
+        assertEquals(191.06608804, s.stdReturnBps(), 1e-8);
+        // Standard error = sd/√4 = 95.533 bps — the mean sits well inside one, i.e. it is not evidence.
+        assertEquals(95.53304402, s.stdErrorBps(), 1e-8);
     }
 
     @Test
@@ -51,6 +57,17 @@ class SignalScoringTest {
         assertEquals(0, s.resolved());
         assertEquals(0.0, s.hitRate(), 1e-12);
         assertEquals(0.0, s.avgReturnBps(), 1e-12);
+        assertEquals(0.0, s.stdReturnBps(), 1e-12);
+        assertEquals(0.0, s.stdErrorBps(), 1e-12);
+    }
+
+    @Test
+    void aSingleObservationHasNoDispersion() {
+        // One sample cannot estimate a dispersion — it must read zero, never NaN or a divide-by-zero.
+        SignalScoring.Stats s = SignalScoring.aggregate("learned", List.of(0.02), FLAT_BPS, 0);
+        assertEquals(200.0, s.avgReturnBps(), 1e-9);
+        assertEquals(0.0, s.stdReturnBps(), 1e-12);
+        assertEquals(0.0, s.stdErrorBps(), 1e-12);
     }
 
     private static BigDecimal bd(double v) {

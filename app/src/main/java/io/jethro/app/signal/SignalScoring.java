@@ -38,12 +38,23 @@ public final class SignalScoring {
         return directionalReturn > th ? Outcome.WIN : (directionalReturn < -th ? Outcome.LOSS : Outcome.FLAT);
     }
 
-    /** Rolling health for one source; {@code open} (unresolved) is filled by the caller. */
+    /**
+     * Rolling health for one source; {@code open} (unresolved) is filled by the caller.
+     * {@code stdReturnBps} is the SAMPLE standard deviation of the same directional returns
+     * {@code avgReturnBps} averages — the dispersion without which a mean is not evidence. It is what
+     * lets a consumer ask "is this expectancy distinguishable from zero?" instead of reading a noisy
+     * average as a fact (ADR-0064). Zero when fewer than two observations resolved.
+     */
     public record Stats(String source, long resolved, long wins, long losses, long flats, long open,
-                        double hitRate, double avgReturnBps) {
+                        double hitRate, double avgReturnBps, double stdReturnBps) {
+
+        /** Standard error of {@link #avgReturnBps} in bps; 0 when the sample cannot support one. */
+        public double stdErrorBps() {
+            return resolved > 1 && stdReturnBps > 0 ? stdReturnBps / Math.sqrt((double) resolved) : 0.0;
+        }
     }
 
-    /** Aggregates one source's resolved directional returns into hit-rate + average return. */
+    /** Aggregates one source's resolved directional returns into hit-rate + average return + dispersion. */
     public static Stats aggregate(String source, List<Double> directionalReturns, double flatThresholdBps, long open) {
         long wins = 0;
         long losses = 0;
@@ -60,7 +71,15 @@ public final class SignalScoring {
         long n = directionalReturns.size();
         double decisive = wins + losses;
         double hitRate = decisive > 0 ? wins / decisive : 0.0; // FLATs excluded — they were no bet
-        double avgBps = n > 0 ? (sum / n) * 1e4 : 0.0;
-        return new Stats(source, n, wins, losses, flats, open, hitRate, avgBps);
+        double mean = n > 0 ? sum / n : 0.0;
+        double avgBps = mean * 1e4;
+        double sqDev = 0;
+        for (double r : directionalReturns) {
+            double d = r - mean;
+            sqDev += d * d;
+        }
+        // Bessel-corrected sample variance: we are estimating the population dispersion from a sample.
+        double stdBps = n > 1 ? Math.sqrt(sqDev / (n - 1)) * 1e4 : 0.0;
+        return new Stats(source, n, wins, losses, flats, open, hitRate, avgBps, stdBps);
     }
 }

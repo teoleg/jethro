@@ -18,7 +18,7 @@ class TelemetryWeightsTest {
     private static final TelemetryWeights.Params K20 = new TelemetryWeights.Params(20, 0.25, 3.0);
 
     private static SignalScoring.Stats stat(String source, double hitRate, long wins, long losses) {
-        return new SignalScoring.Stats(source, wins + losses, wins, losses, 0, 0, hitRate, 0.0);
+        return new SignalScoring.Stats(source, wins + losses, wins, losses, 0, 0, hitRate, 0.0, 0.0);
     }
 
     @Test

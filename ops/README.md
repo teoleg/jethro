@@ -33,7 +33,22 @@ echo "$ANTHROPIC_API_KEY"                             # must be EMPTY, or it bil
 # Git push credentials for the claude/auto-improve branch must be set for the cron user.
 ```
 
-## Turn it on / off
+## Easiest: one guided script (pull → check → enable)
+`ops/enable-loop.sh` does the whole thing — pulls latest, runs preflight checks (python3, the `claude`
+CLI, that `ANTHROPIC_API_KEY` is empty so it bills Max, that the app's `/api/attribution` + `/api/risk`
+answer), then asks before installing the cron. It finds the repo from its own location, so it works
+wherever you cloned it.
+```sh
+# Set your build+restart, then run. It confirms before enabling.
+JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' \
+  ops/enable-loop.sh
+
+ops/enable-loop.sh --dry-run    # run ONE cycle now and STOP (don't install the cron) — great first test
+ops/enable-loop.sh --yes        # skip the confirmation prompt
+# If the app isn't on localhost:8080, add:  JETHRO_URL='http://host:port'
+```
+
+## Or the low-level switch directly
 ```sh
 # Tell it how to rebuild + restart YOUR app, then enable. Example (adjust to how you run Jethro):
 JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' \
@@ -59,6 +74,7 @@ alpha)**, with a verdict: ✅ GOOD (PnL up, exposure down), ❌ BAD (PnL flat/do
 history on GitHub from anywhere. A ledger-only commit does not restart the app.
 
 ## Files (all in git)
+- `ops/enable-loop.sh` — one-shot guided setup: pull + preflight checks + (optional dry-run) + enable.
 - `ops/loop-control.sh` — on/off/status switch for the cron.
 - `ops/improve-loop.sh` — one full cycle (report -> Claude -> test -> commit -> push -> deploy).
 - `ops/improve-prompt.md` — the agent's instructions (ledger, objective, procedure, hard limits).
