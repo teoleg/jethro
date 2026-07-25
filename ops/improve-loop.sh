@@ -16,6 +16,15 @@ unset ANTHROPIC_API_KEY || true   # bill to Max, never the API account
 
 mkdir -p logs
 LOG="logs/improve-$(date +%F).log"
+
+# Single-flight: with a short interval, a slow gradle test could still be running when the next cron
+# fires. Take a non-blocking lock and skip this fire rather than stacking overlapping cycles.
+exec 9>"$REPO/.improve-loop.lock"
+if ! flock -n 9; then
+  echo "==== $(date -Is) skipped — previous cycle still running ====" >> "$LOG"
+  exit 0
+fi
+
 echo "==== $(date -Is) cycle start ====" >> "$LOG"
 
 # 1. Snapshot the LIVE app (writes logs/report.md + jethro-report-*.zip). Do NOT restart first —

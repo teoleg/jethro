@@ -16,3 +16,6 @@ backups/
 # Python bytecode
 __pycache__/
 *.pyc
+
+# continuous-improvement loop single-flight lock
+.improve-loop.lock
