@@ -27,11 +27,12 @@ exposure** — by reading the latest run and, only when warranted, shipping one 
    `logs/improve-YYYY-MM-DD.log` explaining why (e.g. "flat is optimal: both algos negative live
    edge") and **stop without committing**. Doing nothing is a valid, common outcome.
 4. If **yes**: make the **single** smallest change (code or config).
-5. **Verify before pushing:** run `./gradlew -Pci test` (or the narrowest relevant module). If the
-   build/tests are not green, revert your edit and stop — never push a red build.
-6. Commit to branch **`claude/auto-improve`** with a message that records: the diagnosis, the change,
-   and the **objective vector before** (so the next run can attribute the delta). Push:
-   `git push -u origin claude/auto-improve`.
+5. **Verify:** run `./gradlew -Pci test` (or the narrowest relevant module). If the build/tests are
+   not green, revert your edit and stop — never commit a red build.
+6. Commit to the current branch (**`claude/auto-improve`**) with a message that records: the diagnosis,
+   the change, and the **objective vector before** (so the next run can attribute the delta).
+   **Do not push and do not restart the app** — the wrapper detects your commit and handles push +
+   rebuild + restart. Committing green is your finish line.
 
 ## Hard limits — never cross these
 - **Never edit the deterministic floor**: the pre-trade guardrail, the firm drawdown breaker, or the
