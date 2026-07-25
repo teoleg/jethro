@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *  budget surface as RATE_LIMITED, and non-qualifying names never consume the budget. */
 class UniversePromotionEvaluatorTest {
 
-    private static final Thresholds T = new Thresholds(25.0, 3, 2, 2); // budget = 2/day
+    private static final Thresholds T = new Thresholds(25.0, 1, 3, 2, 2); // minMentions 1; budget = 2/day
     private final UniversePromotionEvaluator evaluator =
             new UniversePromotionEvaluator(new UniversePromotionPolicy(T));
 

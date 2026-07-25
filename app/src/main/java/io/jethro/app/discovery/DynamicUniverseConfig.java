@@ -39,8 +39,9 @@ public class DynamicUniverseConfig {
 
     @Bean
     UniversePromotionController universePromotionController(ObjectProvider<UniversePromotionLifecycle> lifecycle,
-                                                           ObjectProvider<UniversePromotionRepository> repository) {
-        return new UniversePromotionController(lifecycle, repository);
+                                                           ObjectProvider<UniversePromotionRepository> repository,
+                                                           DynamicUniverseProperties props) {
+        return new UniversePromotionController(lifecycle, repository, props);
     }
 
     /** Runtime refdata write port (ADR-0060 Phase 2). Present only with persistence + the concrete

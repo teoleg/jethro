@@ -93,12 +93,12 @@ public final class UniversePromotionService {
     }
 
     /**
-     * Enforce the monitored cap (ADR-0060 §4): while the discovered set exceeds {@code maxMonitored},
-     * evict the STALEST admissible name — least-recent mention, not pinned, no fills. {@code lastSeenById}
-     * comes from the live candidate register (a name absent from it is treated as maximally stale).
-     * Returns the evicted ids.
+     * Enforce the cap (ADR-0060 §4): while the discovered set exceeds {@code maxMonitored}, evict the
+     * LEAST-PERFORMING admissible name — lowest current discovery score, not pinned, no fills.
+     * {@code scoreById} comes from the live candidate register; a name absent from it (no longer discussed)
+     * scores 0 and is evicted first. Returns the evicted ids.
      */
-    public List<String> enforceCap(Map<String, Long> lastSeenById, Set<String> pinList,
+    public List<String> enforceCap(Map<String, Double> scoreById, Set<String> pinList,
                                    String sessionEpoch, String feedMode, long now) {
         int cap = props.maxMonitoredOrDefault();
         List<String> evicted = new java.util.ArrayList<>();
@@ -108,26 +108,29 @@ public final class UniversePromotionService {
             if (discovered.size() <= cap) {
                 break;
             }
-            String stalest = null;
-            long stalestSeen = Long.MAX_VALUE;
+            String worst = null;
+            double worstScore = Double.MAX_VALUE;
             for (String id : discovered) {
                 if (pinList.contains(id) || refdata.hasFills(id)) {
                     continue; // pinned or has traded — never evict
                 }
-                long seen = lastSeenById.getOrDefault(id, 0L); // absent from register → maximally stale
-                if (seen < stalestSeen) {
-                    stalestSeen = seen;
-                    stalest = id;
+                // Least-performing = lowest current discovery score; a name that fell out of the register
+                // (no longer discussed) scores 0 and is evicted first.
+                double score = scoreById.getOrDefault(id, 0.0);
+                if (score < worstScore) {
+                    worstScore = score;
+                    worst = id;
                 }
             }
-            if (stalest == null) {
+            if (worst == null) {
                 break; // everything over the cap is pinned or has traded — cannot evict further
             }
-            if (refdata.evict(stalest)) {
-                audit.record(now, sessionEpoch, feedMode, stalest, "EVICTED", "EVICTED_STALE", null, null, null,
-                        "evicted as stalest discovered name to stay within cap " + cap, false);
-                evicted.add(stalest);
-                log.info("ADR-0060 EVICTED {} (stalest discovered name; cap {})", stalest, cap);
+            if (refdata.evict(worst)) {
+                audit.record(now, sessionEpoch, feedMode, worst, "EVICTED", "EVICTED_LOW_SCORE", worstScore, null,
+                        null, "evicted as lowest-scoring discovered name to stay within cap " + cap, false);
+                evicted.add(worst);
+                log.info("ADR-0060 EVICTED {} (lowest-scoring discovered name, score {}; cap {})",
+                        worst, worstScore, cap);
             } else {
                 break; // refused (not discovered) — stop
             }

@@ -141,11 +141,11 @@ public final class UniversePromotionLifecycle implements SmartLifecycle {
                 for (Proposal p : wouldPromote) {
                     svc.promote(p.candidate(), p.verdict(), Provenance.epoch(), Provenance.mode().name(), now);
                 }
-                Map<String, Long> lastSeen = new java.util.HashMap<>();
+                Map<String, Double> scores = new java.util.HashMap<>();
                 for (Proposal p : proposals) {
-                    lastSeen.put(p.candidate().instrumentId(), p.candidate().lastSeenMillis());
+                    scores.put(p.candidate().instrumentId(), p.candidate().score());
                 }
-                svc.enforceCap(lastSeen, props.pinListOrEmpty(), Provenance.epoch(), Provenance.mode().name(), now);
+                svc.enforceCap(scores, props.pinListOrEmpty(), Provenance.epoch(), Provenance.mode().name(), now);
                 return;
             }
 

@@ -35,17 +35,22 @@ public final class UniversePromotionPolicy {
         BLACKLISTED,
         ALREADY_TRACKED,
         LOW_SCORE,
+        LOW_MENTIONS,
         NOT_SUSTAINED,
         NOT_CORROBORATED,
         NO_FEED_COVERAGE,
         RATE_LIMITED
     }
 
-    /** Gate thresholds. All conservative and Oleg-owned (ADR-0060); this record only validates them. */
-    public record Thresholds(double minScore, int minSustainedDays, int minSources, int maxPromotionsPerDay) {
+    /** Gate thresholds (owner-set, ADR-0060); this record only validates them. */
+    public record Thresholds(double minScore, int minMentions, int minSustainedDays, int minSources,
+                             int maxPromotionsPerDay) {
         public Thresholds {
             if (minScore < 0) {
                 throw new IllegalArgumentException("minScore must be >= 0");
+            }
+            if (minMentions < 0) {
+                throw new IllegalArgumentException("minMentions must be >= 0");
             }
             if (minSustainedDays < 1) {
                 throw new IllegalArgumentException("minSustainedDays must be >= 1");
@@ -100,6 +105,10 @@ public final class UniversePromotionPolicy {
         if (c.score() < t.minScore()) {
             return reject(id, Outcome.LOW_SCORE,
                     "score %.1f < %.1f required".formatted(c.score(), t.minScore()));
+        }
+        if (c.mentions() < t.minMentions()) {
+            return reject(id, Outcome.LOW_MENTIONS,
+                    "%d mention(s) < %d required".formatted(c.mentions(), t.minMentions()));
         }
         if (c.distinctDays() < t.minSustainedDays()) {
             return reject(id, Outcome.NOT_SUSTAINED,
