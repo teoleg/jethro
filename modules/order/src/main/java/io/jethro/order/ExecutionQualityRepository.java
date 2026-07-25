@@ -85,6 +85,28 @@ public final class ExecutionQualityRepository implements TcaRecorder {
                 rs.getBigDecimal("avg_bps"), rs.getBigDecimal("worst_bps")), mode());
     }
 
+    /**
+     * The desk's MEASURED one-way execution cost for this feed mode: the fill-weighted mean
+     * implementation-shortfall slippage, in bps of price. Empty until this mode has produced a fill —
+     * a cost we have not measured is not a cost we may assert (ADR-0016 / invariant 7).
+     *
+     * <p>Price-quoted rows only. A rate-quoted instrument's "bps" is an additive basis point of RATE,
+     * not a fraction of notional (see {@link Tca}); averaging the two would be a unit error, so the
+     * rate-quoted book is excluded rather than silently blended.
+     *
+     * <p>This is <b>price</b> cost only. The separate cash commission on each fill is real and
+     * additional, but {@code execution_quality} stores it as cash without the contract multiplier
+     * needed to turn it back into bps of notional, so it is left out rather than approximated — which
+     * makes this a documented LOWER BOUND on true round-trip cost. Tracked in the deferred register.
+     */
+    public java.util.Optional<BigDecimal> averageSlippageBps() {
+        BigDecimal avg = jdbc.queryForObject("""
+                select avg(slippage_bps) from execution_quality
+                where feed_mode = ? and rate_quoted = false
+                """, BigDecimal.class, mode());
+        return java.util.Optional.ofNullable(avg);
+    }
+
     /** The running session's feed mode (ADR-0029) — scopes TCA reads to this mode only. */
     private static String mode() {
         return io.jethro.messaging.Provenance.mode().name();

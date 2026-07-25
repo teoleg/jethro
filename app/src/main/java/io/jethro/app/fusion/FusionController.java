@@ -21,7 +21,8 @@ public final class FusionController {
     @GetMapping("/api/fusion/targets")
     public FusionLifecycle.TargetBook targets() {
         FusionLifecycle f = fusion.getIfAvailable();
-        return f == null ? new FusionLifecycle.TargetBook(0, false, 0, java.util.Map.of(), java.util.List.of())
+        return f == null
+                ? new FusionLifecycle.TargetBook(0, false, 0, java.util.Map.of(), java.util.List.of(), null)
                 : f.book();
     }
 }

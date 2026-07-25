@@ -52,4 +52,24 @@ public final class TargetPlanner {
         double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
         return gap.multiply(BigDecimal.valueOf(rate)).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
     }
+
+    /**
+     * The part of {@code delta} that does not INCREASE |position| — the reduce-only projection used
+     * when the ADR-0064 edge gate finds no measured edge worth paying execution cost for.
+     *
+     * <p>Three cases, all pure arithmetic on the signs: flat already ⇒ trade nothing (opening is an
+     * increase); same sign as the position ⇒ trade nothing (adding is an increase); opposite sign ⇒
+     * trade at most enough to reach zero, never through it (crossing to the other side is a new
+     * position, not a reduction). Cutting risk is always permitted — a gate that could trap the book
+     * in a position it wants out of would be a worse bug than the churn it prevents.
+     */
+    public static BigDecimal reduceOnly(BigDecimal delta, BigDecimal current) {
+        BigDecimal d = delta == null ? BigDecimal.ZERO : delta;
+        BigDecimal cur = current == null ? BigDecimal.ZERO : current;
+        if (d.signum() == 0 || cur.signum() == 0 || d.signum() == cur.signum()) {
+            return BigDecimal.ZERO;
+        }
+        return d.abs().min(cur.abs()).multiply(BigDecimal.valueOf(d.signum()))
+                .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+    }
 }
