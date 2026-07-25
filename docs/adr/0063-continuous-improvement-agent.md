@@ -56,8 +56,14 @@ the numbers.
 
 We will build a **continuous improvement agent** whose deploy channel is **git**: the agent
 runs the observe→diagnose→**fix**→rerun loop and ships fixes as **commits on a branch the
-running system pulls and restarts on**, judged against the objective above. Each cycle it: (1) reads the existing
-telemetry/attribution/edge state (never the tick path — batch/near-real-time reads only);
+running system pulls and restarts on**, judged against the objective above. Each cycle it: (1) generates the
+**existing full report bundle** — `scripts/system-report.py` → `jethro-report-<ts>.zip` (the same
+`diagnostics.xlsx` + `ops-telemetry.xlsx` + `db-aggregates.xlsx` the owner uploads today: risk/P&L,
+positions, fills, TCA, hypotheses, strategy dials + change history, live `signals_telemetry` edge,
+equity curves, `signal_observations` by `feed_mode`) — and feeds that **whole bundle** to the model, plus
+the repo working tree (the agent runs inside the checkout) and recent WARN/ERROR **logs with stack traces**;
+never the tick path — batch reads only. The bundle is the comprehensive-analysis contract: parity with the
+manual post-mortem is guaranteed because it is the *same* collector;
 (2) produces an **expert diagnosis** (the recurring post-mortem, automated) + ranked
 corrections, each emitted as an `ai.decisions` event and surfaced on the attention feed;
 (3) generates the fix as **code + config, commits, and pushes to a branch**; (4) the
@@ -127,8 +133,14 @@ agent — **not** a plain text-completion Messages API call, which returns text 
   (ΔPnL *and* exposure, not one collapsed number), measuring on alpha-not-firm, the breaker
   floor, and the allowed no-trade outcome are the specific defenses; any dimension or metric
   added later must carry the same anti-gaming framing.
-- **Follow-ups:** wire CI-on-agent-branch as the pre-pull bar; define the rollback
-  baseline/metric that triggers a revert commit; decide SLM-vs-frontier per ADR-0010; specify
-  the node-side pull-and-restart hook (poll interval, restart safety around open positions).
-  This agent is the natural driver of the ADR-0062 live-edge gate once that is Accepted. Does
-  not change invariant 7 or ADR-0016 — it operates strictly above them.
+- **Follow-ups:** **add a logs input to the report bundle** — `scripts/system-report.py` today
+  carries risk/P&L/ops/DB workbooks but **not** application logs, yet the code-level causes it
+  must fix often live only in a stack trace (e.g. the `/api/universe/proposals`
+  `ClassCastException` was found from a pasted trace, not the xlsx); a recent WARN/ERROR + stack-trace
+  sheet is the one gap between "comprehensive P&L analysis" and "enough to find and fix a code
+  issue." Then: wire CI-on-agent-branch as the pre-pull bar; define the rollback baseline/metric
+  that triggers a revert commit; decide SLM-vs-frontier per ADR-0010 (a raw-log→code-fix diagnosis
+  is frontier-tier work, not the local SLM's job); specify the node-side pull-and-restart hook
+  (poll interval, restart safety around open positions). This agent is the natural driver of the
+  ADR-0062 live-edge gate once that is Accepted. Does not change invariant 7 or ADR-0016 — it
+  operates strictly above them.
