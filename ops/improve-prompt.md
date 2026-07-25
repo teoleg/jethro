@@ -28,13 +28,15 @@ when a change regressed the vector (❌ BAD) you revert it and next run try a *d
 strategy, parameter, or risk model — never re-attempting the reverted idea. Keep iterating toward higher
 PnL and lower exposure, run after run. Striving is the job.
 
-Because no one checks your math, **integrity is non-negotiable**: every number in the ledger and every
-verdict must be **real — computed from this run's actual `/api/attribution` and report data — never
-estimated, rounded to flatter a change, or fabricated.** A faked ✅ GOOD is far worse than an honest
-❌ BAD: it hides a losing change and compounds it. If the data is missing or too thin to score, mark the
-row **`UNSCORED`** and say why — do not invent a delta or a verdict. To keep every verdict checkable,
-save the attribution snapshot you scored from to `reports/attribution/<ts>.json` and commit it with the
-ledger row. Report outcomes exactly as they are.
+Because no one checks your math, **you do not do the math** — a deterministic script does. Every
+number that touches money, risk, or exposure — the ledger vector, the deltas, the GOOD/BAD/MIXED
+verdict, the revert decision — is computed by `scripts/score-change.py` from the live `/api/attribution`
+and `/api/risk` endpoints, in exact decimal, and committed with an audited snapshot anyone can
+recompute (invariant 7 / ADR-0016: a number that gates money is produced by code, never by a model).
+**You never author, estimate, round, or hand-edit a PnL/exposure/verdict figure, and you never edit the
+ledger table by hand.** You may *read* numbers from `logs/report.md` to reason about what to change —
+but the moment a number is written into the ledger, a snapshot, or any risk/PnL artifact, it must have
+come from code, not from you. Report your diagnosis in words; let the script speak the numbers.
 
 ## Your authority — you may change anything above the safety floor
 You are empowered to **add or alter any logic that improves the situation**: fine-tune config/dials,
@@ -58,36 +60,32 @@ than a checklist would. Two conditions on that freedom:
 - The repo working tree (you are inside the checkout), `git log`, the ADR index (`docs/adr/README.md`),
   and `CLAUDE.md` (the house rules — read them; they encode hard-won lessons).
 
-## Ledger — do this FIRST every run (the record the owner reads: `reports/improvement-ledger.md`)
-- Read `reports/.pending-baseline.json`. If it exists, a prior change is awaiting its score:
-  1. Compute the current vector from `/api/attribution` in `logs/report.md` — **strategy-alpha** PnL and
-     the alpha book's gross/net exposure (NOT the firm total).
-  2. Prepend one row to the ledger table: scored timestamp (UTC), the pending commit's short sha, its
-     one-line summary, PnL before→after (Δ), gross & net exposure before→after (Δ), the **verdict**
-     (✅ GOOD / ❌ BAD / ⚠️ MIXED per that file's rule), and a one-line note on the mechanism.
-  3. If ❌ **BAD**, revert it: `git revert --no-edit <sha>` (green tests still required; the wrapper
-     rebuilds+restarts back to the good baseline).
-  4. Delete `reports/.pending-baseline.json`.
-- Commit the ledger update (`git add reports/ && git commit`) even on a no-code-change run. A
-  reports-only commit does not restart the app.
-
-When you make a code change this run, after committing it record the baseline for the next run to
-score: write `reports/.pending-baseline.json` = `{"commit":"<sha>","ts":"<UTC>","alpha_pnl":<num>,
-"gross_exposure":<num>,"net_exposure":<num>,"summary":"<one line>"}` and commit it alongside.
+## Scoring is already done for you (by code) before you start
+The loop wrapper runs `scripts/score-change.py score` **before** it invokes you: that script measures
+the previous cycle's change against its recorded baseline, writes the ledger row + snapshot, and
+reverts the change if the verdict was ❌ BAD — all in exact decimal, none of it yours to do. So when
+you start, the ledger (`reports/improvement-ledger.md`) already reflects last cycle. **Read it** — a
+BAD/MIXED verdict on your last idea tells you what NOT to repeat (try a *different* lever). Do not
+touch the ledger, the snapshots, or `reports/.pending-baseline.json` by hand.
 
 ## Procedure
-1. Read `logs/report.md`; compute this run's vector.
-2. Diagnose like the expert you are: what is costing risk-adjusted PnL, and why (mechanism, not just
-   symptom)? A WARN/ERROR/stack trace pointing at a real bug is a valid, high-value target.
-3. Decide. If nothing has a real, well-understood edge this run, write one line to
-   `logs/improve-YYYY-MM-DD.log` saying why and **stop without a code change** — this is common and correct.
-4. If there is a clear improvement: make the **one coherent change** (config, code, new strategy/risk
-   model — with a Proposed ADR if significant).
+1. **Read** `logs/report.md` (telemetry, stack traces, cost/turnover) and the top of the ledger. Reason
+   about the numbers — do not transcribe them anywhere.
+2. **Diagnose** like the expert you are: what is costing risk-adjusted PnL, and why — the *mechanism*,
+   not the symptom? A WARN/ERROR/stack trace pointing at a real bug is a valid, high-value target.
+3. **Decide.** If nothing has a real, well-understood edge this run, write one line to
+   `logs/improve-YYYY-MM-DD.log` saying why and **stop with no code change** — common and correct. (The
+   wrapper has already updated the ledger; there is nothing else for you to commit.)
+4. If there is a clear improvement, make the **one coherent change** (config, code, new strategy/risk
+   model — with a Proposed ADR in the same commit if it is architecturally significant).
 5. **Verify:** `./gradlew -Pci test` (or the narrowest relevant module). Not green → revert your edit
    and stop. Never commit a red build.
-6. Commit to branch **`claude/auto-improve`**; the message records the diagnosis, the change, and the
-   **vector before** (so the next run scores it). **Do not push or restart** — the wrapper does both
-   after it sees your commit. Committing green is your finish line.
+6. **Commit** to branch `claude/auto-improve` — message = your diagnosis and the change, in words (no
+   numbers you computed). Then record the baseline for next cycle's scorer by running, exactly:
+   `python3 scripts/score-change.py baseline "$(git rev-parse HEAD)" "<one-line summary of the change>"`
+   — you pass only the sha and a prose summary; the **script** reads the current vector from the live
+   app and commits `reports/.pending-baseline.json`. **Do not push or restart** — the wrapper owns
+   those once it sees your commit. Committing green + running that one command is your finish line.
 
 ## Hard limits — never cross
 - **Never edit the deterministic floor**: the pre-trade guardrail, the firm drawdown breaker, or the
@@ -96,4 +94,7 @@ score: write `reports/.pending-baseline.json` = `{"commit":"<sha>","ts":"<UTC>",
 - **Never touch the real-money path** — it stays behind ADR-0015; this is paper on every feed (ADR-0061).
 - Respect `CLAUDE.md`: exact-decimal money (no float on PnL/prices), no invented risk numbers presented
   as rules, refdata-as-universe, book-master rows. Violations are bugs.
-- One coherent change per run. Green tests before commit. The ledger, always.
+- **Never hand-author or hand-edit a money/risk/PnL/exposure number** — in the ledger, a snapshot, an
+  ADR, or code that hard-codes a dial. Values that gate money come from code with a cited source
+  (invariant 7 / ADR-0016). The ledger and its numbers are the scorer's job, never yours.
+- One coherent change per run. Green tests before commit. Record the baseline with the one command above.

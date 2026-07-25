@@ -1,0 +1,309 @@
+#!/usr/bin/env python3
+"""
+Deterministic change scorer for the Jethro continuous-improvement loop (ADR-0063).
+
+CLAUDE.md invariant 7 / ADR-0016: numbers that gate money, risk, or exposure are computed by CODE,
+never by an LLM. This script is the ONLY thing that computes the improvement ledger's vector, its
+deltas, and its verdict. Claude proposes and writes CODE; this script does all the measuring and all
+the arithmetic. Every value is exact-decimal (invariant 1 — no binary float on money) and every
+verdict is recomputable from the snapshot this script commits, so nothing is taken on trust.
+
+Subcommands
+-----------
+  score
+      Score the change recorded in reports/.pending-baseline.json (if any). Fetches the current
+      objective vector from the live app, computes deltas vs the recorded baseline, applies the
+      deterministic verdict rule, prepends a ledger row, writes an audited JSON snapshot, and — on a
+      BAD verdict — reverts the offending commit. Commits reports/ (and the revert). Clears the
+      pending file. If the app can't be reached, leaves the pending file untouched and retries next
+      run (never fabricates a number).
+
+  baseline <sha> <summary...>
+      Record the CURRENT vector as the baseline for the next `score`, tagged with the commit sha and
+      a one-line human summary. The numbers come from the live app, never from an argument — Claude
+      supplies only the sha (from git) and prose (the summary). Commits the pending file.
+
+Objective vector (ADR-0063 — measured on STRATEGY ALPHA, never the hedge-masked firm total)
+  alpha_pnl  = /api/attribution .strategyAlpha
+  gross,net  = Sigma /api/risk .byBook[grossExposure|netExposure] over books whose /api/attribution
+               role != "hedge"   (the hedge book is read FROM the app, not hardcoded here)
+  fees       = /api/attribution .totalFees   (transaction-cost drag; informational)
+
+Env: JETHRO_URL (default http://localhost:8080).
+"""
+
+import json
+import os
+import subprocess
+import sys
+import urllib.request
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+
+BASE = os.environ.get("JETHRO_URL", "http://localhost:8080").rstrip("/")
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PENDING = os.path.join(REPO, "reports", ".pending-baseline.json")
+LEDGER = os.path.join(REPO, "reports", "improvement-ledger.md")
+SNAP_DIR = os.path.join(REPO, "reports", "attribution")
+
+# --- Deadbands: below these a move is treated as market noise, not an effect of the change. They
+# gate the GOOD/BAD/revert decision, so per CLAUDE.md they carry provenance and are NOT silent
+# self-chosen rules:
+#   PLACEHOLDER -- Oleg to set. $50 is a round, deliberately-conservative floor meant to swamp
+#   per-run mark jitter on a paper book; it is NOT a calibrated figure. 1% is a matching floor on
+#   gross-exposure drift. Override either via env without editing code.
+PNL_DEADBAND = Decimal(os.environ.get("JETHRO_SCORE_PNL_DEADBAND_USD", "50"))
+EXP_DEADBAND_FRAC = Decimal(os.environ.get("JETHRO_SCORE_EXPOSURE_DEADBAND_FRAC", "0.01"))
+
+
+def fetch_json(path):
+    req = urllib.request.Request(BASE + path, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def dec(x):
+    """Parse a boundary string into an exact Decimal; raises on anything non-numeric."""
+    return Decimal(str(x))
+
+
+def current_vector():
+    """The objective vector, computed entirely from live endpoints. Returns (vector, raw) or raises."""
+    attr = fetch_json("/api/attribution")
+    if not attr.get("available", False):
+        raise ValueError("attribution not available (projection empty) — cannot score")
+    risk = fetch_json("/api/risk")
+
+    hedge_books = {b["book"] for b in attr.get("books", []) if b.get("role") == "hedge"}
+    gross = Decimal(0)
+    net = Decimal(0)
+    per_book = []
+    for g in risk.get("byBook", []):
+        if g["key"] in hedge_books:
+            continue
+        gexp = dec(g["grossExposure"])
+        nexp = dec(g["netExposure"])
+        gross += gexp
+        net += nexp
+        per_book.append({"book": g["key"], "gross": str(gexp), "net": str(nexp)})
+
+    vec = {
+        "alpha_pnl": dec(attr["strategyAlpha"]),
+        "gross": gross,
+        "net": net,
+        "fees": dec(attr["totalFees"]),
+    }
+    raw = {
+        "feedMode": attr.get("feedMode"),
+        "strategyAlpha": attr["strategyAlpha"],
+        "hedgePnl": attr.get("hedgePnl"),
+        "firmTotal": attr.get("firmTotal"),
+        "totalFees": attr["totalFees"],
+        "hedgeBooks": sorted(hedge_books),
+        "alphaBooks": per_book,
+    }
+    return vec, raw
+
+
+# ----------------------------- formatting (display only) -----------------------------
+
+def money2(d):
+    # 2dp with thousands separators and sign, from an exact Decimal
+    d = d.quantize(Decimal("0.01"))
+    return ("-$" if d < 0 else "$") + f"{abs(d):,.2f}"
+
+
+def delta(d):
+    d = d.quantize(Decimal("0.01"))
+    return ("+" if d >= 0 else "-") + "$" + f"{abs(d):,.2f}"
+
+
+def pair(before, after):
+    return f"{money2(before)} → {money2(after)} ({delta(after - before)})"
+
+
+# ----------------------------- deterministic verdict -----------------------------
+
+def classify(before, after):
+    """Pure function of the two vectors. Returns (verdict, revert:bool, note)."""
+    d_pnl = after["alpha_pnl"] - before["alpha_pnl"]
+    d_gross = after["gross"] - before["gross"]
+    gross_band = abs(before["gross"]) * EXP_DEADBAND_FRAC
+
+    pnl_up = d_pnl > PNL_DEADBAND
+    gross_up = d_gross > gross_band
+    gross_down = d_gross < -gross_band
+
+    ra_before = (before["alpha_pnl"] / before["gross"]) if before["gross"] != 0 else None
+    ra_after = (after["alpha_pnl"] / after["gross"]) if after["gross"] != 0 else None
+    if ra_before is not None and ra_after is not None:
+        ra_dir = "improved" if ra_after > ra_before else ("worsened" if ra_after < ra_before else "unchanged")
+        ra_note = f"risk-adj (PnL/$1 gross) {ra_dir} {float(ra_before):.5f}→{float(ra_after):.5f}"
+    else:
+        ra_note = "risk-adj n/a (zero gross)"
+
+    if pnl_up and not gross_up:
+        return "✅ GOOD", False, f"PnL up, exposure not up; {ra_note}"
+    if (not pnl_up) and gross_up:
+        return "❌ BAD", True, f"exposure grew with no PnL gain — reverted; {ra_note}"
+    if not pnl_up and not gross_up and not gross_down and d_pnl.copy_abs() <= PNL_DEADBAND:
+        return "⚠️ MIXED", False, f"no material change (within noise band); {ra_note}"
+    return "⚠️ MIXED", False, ra_note
+
+
+# ----------------------------- ledger + snapshot writers -----------------------------
+
+def prepend_ledger_row(row):
+    with open(LEDGER, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    # drop the placeholder row if present
+    lines = [ln for ln in lines if "no changes scored yet" not in ln]
+    out, inserted = [], False
+    for ln in lines:
+        out.append(ln)
+        if not inserted and ln.lstrip().startswith("|---"):
+            out.append(row if row.endswith("\n") else row + "\n")
+            inserted = True
+    if not inserted:  # no table found — append one defensively
+        out.append("\n" + row + "\n")
+    with open(LEDGER, "w", encoding="utf-8") as f:
+        f.writelines(out)
+
+
+def write_snapshot(name, payload):
+    os.makedirs(SNAP_DIR, exist_ok=True)
+    path = os.path.join(SNAP_DIR, name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+    return path
+
+
+def git(*args, check=True):
+    return subprocess.run(["git", "-C", REPO, *args], check=check,
+                          capture_output=True, text=True)
+
+
+# ----------------------------- subcommands -----------------------------
+
+def cmd_score():
+    if not os.path.exists(PENDING):
+        print("score: no pending change to score — nothing to do")
+        return 0
+    with open(PENDING, "r", encoding="utf-8") as f:
+        base = json.load(f)
+
+    try:
+        after, raw_after = current_vector()
+    except Exception as e:
+        # App unreachable or projection empty: do NOT fabricate. Leave pending, retry next run.
+        print(f"score: cannot measure current vector ({e}); leaving pending baseline for next run")
+        return 0
+
+    before = {
+        "alpha_pnl": dec(base["alpha_pnl"]),
+        "gross": dec(base["gross_exposure"]),
+        "net": dec(base["net_exposure"]),
+    }
+    verdict, revert, note = classify(before, after)
+    sha = base.get("commit", "unknown")
+    short = sha[:9]
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    summary = base.get("summary", "")
+
+    # Audited snapshot — every number a verdict rests on, recomputable by anyone.
+    snap_name = f"{ts.replace(':', '').replace('-', '')}-{short}.json"
+    snap = {
+        "scoredAt": ts, "commit": sha, "summary": summary,
+        "verdict": verdict, "revert": revert, "note": note,
+        "deadbands": {"pnlUsd": str(PNL_DEADBAND), "exposureFrac": str(EXP_DEADBAND_FRAC)},
+        "before": {"alpha_pnl": base["alpha_pnl"], "gross": base["gross_exposure"], "net": base["net_exposure"],
+                   "at": base.get("ts")},
+        "after": {"alpha_pnl": str(after["alpha_pnl"]), "gross": str(after["gross"]), "net": str(after["net"]),
+                  "fees": str(after["fees"]), "at": ts, "source": raw_after},
+        "delta": {"alpha_pnl": str(after["alpha_pnl"] - before["alpha_pnl"]),
+                  "gross": str(after["gross"] - before["gross"]),
+                  "net": str(after["net"] - before["net"])},
+    }
+    snap_path = write_snapshot(snap_name, snap)
+
+    row = "| {ts} | `{short}` | {what} | {pnl} | {gross} | {net} | {verdict} | {note} |".format(
+        ts=ts, short=short, what=(summary or "—").replace("|", "/"),
+        pnl=pair(before["alpha_pnl"], after["alpha_pnl"]),
+        gross=pair(before["gross"], after["gross"]),
+        net=pair(before["net"], after["net"]),
+        verdict=verdict, note=note.replace("|", "/"))
+    prepend_ledger_row(row)
+
+    reverted_ok = None
+    if revert and sha != "unknown":
+        r = git("revert", "--no-edit", sha, check=False)
+        if r.returncode != 0:
+            git("revert", "--abort", check=False)
+            reverted_ok = False
+            print(f"score: BAD verdict but `git revert {short}` conflicted — NOT reverted; needs attention")
+        else:
+            reverted_ok = True
+            print(f"score: BAD verdict — reverted {short}")
+
+    os.remove(PENDING)
+    git("add", "reports/", check=False)
+    msg = f"chore(ledger): score {short} — {verdict}\n\n{note}\n\nSnapshot: {os.path.relpath(snap_path, REPO)}"
+    git("commit", "-m", msg, check=False)
+
+    print(f"score: {verdict} for {short} | ΔPnL {delta(after['alpha_pnl'] - before['alpha_pnl'])} "
+          f"| Δgross {delta(after['gross'] - before['gross'])} | {note}")
+    if reverted_ok is False:
+        return 3
+    return 0
+
+
+def cmd_baseline(argv):
+    if len(argv) < 2:
+        print("usage: score-change.py baseline <sha> <summary...>", file=sys.stderr)
+        return 2
+    sha = argv[0]
+    summary = " ".join(argv[1:]).strip()
+    try:
+        vec, raw = current_vector()
+    except Exception as e:
+        print(f"baseline: cannot read current vector ({e}) — NOT recording a baseline "
+              f"(the change will be unscored rather than scored against a fake number)")
+        return 1
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = {
+        "commit": sha, "ts": ts, "summary": summary,
+        "alpha_pnl": str(vec["alpha_pnl"]),
+        "gross_exposure": str(vec["gross"]),
+        "net_exposure": str(vec["net"]),
+        "fees": str(vec["fees"]),
+        "source": raw,
+    }
+    os.makedirs(os.path.dirname(PENDING), exist_ok=True)
+    with open(PENDING, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+    git("add", "reports/.pending-baseline.json", check=False)
+    git("commit", "-m", f"chore(ledger): baseline for {sha[:9]} — {summary}"[:200], check=False)
+    print(f"baseline: recorded for {sha[:9]} | alpha_pnl {money2(vec['alpha_pnl'])} "
+          f"| gross {money2(vec['gross'])} | net {money2(vec['net'])}")
+    return 0
+
+
+def main(argv):
+    if not argv:
+        print(__doc__)
+        return 2
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "score":
+        return cmd_score()
+    if cmd == "baseline":
+        return cmd_baseline(rest)
+    print(f"unknown subcommand: {cmd}", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except (InvalidOperation, ValueError) as e:
+        print(f"score-change: refusing to proceed on non-numeric/boundary data: {e}", file=sys.stderr)
+        sys.exit(2)

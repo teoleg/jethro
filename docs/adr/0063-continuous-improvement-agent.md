@@ -97,7 +97,16 @@ report, it is the **gate on every commit**, and the accumulating tagged history 
 committed file, **`reports/improvement-ledger.md`**: each change is scored on the next run with an
 explicit verdict — ✅ **GOOD** (PnL up **and** exposure down), ❌ **BAD** (PnL flat/down **and** exposure
 up → **auto-reverted**), ⚠️ **MIXED** (judged by the risk-adjusted read) — on strategy alpha, not the
-firm total. (The engine that reads a
+firm total. **All scoring arithmetic is done by a deterministic script, `scripts/score-change.py`, not by
+the model** (invariant 7 / ADR-0016 — a number that gates money/risk is produced by code, never by an
+LLM). The loop wrapper runs the scorer *before* it invokes the agent: it reads the live
+`/api/attribution` + `/api/risk` endpoints in exact decimal, computes the vector/deltas/verdict against a
+recorded baseline (with a documented noise deadband — `PLACEHOLDER — Oleg to set`), writes the ledger row,
+commits an audited `reports/attribution/<ts>.json` snapshot that makes the verdict recomputable from
+source, and on ❌ BAD opens the `git revert` itself. The agent's only ledger interaction is running
+`score-change.py baseline <sha> "<summary>"` after a change — passing the sha and prose, never a number;
+the script reads and records the vector. The agent authors code and words; the script authors every
+figure. (The engine that reads a
 report, edits code, and pushes is **Claude Code headless / the Claude Agent SDK** — a tool-enabled coding
 agent — **not** a plain text-completion Messages API call, which returns text and cannot edit files or push.)
 

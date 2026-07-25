@@ -28,6 +28,13 @@ git fetch origin >> "$LOG" 2>&1 || true
 git checkout -B "$BRANCH" >> "$LOG" 2>&1
 BEFORE=$(git rev-parse HEAD)
 
+# 2b. Score the PREVIOUS cycle's change — DETERMINISTICALLY, in code, never by the LLM (invariant 7 /
+#     ADR-0016). Measures the live app as it runs now (still on last cycle's code), writes the ledger
+#     row + an audited snapshot, and on a BAD verdict reverts the offending commit. Any commits it
+#     makes fall inside BEFORE..AFTER below, so they get pushed and (if the revert changed code)
+#     trigger the rebuild. All numbers come from /api/attribution + /api/risk, none from Claude.
+python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-zero (see above)" >> "$LOG"
+
 # 3. Claude Code (headless, on Max) reads logs/report.md, diagnoses against the objective, and ONLY
 #    if warranted makes one change, runs the tests, and commits. It does NOT push or restart — the
 #    wrapper owns those so build+restart only happen on a verified commit.
