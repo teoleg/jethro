@@ -49,10 +49,13 @@ python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-
 # 3. Claude Code (headless, on Max) reads logs/report.md, diagnoses against the objective, and ONLY
 #    if warranted makes one change, runs the tests, and commits. It does NOT push or restart — the
 #    wrapper owns those so build+restart only happen on a verified commit.
+# 9>&- closes the single-flight lock fd for Claude and everything it spawns — otherwise a persistent
+# child (notably the Gradle DAEMON that `./gradlew -Pci test` leaves running for hours) inherits the
+# lock and holds it long after the cycle ends, wedging every later cycle into "skipped".
 claude -p "$(cat ops/improve-prompt.md)" \
   --allowedTools "Bash Read Edit Grep Glob" \
   --permission-mode acceptEdits \
-  >> "$LOG" 2>&1 || echo "claude run exited non-zero (see above)" >> "$LOG"
+  >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero (see above)" >> "$LOG"
 
 # 3b. Per-cycle heartbeat for the UI (reports/run-status.json) — DETERMINISTIC, computed in code
 #     (invariant 7): current PnL/exposure, % change vs the previous run, and this cycle's decision.
@@ -91,7 +94,9 @@ echo "code changed:" >> "$LOG"; printf '%s\n' "$CODE_CHANGED" >> "$LOG"
 #      JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro'
 if [ -n "${JETHRO_DEPLOY_CMD:-}" ]; then
   echo "deploy: $JETHRO_DEPLOY_CMD" >> "$LOG"
-  bash -c "$JETHRO_DEPLOY_CMD" >> "$LOG" 2>&1 || echo "deploy command FAILED — app NOT restarted" >> "$LOG"
+  # 9>&- as above: the deploy starts the long-lived app (and may spawn Gradle); neither must inherit
+  # the single-flight lock, or it stays held for the life of the app and every later cycle skips.
+  bash -c "$JETHRO_DEPLOY_CMD" >> "$LOG" 2>&1 9>&- || echo "deploy command FAILED — app NOT restarted" >> "$LOG"
 else
   echo "JETHRO_DEPLOY_CMD not set — change is committed+pushed but app was NOT rebuilt/restarted" >> "$LOG"
 fi
