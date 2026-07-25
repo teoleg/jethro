@@ -203,6 +203,46 @@ never breaks the loop or fakes data.
 
 ---
 
+## The platform improves itself — a bounded autonomy loop (ADR-0063)
+
+The newest layer wraps everything above in a **self-improvement loop** that runs unattended on the box
+next to the live (paper) platform and pushes for one thing: **higher risk-adjusted PnL — more PnL per
+unit of exposure.** Every ~2 hours, one cycle:
+
+1. **Report** — a dependency-free collector snapshots the live app (risk, VaR, breaker, signals/edge
+   telemetry, hedging, **attribution**, turnover/cost, equity curves, recent stack traces) into a
+   compact, model-readable digest.
+2. **Diagnose + change** — Claude Code (headless, on the **Max** plan), framed as a world-class
+   trader/quant *and* a senior engineer, reads the digest and — **only if warranted** — makes **one
+   coherent change above the safety floor**: fine-tune a dial, fix a bug from a trace, adjust
+   sizing/hedging, or add a whole new **strategy / risk model** (with a Proposed ADR in the same
+   commit). Most cycles make **no change** — flat is often the right answer (ADR-0062).
+3. **Verify + commit** — the change ships only if `./gradlew -Pci test` is green; the wrapper owns
+   push + rebuild + restart, so those happen only on a verified commit.
+4. **Score, then self-correct** — the change is measured **on the next run** by its ΔPnL/Δexposure on
+   **strategy alpha** (never the hedge-masked firm total) and recorded in
+   `reports/improvement-ledger.md` with a verdict: ✅ **GOOD** / ❌ **BAD** (**auto-reverted**) /
+   ⚠️ **MIXED**. A regression backs itself out and the loop tries a *different* lever next run — no
+   human in the loop, striving run after run.
+
+**The numbers are deterministic, never the model's** — the discipline that makes the autonomy safe.
+All scoring (the vector, the deltas, the verdict, the revert decision) is computed by a **deterministic
+script, `scripts/score-change.py`**, in exact decimal from the live `/api/attribution` + `/api/risk`
+endpoints, and committed with an **audited snapshot anyone can recompute** (invariant 7 / ADR-0016 — a
+number that gates money/risk is produced by code, never by an LLM). The agent authors code and words;
+the script authors every figure.
+
+**What it may never touch:** the **deterministic floor** — the pre-trade guardrail, the firm drawdown
+breaker, the invariant-7 gates — and the **real-money path** (behind ADR-0015). It is paper on every
+feed (ADR-0061). Bounded, auto-reverting, and green-gated: the worst a bad change can do is lose paper
+money for one cycle, then revert.
+
+**Built and tested, inert until enabled** — `ops/loop-control.sh on` installs one tagged cron line;
+it's **off by default**. The ledger and its snapshots are the record you read (see
+[`ops/README.md`](ops/README.md) for the runbook).
+
+---
+
 ## Tech stack
 
 | Layer | Choice |
@@ -312,4 +352,5 @@ GitHub Actions (`.github/workflows/ci.yml`), two jobs per push:
 - [`docs/adr/`](docs/adr/) — Architecture Decision Records ([index](docs/adr/README.md))
 - [`docs/gap-register.md`](docs/gap-register.md) — open work threads, each with its own home
 - [`docs/deferred-register.md`](docs/deferred-register.md) — implementation-level deferred items
+- [`ops/README.md`](ops/README.md) — the self-improvement loop runbook (ADR-0063): enable/disable, billing, the ledger
 - [`CLAUDE.md`](CLAUDE.md) — working conventions

@@ -56,8 +56,14 @@ the numbers.
 
 We will build a **continuous improvement agent** whose deploy channel is **git**: the agent
 runs the observe→diagnose→**fix**→rerun loop and ships fixes as **commits on a branch the
-running system pulls and restarts on**, judged against the objective above. Each cycle it: (1) reads the existing
-telemetry/attribution/edge state (never the tick path — batch/near-real-time reads only);
+running system pulls and restarts on**, judged against the objective above. Each cycle it: (1) generates the
+**existing full report bundle** — `scripts/system-report.py` → `jethro-report-<ts>.zip` (the same
+`diagnostics.xlsx` + `ops-telemetry.xlsx` + `db-aggregates.xlsx` the owner uploads today: risk/P&L,
+positions, fills, TCA, hypotheses, strategy dials + change history, live `signals_telemetry` edge,
+equity curves, `signal_observations` by `feed_mode`) — and feeds that **whole bundle** to the model, plus
+the repo working tree (the agent runs inside the checkout) and recent WARN/ERROR **logs with stack traces**;
+never the tick path — batch reads only. The bundle is the comprehensive-analysis contract: parity with the
+manual post-mortem is guaranteed because it is the *same* collector;
 (2) produces an **expert diagnosis** (the recurring post-mortem, automated) + ranked
 corrections, each emitted as an `ai.decisions` event and surfaced on the attention feed;
 (3) generates the fix as **code + config, commits, and pushes to a branch**; (4) the
@@ -71,8 +77,12 @@ branch the agent pushes to for full autonomy, or keep it on `main` and have the 
 to a `claude/*` branch the owner fast-forwards to stay in the loop with one command — same
 code, owner picks the coupling. Two hard engineering floors hold under **either** coupling:
 the agent **never edits the deterministic floor** (guardrails, firm breaker, the invariant-7
-/ ADR-0016 gates) — it may change strategy/analysis/config code but not the code that stops
-a bad trade; and the **real-money path stays behind ADR-0015** (order-module extraction), so
+/ ADR-0016 gates). *Above* the floor its authority is broad — it may add or alter any logic that
+improves risk-adjusted PnL: config/dials, signal computation, sizing, hedging, **new strategies and
+risk models**, and bug fixes from stack traces — one coherent, attributable change per run, and with a
+**Proposed ADR written in the same commit** for architecturally-significant additions (design-first per
+CLAUDE.md; it does not wait for approval but leaves the record). It just may never edit the code that
+stops a bad trade. And the **real-money path stays behind ADR-0015** (order-module extraction), so
 no agent commit can reach a real broker regardless of coupling — the platform is paper on
 every feed (ADR-0061), so the agent has free rein with zero money risk. Every pushed change
 is an auditable git commit (revertable) tied to its `ai.decisions` diagnosis.
@@ -83,9 +93,33 @@ exposure, cost, on strategy alpha) *before* the change, ships **one tagged chang
 *after* and **attributes the delta to that change**: a change that improved the vector is kept; one that
 regressed it — or trips the breaker floor — auto-opens a revert commit. So the KPI is not an end-of-run
 report, it is the **gate on every commit**, and the accumulating tagged history becomes the record of
-*which changes moved PnL/exposure which way* — the thing the owner wanted to see. (The engine that reads a
+*which changes moved PnL/exposure which way* — the thing the owner wanted to see. That record is a
+committed file, **`reports/improvement-ledger.md`**: each change is scored on the next run with an
+explicit verdict — ✅ **GOOD** (PnL up **and** exposure down), ❌ **BAD** (PnL flat/down **and** exposure
+up → **auto-reverted**), ⚠️ **MIXED** (judged by the risk-adjusted read) — on strategy alpha, not the
+firm total. **All scoring arithmetic is done by a deterministic script, `scripts/score-change.py`, not by
+the model** (invariant 7 / ADR-0016 — a number that gates money/risk is produced by code, never by an
+LLM). The loop wrapper runs the scorer *before* it invokes the agent: it reads the live
+`/api/attribution` + `/api/risk` endpoints in exact decimal, computes the vector/deltas/verdict against a
+recorded baseline (with a documented noise deadband — `PLACEHOLDER — Oleg to set`), writes the ledger row,
+commits an audited `reports/attribution/<ts>.json` snapshot that makes the verdict recomputable from
+source, and on ❌ BAD opens the `git revert` itself. The agent's only ledger interaction is running
+`score-change.py baseline <sha> "<summary>"` after a change — passing the sha and prose, never a number;
+the script reads and records the vector. The agent authors code and words; the script authors every
+figure. (The engine that reads a
 report, edits code, and pushes is **Claude Code headless / the Claude Agent SDK** — a tool-enabled coding
 agent — **not** a plain text-completion Messages API call, which returns text and cannot edit files or push.)
+
+**Implementation (landed as inert scaffolding, not yet enabled).** The engine is **Claude Code headless
+(`claude -p`) running on the box** — one self-contained local cycle, not a remote push into a chat: report
+the live app → analyse → (only if warranted) one change → `./gradlew -Pci test` → commit to
+`claude/auto-improve` → push → rebuild+restart. It **runs on the Claude Max subscription** (the wrapper
+`unset`s `ANTHROPIC_API_KEY` so cost is plan-usage, not per-token API billing), and **rebuilds/restarts only
+when a commit actually happened** (a no-change cycle leaves the app running). Restart is the owner's own
+build+restart command (`JETHRO_DEPLOY_CMD`); enable/disable is one crontab line via `ops/loop-control.sh`.
+Files: `ops/loop-control.sh`, `ops/improve-loop.sh`, `ops/improve-prompt.md`, and the `report.md`/logs
+addition to `scripts/system-report.py`. Nothing runs until `ops/loop-control.sh on`; this ADR stays
+**Proposed** until the owner turns it on.
 
 ## Alternatives considered
 
@@ -126,9 +160,24 @@ agent — **not** a plain text-completion Messages API call, which returns text 
   agent **will try to game its objective** (Goodhart) — keeping the dimensions separate
   (ΔPnL *and* exposure, not one collapsed number), measuring on alpha-not-firm, the breaker
   floor, and the allowed no-trade outcome are the specific defenses; any dimension or metric
-  added later must carry the same anti-gaming framing.
-- **Follow-ups:** wire CI-on-agent-branch as the pre-pull bar; define the rollback
-  baseline/metric that triggers a revert commit; decide SLM-vs-frontier per ADR-0010; specify
-  the node-side pull-and-restart hook (poll interval, restart safety around open positions).
-  This agent is the natural driver of the ADR-0062 live-edge gate once that is Accepted. Does
-  not change invariant 7 or ADR-0016 — it operates strictly above them.
+  added later must carry the same anti-gaming framing. The owner runs it **fully autonomous** — the box
+  tracks `claude/auto-improve` and he monitors the report/ledger in the UI rather than approving each
+  diff. That removes the human gate, so a **fabricated ledger verdict** becomes the sharpest failure
+  mode (a faked ✅ hides a losing change and compounds it). Mitigations: the agent must score only from
+  real data and commit the `/api/attribution` snapshot it scored from (`reports/attribution/<ts>.json`)
+  so any verdict is recomputable; the auto-revert on ❌ BAD limits the damage of a genuinely-bad change;
+  the green-test gate and untouchable deterministic floor bound the rest. The honest-self-scoring
+  requirement is load-bearing and warrants an occasional spot-audit.
+- **Follow-ups:** **add a logs input to the report bundle** — `scripts/system-report.py` today
+  carries risk/P&L/ops/DB workbooks but **not** application logs, yet the code-level causes it
+  must fix often live only in a stack trace (e.g. the `/api/universe/proposals`
+  `ClassCastException` was found from a pasted trace, not the xlsx); a recent WARN/ERROR + stack-trace
+  sheet is the one gap between "comprehensive P&L analysis" and "enough to find and fix a code
+  issue." Then: wire CI-on-agent-branch as the pre-pull bar; define the rollback baseline/metric
+  that triggers a revert commit; decide SLM-vs-frontier per ADR-0010 (a raw-log→code-fix diagnosis
+  is frontier-tier work, not the local SLM's job). The node-side rebuild-and-restart hook is **done**
+  (`ops/improve-loop.sh` + `JETHRO_DEPLOY_CMD`, restart only on a committed change) — the one piece still
+  open there is **restart safety around open positions** (a rebuild mid-session drops in-memory state; on a
+  paper/sim box that is acceptable, but a guard/flat-first step is owed before this ever nears real money).
+  This agent is the natural driver of the ADR-0062 live-edge gate once that is Accepted. Does not change
+  invariant 7 or ADR-0016 — it operates strictly above them.
