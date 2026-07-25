@@ -93,6 +93,17 @@ report, it is the **gate on every commit**, and the accumulating tagged history 
 report, edits code, and pushes is **Claude Code headless / the Claude Agent SDK** — a tool-enabled coding
 agent — **not** a plain text-completion Messages API call, which returns text and cannot edit files or push.)
 
+**Implementation (landed as inert scaffolding, not yet enabled).** The engine is **Claude Code headless
+(`claude -p`) running on the box** — one self-contained local cycle, not a remote push into a chat: report
+the live app → analyse → (only if warranted) one change → `./gradlew -Pci test` → commit to
+`claude/auto-improve` → push → rebuild+restart. It **runs on the Claude Max subscription** (the wrapper
+`unset`s `ANTHROPIC_API_KEY` so cost is plan-usage, not per-token API billing), and **rebuilds/restarts only
+when a commit actually happened** (a no-change cycle leaves the app running). Restart is the owner's own
+build+restart command (`JETHRO_DEPLOY_CMD`); enable/disable is one crontab line via `ops/loop-control.sh`.
+Files: `ops/loop-control.sh`, `ops/improve-loop.sh`, `ops/improve-prompt.md`, and the `report.md`/logs
+addition to `scripts/system-report.py`. Nothing runs until `ops/loop-control.sh on`; this ADR stays
+**Proposed** until the owner turns it on.
+
 ## Alternatives considered
 
 - **Agent edits the deterministic floor too (unbounded self-modification).** Rejected: lets
@@ -140,7 +151,9 @@ agent — **not** a plain text-completion Messages API call, which returns text 
   sheet is the one gap between "comprehensive P&L analysis" and "enough to find and fix a code
   issue." Then: wire CI-on-agent-branch as the pre-pull bar; define the rollback baseline/metric
   that triggers a revert commit; decide SLM-vs-frontier per ADR-0010 (a raw-log→code-fix diagnosis
-  is frontier-tier work, not the local SLM's job); specify the node-side pull-and-restart hook
-  (poll interval, restart safety around open positions). This agent is the natural driver of the
-  ADR-0062 live-edge gate once that is Accepted. Does not change invariant 7 or ADR-0016 — it
-  operates strictly above them.
+  is frontier-tier work, not the local SLM's job). The node-side rebuild-and-restart hook is **done**
+  (`ops/improve-loop.sh` + `JETHRO_DEPLOY_CMD`, restart only on a committed change) — the one piece still
+  open there is **restart safety around open positions** (a rebuild mid-session drops in-memory state; on a
+  paper/sim box that is acceptable, but a guard/flat-first step is owed before this ever nears real money).
+  This agent is the natural driver of the ADR-0062 live-edge gate once that is Accepted. Does not change
+  invariant 7 or ADR-0016 — it operates strictly above them.
