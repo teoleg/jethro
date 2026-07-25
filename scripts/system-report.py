@@ -224,14 +224,72 @@ def write_xlsx(path, sheets):
             z.writestr("xl/worksheets/sheet%d.xml" % (i + 1), _sheet_xml(h, r))
 
 
+def capture_logs(max_lines=400):
+    """Best-effort recent WARN/ERROR/Exception + stack-frame lines from the compose stack.
+    The code-level causes an auto-fix loop must act on often live only in a stack trace, not in
+    the risk/P&L workbook (e.g. a NUMERIC->double ClassCastException surfaces as a blank sheet,
+    never a number). Never raises — a missing 'docker compose' just yields a note."""
+    try:
+        p = subprocess.run(["docker", "compose", "logs", "--no-color", "--tail", "1500"],
+                           capture_output=True, text=True, timeout=45)
+        text = p.stdout or ""
+    except Exception as e:
+        return "log capture unavailable (%s: %s)" % (type(e).__name__, e)
+    keep = [ln for ln in text.splitlines()
+            if any(k in ln for k in ("WARN", "ERROR", "Exception", "Caused by")) or ln.strip().startswith("at ")]
+    return "\n".join(keep[-max_lines:]) if keep else "(no WARN/ERROR/Exception lines in recent logs)"
+
+
+def _esc_md(v):
+    return str(v).replace("|", "\\|").replace("\n", " ")
+
+
+def _md_table(headers, rows):
+    if not rows:
+        return "_(no rows)_\n"
+    out = ["| " + " | ".join(_esc_md(h) for h in headers) + " |",
+           "| " + " | ".join("---" for _ in headers) + " |"]
+    for row in rows:
+        out.append("| " + " | ".join(_esc_md(c) for c in row) + " |")
+    return "\n".join(out) + "\n"
+
+
+def render_markdown(ops_raw, db_sheets, logs_text):
+    """Compact, model-readable digest of the same data as the xlsx bundle — cheap to read every
+    cycle (the .xlsx is binary and token-heavy). Row-level detail (positions, fills, TCA,
+    hypotheses, strategy dials) stays in diagnostics.xlsx in the same zip for when it's needed."""
+    L = ["# Jethro report %s" % TS, "",
+         "Model-readable digest of the live run for automated analysis. The objective is "
+         "risk-adjusted PnL — PnL up per unit of exposure, measured on strategy alpha, not the "
+         "hedge-masked firm total. Row-level detail is in `diagnostics.xlsx` in this bundle.", "",
+         "## Operational / runtime (live endpoints)"]
+    for name, data in ops_raw.items():
+        L.append("### %s" % name)
+        L.append("```json")
+        L.append(json.dumps(data, indent=1)[:6000])
+        L.append("```")
+    L.append("## Postgres aggregates (behaviour over the run)")
+    for name, h, r in db_sheets:
+        L.append("### %s" % name)
+        L.append(_md_table(h, r[:60]))
+    L.append("## Recent WARN/ERROR / stack traces")
+    L.append("```")
+    L.append(logs_text[:20000])
+    L.append("```")
+    return "\n".join(L)
+
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     files = []
 
     print("==> collecting operational endpoints from", BASE)
     ops_sheets = []
+    ops_raw = {}
     for name, path in ENDPOINTS.items():
-        h, r = to_table(fetch_json(path))
+        data = fetch_json(path)
+        ops_raw[name] = data
+        h, r = to_table(data)
         ops_sheets.append((name, h, r))
         print("   %-20s %d row(s)" % (name, len(r)))
     ops_path = os.path.join(OUT_DIR, "ops-telemetry.xlsx")
@@ -245,6 +303,13 @@ def main():
         print("   %-22s %d row(s)" % (name, len(r)))
     db_path = os.path.join(OUT_DIR, "db-aggregates.xlsx")
     write_xlsx(db_path, db_sheets); files.append(db_path)
+
+    print("==> capturing recent WARN/ERROR logs + writing report.md")
+    logs_text = capture_logs()
+    md_path = os.path.join(OUT_DIR, "report.md")
+    with open(md_path, "w") as f:
+        f.write(render_markdown(ops_raw, db_sheets, logs_text))
+    files.append(md_path)
 
     print("==> downloading the app's own diagnostics.xlsx")
     diag = os.path.join(OUT_DIR, "diagnostics.xlsx")
