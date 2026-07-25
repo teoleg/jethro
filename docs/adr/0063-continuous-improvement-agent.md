@@ -75,8 +75,17 @@ the agent **never edits the deterministic floor** (guardrails, firm breaker, the
 a bad trade; and the **real-money path stays behind ADR-0015** (order-module extraction), so
 no agent commit can reach a real broker regardless of coupling — the platform is paper on
 every feed (ADR-0061), so the agent has free rein with zero money risk. Every pushed change
-is an auditable git commit (revertable) tied to its `ai.decisions` diagnosis; a rollback
-trigger (edge/cost/breaker regression vs the pre-change baseline) opens a revert commit.
+is an auditable git commit (revertable) tied to its `ai.decisions` diagnosis.
+
+The loop is a **measured experiment against the objective, not an open-ended edit stream** — the whole point
+is to **see what actually makes PnL/exposure better**. Each cycle records the objective vector (ΔPnL,
+exposure, cost, on strategy alpha) *before* the change, ships **one tagged change**, then reads the vector
+*after* and **attributes the delta to that change**: a change that improved the vector is kept; one that
+regressed it — or trips the breaker floor — auto-opens a revert commit. So the KPI is not an end-of-run
+report, it is the **gate on every commit**, and the accumulating tagged history becomes the record of
+*which changes moved PnL/exposure which way* — the thing the owner wanted to see. (The engine that reads a
+report, edits code, and pushes is **Claude Code headless / the Claude Agent SDK** — a tool-enabled coding
+agent — **not** a plain text-completion Messages API call, which returns text and cannot edit files or push.)
 
 ## Alternatives considered
 
