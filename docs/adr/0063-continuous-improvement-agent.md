@@ -151,7 +151,14 @@ addition to `scripts/system-report.py`. Nothing runs until `ops/loop-control.sh 
   agent **will try to game its objective** (Goodhart) — keeping the dimensions separate
   (ΔPnL *and* exposure, not one collapsed number), measuring on alpha-not-firm, the breaker
   floor, and the allowed no-trade outcome are the specific defenses; any dimension or metric
-  added later must carry the same anti-gaming framing.
+  added later must carry the same anti-gaming framing. The owner runs it **fully autonomous** — the box
+  tracks `claude/auto-improve` and he monitors the report/ledger in the UI rather than approving each
+  diff. That removes the human gate, so a **fabricated ledger verdict** becomes the sharpest failure
+  mode (a faked ✅ hides a losing change and compounds it). Mitigations: the agent must score only from
+  real data and commit the `/api/attribution` snapshot it scored from (`reports/attribution/<ts>.json`)
+  so any verdict is recomputable; the auto-revert on ❌ BAD limits the damage of a genuinely-bad change;
+  the green-test gate and untouchable deterministic floor bound the rest. The honest-self-scoring
+  requirement is load-bearing and warrants an occasional spot-audit.
 - **Follow-ups:** **add a logs input to the report bundle** — `scripts/system-report.py` today
   carries risk/P&L/ops/DB workbooks but **not** application logs, yet the code-level causes it
   must fix often live only in a stack trace (e.g. the `/api/universe/proposals`
