@@ -1,0 +1,16 @@
+[
+  {
+    "ts": "2026-07-25T20:59:26Z",
+    "feedMode": "SIM",
+    "available": true,
+    "alpha_pnl": "-7058.11667866",
+    "gross": "345589.61293779",
+    "net": "-30439.90962579",
+    "pnl_pct": null,
+    "gross_pct": null,
+    "action": "changed",
+    "last_verdict": "\u2705 GOOD",
+    "decision": "made a change: fusion target book spans held positions \u2014 a name with no fresh forecast is planned flat and worked down; risk-reducing deltas skip the conviction floor and the backtest-support veto (ADR-0065) \u00b7 prev \u2705 GOOD",
+    "commit": "bc83ae6"
+  }
+]
