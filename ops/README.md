@@ -66,6 +66,13 @@ The box works on **`claude/auto-improve`** and runs whatever is committed there.
 autonomy, leave it as-is. To review each change before it runs live, set `JETHRO_DEPLOY_CMD` empty
 (so it commits+pushes but doesn't restart) and rebuild/restart yourself after you've looked.
 
+## Watch it in the UI — the Improve page
+Every cycle (change or not) writes one deterministic heartbeat line to `reports/run-status.json`, which
+the running app serves at `/api/improve/status` and the **Improve** tab renders: time, alpha PnL,
+exposure, % change vs the previous run, the action (changed / no-change / reverted), and the previous
+change's scored verdict. All numbers come from `scripts/score-change.py` (never the model). Open
+`http://localhost:8080/improve.html`.
+
 ## The improvement ledger — your running record
 `reports/improvement-ledger.md` is the file you read to track improvement over time. Every code change
 the loop makes is scored **on the next run** by its measured delta on **PnL and exposure (strategy

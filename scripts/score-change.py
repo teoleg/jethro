@@ -23,6 +23,11 @@ Subcommands
       a one-line human summary. The numbers come from the live app, never from an argument — Claude
       supplies only the sha (from git) and prose (the summary). Commits the pending file.
 
+  status --scored <0|1> --changed <0|1>
+      Append one per-cycle heartbeat to reports/run-status.json (the feed the UI shows): current
+      PnL/exposure, % change vs the previous run, and this cycle's decision (changed / no-change /
+      reverted). Every number is computed here; the wrapper passes only the two booleans.
+
 Objective vector (ADR-0063 — measured on STRATEGY ALPHA, never the hedge-masked firm total)
   alpha_pnl  = /api/attribution .strategyAlpha
   gross,net  = Sigma /api/risk .byBook[grossExposure|netExposure] over books whose /api/attribution
@@ -45,6 +50,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PENDING = os.path.join(REPO, "reports", ".pending-baseline.json")
 LEDGER = os.path.join(REPO, "reports", "improvement-ledger.md")
 SNAP_DIR = os.path.join(REPO, "reports", "attribution")
+STATUS = os.path.join(REPO, "reports", "run-status.json")  # per-cycle heartbeat the UI reads
+STATUS_CAP = 300
 
 # --- Deadbands: below these a move is treated as market noise, not an effect of the change. They
 # gate the GOOD/BAD/revert decision, so per CLAUDE.md they carry provenance and are NOT silent
@@ -288,6 +295,109 @@ def cmd_baseline(argv):
     return 0
 
 
+def newest_snapshot():
+    if not os.path.isdir(SNAP_DIR):
+        return None
+    files = sorted(f for f in os.listdir(SNAP_DIR) if f.endswith(".json"))
+    if not files:
+        return None  # snapshot names are timestamp-prefixed, so lexical sort == chronological
+    with open(os.path.join(SNAP_DIR, files[-1]), "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def cmd_status(argv):
+    """Append one deterministic per-cycle heartbeat entry to reports/run-status.json (the UI feed).
+
+    Every number (current vector + % change vs the previous run) is computed here, in exact decimal —
+    never by the model. The wrapper passes only two booleans about what happened this cycle:
+      --scored 0|1   a pending change was scored this cycle (so a fresh snapshot verdict exists)
+      --changed 0|1  the agent recorded a NEW change this cycle (a new pending baseline)
+    """
+    scored = changed = False
+    it = iter(argv)
+    for a in it:
+        if a == "--scored":
+            scored = next(it, "0") == "1"
+        elif a == "--changed":
+            changed = next(it, "0") == "1"
+
+    available = True
+    vec = raw = None
+    err = ""
+    try:
+        vec, raw = current_vector()
+    except Exception as e:
+        available = False
+        err = str(e)
+
+    entries = []
+    if os.path.exists(STATUS):
+        try:
+            with open(STATUS, "r", encoding="utf-8") as f:
+                entries = json.load(f)
+        except Exception:
+            entries = []
+    prev = entries[0] if entries else None
+
+    def pct(cur, prev_key):
+        if not prev or prev.get(prev_key) in (None, ""):
+            return None
+        p = Decimal(str(prev[prev_key]))
+        if p == 0:
+            return None
+        return round(float((cur - p) / abs(p) * 100), 2)
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    head = git("rev-parse", "--short", "HEAD", check=False).stdout.strip()
+    snap = newest_snapshot() if scored else None
+    last_verdict = snap.get("verdict") if snap else None
+    reverted = bool(snap and snap.get("revert"))
+
+    action = "reverted" if reverted else ("changed" if changed else "no-change")
+
+    if not available:
+        decision = f"app unreachable — not measured ({err})"
+    elif reverted:
+        short = (snap.get("commit") or "")[:9]
+        decision = f"backed off {short} ({last_verdict}) — next run tries a different lever"
+    elif changed:
+        summ = ""
+        if os.path.exists(PENDING):
+            try:
+                with open(PENDING, "r", encoding="utf-8") as f:
+                    summ = json.load(f).get("summary", "")
+            except Exception:
+                pass
+        decision = f"made a change: {summ}" + (f" · prev {last_verdict}" if last_verdict else "")
+    else:
+        decision = "no change this cycle" + (f" · prev {last_verdict}" if last_verdict else "")
+
+    entry = {
+        "ts": ts,
+        "feedMode": (raw.get("feedMode") if raw else None),
+        "available": available,
+        "alpha_pnl": (str(vec["alpha_pnl"]) if available else None),
+        "gross": (str(vec["gross"]) if available else None),
+        "net": (str(vec["net"]) if available else None),
+        "pnl_pct": (pct(vec["alpha_pnl"], "alpha_pnl") if available else None),
+        "gross_pct": (pct(vec["gross"], "gross") if available else None),
+        "action": action,
+        "last_verdict": last_verdict,
+        "decision": decision,
+        "commit": head,
+    }
+    entries.insert(0, entry)
+    entries = entries[:STATUS_CAP]
+    os.makedirs(os.path.dirname(STATUS), exist_ok=True)
+    with open(STATUS, "w", encoding="utf-8") as f:
+        json.dump(entries, f, indent=2)
+    git("add", "reports/run-status.json", check=False)
+    git("commit", "-m", f"chore(status): run {ts} — {action}", check=False)
+    print(f"status: {action} | pnl {entry['alpha_pnl']} ({entry['pnl_pct']}%) "
+          f"| gross {entry['gross']} ({entry['gross_pct']}%) | {decision}")
+    return 0
+
+
 def main(argv):
     if not argv:
         print(__doc__)
@@ -297,6 +407,8 @@ def main(argv):
         return cmd_score()
     if cmd == "baseline":
         return cmd_baseline(rest)
+    if cmd == "status":
+        return cmd_status(rest)
     print(f"unknown subcommand: {cmd}", file=sys.stderr)
     return 2
 

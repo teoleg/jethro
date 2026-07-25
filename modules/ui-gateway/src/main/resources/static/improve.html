@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — improve</title>
+<style>
+  :root { --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --warn:#e0a83d; --alert:#f0553f; --up:#35c07a; --down:#f0553f; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--bg); color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  .topbar { position:sticky; top:0; z-index:10; background:rgba(10,13,19,.72); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:16px; padding:0 24px; height:56px; max-width:1200px; margin:0 auto; }
+  .brand { font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; }
+  .tab { padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; }
+  .tab:hover { color:var(--txt); background:var(--surface); } .tab.active { color:var(--txt); background:var(--surface-2); }
+  main { max-width:1200px; margin:0 auto; padding:18px 24px 40px; display:flex; flex-direction:column; gap:18px; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 0; }
+  .note { color:var(--dim); }
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:4px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:left; padding:6px 12px; border-bottom:1px solid var(--line); line-height:1.6; }
+  tr:last-child td { border-bottom:0; } th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+  td.num, th.num { text-align:right; }
+  .dim{color:var(--dim)} a { color:var(--brand); text-decoration:none; } a:hover { text-decoration:underline; }
+  .empty { color:var(--dim); text-align:center; padding:20px 0; }
+  .up{color:var(--up)} .down{color:var(--down)}
+  .hero { display:flex; gap:28px; flex-wrap:wrap; align-items:flex-end; padding:14px 16px 12px; }
+  .metric { display:flex; flex-direction:column; gap:3px; }
+  .metric .k { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim); }
+  .metric .v { font-size:23px; font-weight:600; }
+  .goal { font-size:13px; font-weight:600; color:var(--txt); }
+  .decision { padding:8px 16px 10px; color:var(--dim); font-size:12px; border-top:1px solid var(--line); }
+  .decision b { color:var(--txt); }
+  .pillv { font-size:10px; font-weight:700; border-radius:4px; padding:1px 6px; border:1px solid var(--line-2); color:var(--dim); white-space:nowrap; }
+  .pillv.good{color:var(--up);border-color:var(--up)} .pillv.bad{color:var(--alert);border-color:var(--alert)} .pillv.mixed{color:var(--warn);border-color:var(--warn)}
+  .act { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+  .act.changed{color:var(--brand)} .act.reverted{color:var(--alert)} .act.nochange{color:var(--dim)}
+</style>
+</head>
+<body>
+<script src="/format.js"></script>
+<script src="/poll.js"></script>
+<div class="topbar"><div class="bar">
+  <span class="brand">JETHRO</span>
+  <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab active" href="/improve.html">Improve</a>
+      <a class="tab" href="/markets.html">Markets</a>
+      <a class="tab" href="/rates.html">Rates</a>
+      <a class="tab" href="/books.html">Books</a>
+      <a class="tab" href="/orders.html">Orders</a>
+      <a class="tab" href="/config.html">Config</a>
+      <a class="tab" href="/sim.html">Sim</a>
+      <a class="tab" href="/backtest.html">Backtest</a>
+      <a class="tab" href="/strategy.html">Strategy</a>
+      <a class="tab" href="/signals.html">Signals</a>
+      <a class="tab" href="/social.html">Social</a>
+      <a class="tab" href="/social-sources.html">Sources</a>
+      <a class="tab" href="/discovery.html">Discover</a>
+      <a class="tab" href="/ollama.html">Ops</a>
+  </nav>
+</div></div>
+<main>
+  <div class="panel">
+    <div class="hero">
+      <div class="metric"><span class="k">Goal</span><span class="goal">PnL&nbsp;↑ &nbsp;·&nbsp; Exposure&nbsp;↓</span></div>
+      <div class="metric"><span class="k">Alpha PnL</span><span class="v mono" id="hPnl">—</span></div>
+      <div class="metric"><span class="k">Gross exposure</span><span class="v mono" id="hGross">—</span></div>
+      <div class="metric"><span class="k">Net exposure</span><span class="v mono" id="hNet">—</span></div>
+      <div class="metric"><span class="k">Last run (UTC)</span><span class="v mono" id="hTime" style="font-size:15px">—</span></div>
+    </div>
+    <div class="decision" id="hDecision">waiting for the first cycle…</div>
+  </div>
+
+  <div class="section-h">Per-run history — one line per cycle, change or not</div>
+  <div class="panel">
+    <table>
+      <thead><tr>
+        <th>Time (UTC)</th>
+        <th class="num">Alpha PnL</th><th class="num">Δ vs prev</th>
+        <th class="num">Gross exp</th><th class="num">Δ</th>
+        <th class="num">Net exp</th>
+        <th>Action</th><th>Prev verdict</th><th>Decision</th>
+      </tr></thead>
+      <tbody id="rows"><tr><td colspan="9" class="empty">waiting for the first cycle…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="note" style="font-size:11px; padding:0 4px; line-height:1.7">
+    Numbers are computed by <span class="mono">scripts/score-change.py</span> from the live risk /
+    attribution endpoints in exact decimal — never by a model (invariant&nbsp;7 / ADR-0016).
+    <b>“Δ vs prev”</b> is run-over-run drift and includes market moves; the <b>Prev verdict</b> column is
+    the previous change’s <i>scored</i> effect on the objective (✅&nbsp;GOOD&nbsp;= PnL up &amp; exposure
+    not up, ❌&nbsp;BAD&nbsp;= auto-reverted). Full history: <span class="mono">reports/improvement-ledger.md</span>.
+  </div>
+</main>
+
+<script>
+(function () {
+  function money(s) {
+    if (s === null || s === undefined || s === "") return "—";
+    var n = Number(s); if (!isFinite(n)) return "—";
+    return (n < 0 ? "-$" : "$") + Math.abs(n).toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+  function pctText(p) { return (p === null || p === undefined) ? "" : (p > 0 ? "+" : "") + Number(p).toFixed(2) + "%"; }
+  // PnL up is good; exposure down is good.
+  function pctClass(p, goodIfNegative) {
+    if (p === null || p === undefined || p === 0) return "";
+    var good = goodIfNegative ? p < 0 : p > 0;
+    return good ? "up" : "down";
+  }
+  function verdictClass(v) { if (!v) return ""; if (v.indexOf("GOOD") >= 0) return "good"; if (v.indexOf("BAD") >= 0) return "bad"; return "mixed"; }
+  function actClass(a) { return (a || "").replace(/[^a-z]/g, ""); }  // "no-change" -> "nochange"
+  function esc(s) { return (s === null || s === undefined ? "" : String(s)).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+  function fmtTs(ts) { return ts ? String(ts).replace("T", " ").replace("Z", "") : "—"; }
+
+  function render(list) {
+    var rows = document.getElementById("rows");
+    if (!list || !list.length) {
+      rows.innerHTML = '<tr><td colspan="9" class="empty">waiting for the first cycle…</td></tr>';
+      return;
+    }
+    var top = list[0];
+    document.getElementById("hPnl").textContent = money(top.alpha_pnl);
+    document.getElementById("hGross").textContent = money(top.gross);
+    document.getElementById("hNet").textContent = money(top.net);
+    document.getElementById("hTime").textContent = fmtTs(top.ts);
+    document.getElementById("hDecision").innerHTML = '<b>Latest decision:</b> ' + esc(top.decision || "—");
+
+    rows.innerHTML = list.map(function (e) {
+      var verdict = e.last_verdict
+        ? '<span class="pillv ' + verdictClass(e.last_verdict) + '">' + esc(e.last_verdict) + '</span>'
+        : '<span class="dim">—</span>';
+      return '<tr>'
+        + '<td class="mono">' + esc(fmtTs(e.ts)) + '</td>'
+        + '<td class="num mono">' + money(e.alpha_pnl) + '</td>'
+        + '<td class="num mono ' + pctClass(e.pnl_pct, false) + '">' + esc(pctText(e.pnl_pct)) + '</td>'
+        + '<td class="num mono">' + money(e.gross) + '</td>'
+        + '<td class="num mono ' + pctClass(e.gross_pct, true) + '">' + esc(pctText(e.gross_pct)) + '</td>'
+        + '<td class="num mono">' + money(e.net) + '</td>'
+        + '<td><span class="act ' + actClass(e.action) + '">' + esc(e.action || "") + '</span></td>'
+        + '<td>' + verdict + '</td>'
+        + '<td class="dim">' + esc(e.decision || "") + '</td>'
+        + '</tr>';
+    }).join("");
+  }
+
+  poll(function () {
+    return pollFetch("/api/improve/status").then(function (r) { return r.json(); }).then(render)
+      .catch(function () { /* transient — keep last render */ });
+  }, 15000);
+})();
+</script>
+</body>
+</html>

@@ -16,6 +16,15 @@ unset ANTHROPIC_API_KEY || true   # bill to Max, never the API account
 
 mkdir -p logs
 LOG="logs/improve-$(date +%F).log"
+
+# Single-flight: with a short interval, a slow gradle test could still be running when the next cron
+# fires. Take a non-blocking lock and skip this fire rather than stacking overlapping cycles.
+exec 9>"$REPO/.improve-loop.lock"
+if ! flock -n 9; then
+  echo "==== $(date -Is) skipped — previous cycle still running ====" >> "$LOG"
+  exit 0
+fi
+
 echo "==== $(date -Is) cycle start ====" >> "$LOG"
 
 # 1. Snapshot the LIVE app (writes logs/report.md + jethro-report-*.zip). Do NOT restart first —
@@ -27,6 +36,8 @@ python3 scripts/system-report.py >> "$LOG" 2>&1 || {
 git fetch origin >> "$LOG" 2>&1 || true
 git checkout -B "$BRANCH" >> "$LOG" 2>&1
 BEFORE=$(git rev-parse HEAD)
+# Was a prior change awaiting its score at cycle start? Drives the run-status "scored/reverted" state.
+HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
 
 # 2b. Score the PREVIOUS cycle's change — DETERMINISTICALLY, in code, never by the LLM (invariant 7 /
 #     ADR-0016). Measures the live app as it runs now (still on last cycle's code), writes the ledger
@@ -43,9 +54,17 @@ claude -p "$(cat ops/improve-prompt.md)" \
   --permission-mode acceptEdits \
   >> "$LOG" 2>&1 || echo "claude run exited non-zero (see above)" >> "$LOG"
 
+# 3b. Per-cycle heartbeat for the UI (reports/run-status.json) — DETERMINISTIC, computed in code
+#     (invariant 7): current PnL/exposure, % change vs the previous run, and this cycle's decision.
+#     Runs EVERY cycle, including no-change ones, so the UI shows a line for each run. --changed = the
+#     agent recorded a NEW baseline this cycle; --scored = a prior change was scored at cycle start.
+CHANGED=0; [ -f reports/.pending-baseline.json ] && CHANGED=1
+python3 scripts/score-change.py status --scored "$HAD_PENDING" --changed "$CHANGED" >> "$LOG" 2>&1 \
+  || echo "status writer exited non-zero (see above)" >> "$LOG"
+
 AFTER=$(git rev-parse HEAD)
 if [ "$BEFORE" = "$AFTER" ]; then
-  echo "no commit this cycle — app left running as-is (common, expected case)" >> "$LOG"
+  echo "nothing committed this cycle (even the heartbeat write?) — app left running as-is" >> "$LOG"
   echo "==== $(date -Is) cycle end ====" >> "$LOG"
   exit 0
 fi
