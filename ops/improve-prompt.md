@@ -19,9 +19,29 @@ exposure** — by reading the latest run and, only when warranted, shipping one 
   need detail beyond report.md.
 - The repo working tree (you are inside the checkout) and `git log`.
 
+## Ledger — do this FIRST, every run (it is the record the owner reads: `reports/improvement-ledger.md`)
+- Read `reports/.pending-baseline.json`. If it exists, a change from a previous run is awaiting a score:
+  1. Compute the current objective vector from `/api/attribution` in `logs/report.md` — **strategy
+     alpha** PnL, and gross/net exposure of the alpha book (NOT the firm total).
+  2. Append one row to the **top** of the table in `reports/improvement-ledger.md`: scored timestamp
+     (UTC), the pending commit's short sha, its one-line change summary, PnL before→after (Δ), gross
+     and net exposure before→after (Δ), the **verdict** (✅ GOOD / ❌ BAD / ⚠️ MIXED, per that file's
+     rule), and a one-line note on the mechanism.
+  3. If the verdict is ❌ **BAD**, revert that change: `git revert --no-edit <sha>`. A bad change must
+     not stay. (The revert is itself a code change — green tests still required; the wrapper will
+     rebuild+restart back to the good baseline.)
+  4. Delete `reports/.pending-baseline.json`.
+- Commit the ledger update (`git add reports/ && git commit`) even on a run that makes no code change,
+  so the record persists. A **reports-only** commit does not trigger a restart.
+
+When you make a code change this run (step 4 below), after committing it record the new baseline for the
+next run to score: write `reports/.pending-baseline.json` =
+`{"commit": "<sha you just committed>", "ts": "<UTC>", "alpha_pnl": <num>, "gross_exposure": <num>,
+"net_exposure": <num>, "summary": "<one line>"}` and commit it alongside.
+
 ## Procedure
-1. Read `logs/report.md`. Compute the objective vector for this run and compare against the previous
-   commit's recorded baseline (see the tag in the last `auto-improve` commit message, if any).
+1. Read `logs/report.md`. Compute the objective vector for this run and compare against the pending
+   baseline (`reports/.pending-baseline.json`) if one exists.
 2. Diagnose. If a WARN/ERROR/stack trace points at a real bug, that is a valid fix target.
 3. Decide: is there a change that should improve the vector? If **no** — write one short line to
    `logs/improve-YYYY-MM-DD.log` explaining why (e.g. "flat is optimal: both algos negative live

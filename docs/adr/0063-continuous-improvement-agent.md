@@ -89,7 +89,11 @@ exposure, cost, on strategy alpha) *before* the change, ships **one tagged chang
 *after* and **attributes the delta to that change**: a change that improved the vector is kept; one that
 regressed it — or trips the breaker floor — auto-opens a revert commit. So the KPI is not an end-of-run
 report, it is the **gate on every commit**, and the accumulating tagged history becomes the record of
-*which changes moved PnL/exposure which way* — the thing the owner wanted to see. (The engine that reads a
+*which changes moved PnL/exposure which way* — the thing the owner wanted to see. That record is a
+committed file, **`reports/improvement-ledger.md`**: each change is scored on the next run with an
+explicit verdict — ✅ **GOOD** (PnL up **and** exposure down), ❌ **BAD** (PnL flat/down **and** exposure
+up → **auto-reverted**), ⚠️ **MIXED** (judged by the risk-adjusted read) — on strategy alpha, not the
+firm total. (The engine that reads a
 report, edits code, and pushes is **Claude Code headless / the Claude Agent SDK** — a tool-enabled coding
 agent — **not** a plain text-completion Messages API call, which returns text and cannot edit files or push.)
 

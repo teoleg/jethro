@@ -31,7 +31,7 @@ ENDPOINTS = {
     "social": "/api/social", "tca": "/api/tca", "history_status": "/api/history/status",
     "strategy_selection": "/api/strategy/selection", "strategy_diag": "/api/strategy/diagnostics",
     "orders_day": "/api/orders/day", "risk": "/api/risk", "llm_runs": "/api/llm/runs",
-    "attention": "/api/attention",
+    "attention": "/api/attention", "attribution": "/api/attribution",
 }
 
 # ---- durable DB aggregates (behaviour over the run; complements the diagnostics fills/tca sheets) ----

@@ -51,8 +51,16 @@ The box works on **`claude/auto-improve`** and runs whatever is committed there.
 autonomy, leave it as-is. To review each change before it runs live, set `JETHRO_DEPLOY_CMD` empty
 (so it commits+pushes but doesn't restart) and rebuild/restart yourself after you've looked.
 
+## The improvement ledger — your running record
+`reports/improvement-ledger.md` is the file you read to track improvement over time. Every code change
+the loop makes is scored **on the next run** by its measured delta on **PnL and exposure (strategy
+alpha)**, with a verdict: ✅ GOOD (PnL up, exposure down), ❌ BAD (PnL flat/down, exposure up →
+**auto-reverted**), ⚠️ MIXED (risk-adjusted read). It's committed each cycle, so you can read the whole
+history on GitHub from anywhere. A ledger-only commit does not restart the app.
+
 ## Files (all in git)
 - `ops/loop-control.sh` — on/off/status switch for the cron.
 - `ops/improve-loop.sh` — one full cycle (report -> Claude -> test -> commit -> push -> deploy).
-- `ops/improve-prompt.md` — the agent's instructions (objective, procedure, hard limits).
+- `ops/improve-prompt.md` — the agent's instructions (ledger, objective, procedure, hard limits).
+- `reports/improvement-ledger.md` — the scored history of PnL/exposure deltas per change.
 - `scripts/system-report.py` — the report collector (also writes the compact `report.md` + logs).

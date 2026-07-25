@@ -38,16 +38,27 @@ claude -p "$(cat ops/improve-prompt.md)" \
 
 AFTER=$(git rev-parse HEAD)
 if [ "$BEFORE" = "$AFTER" ]; then
-  echo "no change this cycle — app left running as-is (this is the common, expected case)" >> "$LOG"
+  echo "no commit this cycle — app left running as-is (common, expected case)" >> "$LOG"
   echo "==== $(date -Is) cycle end ====" >> "$LOG"
   exit 0
 fi
 
-# 4. A change was committed (the prompt requires green `./gradlew -Pci test` before committing).
-echo "change committed $BEFORE -> $AFTER — pushing + deploying" >> "$LOG"
+# 4. Something was committed (ledger score and/or a code change; the prompt requires green
+#    `./gradlew -Pci test` before any code commit). Push so the ledger + any change persist.
+echo "commit(s) this cycle $BEFORE -> $AFTER — pushing" >> "$LOG"
 for i in 1 2 3 4; do
   git push -u origin "$BRANCH" >> "$LOG" 2>&1 && break || { echo "push retry $i" >> "$LOG"; sleep $((2 ** i)); }
 done
+
+# 4b. Rebuild+restart ONLY if code outside reports/ changed. A ledger-only commit (scoring the
+#     previous change) must not bounce the app.
+CODE_CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" | grep -v '^reports/' || true)
+if [ -z "$CODE_CHANGED" ]; then
+  echo "ledger-only update — pushed, no rebuild/restart" >> "$LOG"
+  echo "==== $(date -Is) cycle end ====" >> "$LOG"
+  exit 0
+fi
+echo "code changed:" >> "$LOG"; printf '%s\n' "$CODE_CHANGED" >> "$LOG"
 
 # 5. Rebuild the binary + restart the app. This is YOUR command (how you build/run Jethro) — set
 #    JETHRO_DEPLOY_CMD in the crontab or environment, e.g.
