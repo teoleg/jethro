@@ -67,20 +67,21 @@
   <div class="panel">
     <div class="hero">
       <div class="metric"><span class="k">Goal</span><span class="goal">PnL&nbsp;↑ &nbsp;·&nbsp; Exposure&nbsp;↓</span></div>
-      <div class="metric"><span class="k">Alpha PnL (ex-hedge)</span><span class="v mono" id="hPnl">—</span></div>
-      <div class="metric"><span class="k">Gross exp (ex-hedge)</span><span class="v mono" id="hGross">—</span></div>
-      <div class="metric"><span class="k">Net exp (ex-hedge)</span><span class="v mono" id="hNet">—</span></div>
+      <div class="metric"><span class="k">Total PnL</span><span class="v mono" id="hPnl">—</span></div>
+      <div class="metric"><span class="k">Gross exposure</span><span class="v mono" id="hGross">—</span></div>
+      <div class="metric"><span class="k">Net exposure</span><span class="v mono" id="hNet">—</span></div>
+      <div class="metric"><span class="k">Cost (fees)</span><span class="v mono" id="hFees">—</span></div>
       <div class="metric"><span class="k">As of run (UTC)</span><span class="v mono" id="hTime" style="font-size:15px">—</span></div>
     </div>
     <div class="decision" id="hDecision">waiting for the first cycle…</div>
   </div>
 
   <div class="note" style="font-size:11.5px; padding:2px 8px; line-height:1.65; border:1px solid var(--line-2); border-radius:10px; background:var(--surface)">
-    <b>These are strategy-alpha figures, not the Overview firm headline — and they will not match it, by design.</b><br>
-    • <b>Scope:</b> the <b>HEDGE book is excluded</b> here (a winning hedge must never mask a bleeding strategy book).
-      Reconcile: <span class="mono">Overview Total&nbsp;P&amp;L = this Alpha&nbsp;PnL + hedge book</span>; <span class="mono">Overview gross = this gross + HEDGE gross</span>.<br>
-    • <b>Time:</b> every row is frozen <b>as of that run</b>, while <a href="/">Overview</a> is live now — so a restart or elapsed time moves them apart.<br>
-    • <b>Same source:</b> both read <span class="mono">/api/risk</span> + <span class="mono">/api/attribution</span>; <span class="mono">score-change.py</span> just filters to non-hedge books (invariant&nbsp;7 — no model-authored numbers).
+    <b>Firm total — the real money made and the real money at risk, all books incl. the hedge.</b>
+    Same figures as the <a href="/">Overview</a> headline (<span class="mono">/api/risk .total</span>): Total&nbsp;PnL is
+    net of every cost, Gross/Net exposure is the whole book. The only reason a row can differ from Overview
+    is <b>time</b> — each row is frozen <b>as of that run</b>, while Overview is live. Numbers computed by
+    <span class="mono">score-change.py</span> in exact decimal (invariant&nbsp;7 — no model-authored numbers).
   </div>
 
   <div class="section-h">Per-run history — one line per cycle, change or not</div>
@@ -88,12 +89,12 @@
     <table>
       <thead><tr>
         <th>Time (UTC)</th>
-        <th class="num">Alpha PnL</th><th class="num">Δ vs prev</th>
+        <th class="num">Total PnL</th><th class="num">Δ vs prev</th>
         <th class="num">Gross exp</th><th class="num">Δ</th>
-        <th class="num">Net exp</th>
+        <th class="num">Net exp</th><th class="num">Cost</th>
         <th>Action</th><th>Prev verdict</th><th>Decision</th>
       </tr></thead>
-      <tbody id="rows"><tr><td colspan="9" class="empty">waiting for the first cycle…</td></tr></tbody>
+      <tbody id="rows"><tr><td colspan="10" class="empty">waiting for the first cycle…</td></tr></tbody>
     </table>
   </div>
 
@@ -132,23 +133,27 @@
       return;
     }
     var top = list[0];
-    document.getElementById("hPnl").textContent = money(top.alpha_pnl);
+    var topPnl = (top.total_pnl != null ? top.total_pnl : top.alpha_pnl);
+    document.getElementById("hPnl").textContent = money(topPnl);
     document.getElementById("hGross").textContent = money(top.gross);
     document.getElementById("hNet").textContent = money(top.net);
+    document.getElementById("hFees").textContent = money(top.fees);
     document.getElementById("hTime").textContent = fmtTs(top.ts);
     document.getElementById("hDecision").innerHTML = '<b>Latest decision:</b> ' + esc(top.decision || "—");
 
     rows.innerHTML = list.map(function (e) {
+      var pnl = (e.total_pnl != null ? e.total_pnl : e.alpha_pnl);   // fallback for old-format rows
       var verdict = e.last_verdict
         ? '<span class="pillv ' + verdictClass(e.last_verdict) + '">' + esc(e.last_verdict) + '</span>'
         : '<span class="dim">—</span>';
       return '<tr>'
         + '<td class="mono">' + esc(fmtTs(e.ts)) + '</td>'
-        + '<td class="num mono">' + money(e.alpha_pnl) + '</td>'
+        + '<td class="num mono">' + money(pnl) + '</td>'
         + '<td class="num mono ' + pctClass(e.pnl_pct, false) + '">' + esc(pctText(e.pnl_pct)) + '</td>'
         + '<td class="num mono">' + money(e.gross) + '</td>'
         + '<td class="num mono ' + pctClass(e.gross_pct, true) + '">' + esc(pctText(e.gross_pct)) + '</td>'
         + '<td class="num mono">' + money(e.net) + '</td>'
+        + '<td class="num mono dim">' + money(e.fees) + '</td>'
         + '<td><span class="act ' + actClass(e.action) + '">' + esc(e.action || "") + '</span></td>'
         + '<td>' + verdict + '</td>'
         + '<td class="dim">' + esc(e.decision || "") + '</td>'
