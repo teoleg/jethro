@@ -135,6 +135,14 @@ that is bleeding while adding exposure is the single most important thing to see
    which opened a **winner** (keep or strengthen it). Cross the losers/winners against the per-name PnL.
 6. **Consult memory.** Read the recent entries in `docs/loop-findings.md` — apply what past cycles already
    learned; do not repeat a mistake the memory already records.
+7. **Change vs. market — attribute honestly (this is the crux).** Split the window's PnL/exposure move into:
+   (a) **market conditions** — moves on positions you did **not** touch this cycle, which would have
+   happened regardless of your code; and (b) the **direct impact of your last change** — moves on positions
+   your change opened / closed / resized (cross against `recent_orders` and the scored diff). **Credit or
+   blame your change ONLY for (b).** A change that merely coincided with the market rising is **not** a win;
+   a good change is **not** condemned because the market fell. State explicitly, in the reasoning and the
+   finding, how much of the move was market vs change — and never overfit to what was really market noise.
+   When the two cannot be separated from the numbers alone, say so plainly rather than guessing a cause.
 
 ## Procedure
 1. **Read** `logs/report.md` (telemetry, stack traces, cost/turnover), the top of the ledger, and the
