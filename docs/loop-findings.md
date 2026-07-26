@@ -128,3 +128,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   10 bps slippage looks like a provisional 20 bps refdata spread on a mega-cap, and repairing it would
   lower the cost hurdle. That is a real data-quality item — make it on its own merits, separately, or it
   is indistinguishable from tuning the measurement until it passes.
+
+### 2026-07-26T18:30Z — ADR-0073 (the daily close series is feed-mode scoped)
+- Situation: PnL -$867.73, unchanged run-over-run and flat over three; gross AND net exposure $0.00,
+  VaR "no positions", breaker untripped. Not bleeding, no danger state. The window's only orders were
+  the ADR-0065 flattening tail (1-share ALPHA closes + matching HEDGE ES trims) under a reduce-only
+  gate — **no trigger opened a position**, so 100% of the (nil) move is mark drift + prior policy:
+  market, not change. ADR-0072 scored ⚠️ MIXED "no material change", which is what it predicted of
+  itself; with a shut gate it can only subtract permission, so there was nothing for it to act on.
+- **`reversion` finally publishes** — first appearance in `fusion_targets.weights` and in per-name
+  contributions, 23 open / 0 resolved. ADR-0070 + ADR-0071 both work; its calls resolve one signal
+  horizon out, so the edge gate can judge it in a cycle or two. Plumbing is DONE — stop working it.
+- Change: `daily_close` was the one EOD artifact never scoped by feed mode. `EodService.rollover()`
+  and `MarketHistoryRecorder.recordOnce()` each write `firm_equity` WITH `feed_mode` and, three lines
+  away, `daily_close` WITHOUT it — so LIVE and SIM closes shared one series. The handover return is
+  then the ratio of two unrelated price levels: AAPL 190.00 (seed) → 326.95 (live) = a fabricated
+  +72% day, then −43%, +76%, −42%, all inside the last eight observations that EWMA weights hardest.
+  Result: measured daily vol overstated 10.1× (GOOG), 10.7× (AAPL), 12.4× (JPM), 11.9× (ES) — and that
+  vol vol-targets position sizing and feeds VaR.
+- Lesson / rule: **when two writes sit in the same method and only one carries `feed_mode`, that is the
+  bug — go look.** Both writers had `firm_equity` correct and `daily_close` wrong, three lines apart.
+  Grep every persisted series against invariant 8 the same way; a missing mode column is silent and
+  reads exactly like volatility.
+- Rule 2: **row filtering alone does not remove a cross-mode artifact — the boundary PAIR does.** After
+  restricting to the running mode + seed, the one return spanning the handover is still there. A return
+  is admissible only when both endpoints come from the same stream. Costs one observation per boundary;
+  a gap the estimator handles, unlike a fabricated 72% day.
+- Rule 3: **a private clean copy of a shared series is a bug report.** `training_bars` (ADR-0038) exists
+  partly because the runtime series is "sim-contaminated at the tail" — the workaround was written and
+  the cause left in place for every other consumer. When you find a duplicate store justified by "the
+  original is dirty", fix the original.
+- Rule 4: backfill a provenance column from the platform's OWN record (`firm_equity.feed_mode`), never
+  from a rule about prices — a "returns bigger than X are fake" threshold is an invented number gating
+  risk, and it would silently eat the real gap risk VaR exists to measure. Rows whose mode cannot be
+  established are inadmissible observations, not rows to guess at.

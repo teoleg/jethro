@@ -51,8 +51,8 @@ DB_QUERIES = {
     "signal_observations": "select source, feed_mode, count(*) n, count(*) filter (where resolved) resolved, "
         "round(avg(case when outcome='WIN' then 1.0 when outcome='LOSS' then 0.0 end),3) hit_rate "
         "from signal_observations group by source, feed_mode order by n desc",
-    "daily_close_depth": "select count(distinct day) days, min(day) first, max(day) last, "
-        "count(distinct instrument) instruments from daily_close",
+    "daily_close_depth": "select feed_mode, count(distinct day) days, min(day) first, max(day) last, "
+        "count(distinct instrument) instruments from daily_close group by feed_mode order by feed_mode",
     "mark_quarantine": "select * from mark_quarantine",
     "strategy_param_change": "select * from strategy_param_change order by changed_at desc limit 100",
 }

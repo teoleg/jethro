@@ -1,65 +1,71 @@
-The desk is fully flat with the gate shut, so nothing can move PnL this cycle — I spent it making sure that when the gate does open, the desk stops paying more to enter a name than the edge it entered on (ADR-0072).
+The desk's risk sensor has been wrong by 10–12× on every name that has lived through a sim↔live switch — the daily close series was never feed-mode scoped, so a feed handover was being measured as a ±40–75% market day (ADR-0073).
 
 ## Situation (live endpoints, read first)
 
-**Money — flat, not bleeding.** Total PnL `-$867.73`, unchanged since the last run and effectively
-unchanged across the last three; every move in that span is inside the scorer's noise deadband. The
-loop's `on_track` flag is true only as an artifact of the hedge unwind three runs ago — treat it as
-noise, not progress. We are nowhere near the ≥1%-per-3-iterations target, and the reason is not a loss:
-it is that the desk is structurally forbidden to open a position.
+**Money — flat, not bleeding.** Total PnL `-$867.73`, unchanged run-over-run and effectively flat
+across the last three; every move in that span is inside the scorer's noise deadband. `stale` and
+`underwater` are both set and we are nowhere near the ≥1%-per-3-iterations target. The reason is not a
+loss: with zero exposure, PnL cannot move at all.
 
-**Risk — zero, and that is the whole problem.** Gross and net exposure are both `$0.00`, VaR is `$0.00`
-("no positions"), the firm drawdown breaker is untripped. There is no danger state and nothing to
-de-risk. The window's only orders were the last leg of the flattening: single-share buys closing the
-remaining ALPHA shorts (AAPL, GOOG) and the matching HEDGE ES trims. That is the ADR-0065 planner
-finishing its job under a reduce-only gate, not a new view.
+**Risk — zero, and no danger state.** Gross and net exposure are both `$0.00`, VaR reports "no
+positions", the firm drawdown breaker is untripped. There is nothing to de-risk and nothing to cut, so
+the danger-state override does not apply this cycle.
 
-**Cause — last cycle's change worked, and its verdict is measuring the wrong thing.** The ADR-0071
-warm-restart clock correction scored ⚠️ MIXED "no material change", which was expected and stated in
-advance: it restores *measurability*, not PnL. The app log — visible for the first time this cycle,
-which is itself last cycle's other fix — confirms it now runs: the sensors seeded 60/193 (trend) and
-175/241 (reversion) stored prices instead of the 4 they got before. I replayed the seed algorithm
-against the live LMDB series and it now yields 193 and 236: the binding constraint was the store's
-provider-time depth at boot, which has since grown past both warm-ups. **Both sensors will boot warm
-from here, and `reversion` should publish and be measured for the first time.** No further plumbing.
-100% of the window's PnL/exposure move is the flattening plus mark drift on positions no code change
-of mine opened — market and prior policy, not this change.
+**Cause — last cycle's change is inert by construction, exactly as stated in advance.** ADR-0072
+(per-name execution cost in the edge gate) scored ⚠️ MIXED "no material change". That was the
+prediction written before it shipped: with the gate shut and the book flat it can only ever subtract
+permission, so there is nothing for it to act on yet. The window's only orders were the last leg of the
+ADR-0065 flattening — single-share buys closing the remaining ALPHA shorts (AAPL, GOOG) and the matching
+HEDGE ES trims — under a reduce-only gate. **No trigger opened a position this window**, so 100% of the
+(nil) PnL and exposure move is mark drift plus that flattening: market and prior policy, none of it
+attributable to my last change, good or bad.
 
-## Diagnosis and what I changed
+**One genuinely new fact: `reversion` speaks.** For the first time it appears in `fusion_targets.weights`
+and in per-name contributions, with 23 open observations and none yet resolved. That is the
+absence-is-the-tell check the findings memory told me to run, and it now passes: ADR-0070 + the ADR-0071
+warm restart work. Its calls resolve one signal horizon out, so it becomes measurable — and the edge gate
+can finally judge it — within the next cycle or two. The plumbing is done; I did not touch it again.
 
-The edge gate is correctly shut: `trend` measures −17.31 bps over 69 observations (t = −6.39 net of
-cost), with `momentum` and `social` negative alongside it. Every continuous source the desk owns is a
-continuation bet and the tape is chopping — three independent measurements (regime detector, OOS
-walk-forward selector, live telemetry) agree. The counter-trend source that fills that gap is ADR-0070
-`reversion`, and it is now finally able to speak. There is no honest way to open the gate this cycle,
-and loosening it has already been tried and auto-reverted (❌ BAD, `fb9273505`) — I did not re-attempt it.
+## Diagnosis — the risk sensor, not the signal
 
-So I attacked the thing that will decide whether the desk *makes money once it starts*: the gate charges
-one blended round-trip cost (6.9270 bps) to a universe whose measured costs span 69:1 — ES at 0.2912 bps
-against GOOGL at 20.1056 bps. That blend over-charges the cheap names, suppressing edge that would have
-survived, and under-charges the expensive ones. The second error is the dangerous one: the moment a
-source passes at, say, +18 bps gross, the planner sizes GOOGL too, where the round trip costs 20.11 bps —
-a **−2.11 bps loss per round trip by arithmetic**, at the very expectancy that opened the gate. Nothing
-downstream reads cost: the conviction floor reads forecast magnitude, the guardrail reads limits, the
-breaker reads drawdown.
+With the gate correctly shut on measurement (trend −17.31 bps over 69 observations, momentum and social
+negative alongside it), the honest place to spend this cycle is the first sensor in the owner's thesis:
+*know how much is at risk right now*. It has been lying.
 
-**ADR-0072:** once a source clears the desk-wide ADR-0064 hurdle, each name is re-tested against its own
-measured round-trip cost, and a name whose round trip costs more than the passing source's measured gross
-expectancy is reduce-only. It can only ever subtract permission — a shut gate stays shut everywhere — so
-it improves both axes of the objective at once (a negative-expectancy position is not opened, and that
-notional never becomes exposure). No new dial and no new number: expectancy comes from the ADR-0055
-telemetry, cost from the ADR-0025 TCA table, both feed-mode scoped. Unmeasured and rate-quoted names are
-never vetoed on an assumed cost. The deterministic floor is untouched.
+`daily_close` is the return series behind historical + parametric VaR, behind per-name daily volatility
+— which **vol-targets position sizing** — and behind every change chip on the UI. It was the one
+end-of-day artifact never scoped by feed mode. The defect is visible in its starkest form inside a single
+method: `EodService.rollover()` and `MarketHistoryRecorder.recordOnce()` each write `firm_equity` **with**
+`feed_mode`, and three lines away write `daily_close` **without** it. So a LIVE session's closes and a SIM
+session's closes share one series and overwrite each other, and the close-to-close "return" at a handover
+is the ratio of two unrelated price levels — the seed's AAPL at 190.00 against the live feed's at 326.95
+is a fabricated **+72%** day, then −43% back to the sim, then +76%, then −42%. Four phantom days in the
+last eight observations of the window, and EWMA(λ=0.94) weights the most recent observations hardest.
 
-**Expect ⚠️ "no material change" again next cycle** — with exposure at zero and the gate shut, this is
-inert until `reversion` earns its keep. Judge it then, on whether the desk's first trades are in names
-that can pay for themselves.
+Measured against the clean block, that overstates daily vol by 10.1× on GOOG, 10.7× on AAPL, 12.4× on
+JPM, 11.9× on ES. The tell is decisive: names that have only ever run under one feed — GOOGL, BRK.B, GS,
+TSLA — sit at a sane 0.4–0.9%. **The 10–12× is a function of how many feed boundaries a name has lived
+through, not of the name.** It is also a hard-invariant-8 violation, and `training_bars` already keeps a
+private copy of the series precisely because the runtime one is "sim-contaminated at the tail" — someone
+worked around this once already instead of fixing it.
 
-## Also worth flagging (not acted on)
+## Change (ADR-0073)
 
-Six names — GOOGL, GS, BRK.B, NFLX, ORCL, TSLA — boot with generic sim-calibration defaults and sit at a
-near-identical ~$99.9 price, and GOOGL's 10.05 bps one-way slippage looks like a provisional 20 bps
-refdata spread rather than a measured property of a mega-cap. Repairing that refdata would lower the cost
-hurdle and help the gate open — which is exactly why I did not do it in the same breath as building the
-test that hurdle feeds. It is a data-quality fix to make on its own merits, not while it doubles as a way
-to pass my own measurement.
+Tag every recorded close with the stream that produced it, and never take a return across a handover.
+`daily_close` gains `feed_mode` with PK `(day, instrument, feed_mode)`; both session writers stamp
+`Provenance.mode()` like the `firm_equity` write beside them; the bootstrap history is tagged `SEED` —
+reference history loaded before any session ran, the prior every mode starts from. Readers admit the
+running mode's rows plus `SEED`, and take a return **only between two closes from the same stream** —
+that second rule is what actually kills the phantom, since filtering rows alone leaves the boundary pair.
+History is re-tagged deterministically from the platform's own record (`firm_equity.feed_mode`), never
+from a rule about prices; session-era days whose mode cannot be established are dropped as inadmissible
+observations. I dry-ran the migration in a rolled-back transaction: it leaves a clean 1,557-day seed
+block, 4 LIVE days and 1 SIM day, so VaR keeps a full window and vol stays measured — just correct.
+
+No risk formula, estimator, dial or gate changed; the deterministic floor is untouched. This changes only
+**which observations are admissible**, which is why it carries no number of its own.
+
+**What to expect, honestly:** with exposure at zero this cannot move PnL this cycle either, and I expect
+another ⚠️ "no material change" — say it up front rather than dress it up. What it buys is that when
+`reversion` earns its keep and the gate opens, every position is sized against a real σ instead of one
+ten times too large, and the VaR the owner watches stops counting a feed switch as a market crash.

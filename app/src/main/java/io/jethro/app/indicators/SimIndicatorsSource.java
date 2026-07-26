@@ -91,13 +91,20 @@ public final class SimIndicatorsSource implements IndicatorsSource {
         }
         Map<String, BigDecimal> fresh = new LinkedHashMap<>();
         try {
+            // ADR-0073: only the streams this session may read — otherwise the "previous session
+            // close" could be another feed mode's close at a different price level, and every change
+            // chip on the page would show the gap between two feeds as a market move.
+            var modes = io.jethro.app.risk.DailyCloseSeries.admissibleModes();
             jdbc.query("""
                     select instrument, close from daily_close
-                    where day = (select max(day) from daily_close
-                                 where day < (select max(day) from daily_close))
+                    where feed_mode in (?, ?)
+                      and day = (select max(day) from daily_close
+                                 where feed_mode in (?, ?)
+                                   and day < (select max(day) from daily_close
+                                              where feed_mode in (?, ?)))
                     """, rs -> {
                 fresh.put(rs.getString("instrument"), rs.getBigDecimal("close"));
-            });
+            }, modes.get(0), modes.get(1), modes.get(0), modes.get(1), modes.get(0), modes.get(1));
         } catch (Exception e) {
             // No history yet (first session) or DB hiccup — change chips just stay off.
         }

@@ -54,7 +54,11 @@ public final class HistorySeeder {
 
     private void run() {
         try {
-            Long have = jdbc.queryForObject("select count(distinct day) from daily_close", Long.class);
+            // Count the SEED block only (ADR-0073): a session's own accrued closes are its stream, not
+            // the bootstrap prior, so they must not make the seeder think the prior is already on file.
+            Long have = jdbc.queryForObject(
+                    "select count(distinct day) from daily_close where feed_mode = ?", Long.class,
+                    io.jethro.app.risk.DailyCloseSeries.SEED);
             if (have != null && have >= windowDays) {
                 status.markExisting();
                 log.info("history: {} days already on file (>= {} window) — no fetch needed", have, windowDays);
@@ -105,10 +109,13 @@ public final class HistorySeeder {
             if (close.signum() <= 0) {
                 continue;
             }
+            // ADR-0073: the bootstrap prior is tagged SEED — reference history loaded once before any
+            // session ran, admissible in every feed mode, and never confused with a session's own
+            // closes (which carry their own mode and form their own return stream).
             jdbc.update("""
-                    insert into daily_close (day, instrument, close) values (?, ?, ?)
-                    on conflict (day, instrument) do nothing
-                    """, day, id, close);
+                    insert into daily_close (day, instrument, close, feed_mode) values (?, ?, ?, ?)
+                    on conflict (day, instrument, feed_mode) do nothing
+                    """, day, id, close, io.jethro.app.risk.DailyCloseSeries.SEED);
             rows++;
         }
         return rows;

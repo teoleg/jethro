@@ -204,29 +204,44 @@ public final class VarService {
      *  additionally emit their synthetic {@code dv01:} series: Δbp = (close − prev) × 100
      *  (marks are par rates in percent; 0.01 of a percentage point = 1bp). */
     private List<VarMath.DayVector> dayVectors() {
-        // day → instrument → close, ordered by day.
-        TreeMap<LocalDate, Map<String, Double>> closes = new TreeMap<>();
+        // day → instrument → close, ordered by day. Restricted to the streams this session may measure
+        // and tagged with the stream that produced each close, so a handover between the seed and the
+        // session — or between two feed modes — never becomes a return (ADR-0073 / invariant 8).
+        List<String> modes = DailyCloseSeries.admissibleModes();
+        TreeMap<LocalDate, Map<String, DailyCloseSeries.Close>> closes = new TreeMap<>();
         jdbc.query("""
-                select day, instrument, close from daily_close
-                where day >= (select coalesce(max(day), current_date) from daily_close) - ?::int
+                select day, instrument, close, feed_mode from daily_close
+                where feed_mode in (?, ?)
+                  and day >= (select coalesce(max(day), current_date) from daily_close
+                              where feed_mode in (?, ?)) - ?::int
                 order by day
                 """, rs -> {
-            closes.computeIfAbsent(rs.getObject("day", LocalDate.class), d -> new LinkedHashMap<>())
-                    .put(rs.getString("instrument"), rs.getBigDecimal("close").doubleValue());
-        }, FETCH_CALENDAR_DAYS); // trading-day window needs a calendar-day reach + holiday margin
+            LocalDate day = rs.getObject("day", LocalDate.class);
+            String instrument = rs.getString("instrument");
+            var byInstrument = closes.computeIfAbsent(day, d -> new LinkedHashMap<>());
+            var candidate = new DailyCloseSeries.Close(day, rs.getString("feed_mode"),
+                    rs.getBigDecimal("close").doubleValue());
+            var held = byInstrument.get(instrument);
+            if (held == null || DailyCloseSeries.preferOver(held.feedMode(), candidate.feedMode())) {
+                byInstrument.put(instrument, candidate);
+            }
+            // trading-day window needs a calendar-day reach + holiday margin
+        }, modes.get(0), modes.get(1), modes.get(0), modes.get(1), FETCH_CALENDAR_DAYS);
 
         List<LocalDate> days = new ArrayList<>(closes.keySet());
         List<VarMath.DayVector> vectors = new ArrayList<>();
         for (int i = 1; i < days.size(); i++) {
-            Map<String, Double> prev = closes.get(days.get(i - 1));
-            Map<String, Double> curr = closes.get(days.get(i));
+            Map<String, DailyCloseSeries.Close> prev = closes.get(days.get(i - 1));
+            Map<String, DailyCloseSeries.Close> curr = closes.get(days.get(i));
             Map<String, Double> returns = new LinkedHashMap<>();
             curr.forEach((id, close) -> {
-                Double p = prev.get(id);
-                if (p != null && p > 0) {
-                    returns.put(id, close / p - 1.0);
+                DailyCloseSeries.Close previous = prev.get(id);
+                if (previous != null && previous.close() > 0
+                        && DailyCloseSeries.sameStream(previous.feedMode(), close.feedMode())) {
+                    double p = previous.close();
+                    returns.put(id, close.close() / p - 1.0);
                     if (isSwap(id)) {
-                        returns.put(DV01_PREFIX + id, (close - p) * 100.0);
+                        returns.put(DV01_PREFIX + id, (close.close() - p) * 100.0);
                     }
                 }
             });
