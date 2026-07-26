@@ -1,0 +1,20 @@
+{
+  "commit": "858a3fb542b61c46de33e49b6b4fb76ba33ed6c7",
+  "fees": "158.453066",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "69.88228362",
+    "netExposure": "0.00000000",
+    "realizedPnl": "-826.05938139",
+    "strategyAlpha": "-895.94166501",
+    "totalFees": "158.453066",
+    "totalPnl": "-826.05938139",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "grade every signal call over a ladder of horizons (3600/900/225s) and let the edge gate select the rung the evidence supports, paying a Bonferroni haircut for the search \u2014 the gate was starved rather than wrong, accruing one degree of freedom per hour because a cross-sectional source emits one cohort per measurement horizon; the selected rung drives the gate verdict, the source weights and the holding period alike (ADR-0082)",
+  "total_pnl": "-826.05938139",
+  "ts": "2026-07-26T22:19:31Z"
+}
