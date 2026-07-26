@@ -50,6 +50,11 @@ public final class ForecastRegistry {
         put(SourceForecasts.fromSocial(signal, params.socialPerChannel()));
     }
 
+    /** Price-derived EWMAC trend reading (ADR-0066); {@code score} is the self-normalised forecast. */
+    public void submitTrend(String instrument, double score) {
+        put(SourceForecasts.fromTrend(instrument, score, Forecast.TARGET_ABS));
+    }
+
     public void submitLearned(String instrument, double pUp, double pDown, boolean ships) {
         put(SourceForecasts.fromLearned(instrument, pUp, pDown, ships, params.learnedScale()));
     }

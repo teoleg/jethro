@@ -63,6 +63,20 @@ public final class SourceForecasts {
     }
 
     /**
+     * Price-derived trend sensor (ADR-0066). {@code score} is the EWMAC forecaster's self-normalised
+     * reading, built so its expected absolute value on the running stream is ≈ 1 — "one typical trend".
+     * Multiplying by {@code targetAbs} puts it on the desk's shared convention (a typical trend reads
+     * as a typical conviction), so the sizing dials keep their meaning across sources. The forecaster
+     * has already done every measurement; this mapper only changes units.
+     */
+    public static Forecast fromTrend(String instrument, double score, double targetAbs) {
+        if (!Double.isFinite(score)) {
+            return Forecast.of("trend", instrument, 0.0);
+        }
+        return Forecast.of("trend", instrument, score * targetAbs);
+    }
+
+    /**
      * Learned advisory label (ADR-0053) — contributes ONLY when its walk-forward gate says it ships;
      * otherwise it is silent (0), never a phantom edge on the order path. The directional edge
      * {@code P(up) − P(down)} in [−1,1] scales up to the cap.

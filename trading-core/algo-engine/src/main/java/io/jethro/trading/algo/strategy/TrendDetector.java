@@ -74,18 +74,33 @@ public final class TrendDetector {
         recomputeBreadth();
     }
 
-    /** ER = |last − first| / Σ|step|; a dead-flat window (Σ=0) reads as 0 (the extreme of non-trending). */
-    private BigDecimal efficiencyRatio(Deque<BigDecimal> win) {
-        List<BigDecimal> ps = new ArrayList<>(win);
-        BigDecimal net = ps.get(ps.size() - 1).subtract(ps.get(0)).abs();
+    /**
+     * Kaufman's efficiency ratio over a price window: {@code ER = |last − first| / Σ|step| ∈ [0,1]} —
+     * ~1 a clean trend, ~0 chop. A dead-flat window (Σ=0) reads as 0 (the extreme of non-trending);
+     * fewer than two prices has no steps to measure and also reads 0.
+     *
+     * <p>Exposed as a pure static so every consumer of "how directional is this window?" shares ONE
+     * definition of the ratio — this detector's regime classification and the EWMAC trend forecaster's
+     * quality weight ({@code EwmacTrendForecaster}) among them. Dimensionless: exact BigDecimal price
+     * arithmetic in, a ratio out — no money number is produced here (invariant 1 / ADR-0016).
+     */
+    public static BigDecimal efficiencyRatio(List<BigDecimal> prices) {
+        if (prices == null || prices.size() < 2) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal net = prices.get(prices.size() - 1).subtract(prices.get(0)).abs();
         BigDecimal sumSteps = BigDecimal.ZERO;
-        for (int i = 1; i < ps.size(); i++) {
-            sumSteps = sumSteps.add(ps.get(i).subtract(ps.get(i - 1)).abs());
+        for (int i = 1; i < prices.size(); i++) {
+            sumSteps = sumSteps.add(prices.get(i).subtract(prices.get(i - 1)).abs());
         }
         if (sumSteps.signum() == 0) {
             return BigDecimal.ZERO;
         }
         return net.divide(sumSteps, MC);
+    }
+
+    private BigDecimal efficiencyRatio(Deque<BigDecimal> win) {
+        return efficiencyRatio(new ArrayList<>(win));
     }
 
     /** Apply the bands with hysteresis; a name in the neutral zone on first warm-up adopts breadth. */

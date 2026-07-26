@@ -78,6 +78,20 @@ class ForecastTest {
     }
 
     @Test
+    void trendScoreMapsOntoTheHouseConvention() {
+        // ADR-0066: the sensor's score has expected |value| ≈ 1 ("one typical trend"), so a typical
+        // reading must land on TARGET_ABS — the same conviction a typical firing of any other source is.
+        assertEquals(10.0, SourceForecasts.fromTrend("AAPL", 1.0, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals(-10.0, SourceForecasts.fromTrend("AAPL", -1.0, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals(5.0, SourceForecasts.fromTrend("AAPL", 0.5, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals("trend", SourceForecasts.fromTrend("AAPL", 0.5, Forecast.TARGET_ABS).source());
+        // An exceptional trend caps like everything else, and a non-finite reading is no view.
+        assertEquals(20.0, SourceForecasts.fromTrend("AAPL", 9.0, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals(0.0, SourceForecasts.fromTrend("AAPL", Double.NaN, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals(0.0, SourceForecasts.fromTrend("AAPL", 0.0, Forecast.TARGET_ABS).value(), 1e-12);
+    }
+
+    @Test
     void everyForecastStaysBounded() {
         assertTrue(Math.abs(SourceForecasts.fromLearned("X", 1.0, 0.0, true, 100.0).value()) <= Forecast.CAP);
     }

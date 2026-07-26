@@ -124,6 +124,32 @@ public class FusionConfig {
         return lifecycle;
     }
 
+    /**
+     * The ADR-0066 trend sensor. A forecast source only: it publishes a continuous, self-normalised
+     * EWMAC reading per name into the same registry every other source pushes to, and records its calls
+     * in the phase-1 telemetry so its edge is measured like anyone else's. It cannot place an order and
+     * cannot relax a gate — the edge gate, conviction floor, backtest-support veto and the deterministic
+     * floor all still stand between a forecast and a fill.
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.fusion.trend", name = "enabled", havingValue = "true", matchIfMissing = true)
+    TrendForecastLifecycle trendForecastLifecycle(
+            ForecastRegistry registry,
+            ObjectProvider<TradingCoreLifecycle> tradingCore,
+            ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
+            @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
+            @Value("${jethro.fusion.trend.fast-span:16}") int fastSpan,
+            @Value("${jethro.fusion.trend.slow-span:64}") int slowSpan,
+            @Value("${jethro.fusion.trend.normalisation-span:256}") int normalisationSpan,
+            @Value("${jethro.fusion.trend.interval-seconds:5}") long intervalSeconds) {
+        var forecaster = new io.jethro.trading.algo.strategy.EwmacTrendForecaster(
+                new io.jethro.trading.algo.strategy.EwmacTrendForecaster.Params(fastSpan, slowSpan, normalisationSpan));
+        var lifecycle = new TrendForecastLifecycle(forecaster, registry, tradingCore.getIfAvailable(),
+                telemetry.getIfAvailable(), scheduler, intervalSeconds);
+        lifecycle.start();
+        return lifecycle;
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "jethro.fusion", name = "enabled", havingValue = "true", matchIfMissing = true)
     FusionController fusionController(ObjectProvider<FusionLifecycle> fusion) {
