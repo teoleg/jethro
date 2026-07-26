@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T19:30:10Z",
+    "fees": "131.123236",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "95.38694807",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-867.73313105",
+      "strategyAlpha": "-963.12007912",
+      "totalFees": "131.123236",
+      "totalPnl": "-867.73313105",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-867.73313105"
+  },
+  "before": {
+    "at": "2026-07-26T19:15:52Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-867.73313105"
+  },
+  "commit": "7fc30a1c493731f17156f6ca4aa2ddcef5d2c9be",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T19:30:10Z",
+  "summary": "fusion source trust is shrunk over the sample its estimate was made from: Buhlmann credibility counts resolved observations (flats included, as the expectancy itself does) instead of wins+losses, and the hard min-sample floor \u2014 which pinned measured-negative sources at a more-trusting neutral 1.0 \u2014 is removed, leaving shrinkage-k as the single continuous thin-sample defence (ADR-0074)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
