@@ -86,15 +86,20 @@ than a checklist would. Two conditions on that freedom:
   local, reversible tuning does not need an ADR.
 
 ## Inputs (already generated this run)
-- `logs/report.md` — model-readable digest: live endpoints (risk, VaR, breaker, signals telemetry /
-  live edge, fusion targets, regime, hedging, traffic, **attribution**), Postgres aggregates (turnover
-  & cost by name, signal_observations by feed_mode, equity curves), and recent WARN/ERROR + stack traces.
+- `logs/report.md` — model-readable digest. Opens with a **⚠ SITUATION** header (live PnL/exposure +
+  deltas + danger flags — read it first). Then live endpoints (risk, VaR, breaker, signals telemetry /
+  live edge, fusion targets, regime, hedging, attribution), Postgres aggregates including **`recent_orders`
+  — the window's orders each with the `reason` that triggered it** (your order-level post-mortem source),
+  turnover & cost by name, signal_observations, equity curves, and recent WARN/ERROR + stack traces.
 - `logs/jethro-report-*.zip` — same data plus `diagnostics.xlsx` for row-level detail (positions,
   fills, TCA, hypotheses, strategy dials + change history). Unzip only if you need that detail.
 - The repo working tree (you are inside the checkout), `git log`, the ADR index (`docs/adr/README.md`),
   and `CLAUDE.md` (the house rules — read them; they encode hard-won lessons).
 - **`docs/loop-playbook.md`** — your standing operator context (mission, the strategy thesis, hard
   lessons already paid for, current focus). Read it every cycle; it is your memory across cold starts.
+- **`docs/loop-findings.md`** — the **accumulating lessons memory**: one dated finding per past cycle
+  (what the orders/change did, the trigger behind it, the rule). Read the recent entries every cycle so
+  lessons **compound** — do not relearn what a past cycle already found.
 - **Project skills — invoke them via the `Skill` tool; they package the house rigor:**
   **`finance-math`** before/while touching ANY PnL / risk / pricing / position / FX calculation
   (mandatory — do not hand-derive money math); **`adr`** when authoring or superseding an ADR;
@@ -124,6 +129,13 @@ Only after answering 1–4 in words do you diagnose further. **Trust the numbers
 — if the live endpoints show deterioration the report did not foreground, *that* is your target. A book
 that is bleeding while adding exposure is the single most important thing to see; never miss it.
 
+5. **Order-level post-mortem.** Look back at the window's orders (`recent_orders` in the report — each
+   carries the `reason` that triggered it). Attribute the PnL/exposure move to specific triggers: which
+   trigger opened a **losing** position (fix the *trigger* so it can't recur, not just the symptom), and
+   which opened a **winner** (keep or strengthen it). Cross the losers/winners against the per-name PnL.
+6. **Consult memory.** Read the recent entries in `docs/loop-findings.md` — apply what past cycles already
+   learned; do not repeat a mistake the memory already records.
+
 ## Procedure
 1. **Read** `logs/report.md` (telemetry, stack traces, cost/turnover), the top of the ledger, and the
    recent `reports/run-status.json` trend. Reason about the numbers — do not transcribe them anywhere.
@@ -136,6 +148,9 @@ that is bleeding while adding exposure is the single most important thing to see
    nothing has a real, well-understood edge this run, say so concretely (what you checked, why it's not
    actionable) and **stop with no code change** — common and correct. Committing `reports/last-analysis.md`
    is fine (reports-only, no restart).
+   **Also APPEND one dated finding to `docs/loop-findings.md`** (append — never overwrite; it is the durable,
+   compounding memory): what the window's orders/change did to PnL/exposure, the **trigger** behind any bad
+   or good move, and the **rule** for next time. 2–4 lines, specific. Commit it alongside your reasoning.
 4. If there is a clear improvement, make the **one coherent change** (config, code, new strategy/risk
    model — with a Proposed ADR in the same commit if it is architecturally significant).
 5. **Verify:** `./gradlew -Pci test` (or the narrowest relevant module). Not green → revert your edit

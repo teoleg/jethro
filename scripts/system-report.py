@@ -39,6 +39,10 @@ DB_QUERIES = {
     "turnover_cost_by_name": "select instrument_id instrument, count(*) fills, sum(abs(qty)) shares, "
         "round(sum(fee)::numeric,2) total_fee from fills group by instrument_id order by fills desc",
     "orders_by_status": "select status, count(*) n from orders group by status order by n desc",
+    # Order-level lookback for the post-mortem: recent orders with the REASON that triggered each, so the
+    # model can attribute the window's PnL/exposure moves to specific triggers (bad ones to fix, good to keep).
+    "recent_orders": "select created_at, book_id book, instrument_id instrument, side, quantity qty, "
+        "status, reason from orders where feed_mode='SIM' order by created_at desc limit 60",
     "fills_by_day": "select date(executed_at) d, count(*) fills, round(sum(fee)::numeric,2) fee "
         "from fills group by 1 order by 1",
     "firm_equity_curve": "select * from firm_equity order by 1",
