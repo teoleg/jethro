@@ -28,11 +28,11 @@ Subcommands
       PnL/exposure, % change vs the previous run, and this cycle's decision (changed / no-change /
       reverted). Every number is computed here; the wrapper passes only the two booleans.
 
-Objective vector (ADR-0063 — measured on STRATEGY ALPHA, never the hedge-masked firm total)
-  alpha_pnl  = /api/attribution .strategyAlpha
-  gross,net  = Sigma /api/risk .byBook[grossExposure|netExposure] over books whose /api/attribution
-               role != "hedge"   (the hedge book is read FROM the app, not hardcoded here)
-  fees       = /api/attribution .totalFees   (transaction-cost drag; informational)
+Objective vector (ADR-0063 — the FIRM TOTAL: total money made, total money at risk, ALL books incl.
+the hedge; this is exactly the Overview headline, /api/risk .total)
+  pnl        = /api/risk .total.totalPnl        (total realized+unrealized, net of all costs incl. fees)
+  gross,net  = /api/risk .total.grossExposure | .netExposure   (total exposure — all books)
+  fees       = /api/attribution .totalFees      (cumulative fees paid — money spent trading; context)
 
 Env: JETHRO_URL (default http://localhost:8080).
 """
@@ -75,40 +75,40 @@ def dec(x):
 
 
 def current_vector():
-    """The objective vector, computed entirely from live endpoints. Returns (vector, raw) or raises."""
-    attr = fetch_json("/api/attribution")
-    if not attr.get("available", False):
-        raise ValueError("attribution not available (projection empty) — cannot score")
+    """The objective vector — the FIRM TOTAL: total money made and total money at risk, ALL books
+    including the hedge (the hedge costs real money and carries real exposure, so it counts). This is
+    exactly what the Overview headline shows (/api/risk .total). Returns (vector, raw) or raises.
+    Attribution (strategy vs hedge split, fees) is fetched best-effort for context/diagnostics only —
+    it never changes the totals."""
     risk = fetch_json("/api/risk")
-
-    hedge_books = {b["book"] for b in attr.get("books", []) if b.get("role") == "hedge"}
-    gross = Decimal(0)
-    net = Decimal(0)
-    per_book = []
-    for g in risk.get("byBook", []):
-        if g["key"] in hedge_books:
-            continue
-        gexp = dec(g["grossExposure"])
-        nexp = dec(g["netExposure"])
-        gross += gexp
-        net += nexp
-        per_book.append({"book": g["key"], "gross": str(gexp), "net": str(nexp)})
+    total = risk.get("total")
+    if not total:
+        raise ValueError("risk totals unavailable — cannot score")
 
     vec = {
-        "alpha_pnl": dec(attr["strategyAlpha"]),
-        "gross": gross,
-        "net": net,
-        "fees": dec(attr["totalFees"]),
+        "pnl": dec(total["totalPnl"]),           # total realized+unrealized, net of all costs (fees inside)
+        "gross": dec(total["grossExposure"]),    # total gross exposure — all books incl. hedge
+        "net": dec(total["netExposure"]),        # total net exposure
+        "fees": Decimal(0),                       # cumulative fees paid (money spent trading); filled below
     }
     raw = {
-        "feedMode": attr.get("feedMode"),
-        "strategyAlpha": attr["strategyAlpha"],
-        "hedgePnl": attr.get("hedgePnl"),
-        "firmTotal": attr.get("firmTotal"),
-        "totalFees": attr["totalFees"],
-        "hedgeBooks": sorted(hedge_books),
-        "alphaBooks": per_book,
+        "totalPnl": total["totalPnl"],
+        "realizedPnl": total.get("realizedPnl"),
+        "unrealizedPnl": total.get("unrealizedPnl"),
+        "grossExposure": total["grossExposure"],
+        "netExposure": total["netExposure"],
     }
+    # Best-effort context: feed mode, cumulative fees, and the alpha/hedge split (diagnostic only).
+    try:
+        attr = fetch_json("/api/attribution")
+        if attr.get("available"):
+            vec["fees"] = dec(attr.get("totalFees", "0"))
+            raw["feedMode"] = attr.get("feedMode")
+            raw["totalFees"] = attr.get("totalFees")
+            raw["strategyAlpha"] = attr.get("strategyAlpha")
+            raw["hedgePnl"] = attr.get("hedgePnl")
+    except Exception:
+        pass
     return vec, raw
 
 
@@ -133,7 +133,7 @@ def pair(before, after):
 
 def classify(before, after):
     """Pure function of the two vectors. Returns (verdict, revert:bool, note)."""
-    d_pnl = after["alpha_pnl"] - before["alpha_pnl"]
+    d_pnl = after["pnl"] - before["pnl"]
     d_gross = after["gross"] - before["gross"]
     gross_band = abs(before["gross"]) * EXP_DEADBAND_FRAC
 
@@ -141,8 +141,8 @@ def classify(before, after):
     gross_up = d_gross > gross_band
     gross_down = d_gross < -gross_band
 
-    ra_before = (before["alpha_pnl"] / before["gross"]) if before["gross"] != 0 else None
-    ra_after = (after["alpha_pnl"] / after["gross"]) if after["gross"] != 0 else None
+    ra_before = (before["pnl"] / before["gross"]) if before["gross"] != 0 else None
+    ra_after = (after["pnl"] / after["gross"]) if after["gross"] != 0 else None
     if ra_before is not None and ra_after is not None:
         ra_dir = "improved" if ra_after > ra_before else ("worsened" if ra_after < ra_before else "unchanged")
         ra_note = f"risk-adj (PnL/$1 gross) {ra_dir} {float(ra_before):.5f}→{float(ra_after):.5f}"
@@ -207,7 +207,7 @@ def cmd_score():
         return 0
 
     before = {
-        "alpha_pnl": dec(base["alpha_pnl"]),
+        "pnl": dec(base.get("total_pnl", base.get("alpha_pnl", "0"))),  # fallback: score an old-format baseline
         "gross": dec(base["gross_exposure"]),
         "net": dec(base["net_exposure"]),
     }
@@ -223,11 +223,11 @@ def cmd_score():
         "scoredAt": ts, "commit": sha, "summary": summary,
         "verdict": verdict, "revert": revert, "note": note,
         "deadbands": {"pnlUsd": str(PNL_DEADBAND), "exposureFrac": str(EXP_DEADBAND_FRAC)},
-        "before": {"alpha_pnl": base["alpha_pnl"], "gross": base["gross_exposure"], "net": base["net_exposure"],
-                   "at": base.get("ts")},
-        "after": {"alpha_pnl": str(after["alpha_pnl"]), "gross": str(after["gross"]), "net": str(after["net"]),
+        "before": {"total_pnl": base.get("total_pnl", base.get("alpha_pnl")),
+                   "gross": base["gross_exposure"], "net": base["net_exposure"], "at": base.get("ts")},
+        "after": {"total_pnl": str(after["pnl"]), "gross": str(after["gross"]), "net": str(after["net"]),
                   "fees": str(after["fees"]), "at": ts, "source": raw_after},
-        "delta": {"alpha_pnl": str(after["alpha_pnl"] - before["alpha_pnl"]),
+        "delta": {"total_pnl": str(after["pnl"] - before["pnl"]),
                   "gross": str(after["gross"] - before["gross"]),
                   "net": str(after["net"] - before["net"])},
     }
@@ -235,7 +235,7 @@ def cmd_score():
 
     row = "| {ts} | `{short}` | {what} | {pnl} | {gross} | {net} | {verdict} | {note} |".format(
         ts=ts, short=short, what=(summary or "—").replace("|", "/"),
-        pnl=pair(before["alpha_pnl"], after["alpha_pnl"]),
+        pnl=pair(before["pnl"], after["pnl"]),
         gross=pair(before["gross"], after["gross"]),
         net=pair(before["net"], after["net"]),
         verdict=verdict, note=note.replace("|", "/"))
@@ -257,7 +257,7 @@ def cmd_score():
     msg = f"chore(ledger): score {short} — {verdict}\n\n{note}\n\nSnapshot: {os.path.relpath(snap_path, REPO)}"
     git("commit", "-m", msg, check=False)
 
-    print(f"score: {verdict} for {short} | ΔPnL {delta(after['alpha_pnl'] - before['alpha_pnl'])} "
+    print(f"score: {verdict} for {short} | ΔPnL {delta(after['pnl'] - before['pnl'])} "
           f"| Δgross {delta(after['gross'] - before['gross'])} | {note}")
     if reverted_ok is False:
         return 3
@@ -279,7 +279,7 @@ def cmd_baseline(argv):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "commit": sha, "ts": ts, "summary": summary,
-        "alpha_pnl": str(vec["alpha_pnl"]),
+        "total_pnl": str(vec["pnl"]),
         "gross_exposure": str(vec["gross"]),
         "net_exposure": str(vec["net"]),
         "fees": str(vec["fees"]),
@@ -290,7 +290,7 @@ def cmd_baseline(argv):
         json.dump(payload, f, indent=2, sort_keys=True)
     git("add", "reports/.pending-baseline.json", check=False)
     git("commit", "-m", f"chore(ledger): baseline for {sha[:9]} — {summary}"[:200], check=False)
-    print(f"baseline: recorded for {sha[:9]} | alpha_pnl {money2(vec['alpha_pnl'])} "
+    print(f"baseline: recorded for {sha[:9]} | total_pnl {money2(vec['pnl'])} "
           f"| gross {money2(vec['gross'])} | net {money2(vec['net'])}")
     return 0
 
@@ -339,10 +339,15 @@ def cmd_status(argv):
             entries = []
     prev = entries[0] if entries else None
 
-    def pct(cur, prev_key):
-        if not prev or prev.get(prev_key) in (None, ""):
+    def pct(cur, *prev_keys):
+        pv = None
+        for k in prev_keys:  # try new key first, fall back to any old-format key
+            if prev and prev.get(k) not in (None, ""):
+                pv = prev.get(k)
+                break
+        if pv is None:
             return None
-        p = Decimal(str(prev[prev_key]))
+        p = Decimal(str(pv))
         if p == 0:
             return None
         return round(float((cur - p) / abs(p) * 100), 2)
@@ -376,10 +381,11 @@ def cmd_status(argv):
         "ts": ts,
         "feedMode": (raw.get("feedMode") if raw else None),
         "available": available,
-        "alpha_pnl": (str(vec["alpha_pnl"]) if available else None),
+        "total_pnl": (str(vec["pnl"]) if available else None),
         "gross": (str(vec["gross"]) if available else None),
         "net": (str(vec["net"]) if available else None),
-        "pnl_pct": (pct(vec["alpha_pnl"], "alpha_pnl") if available else None),
+        "fees": (str(vec["fees"]) if available else None),
+        "pnl_pct": (pct(vec["pnl"], "total_pnl", "alpha_pnl") if available else None),
         "gross_pct": (pct(vec["gross"], "gross") if available else None),
         "action": action,
         "last_verdict": last_verdict,
@@ -393,7 +399,7 @@ def cmd_status(argv):
         json.dump(entries, f, indent=2)
     git("add", "reports/run-status.json", check=False)
     git("commit", "-m", f"chore(status): run {ts} — {action}", check=False)
-    print(f"status: {action} | pnl {entry['alpha_pnl']} ({entry['pnl_pct']}%) "
+    print(f"status: {action} | total_pnl {entry['total_pnl']} ({entry['pnl_pct']}%) "
           f"| gross {entry['gross']} ({entry['gross_pct']}%) | {decision}")
     return 0
 

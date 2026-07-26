@@ -35,6 +35,13 @@ the UI as a rule; a `β=1.0` placeholder; a sped-up sim clock).
 - **One concept per decision request.** When asking Oleg to decide, name the single policy
   in play; never reuse a term (e.g. "target-flat") across two different mechanisms in the
   same ask — an approval of one is not an approval of the other.
+- **"Total" means firm-wide — the real money.** When the owner monitors *total PnL* or *total
+  exposure*, it is the whole book **including the hedge** (money actually made net of every cost; all
+  money at risk) — the Overview headline. Never present a hedge-stripped or single-book subtotal as the
+  headline "total". A decomposition (e.g. strategy alpha vs hedge) is a **diagnostic**, never a
+  substitute for the total the owner watches or the loop optimizes. (Learned: the improvement loop
+  showed hedge-stripped "alpha" as its headline; it didn't match the Overview total and read as wrong —
+  corrected to firm total, ADR-0063.)
 - **This file is maintained, not static.** When Oleg corrects a decision, add the rule that
   would have prevented it here in the same change, so the conventions compound.
 
