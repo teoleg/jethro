@@ -42,6 +42,8 @@ public final class FusionLifecycle implements AutoCloseable {
 
     private final ForecastRegistry registry;
     private final Function<String, BigDecimal> priceFor;
+    /** instrument → contract multiplier from the instrument master; cash-at-risk → quantity (ADR-0078). */
+    private final Function<String, BigDecimal> multiplierFor;
     private final Supplier<Map<String, BigDecimal>> positionsSupplier;
     private final Supplier<java.util.Set<String>> heldSupplier; // ADR-0065: names we must have a target for
     private final Supplier<FusionWeights> weightsSupplier;
@@ -57,6 +59,7 @@ public final class FusionLifecycle implements AutoCloseable {
     private Future<?> task;
 
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
+                           Function<String, BigDecimal> multiplierFor,
                            Supplier<Map<String, BigDecimal>> positionsSupplier,
                            Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
@@ -65,6 +68,7 @@ public final class FusionLifecycle implements AutoCloseable {
         this.edgeGate = edgeGate;
         this.registry = registry;
         this.priceFor = priceFor;
+        this.multiplierFor = multiplierFor;
         this.positionsSupplier = positionsSupplier;
         this.heldSupplier = heldSupplier;
         this.weightsSupplier = weightsSupplier;
@@ -98,7 +102,7 @@ public final class FusionLifecycle implements AutoCloseable {
             // position never falls out of the target book when its sources go quiet.
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
-                    id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
+                    multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
             // paying for are the ones that take risk OFF. ADR-0072 asks the same question per name, so
             // a name whose own round trip costs more than the passing source's measured edge is

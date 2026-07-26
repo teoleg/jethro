@@ -54,6 +54,7 @@ class FusionShadowTest {
         var params = new FusionPlanner.Params(0.5, BigDecimal.valueOf(10_000), 0.2, 0.5);
         List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, List.of(), s -> 1.0,
                 id -> BigDecimal.valueOf(100), // price $100
+                id -> BigDecimal.ONE,           // equities: contract multiplier 1 (ADR-0078)
                 id -> BigDecimal.ZERO,          // flat book
                 params);
 
@@ -78,7 +79,7 @@ class FusionShadowTest {
         var forecasts = registry.byInstrument(System.currentTimeMillis());
         var params = new FusionPlanner.Params(0.5, BigDecimal.valueOf(10_000), 0.2, 0.5);
         var targets = FusionPlanner.plan(forecasts, List.of(), s -> 1.0, id -> BigDecimal.valueOf(100),
-                id -> BigDecimal.ZERO, params);
+                id -> BigDecimal.ONE, id -> BigDecimal.ZERO, params);
         // Whatever the sign, the point is the two sources fuse into ONE decision, not two orders.
         assertEquals(1, targets.size(), "one combined decision per name, never two competing orders");
     }

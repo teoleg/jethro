@@ -303,3 +303,50 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   cross-sections on a ~10-min cadence against the same 1h horizon — with a Newey–West/Hansen–Hodrick
   correction for the induced overlap. Order matters: raising the rate on the i.i.d. estimator would have
   inflated significance faster still, so it had to come second.
+
+### 2026-07-26T20:35Z — ADR-0078 (fusion sizes in the instrument's own contract terms)
+- Situation: the book traded for the first time in nine cycles and it **worked**. Flat at both endpoints
+  of the window, so there is no mark-drift component whatsoever — 100% of the ~+$42 move is attributable
+  to the trades, 0% to the market. Only MSFT + its ES hedge leg traded (~33 fills, 20:08–20:21) and the
+  round trip netted positive after fees. The trigger was ADR-0077 behaving exactly as designed:
+  `reversion` had ONE resolved cohort, so its standard error read zero, the gate could not certify it,
+  and when the second cohort landed a real standard error appeared and re-shut the gate on every name but
+  ES. Nothing here to revert.
+- **The danger was not where the flags pointed.** The BLEEDING flag fired on a −$31 move that was just an
+  intra-window unrealised peak being closed out; meanwhile the fusion target book was quietly carrying
+  `ES targetQty −8.799423` with a queued `−4.399712`-contract delta. ES multiplier is **50**, so that one
+  delta is ~$1.2M of gross against an intended `unit-notional` of $50k, on a book whose recorded exposure
+  peak is ~$415k. `TargetPlanner.targetQuantity` divided cash-at-risk by `price` when it had to divide by
+  `price × contractMultiplier` — the money value of one unit. `PositionRisk` (`qty · mark · multiplier`),
+  `Positions.applyFill` and the ADR-0039 hedge advisor (`qty = −Σβᵢ·Eᵢ/(price × multiplier)`, on this very
+  instrument) all had it right; the fusion sizer was the only place that didn't. Error: 50× ES, 20× NQ,
+  1000× the note futures, 45,000–80,000× the swaps. Equities and FX (multiplier 1) were always correct.
+- Change: `targetQuantity` divides by `price × multiplier` so `|qty| × price × multiplier` equals the cash
+  asked for in every asset class; `FusionPlanner`/`FusionLifecycle` take a `multiplierFor` wired to
+  `InstrumentRefSource` (the same source risk-pnl values the position with, so sizer and risk engine
+  cannot disagree); an unknown spec plans FLAT rather than sizing as if it were a share; and
+  `tradableQuantity` rounds toward zero in contract terms — whole units at multiplier 1 (byte-identical
+  for every equity/FX name), order-scale for a contract.
+- Lesson / rule: **when two code paths trade the same instrument, diff their sizing arithmetic — the one
+  that has been running longest is usually right.** The hedge advisor and the fusion planner have both
+  been sizing ES for weeks, one dividing by `price × multiplier` and one by `price`, and nothing flagged
+  the disagreement because each was internally consistent and equities (multiplier 1) made them look
+  identical on 33 of 35 names. Before trusting any sizer, evaluate it on the instrument where the units
+  differ most, not on the typical name.
+- Rule 2: **a cost-based gate is also an instrument SELECTOR, and it selects adversarially.** ADR-0075
+  admits the name whose round trip is cheapest; the cheapest names on this desk are index and rates
+  futures; those are exactly the names with the largest multipliers. So the gate reliably steered the
+  desk into the single instrument where the sizing bug was worst. Whenever a filter ranks names by a
+  property, ask what *else* correlates with that property — cheap-to-trade and big-contract are the same
+  fact about a future.
+- Rule 3: **a "situation flag" measured between two runs is not an attribution.** BLEEDING fired because
+  PnL fell run-over-run, but the earlier reading included open MTM. Flat-to-flat is the only comparison
+  that has no market component in it — when both endpoints are flat, attribution is exact and free. Look
+  for those endpoints before believing a delta means what the flag says it means.
+- Next lever (deliberately NOT this change): evidence still accrues at ONE independent cohort per source
+  per hour, because `SignalTelemetry.record` refuses a new call while one is open and the horizon is
+  3600s. That is the real reason the desk sits flat. The honest fix is NOT faster sampling of the same
+  horizon (overlapping draws add almost no independent information, and Newey–West would correctly
+  refuse to credit them) — it is a **measurement horizon matched to the actual holding period**, which
+  the MSFT round trip says is ~13 minutes, not an hour. Grading sources on a horizon the desk never holds
+  is both statistically slow and economically the wrong question.

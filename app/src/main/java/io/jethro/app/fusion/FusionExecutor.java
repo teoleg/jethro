@@ -89,13 +89,17 @@ public final class FusionExecutor {
             if (halt.isHalted()) {
                 return Result.vetoed(instrument, "firm breaker halted (ADR-0027)");
             }
-            BigDecimal qty = deltaQty == null ? BigDecimal.ZERO : deltaQty.setScale(0, RoundingMode.DOWN);
-            if (qty.signum() == 0) {
-                return Result.vetoed(instrument, "sub-unit delta — nothing to trade");
-            }
             InstrumentRef ref = refs.find(instrument).orElse(null);
             if (ref == null) {
                 return Result.vetoed(instrument, "not in the instrument master");
+            }
+            // ADR-0078: round in the instrument's own contract terms. A share/FX unit still rounds to a
+            // whole unit; a CONTRACT keeps the quantity scale the order and fill records already carry,
+            // because one contract is worth price × multiplier and a correctly-sized position in it is
+            // routinely a fraction of one. Always toward zero — rounding may only ever trade less.
+            BigDecimal qty = TargetPlanner.tradableQuantity(deltaQty, ref.multiplier());
+            if (qty.signum() == 0) {
+                return Result.vetoed(instrument, "sub-unit delta — nothing to trade");
             }
             if (!riskReducing && !backtestSupported(instrument)) {
                 return Result.vetoed(instrument, "not backtest-supported (ADR-0049) — no tradable OOS algo");

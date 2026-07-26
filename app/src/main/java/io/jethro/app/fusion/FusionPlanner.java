@@ -43,12 +43,18 @@ public final class FusionPlanner {
      *                              whose sources have gone silent still gets a target (ADR-0065).
      * @param weightFor             source → weight (evidence-based; equal is the phase-4 placeholder)
      * @param priceFor              instrument → current mark (null/≤0 skips sizing for that name)
+     * @param multiplierFor         instrument → contract multiplier from the instrument master
+     *                              (ADR-0078). Cash-at-risk becomes a quantity only after dividing by
+     *                              the money value of one unit, {@code price × multiplier}; null/≤0
+     *                              means the contract spec is unknown and the name is planned flat
+     *                              rather than sized as if it were a share.
      * @param currentQtyFor         instrument → current firm position quantity
      */
     public static List<Target> plan(Map<String, List<Forecast>> forecastsByInstrument,
                                     Collection<String> heldInstruments,
                                     Function<String, Double> weightFor,
                                     Function<String, BigDecimal> priceFor,
+                                    Function<String, BigDecimal> multiplierFor,
                                     Function<String, BigDecimal> currentQtyFor,
                                     Params params) {
         // ADR-0065: the target book spans {names with a view} ∪ {names we hold}. Planning only the
@@ -82,7 +88,9 @@ public final class FusionPlanner {
             if (current == null) {
                 current = BigDecimal.ZERO;
             }
-            BigDecimal target = TargetPlanner.targetQuantity(combined.value(), params.unitNotional(), price);
+            BigDecimal multiplier = multiplierFor == null ? null : multiplierFor.apply(instrument);
+            BigDecimal target = TargetPlanner.targetQuantity(combined.value(), params.unitNotional(),
+                    price, multiplier);
             BigDecimal delta = TargetPlanner.orderDelta(target, current, params.bufferFraction(), params.adjustmentRate());
             out.add(new Target(instrument, combined.value(), combined.activeSources(),
                     combined.diversificationMultiplier(), price, target, current, delta, contributions));

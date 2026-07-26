@@ -105,16 +105,78 @@ class FusionEngineTest {
 
     @Test
     void targetSizingScalesWithForecast() {
-        // forecast = TARGET_ABS (10) at $100 with $10,000 unit → 1.0× unit → 100 shares.
+        // forecast = TARGET_ABS (10) at $100 with $10,000 unit → 1.0× unit → 100 shares (multiplier 1).
         assertEquals(0, new BigDecimal("100.000000").compareTo(
-                TargetPlanner.targetQuantity(10.0, bd(10_000), bd(100))));
+                TargetPlanner.targetQuantity(10.0, bd(10_000), bd(100), BigDecimal.ONE)));
         // cap forecast (20) → 2× unit → 200 shares; short at −20 → −200.
         assertEquals(0, new BigDecimal("200.000000").compareTo(
-                TargetPlanner.targetQuantity(20.0, bd(10_000), bd(100))));
+                TargetPlanner.targetQuantity(20.0, bd(10_000), bd(100), BigDecimal.ONE)));
         assertEquals(0, new BigDecimal("-200.000000").compareTo(
-                TargetPlanner.targetQuantity(-20.0, bd(10_000), bd(100))));
+                TargetPlanner.targetQuantity(-20.0, bd(10_000), bd(100), BigDecimal.ONE)));
         assertEquals(0, BigDecimal.ZERO.compareTo(
-                TargetPlanner.targetQuantity(10.0, bd(10_000), BigDecimal.ZERO)), "no price → no target");
+                TargetPlanner.targetQuantity(10.0, bd(10_000), BigDecimal.ZERO, BigDecimal.ONE)),
+                "no price → no target");
+    }
+
+    /**
+     * ADR-0078 — the target is CASH-at-risk, so it divides by the money value of one unit of the
+     * instrument, {@code price × contractMultiplier}, not by price.
+     *
+     * <p>Worked example, exact decimal. Unit notional $50,000, forecast at TARGET_ABS (10) ⇒ fraction 1.0.
+     * <ul>
+     *   <li><b>Equity</b> at $200, multiplier 1: qty = 50,000 / (200 × 1) = 250 shares.
+     *       Exposure = 250 × 200 × 1 = $50,000 ✔ (unchanged by this ADR).</li>
+     *   <li><b>ES future</b> at 5,000, multiplier 50: qty = 50,000 / (5,000 × 50) = 0.2 contracts.
+     *       Exposure = 0.2 × 5,000 × 50 = $50,000 ✔. Dividing by price alone gave 10 contracts —
+     *       exposure 10 × 5,000 × 50 = $2,500,000, i.e. 50× the cash asked for.</li>
+     *   <li><b>ZF note future</b> at 100, multiplier 1,000: qty = 50,000 / (100 × 1,000) = 0.5 contracts.
+     *       Exposure = 0.5 × 100 × 1,000 = $50,000 ✔ (price alone gave 500 ⇒ $50,000,000).</li>
+     * </ul>
+     * The invariant asserted below is the one that matters: {@code |qty| × price × multiplier} — the same
+     * arithmetic {@code PositionRisk} uses for {@code netExposure} — equals the cash asked for, for every
+     * asset class.
+     */
+    @Test
+    void targetIsCashAtRiskInTheInstrumentsOwnContractTerms() {
+        record Case(String name, BigDecimal price, BigDecimal multiplier, String expectedQty) {
+        }
+        List<Case> cases = List.of(
+                new Case("equity", bd(200), BigDecimal.ONE, "250.000000"),
+                new Case("ES", bd(5_000), bd(50), "0.200000"),
+                new Case("ZF", bd(100), bd(1_000), "0.500000"));
+        for (Case c : cases) {
+            BigDecimal qty = TargetPlanner.targetQuantity(10.0, bd(50_000), c.price(), c.multiplier());
+            assertEquals(0, new BigDecimal(c.expectedQty()).compareTo(qty), c.name() + " target quantity");
+            assertEquals(0, bd(50_000).compareTo(qty.multiply(c.price()).multiply(c.multiplier())),
+                    c.name() + " exposure must equal the unit notional asked for");
+        }
+        // An unknown contract spec is not sized as if it were a share — no invented number (invariant 7).
+        assertEquals(0, BigDecimal.ZERO.compareTo(
+                TargetPlanner.targetQuantity(10.0, bd(50_000), bd(100), null)), "no spec → no target");
+        assertEquals(0, BigDecimal.ZERO.compareTo(
+                TargetPlanner.targetQuantity(10.0, bd(50_000), bd(100), BigDecimal.ZERO)),
+                "non-positive multiplier → no target");
+    }
+
+    /** ADR-0078: rounding is in contract terms, and always toward zero. */
+    @Test
+    void tradableQuantityRoundsInContractTerms() {
+        // multiplier 1 (share/FX unit): whole units, toward zero — unchanged behaviour, both signs.
+        assertEquals(0, new BigDecimal("3").compareTo(
+                TargetPlanner.tradableQuantity(new BigDecimal("3.9"), BigDecimal.ONE)));
+        assertEquals(0, new BigDecimal("-3").compareTo(
+                TargetPlanner.tradableQuantity(new BigDecimal("-3.9"), BigDecimal.ONE)));
+        assertEquals(0, BigDecimal.ZERO.compareTo(
+                TargetPlanner.tradableQuantity(new BigDecimal("0.9"), BigDecimal.ONE)), "dust still drops");
+        // a CONTRACT keeps the quantity scale the order/fill records carry — 0.175988 ES is a real order
+        // (the ADR-0039 hedge advisor already submits fractional ES), not dust to be rounded to nothing.
+        assertEquals(0, new BigDecimal("0.175988").compareTo(
+                TargetPlanner.tradableQuantity(new BigDecimal("0.1759884"), bd(50))));
+        assertEquals(0, new BigDecimal("-0.175988").compareTo(
+                TargetPlanner.tradableQuantity(new BigDecimal("-0.1759889"), bd(50))));
+        // unknown spec ⇒ not quoted per unit ⇒ keep the scale rather than round a contract away
+        assertEquals(0, new BigDecimal("0.500000").compareTo(
+                TargetPlanner.tradableQuantity(new BigDecimal("0.5"), null)));
     }
 
     @Test

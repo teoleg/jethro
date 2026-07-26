@@ -33,7 +33,7 @@ class OrphanedPositionTest {
         // planner only ever saw the fresh cross-section the position was never revisited again.
         Map<String, List<Forecast>> noViews = Map.of();
         var targets = FusionPlanner.plan(noViews, List.of("GOOG"), s -> 1.0,
-                id -> BigDecimal.valueOf(178), id -> BigDecimal.valueOf(131), PLAN);
+                id -> BigDecimal.valueOf(178), id -> BigDecimal.ONE, id -> BigDecimal.valueOf(131), PLAN);
 
         assertEquals(1, targets.size(), "a held name is planned even with no fresh forecast");
         FusionPlanner.Target t = targets.get(0);
@@ -52,9 +52,9 @@ class OrphanedPositionTest {
         var forecasts = registry.byInstrument(System.currentTimeMillis());
 
         var withHeld = FusionPlanner.plan(forecasts, List.of("AAPL"), s -> 1.0,
-                id -> BigDecimal.valueOf(196), id -> BigDecimal.valueOf(119), PLAN);
+                id -> BigDecimal.valueOf(196), id -> BigDecimal.ONE, id -> BigDecimal.valueOf(119), PLAN);
         var withoutHeld = FusionPlanner.plan(forecasts, List.of(), s -> 1.0,
-                id -> BigDecimal.valueOf(196), id -> BigDecimal.valueOf(119), PLAN);
+                id -> BigDecimal.valueOf(196), id -> BigDecimal.ONE, id -> BigDecimal.valueOf(119), PLAN);
 
         assertEquals(1, withHeld.size());
         assertEquals(withoutHeld.get(0).targetQty(), withHeld.get(0).targetQty(),
@@ -120,7 +120,7 @@ class OrphanedPositionTest {
         // A stale/absent mark must not be a reason to keep an unsupported position: the target is
         // zero regardless of price, and the delta is pure quantity arithmetic.
         var targets = FusionPlanner.plan(Map.of(), List.of("SAP"), s -> 1.0,
-                id -> null, id -> BigDecimal.valueOf(-96), PLAN);
+                id -> null, id -> BigDecimal.ONE, id -> BigDecimal.valueOf(-96), PLAN);
         assertEquals(qty("48"), targets.get(0).deltaQty(), "short 96 with no view → buy back half");
     }
 }

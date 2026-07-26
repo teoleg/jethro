@@ -57,6 +57,7 @@ public class FusionConfig {
     @ConditionalOnProperty(prefix = "jethro.fusion", name = "enabled", havingValue = "true", matchIfMissing = true)
     FusionLifecycle fusionLifecycle(ForecastRegistry registry,
                                     ObjectProvider<TradingCoreLifecycle> tradingCore,
+                                    io.jethro.trading.riskpnl.InstrumentRefSource refs,
                                     ObjectProvider<RiskProjection> risk,
                                     ObjectProvider<FusionExecutor> executor,
                                     @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
@@ -115,6 +116,11 @@ public class FusionConfig {
                 };
         var lifecycle = new FusionLifecycle(registry,
                 instrument -> priceFor(tradingCore, instrument),
+                // ADR-0078: the contract spec comes from the instrument master — the same source
+                // PositionRisk values the resulting exposure with. A name absent from the master has no
+                // spec to size against, so it plans flat (and the executor vetoes it in any case).
+                instrument -> refs.find(instrument).map(io.jethro.trading.riskpnl.InstrumentRef::multiplier)
+                        .orElse(null),
                 () -> firmPositions(risk),
                 () -> heldInRoutedBooks(risk, hedgeBook),
                 weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
