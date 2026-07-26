@@ -1,1 +1,25 @@
-[]
+[
+  {
+    "ts": "2026-07-26T14:52:02Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-22.82979500",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "fees": "3.998473",
+    "pnl_pct": null,
+    "gross_pct": null,
+    "pnl_growth_pct": null,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": false,
+    "stale": false,
+    "underwater": true,
+    "action": "changed",
+    "last_verdict": null,
+    "decision": "made a change: trend sensor: warm the scale estimator over half a normalisation span before dividing by it, so a freshly-warmed name no longer opens pinned at the forecast cap (ADR-0066 correction)",
+    "reasoning": "Fixed the trend sensor's scale estimator: it was seeded from one observation, so every name opened at\nmaximum conviction \u2014 the sensor was asking for the biggest possible book at the moment it knew least.\n\nContext first, because it explains the empty report: `scripts/reset-sim.sh` was run a few minutes before\nthis cycle. That wipes the SIM book and, by design, the loop's sim-derived records \u2014 so the pending\nbaseline for last cycle's trend sensor went with it and the scorer correctly reported nothing to score.\nLast cycle's change is therefore deployed but unmeasured, not judged. The bundled report was captured ten\nseconds after the restart and shows an idle desk for that reason alone; I read the live endpoints instead,\nand they showed something quite different.\n\nWhat they showed is a defect in my own last change. Every single name the trend source spoke about was\npinned at the extreme of the forecast scale, simultaneously \u2014 including the 2-year and 5-year Treasury\nfutures pinned at *opposite* extremes. Those two are the same rates factor; no real trend read puts them\nin maximum opposition. That is the signature of a saturated forecast, not a directional view. The\nmechanism is in the normaliser: the sensor divides each reading by an EWMA of its own typical magnitude,\nand that EWMA was seeded from a *single* observation. One draw is not an estimate of \"typical\" \u2014 it is an\narbitrary anchor, and because the normalisation span is deliberately long, the EWMA needs most of a span\nto walk it off. Any name whose first reading landed in a quiet patch then reported every ordinary move\nafterwards as an extreme one. I reproduced it deterministically: on a stream built from incommensurate\nsinusoids at production span proportions, five of the first ten published readings clipped at the cap,\npeaking at six and a half times a typical trend.\n\nThis costs risk-adjusted PnL in both terms of the ratio. A clipped forecast carries no sizing\ninformation, so the discrimination that justified ADR-0066 \u2014 a clean trend outranking a noisy one \u2014 is\ndestroyed exactly when it matters; and every saturated name asks for the maximum position the scale\nallows, so exposure inflates with no conviction behind it. It also renders the conviction floor a no-op,\nsince nothing sits below a threshold when everything is at the ceiling.\n\nThe fix repairs the estimator and leaves the model alone: the first half-span of readings accumulate into\na running mean of the raw magnitude, the sensor publishes no view at all until it has them, and only then\ndoes it switch to exponential updating. It stays silent longer and speaks calibrated when it does. I\ndeliberately did *not* speed up the EWMA \u2014 a fast normaliser would divide out the very trend strength the\nscore exists to report. The warm-up length is derived from the existing normalisation span rather than\nadded as a new dial, and it delays the first reading without sizing anything. Both the regression and the\nlong-run calibration are locked in by tests that I verified fail against the old seed, and the correction\nis recorded in ADR-0066 itself, which is still Proposed.\n\nI expect the sensor to be quiet for its warm-up and then to speak with real dispersion instead of a wall\nof maximum readings. If the next ledger row says otherwise, the lever after this is the fusion weighting\nrather than the sensor.",
+    "commit": "ed35f3e"
+  }
+]
