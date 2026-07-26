@@ -97,11 +97,18 @@ public final class FusionLifecycle implements AutoCloseable {
             // ADR-0065: plan over the names we HOLD as well as the names we have a view on, so a
             // position never falls out of the target book when its sources go quiet.
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
-            List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
-                    id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
-            // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
-            // paying for are the ones that take risk OFF. Clamp before anything else sees the deltas.
+            // ADR-0067: size to the evidence. The gate's risk appetite is the measured probability that
+            // the best-evidenced source's expectancy beats the desk's measured execution cost; it scales
+            // the per-name notional the plan plays for, and can only ever shrink it. Evaluated BEFORE
+            // planning so the deltas are computed against the size we actually intend to hold — scaling
+            // the deltas afterwards would still creep to full size over enough cycles.
             EdgeGate.Decision gate = edgeGate == null ? null : edgeGate.get();
+            FusionPlanner.Params planParams = gate == null ? params : params.scaledBy(gate.riskAppetite());
+            List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
+                    id -> positions.getOrDefault(id, BigDecimal.ZERO), planParams);
+            // ADR-0064, kept for the case it was built for: when a source has MEASURED expectancy
+            // significantly below its cost, the only trades worth paying for are the ones that take risk
+            // OFF. Clamp before anything else sees the deltas.
             if (gate != null && !gate.mayIncrease()) {
                 targets = reduceOnly(targets);
             }

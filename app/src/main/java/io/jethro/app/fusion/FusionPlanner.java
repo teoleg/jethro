@@ -1,6 +1,7 @@
 package io.jethro.app.fusion;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -34,6 +35,40 @@ public final class FusionPlanner {
     /** Tunables for one planning pass. */
     public record Params(double assumedCorrelation, BigDecimal unitNotional, double bufferFraction,
                         double adjustmentRate) {
+
+        /** Decimal places the appetite is quantised to before it multiplies money — so sizing is reproducible. */
+        private static final int APPETITE_SCALE = 6;
+        private static final int NOTIONAL_SCALE = 6;
+
+        /**
+         * The same parameters with the per-name cash-at-risk scaled by the ADR-0067 measured risk
+         * appetite — the probability, from the desk's own telemetry, that the best-evidenced source's
+         * expectancy beats its measured execution cost. Bet in proportion to the evidence.
+         *
+         * <p>Worked example (finance-math rule): {@code unitNotional} = $50,000 and no source has the
+         * minimum sample yet, so the appetite is Φ(0) = 0.500000 exactly → the pass sizes to
+         * <b>$25,000.000000</b> per name at a typical forecast. A source that later measures t = +4.0
+         * gives Φ(4.0) = 0.999968 → $49,998.400000, i.e. essentially the configured size. A source
+         * measuring t = −1.0 gives Φ(−1.0) = 0.158655 → $7,932.750000.
+         *
+         * <p>The appetite is clamped to [0,1], so this can only ever SHRINK the configured notional —
+         * never grow it past the value the owner set. Dimensionless analytics in, exact decimal out
+         * (invariant 1): the double becomes money only here, quantised first so two identical readings
+         * always produce the identical position.
+         */
+        public Params scaledBy(double riskAppetite) {
+            if (unitNotional == null) {
+                return this;
+            }
+            double clamped = Double.isNaN(riskAppetite) ? 0.0 : Math.max(0.0, Math.min(1.0, riskAppetite));
+            BigDecimal factor = BigDecimal.valueOf(clamped).setScale(APPETITE_SCALE, RoundingMode.HALF_EVEN);
+            if (factor.compareTo(BigDecimal.ONE) == 0) {
+                return this;
+            }
+            return new Params(assumedCorrelation,
+                    unitNotional.multiply(factor).setScale(NOTIONAL_SCALE, RoundingMode.HALF_EVEN),
+                    bufferFraction, adjustmentRate);
+        }
     }
 
     /**
