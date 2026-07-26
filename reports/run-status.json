@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-26T17:56:53Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-867.73313105",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "fees": "131.123236",
+    "pnl_pct": -0.06,
+    "gross_pct": -100.0,
+    "pnl_growth_pct": 1.02,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": true,
+    "stale": false,
+    "underwater": true,
+    "action": "changed",
+    "last_verdict": "\u26a0\ufe0f MIXED",
+    "decision": "made a change: sensor warm restart correction: anchor the seed window on the mark's provider timestamp instead of wall-clock now, so a feed running behind real time no longer empties the seed and the trend/reversion sensors can actually boot warm and be measured (ADR-0071 correction); also surface the app's own WARN/stack traces in the loop report \u00b7 prev \u26a0\ufe0f MIXED",
+    "reasoning": "Last cycle's warm restart never actually ran: it read the wall clock against a store keyed by feed\ntime, so on a feed running half an hour behind, both sensors booted on 4 prices instead of 193 and 241\n\u2014 now anchored on the feed's own clock (ADR-0071 correction).\n\n## Situation (live endpoints, read first)\n\n**Money \u2014 flat, not bleeding.** Total PnL `-$867.28`, `-$0.10` since the last run and `+$9.36` across\nthe last three. Both moves are inside the scorer's noise deadband. There were **zero orders in the\nwindow** (last fill 16:57, report ran 17:45), so 100% of that move is mark drift on two untouched\nsingle-share stubs: **market, not change.** We are far off the \u22651%-per-3-iterations target, and the\nreason is not a loss \u2014 it is that the desk is forbidden to open a position.\n\n**Risk \u2014 minimal, and the DANGER flag is a threshold artifact.** Gross `$785.99`, net `$56.85`. The\n\"EXPOSURE RISING\" flag fired on `+$0.79` of mark drift against a `$786` book \u2014 noise, not a risk build.\nHistorical VaR95 is `$6.87`; the firm drawdown breaker is untripped and nowhere near it. This is not a\nlive danger state, so de-risking is not the right move \u2014 there is nothing meaningful left to cut.\n\n**Cause \u2014 last cycle's change scored \u26a0\ufe0f MIXED \"no material change\", and I can now show why.** ADR-0071\nwas meant to boot the trend and reversion sensors warm from the durable LMDB mark history. It didn't.\nThe app log has been saying so on every boot \u2014 `reversion sensor warmed AAPL from 4 stored prices\n(needs 241)`, and the same for trend against 193 \u2014 and `reversion` has still never once appeared in\n`fusion_targets.weights` or `signals_telemetry`. That is exactly the absence-is-the-tell check the\nfindings memory told me to run.\n\n## Diagnosis \u2014 two clocks, one silent failure\n\nThe seed asked the store for `System.currentTimeMillis() - lookback`, but the store is keyed by\n**provider** timestamps. On this feed provider time runs about half an hour behind the wall clock \u2014 the\nlag grows monotonically across the last four report snapshots, and the live `/api/history` series ends\n~1,910 s behind wall-clock now. So the lower bound sat almost entirely in the feed's *future* and\nadmitted only a ~20-second sliver of the series: 4 samples. Once a feed's lag exceeds the lookback the\nseed returns nothing at all, and the sensor cold-starts forever while logging that it succeeded.\n\nThis is not a sim quirk. Invariant 5 exists because provider and ingest time differ; `/api/feeds`\nreports `delayed`/`delaySeconds` because a lagging feed is normal \u2014 15-minute-delayed equity data is an\nindustry standard and any replay lags arbitrarily. A wall-clock window on a provider-keyed store is a\nbug on every feed.\n\n## Change\n\nAnchor the seed window on the provider timestamp of the mark being processed: one line per sensor, same\nthinning, same gap tolerance, same replay path, no money or risk number touched. Filed as a correction\non ADR-0071 rather than a new ADR \u2014 the design stands, only its clock source was wrong. Two hygiene\nchanges ride along, because this stayed invisible for two cycles: a sensor still cold after seeding now\nlogs at **WARN**, not INFO; and the report now captures `logs/jethro-app.log` alongside\n`docker compose logs`. The app runs on the host, so until now **none of the platform's own warnings ever\nreached this report** \u2014 the \"warmed 4 of 241\" line was written every boot and read by nobody.\n\n## What to expect, honestly\n\nThis cannot move PnL or exposure by itself. The ADR-0064 edge gate stays reduce-only until some source\nmeasures a cost-beating expectancy, so the scorer will most likely read another \"no material change\".\nWhat it buys is the ability to *measure*: trend should boot near-warm from the history now accumulating\nin the feed-mode namespace, and reversion should finally publish a reading and begin earning or losing\nits own track record. If reversion is still absent from the weights map next cycle, the warm-restart\napproach is the wrong lever, and I should stop paying for it and cut a shorter-warm-up sensor instead.",
+    "commit": "1e882d0"
+  },
+  {
     "ts": "2026-07-26T17:30:15Z",
     "feedMode": "SIM",
     "available": true,
