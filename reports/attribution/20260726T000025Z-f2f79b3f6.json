@@ -1,0 +1,52 @@
+{
+  "after": {
+    "alpha_pnl": "-7009.10019511",
+    "at": "2026-07-26T00:00:25Z",
+    "fees": "1942.472343",
+    "gross": "1118.09958666",
+    "net": "-1118.09958666",
+    "source": {
+      "alphaBooks": [
+        {
+          "book": "ALPHA",
+          "gross": "1117.43948166",
+          "net": "-1117.43948166"
+        },
+        {
+          "book": "MACRO",
+          "gross": "0.66010500",
+          "net": "-0.66010500"
+        }
+      ],
+      "feedMode": "SIM",
+      "firmTotal": "-6509.86147438",
+      "hedgeBooks": [
+        "HEDGE"
+      ],
+      "hedgePnl": "499.23872073",
+      "strategyAlpha": "-7009.10019511",
+      "totalFees": "1942.472343"
+    }
+  },
+  "before": {
+    "alpha_pnl": "-7011.80814732",
+    "at": "2026-07-25T20:59:08Z",
+    "gross": "345623.40913314",
+    "net": "-30395.29000914"
+  },
+  "commit": "f2f79b3f6aca011b87e4d60907dd811d775fb76a",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "alpha_pnl": "2.70795221",
+    "gross": "-344505.30954648",
+    "net": "29277.19042248"
+  },
+  "note": "risk-adj (PnL/$1 gross) worsened -0.02029\u2192-6.26876",
+  "revert": false,
+  "scoredAt": "2026-07-26T00:00:25Z",
+  "summary": "fusion target book spans held positions \u2014 a name with no fresh forecast is planned flat and worked down; risk-reducing deltas skip the conviction floor and the backtest-support veto (ADR-0065)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
