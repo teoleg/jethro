@@ -1,0 +1,20 @@
+{
+  "commit": "68444929df5f59206c676710c057cd91f5afd4ee",
+  "fees": "131.123236",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "95.38694807",
+    "netExposure": "0.00000000",
+    "realizedPnl": "-867.73313105",
+    "strategyAlpha": "-963.12007912",
+    "totalFees": "131.123236",
+    "totalPnl": "-867.73313105",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "sensor warm restart correction: anchor the seed window on the mark's provider timestamp instead of wall-clock now, so a feed running behind real time no longer empties the seed and the trend/reversion sensors can actually boot warm and be measured (ADR-0071 correction); also surface the app's own WARN/stack traces in the loop report",
+  "total_pnl": "-867.73313105",
+  "ts": "2026-07-26T17:56:18Z"
+}
