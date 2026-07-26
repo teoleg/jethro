@@ -1,0 +1,20 @@
+{
+  "commit": "9b6db1d492cb8241debdf17ae593bb6dd57930e8",
+  "fees": "130.970977",
+  "gross_exposure": "6145.14457224",
+  "net_exposure": "5417.62576824",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "6145.14457224",
+    "hedgePnl": "85.62515853",
+    "netExposure": "5417.62576824",
+    "realizedPnl": "-870.76433089",
+    "strategyAlpha": "-962.49415061",
+    "totalFees": "130.970977",
+    "totalPnl": "-876.86899208",
+    "unrealizedPnl": "-6.10466119"
+  },
+  "summary": "hedge no-trade band: trade the delta once it clears the SMALLER of the absolute $10k churn guard and 25% of the hedge's own scale, so an absolute guard can no longer strand a hedge smaller than itself and a zero target is always reachable (ADR-0069)",
+  "total_pnl": "-876.86899208",
+  "ts": "2026-07-26T16:56:54Z"
+}
