@@ -254,14 +254,58 @@ def _md_table(headers, rows):
     return "\n".join(out) + "\n"
 
 
+def situation_block(ops_raw):
+    """A prioritised SITUATION header so the obvious money/risk state is never buried under the section
+    dump. Current PnL + exposure from the live risk endpoint, deltas vs the recent run-status heartbeats,
+    and explicit danger flags (bleeding + exposure rising). All from live data — nothing invented."""
+    total = (ops_raw.get("risk") or {}).get("total") or {}
+    try:
+        pnl = float(total["totalPnl"]); gross = float(total["grossExposure"]); net = float(total["netExposure"])
+    except (KeyError, TypeError, ValueError):
+        return "## SITUATION\n(risk endpoint unavailable — could not read live PnL/exposure.)"
+    hist = []
+    try:
+        with open("reports/run-status.json", encoding="utf-8") as f:
+            hist = json.load(f)
+    except Exception:
+        hist = []
+
+    def prev(i):
+        if len(hist) > i:
+            try:
+                return float(hist[i]["total_pnl"]), float(hist[i]["gross"])
+            except (KeyError, TypeError, ValueError):
+                return None
+        return None
+
+    lines = ["## ⚠ SITUATION — read this before anything else",
+             "Current (live): total PnL **$%.2f**, gross exposure **$%.2f**, net **$%.2f**." % (pnl, gross, net)]
+    p1, p3 = prev(0), prev(2)
+    dp1 = dg1 = 0.0
+    if p1:
+        dp1, dg1 = pnl - p1[0], gross - p1[1]
+        lines.append("Since last run: PnL **%+.2f**, gross **%+.2f**." % (dp1, dg1))
+    if p3:
+        lines.append("Over the last 3 runs: PnL **%+.2f**, gross **%+.2f**." % (pnl - p3[0], gross - p3[1]))
+    flags = []
+    if dp1 < 0: flags.append("BLEEDING (PnL falling)")
+    if dg1 > 0: flags.append("EXPOSURE RISING")
+    if pnl < 0: flags.append("UNDERWATER")
+    if dp1 < 0 and dg1 > 0:
+        flags.append("**DANGER — bleeding AND adding exposure; de-risk / revert the culprit is the priority this cycle**")
+    lines.append("Flags: " + ("; ".join(flags) if flags else "none (not bleeding, exposure not rising)") + ".")
+    return "\n".join(lines)
+
+
 def render_markdown(ops_raw, db_sheets, logs_text):
     """Compact, model-readable digest of the same data as the xlsx bundle — cheap to read every
     cycle (the .xlsx is binary and token-heavy). Row-level detail (positions, fills, TCA,
     hypotheses, strategy dials) stays in diagnostics.xlsx in the same zip for when it's needed."""
     L = ["# Jethro report %s" % TS, "",
-         "Model-readable digest of the live run for automated analysis. The objective is "
-         "risk-adjusted PnL — PnL up per unit of exposure, measured on strategy alpha, not the "
-         "hedge-masked firm total. Row-level detail is in `diagnostics.xlsx` in this bundle.", "",
+         "Model-readable digest of the live run for automated analysis. The objective is risk-adjusted "
+         "PnL on the **FIRM TOTAL** (all books incl. hedge) — total PnL up per unit of total exposure — "
+         "plus the owner target of **+1% PnL every 3 iterations**. Row-level detail is in `diagnostics.xlsx`.", "",
+         situation_block(ops_raw), "",
          "## Operational / runtime (live endpoints)"]
     for name, data in ops_raw.items():
         L.append("### %s" % name)

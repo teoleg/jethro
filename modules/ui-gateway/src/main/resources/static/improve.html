@@ -41,6 +41,11 @@
   .act.noanalysis{color:var(--alert); font-weight:700}
   .reasoning { padding:6px 16px 12px; color:var(--txt); font-size:12.5px; line-height:1.6; white-space:pre-wrap; }
   .reasoning.warn { color:var(--alert); }
+  td details summary { cursor:pointer; color:var(--dim); }
+  td details summary:hover { color:var(--txt); }
+  td details[open] summary { color:var(--txt); font-weight:600; }
+  .rowreason { white-space:pre-wrap; font-size:11.5px; color:var(--txt); margin:6px 0 2px; padding:8px 10px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px; max-width:700px; }
   .alert { margin:8px 8px 0; padding:9px 13px; border-radius:9px; font-size:12.5px; font-weight:600; }
   .alert.bad { background:rgba(240,85,63,.12); border:1px solid var(--alert); color:var(--alert); }
   .alert.good { background:rgba(53,192,122,.10); border:1px solid var(--up); color:var(--up); }
@@ -192,7 +197,9 @@
         + '<td class="num mono dim">' + money(e.fees) + '</td>'
         + '<td><span class="act ' + actClass(e.action) + '">' + esc(e.action || "") + '</span></td>'
         + '<td>' + verdict + '</td>'
-        + '<td class="dim">' + esc(e.decision || "") + '</td>'
+        + '<td class="dim">' + (e.reasoning
+            ? '<details><summary>' + esc(e.decision || "") + '</summary><pre class="rowreason">' + esc(e.reasoning) + '</pre></details>'
+            : esc(e.decision || "")) + '</td>'
         + '</tr>';
     }).join("");
   }
