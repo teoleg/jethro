@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T23:30:07Z",
+    "fees": "158.453066",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "69.88228362",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-826.05938139",
+      "strategyAlpha": "-895.94166501",
+      "totalFees": "158.453066",
+      "totalPnl": "-826.05938139",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-826.05938139"
+  },
+  "before": {
+    "at": "2026-07-26T22:46:09Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-826.05938139"
+  },
+  "commit": "22e0a765fef598b3b03d6e5f1e80fa77d2e66fb0",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T23:30:07Z",
+  "summary": "split the per-name cash budget by each name's measured daily volatility so every covered name contributes the same standalone risk instead of the same cash \u2014 the volatility half of the concentration problem whose correlation half ADR-0079 prices, using the same EWMA covariance that already prices VaR and the hedge advisor, with the harmonic-mean reference that leaves the owner-set unit-notional dial and the covered budget total exactly unchanged and a one-way cap so an estimated sigma can never lever the book up (ADR-0083)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
