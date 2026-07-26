@@ -1,0 +1,20 @@
+{
+  "commit": "daa2d2bd635638beac809e433ba56c79be9fc1eb",
+  "fees": "131.078386",
+  "gross_exposure": "786.04923373",
+  "net_exposure": "56.66859973",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "786.04923373",
+    "hedgePnl": "95.95686203",
+    "netExposure": "56.66859973",
+    "realizedPnl": "-866.92141141",
+    "strategyAlpha": "-963.42511212",
+    "totalFees": "131.078386",
+    "totalPnl": "-867.46825009",
+    "unrealizedPnl": "-0.54683868"
+  },
+  "summary": "reversion sensor: add a continuous, self-calibrating range-position mean-reversion forecast source (fade the stretch, weighted by 1-ER so it refuses to fade a trend) so the desk has a measurable view in the CHOP regime its detector reports \u2014 not the trend source negated, and it must earn its own expectancy before the edge gate lets it size (ADR-0070)",
+  "total_pnl": "-867.46825009",
+  "ts": "2026-07-26T17:11:31Z"
+}
