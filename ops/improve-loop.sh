@@ -79,7 +79,7 @@ if ! command -v claude >/dev/null 2>&1; then
 else
   BRAIN_RAN=1
   claude -p "$(cat ops/improve-prompt.md)" \
-    --allowedTools "Bash Read Edit Grep Glob" \
+    --allowedTools "Bash Read Edit Grep Glob Skill" \
     --permission-mode acceptEdits \
     >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero (see above)" >> "$LOG"
 fi
