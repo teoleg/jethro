@@ -48,9 +48,12 @@ DB_QUERIES = {
         "from fills group by 1 order by 1",
     "firm_equity_curve": "select * from firm_equity order by 1",
     "book_equity_curve": "select * from book_equity order by 1",
-    "signal_observations": "select source, feed_mode, count(*) n, count(*) filter (where resolved) resolved, "
+    # Grouped by horizon too (ADR-0082): a call is graded over every rung of the measurement ladder,
+    # so pooling them would average an hour of return with four minutes of it and read as one number.
+    "signal_observations": "select source, feed_mode, horizon_seconds, count(*) n, "
+        "count(*) filter (where resolved) resolved, "
         "round(avg(case when outcome='WIN' then 1.0 when outcome='LOSS' then 0.0 end),3) hit_rate "
-        "from signal_observations group by source, feed_mode order by n desc",
+        "from signal_observations group by source, feed_mode, horizon_seconds order by n desc",
     "daily_close_depth": "select feed_mode, count(distinct day) days, min(day) first, max(day) last, "
         "count(distinct instrument) instruments from daily_close group by feed_mode order by feed_mode",
     "mark_quarantine": "select * from mark_quarantine",

@@ -41,17 +41,25 @@ public final class SignalScoring {
     }
 
     /**
-     * Rolling health for one source; {@code open} (unresolved) is filled by the caller.
+     * Rolling health for one source <b>at one measurement horizon</b>; {@code open} (unresolved) is
+     * filled by the caller.
      *
      * <p>{@code stdReturnBps} is the SAMPLE standard deviation across every resolved observation — the
      * per-call dispersion, useful for display. {@code cohorts} and {@code stdCohortMeanBps} carry the
      * INDEPENDENT sample (ADR-0077): the number of distinct emission bursts the observations came from,
      * and the dispersion of those bursts' mean returns. The standard error is formed from the latter,
      * because that is the sample that actually varies.
+     *
+     * <p>{@code horizonSeconds} is part of the IDENTITY of this reading, not a label on it (ADR-0082):
+     * expectancy is a return over a period, so "+13.5 bps" means nothing until you know whether that is
+     * per hour or per four minutes — and the desk's round-trip cost, which the edge gate subtracts from
+     * it, is per round trip regardless. A source measured at several horizons yields several Stats, one
+     * per rung, and they are never pooled. Zero means "unstated" — the shape a caller with no ladder to
+     * hand produces, and the reason every consumer must treat it as opaque rather than arithmetic.
      */
     public record Stats(String source, long resolved, long wins, long losses, long flats, long open,
                         double hitRate, double avgReturnBps, double stdReturnBps,
-                        long cohorts, double stdCohortMeanBps) {
+                        long cohorts, double stdCohortMeanBps, long horizonSeconds) {
 
         /**
          * The i.i.d. shape: every observation is its own independent draw. Correct for a source that
@@ -60,7 +68,21 @@ public final class SignalScoring {
         public Stats(String source, long resolved, long wins, long losses, long flats, long open,
                      double hitRate, double avgReturnBps, double stdReturnBps) {
             this(source, resolved, wins, losses, flats, open, hitRate, avgReturnBps, stdReturnBps,
-                    resolved, stdReturnBps);
+                    resolved, stdReturnBps, 0L);
+        }
+
+        /** The cohort-aware shape at an unstated horizon — the ADR-0077 constructor, unchanged. */
+        public Stats(String source, long resolved, long wins, long losses, long flats, long open,
+                     double hitRate, double avgReturnBps, double stdReturnBps,
+                     long cohorts, double stdCohortMeanBps) {
+            this(source, resolved, wins, losses, flats, open, hitRate, avgReturnBps, stdReturnBps,
+                    cohorts, stdCohortMeanBps, 0L);
+        }
+
+        /** The same reading, restated as having been measured over {@code horizonSeconds}. */
+        public Stats atHorizon(long horizonSeconds) {
+            return new Stats(source, resolved, wins, losses, flats, open, hitRate, avgReturnBps,
+                    stdReturnBps, cohorts, stdCohortMeanBps, horizonSeconds);
         }
 
         /**

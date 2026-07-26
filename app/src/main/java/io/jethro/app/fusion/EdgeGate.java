@@ -81,7 +81,7 @@ public final class EdgeGate {
      * demands, stated as a normal quantile — how many standard errors of surplus expectancy would count
      * as evidence rather than a lucky window IF the standard error were known exactly.
      */
-    public record Params(int minSample, double tHurdle) {
+    public record Params(int minSample, double tHurdle, int hypotheses) {
         public Params {
             if (minSample < 2) {
                 minSample = 2; // a standard error needs at least two observations
@@ -89,16 +89,37 @@ public final class EdgeGate {
             if (!(tHurdle > 0)) {
                 tHurdle = 2.0;
             }
+            if (hypotheses < 1) {
+                hypotheses = 1;
+            }
+        }
+
+        /** A single hypothesis — the pre-ADR-0082 shape, with no multiplicity to correct for. */
+        public Params(int minSample, double tHurdle) {
+            this(minSample, tHurdle, 1);
         }
 
         /**
-         * The one-sided tail probability the dial asserts (ADR-0081). This — not the raw quantile — is
-         * what the gate tests against, so the SAME confidence is delivered at every sample size instead
-         * of only in the large-sample limit where a normal quantile happens to be right. The dial's
-         * meaning is unchanged: {@code tHurdle} 2.0 is α = 0.02275, exactly as it always was.
+         * The one-sided tail probability the dial asserts (ADR-0081), divided by the number of
+         * hypotheses the desk searched to find its best one (ADR-0082).
+         *
+         * <p>The dial states the confidence the desk demands, so that — not the raw quantile — is what
+         * the gate tests against, and the SAME confidence is delivered at every sample size instead of
+         * only in the large-sample limit where a normal quantile happens to be right. With one
+         * hypothesis the meaning is unchanged: {@code tHurdle} 2.0 is α = 0.02275, exactly as it
+         * always was.
+         *
+         * <p><b>Why divide.</b> Searching {@code m} measurement horizons and reporting the best one
+         * is {@code m} tests, not one: under a true null the chance that SOME rung looks significant at
+         * α is up to {@code m·α}. Bonferroni's union bound restores the family-wise error rate to α and
+         * — unlike Šidák — needs no independence assumption, which matters here because the rungs are
+         * nested measurements of the same stream and are strongly positively dependent. This is the
+         * haircut the backtest-overfitting literature the gate already cites demands of exactly this
+         * procedure (Harvey, Liu &amp; Zhu, <i>RFS</i> 2016; Bailey, Borwein, López de Prado &amp; Zhu,
+         * <i>J. Comp. Finance</i> 2017). It can only ever make the gate harder to open.
          */
         public double alpha() {
-            return Significance.normalUpperTail(tHurdle);
+            return Significance.normalUpperTail(tHurdle) / hypotheses;
         }
     }
 
@@ -143,17 +164,28 @@ public final class EdgeGate {
      */
     public record Decision(boolean mayIncrease, double roundTripCostBps, String reason,
                            List<SourceEdge> sources,
-                           java.util.Map<String, Double> roundTripBpsByInstrument, Params params) {
+                           java.util.Map<String, Double> roundTripBpsByInstrument, Params params,
+                           long horizonSeconds) {
 
         public Decision {
             sources = sources == null ? List.of() : List.copyOf(sources);
             roundTripBpsByInstrument = roundTripBpsByInstrument == null
                     ? java.util.Map.of() : java.util.Map.copyOf(roundTripBpsByInstrument);
             params = params == null ? new EdgeGate.Params(2, 2.0) : params;
+            if (horizonSeconds < 0) {
+                horizonSeconds = 0;
+            }
+        }
+
+        /** A decision at an unstated horizon — the pre-ADR-0082 shape. */
+        public Decision(boolean mayIncrease, double roundTripCostBps, String reason,
+                        List<SourceEdge> sources,
+                        java.util.Map<String, Double> roundTripBpsByInstrument, Params params) {
+            this(mayIncrease, roundTripCostBps, reason, sources, roundTripBpsByInstrument, params, 0L);
         }
 
         static Decision open(String reason, Params params) {
-            return new Decision(true, 0.0, reason, List.of(), java.util.Map.of(), params);
+            return new Decision(true, 0.0, reason, List.of(), java.util.Map.of(), params, 0L);
         }
 
         /**
@@ -253,16 +285,22 @@ public final class EdgeGate {
             int byP = Double.compare(a.pValue(), b.pValue());
             return byP != 0 ? byP : Double.compare(b.tStat(), a.tStat());
         });
+        // Every stat in one evaluation is measured over the same horizon (they are one rung of the
+        // ADR-0082 ladder), so the decision can state the period its expectancy — and therefore the
+        // holding period the desk owes it — is denominated in. Zero when nothing stated one.
+        long horizon = stats.isEmpty() ? 0L : Math.max(0L, stats.get(0).horizonSeconds());
+        String at = horizon > 0 ? " (measured over " + horizon + "s)" : "";
         if (passing != null) {
             return new Decision(true, roundTripCostBps,
-                    "measured edge clears the cheapest measured round trip with significance: " + passing
+                    "measured edge clears the cheapest measured round trip with significance" + at + ": "
+                            + passing
                             + " — each name is then tested against its own measured cost, and one whose "
                             + "round trip eats that edge stays reduce-only (ADR-0075)",
-                    edges, costs, params);
+                    edges, costs, params, horizon);
         }
         return new Decision(false, roundTripCostBps,
                 "no source's measured expectancy beats measured execution cost at the demanded confidence "
-                        + "in any name, read against the degrees of freedom its standard error was "
-                        + "estimated from — reduce-only (ADR-0064, ADR-0081)", edges, costs, params);
+                        + "in any name" + at + ", read against the degrees of freedom its standard error was "
+                        + "estimated from — reduce-only (ADR-0064, ADR-0081)", edges, costs, params, horizon);
     }
 }

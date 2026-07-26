@@ -30,13 +30,19 @@ public final class SignalTelemetryStore {
     public record Open(String id, String source, String instrument, int direction, BigDecimal entryMark) {
     }
 
-    /** True when this source already has an unresolved call open on this instrument (this mode). */
-    public boolean hasOpen(String source, String instrument) {
+    /**
+     * True when this source already has an unresolved call open on this instrument <b>at this
+     * horizon</b> (this mode). The horizon is part of the key (ADR-0082): the same call measured over
+     * an hour and over four minutes is two observations of two different quantities, and holding only
+     * one open per (source, instrument) would let the longest rung starve every shorter one.
+     */
+    public boolean hasOpen(String source, String instrument, int horizonSeconds) {
         try {
             Long n = jdbc.queryForObject("""
                     select count(*) from signal_observations
-                    where source = ? and instrument = ? and resolved = false and feed_mode = ?
-                    """, Long.class, source, instrument, mode());
+                    where source = ? and instrument = ? and horizon_seconds = ?
+                      and resolved = false and feed_mode = ?
+                    """, Long.class, source, instrument, horizonSeconds, mode());
             return n != null && n > 0;
         } catch (Exception e) {
             return true; // on doubt, don't record a possible duplicate
@@ -96,16 +102,25 @@ public final class SignalTelemetryStore {
     public record Resolved(Instant entryAt, double directionalReturn) {
     }
 
-    /** Resolved observations for one source since {@code since} (this mode), newest first. */
-    public List<Resolved> resolvedObservations(String source, Instant since, int limit) {
+    /**
+     * Resolved observations for one source <b>at one horizon</b> since {@code since} (this mode),
+     * newest first.
+     *
+     * <p>The limit is applied PER HORIZON deliberately (ADR-0082). A short rung resolves many times
+     * more often than a long one — sixteen times, at a 4× ladder ratio two steps down — so a single
+     * newest-first window across all rungs would fill with the fastest rung and silently starve the
+     * slowest of the very history the desk has waited hours to accumulate.
+     */
+    public List<Resolved> resolvedObservations(String source, int horizonSeconds, Instant since, int limit) {
         try {
             return jdbc.query("""
                     select entry_at, realized_return from signal_observations
-                    where source = ? and resolved = true and feed_mode = ? and resolved_at >= ?
+                    where source = ? and horizon_seconds = ? and resolved = true
+                      and feed_mode = ? and resolved_at >= ?
                     order by resolved_at desc limit ?
                     """, (rs, i) -> new Resolved(rs.getTimestamp("entry_at").toInstant(),
                             rs.getBigDecimal("realized_return").doubleValue()),
-                    source, mode(), Timestamp.from(since), limit);
+                    source, horizonSeconds, mode(), Timestamp.from(since), limit);
         } catch (Exception e) {
             return List.of();
         }
@@ -121,12 +136,13 @@ public final class SignalTelemetryStore {
         }
     }
 
-    public long openCount(String source) {
+    /** Unresolved calls this source has open at {@code horizonSeconds} (this mode). */
+    public long openCount(String source, int horizonSeconds) {
         try {
             Long n = jdbc.queryForObject("""
                     select count(*) from signal_observations
-                    where source = ? and resolved = false and feed_mode = ?
-                    """, Long.class, source, mode());
+                    where source = ? and horizon_seconds = ? and resolved = false and feed_mode = ?
+                    """, Long.class, source, horizonSeconds, mode());
             return n == null ? 0 : n;
         } catch (Exception e) {
             return 0;

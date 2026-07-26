@@ -83,45 +83,43 @@ public class FusionConfig {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
         // the edge gate credits and the round-trip cost it charges are denominated over the same
-        // trade. A positive explicit value still overrides (escape hatch); the shipped config sets 0.
-        double rate = adjustmentRate > 0
-                ? adjustmentRate
-                : TargetPlanner.adjustmentRateFor(intervalSeconds, evidenceHorizonSeconds);
-        var params = new FusionPlanner.Params(assumedCorrelation, unitNotional, bufferFraction, rate);
+        // trade. ADR-0082 makes that horizon the one the EVIDENCE picked rather than a fixed dial, so
+        // the derivation moves into the loop, where the selected rung is known: a rate of 0 in Params
+        // means DERIVE PER CYCLE, and a positive explicit value still pins it (escape hatch).
+        var params = new FusionPlanner.Params(assumedCorrelation, unitNotional, bufferFraction,
+                Math.max(0, adjustmentRate));
         // ADR-0055 item 6: per-source weights are re-estimated from the phase-1 telemetry each cycle
         // (evidence, not decree), shrunk toward equal so a thin sample can't dominate. mode=equal forces
         // the flat placeholder; telemetry (default) falls back to equal when the store is absent or cold.
         var weightParams = new TelemetryWeights.Params(shrinkageK, weightMin, weightMax);
+        // ADR-0082: the gate's significance test is now a search over the measurement ladder, so the
+        // α it is read against carries the Bonferroni haircut for the number of rungs searched. The
+        // ladder is read off the telemetry itself rather than restated here, so the two cannot drift.
+        var gateParams = new EdgeGate.Params(edgeGateMinSample, edgeGateTHurdle,
+                telemetryRungs(telemetry));
+        // ADR-0082: ONE rung selection per cycle drives everything downstream — the gate's verdict, the
+        // per-source weights, and (in FusionLifecycle) the holding period. Both suppliers recompute it
+        // from the same live telemetry with the same pure function, so they cannot disagree; the desk
+        // must never grade a source over one period, weight it over a second and hold it for a third.
         java.util.function.Supplier<FusionWeights> weightsSupplier =
                 "equal".equalsIgnoreCase(weightsMode)
                         ? FusionWeights::equal
                         : () -> {
-                            var t = telemetry.getIfAvailable();
-                            return t == null ? FusionWeights.equal()
-                                    : FusionWeights.fromTelemetry(t.stats(), weightParams);
+                            var selection = selectRung(telemetry, tca, gateParams);
+                            return selection == null ? FusionWeights.equal()
+                                    : FusionWeights.fromTelemetry(selection.stats(), weightParams);
                         };
         // ADR-0064: the edge gate re-reads BOTH measurements every cycle — per-source realised
         // expectancy (signal telemetry) and the desk's own realised slippage (TCA) — so it opens by
         // itself the moment a source earns its cost, and closes again if that decays. Nothing here is
         // a chosen number: the only dials are the significance hurdle and the minimum sample.
-        var gateParams = new EdgeGate.Params(edgeGateMinSample, edgeGateTHurdle);
         java.util.function.Supplier<EdgeGate.Decision> gateSupplier = !edgeGateEnabled ? null
                 : () -> {
-                    var t = telemetry.getIfAvailable();
-                    var q = tca.getIfAvailable();
-                    if (t == null || q == null) {
+                    if (tca.getIfAvailable() == null) {
                         return null; // no measurement path — leave the pre-existing controls alone
                     }
-                    try {
-                        // null ⇒ nothing filled in this mode yet; the gate stays open rather than
-                        // assume a cost. A failed read must never stop the planning loop.
-                        Double roundTripBps = q.averageSlippageBps()
-                                .map(oneWay -> oneWay.doubleValue() * 2.0)
-                                .orElse(null);
-                        return EdgeGate.evaluate(t.stats(), roundTripBps, roundTripByInstrument(q), gateParams);
-                    } catch (RuntimeException e) {
-                        return null;
-                    }
+                    var selection = selectRung(telemetry, tca, gateParams);
+                    return selection == null ? null : selection.decision();
                 };
         // ADR-0079: the same EWMA daily-return covariance the parametric VaR and the ADR-0038 hedge
         // advisor already price risk with — so the sizer and the risk engine cannot disagree about how
@@ -150,9 +148,49 @@ public class FusionConfig {
                 () -> firmPositions(risk),
                 () -> heldInRoutedBooks(risk, hedgeBook),
                 weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
-                minForecastToRoute, gateSupplier, covarianceSupplier);
+                minForecastToRoute, gateSupplier, covarianceSupplier, evidenceHorizonSeconds);
         lifecycle.start();
         return lifecycle;
+    }
+
+    /**
+     * How many rungs the live telemetry is measuring over — the multiplicity the edge gate's α must be
+     * divided by (ADR-0082). Read off the telemetry rather than from the property, so the count the
+     * search is charged for is always the count actually searched. One when telemetry is absent, which
+     * is exactly the pre-ADR-0082 α.
+     */
+    private static int telemetryRungs(ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry) {
+        var t = telemetry.getIfAvailable();
+        return t == null ? 1 : Math.max(1, t.horizons().size());
+    }
+
+    /**
+     * The measurement horizon the evidence picks this cycle, with the gate decision made on it
+     * (ADR-0082). Pure given the telemetry snapshot, so every caller in a cycle agrees without any
+     * shared state between them.
+     *
+     * <p>A missing TCA reading is passed through as {@code null} rather than as a cost: nothing has
+     * filled in this feed mode yet, the gate stays open on its own terms, and inventing a cost would be
+     * a number without provenance. A failed read returns null and leaves the pre-existing controls
+     * alone — telemetry must never stop the planning loop.
+     */
+    private static HorizonLadder.Selection selectRung(
+            ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
+            ObjectProvider<io.jethro.order.ExecutionQualityRepository> tca,
+            EdgeGate.Params gateParams) {
+        var t = telemetry.getIfAvailable();
+        if (t == null) {
+            return null;
+        }
+        try {
+            var q = tca.getIfAvailable();
+            Double roundTripBps = q == null ? null
+                    : q.averageSlippageBps().map(oneWay -> oneWay.doubleValue() * 2.0).orElse(null);
+            var costs = q == null ? java.util.Map.<String, Double>of() : roundTripByInstrument(q);
+            return HorizonLadder.select(t.statsByHorizon(), roundTripBps, costs, gateParams);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**

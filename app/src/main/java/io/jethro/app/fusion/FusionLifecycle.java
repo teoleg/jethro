@@ -57,6 +57,8 @@ public final class FusionLifecycle implements AutoCloseable {
     private final Supplier<EdgeGate.Decision> edgeGate; // ADR-0064: measured edge vs measured cost
     /** ADR-0079: measured daily-return covariance — how much of the book is one bet repeated. */
     private final Supplier<ReturnCovarianceSource> covariance;
+    /** ADR-0082 fallback: the desk's stated base measurement horizon, used when no rung is selected. */
+    private final long baseHorizonSeconds;
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -68,7 +70,8 @@ public final class FusionLifecycle implements AutoCloseable {
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
                            ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
                            Supplier<EdgeGate.Decision> edgeGate,
-                           Supplier<ReturnCovarianceSource> covariance) {
+                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds) {
+        this.baseHorizonSeconds = Math.max(1, baseHorizonSeconds);
         this.edgeGate = edgeGate;
         this.covariance = covariance;
         this.registry = registry;
@@ -90,6 +93,25 @@ public final class FusionLifecycle implements AutoCloseable {
         return routeOrders;
     }
 
+    /**
+     * This cycle's planner params, with the partial-adjustment rate derived from the horizon the
+     * evidence selected (ADR-0080 identity, ADR-0082 horizon).
+     *
+     * <p>A configured rate above zero pins it — the ADR-0080 escape hatch, untouched. At zero the rate
+     * is DERIVED so the desk's exposure e-folds toward target in exactly the period its edge was
+     * measured over, which is the period the gate credited one round trip against. When the gate has
+     * not stated a horizon (no telemetry, no fills yet, or a failed read) the desk's stated base
+     * horizon stands — the slowest rung, and so the fewest round trips, which is the safe default when
+     * the evidence has not spoken.
+     */
+    private FusionPlanner.Params withHoldingPeriod(EdgeGate.Decision gate) {
+        if (params.adjustmentRate() > 0) {
+            return params;
+        }
+        long horizon = gate != null && gate.horizonSeconds() > 0 ? gate.horizonSeconds() : baseHorizonSeconds;
+        return params.withAdjustmentRate(TargetPlanner.adjustmentRateFor(intervalSeconds, horizon));
+    }
+
     public void start() {
         task = scheduler.scheduleWithFixedDelay(this::tick, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
         log.info("fusion loop started (every {}s) — ADR-0055 {}", intervalSeconds,
@@ -103,25 +125,29 @@ public final class FusionLifecycle implements AutoCloseable {
             Map<String, List<Forecast>> forecasts = registry.byInstrument(now);
             Map<String, BigDecimal> positions = positionsSupplier.get();
             FusionWeights weights = weightsSupplier.get(); // re-estimated from live telemetry each cycle (ADR-0055)
+            // ADR-0064/0082: read the gate BEFORE planning. It carries the horizon the evidence picked,
+            // and under ADR-0080 the desk's holding period is that horizon — so the rate the planner
+            // sizes this cycle's step with is not known until the gate has spoken.
+            EdgeGate.Decision gate = edgeGate == null ? null : edgeGate.get();
+            FusionPlanner.Params cycleParams = withHoldingPeriod(gate);
             // ADR-0065: plan over the names we HOLD as well as the names we have a view on, so a
             // position never falls out of the target book when its sources go quiet.
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
-                    multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
+                    multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), cycleParams);
             // ADR-0079: the per-name budget sizes each name as if it were the only position, which is
             // the independence assumption. Scale the book back to the risk that assumption implies
             // once the names' MEASURED correlation is counted, so a cross-section that is really one
             // bet cannot carry N budgets of it. Applied before the edge gate: the gate clamps what the
             // desk actually intends to hold, and the operator's book shows the sizes that will route.
             var normalised = PortfolioRiskNormaliser.apply(targets, multiplierFor,
-                    covariance == null ? ReturnCovarianceSource.NONE : covariance.get(), params);
+                    covariance == null ? ReturnCovarianceSource.NONE : covariance.get(), cycleParams);
             targets = normalised.targets();
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
             // paying for are the ones that take risk OFF. ADR-0072 asks the same question per name, so
             // a name whose own round trip costs more than the passing source's measured edge is
             // reduce-only even when the desk as a whole may increase. Clamp before anything else sees
             // the deltas — the operator's target book must show what will actually be routed.
-            EdgeGate.Decision gate = edgeGate == null ? null : edgeGate.get();
             if (gate != null) {
                 targets = reduceOnlyWhere(targets, gate);
             }

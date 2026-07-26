@@ -460,3 +460,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   that the edge is FAST, not by a wish for more samples. The honest way to get that evidence is to measure
   expectancy at a ladder of horizons and let the data choose — with a multiple-testing haircut for the
   number of horizons tried. That, not a horizon guess, is the next change to build.
+
+### 2026-07-26T22:20Z — ADR-0082 (the evidence horizon is measured, not dialled)
+- Situation: eleventh consecutive cycle on a zero move — flat at both endpoints, no orders, PnL and
+  exposure unchanged. Attribution is exact and empty: 0% market, 0% change. ADR-0081's ⚠️ MIXED is
+  **unmeasured, not refuted**. Not a danger state (nothing is held), but a hard failure against the
+  growth target, and the loop has now spent five cycles refining a gate that never gets to speak.
+- **The gate is starved, not wrong.** Three of five sources are measurably negative and correctly
+  refused forever; the one positive source is blocked purely by statistical POWER. A cross-sectional
+  source emits its whole book in one burst, so it produces exactly **one independent cohort per
+  measurement horizon** — at 3600s the gate accrues one degree of freedom per hour, and `reversion`
+  has three. ADR-0077/0079/0080/0081 were each individually right and each landed on zero, because
+  every one of them refined the *test* while the *sample rate* was the binding constraint.
+- Change: `HorizonLadder` grades every call over `base, base/4, base/16` (3600/900/225s), selects the
+  rung with the smallest best p-value, and `EdgeGate.Params.alpha()` divides by the rung count
+  (Bonferroni). The selected rung drives the gate verdict, the source weights AND the holding period
+  (ADR-0080's identity, now evaluated per cycle).
+- Lesson / rule: **when a control never fires, ask what rate its EVIDENCE arrives at before refining
+  the test it applies.** Five cycles were spent sharpening a hurdle whose input accrued one degree of
+  freedom per hour. A test and its sample rate are different objects; a p-value that cannot fall is a
+  measurement problem wearing a statistics problem's clothes. Check the denominator's *arrival rate*,
+  not just its formula.
+- Rule 2: **a search over m variants is m tests — pay for it in the same change that introduces the
+  search.** The ladder is exactly the procedure the backtest-overfitting literature warns about, and
+  the haircut must be shipped WITH it, not "added later once it works". Note the direction: this makes
+  the base rung strictly harder too, which is the property that makes the change safe to ship blind.
+- Rule 3: **shortening a measurement window is not a way to buy significance, and the thing that keeps
+  it honest is the cost term, not the p-value.** Expectancy scales with the period; the round trip
+  charged against it does not. Any future change that increases sample count by shrinking a horizon
+  must be checked against a FIXED per-trade cost before it is believed.
+- Observed but NOT this change (next lever): **forecast saturation.** `fusion_targets` shows `trend`
+  pinned at +20.0 and `reversion` at −20.0 on nearly every name, so GBPUSD and MSFT carry the
+  bit-identical combined forecast −16.9296. Two consequences: the cross-section carries no selection
+  information at all (23 names, one bet), and the combined forecast is the small difference of two
+  constants, so a hair of movement flips the sign of the whole book — that is the mechanism behind the
+  20:08–20:21 MSFT churn. Worth attacking once the gate can actually trade; sizing quality is
+  unmeasurable while the book is flat.

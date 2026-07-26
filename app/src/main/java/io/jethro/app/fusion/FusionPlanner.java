@@ -31,9 +31,20 @@ public final class FusionPlanner {
                         List<Contribution> contributions) {
     }
 
-    /** Tunables for one planning pass. */
+    /**
+     * Tunables for one planning pass.
+     *
+     * <p>{@code adjustmentRate} at or below zero means DERIVE: the loop sets it per cycle from the
+     * horizon the evidence selected, so the desk holds a view for exactly as long as its edge was
+     * measured over (ADR-0080's identity at ADR-0082's horizon). A positive value pins it.
+     */
     public record Params(double assumedCorrelation, BigDecimal unitNotional, double bufferFraction,
                         double adjustmentRate) {
+
+        /** The same tunables at a different partial-adjustment rate. */
+        public Params withAdjustmentRate(double rate) {
+            return new Params(assumedCorrelation, unitNotional, bufferFraction, rate);
+        }
     }
 
     /**
