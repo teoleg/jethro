@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T17:15:07Z",
+    "fees": "131.078386",
+    "gross": "785.36424682",
+    "net": "56.35623282",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "785.36424682",
+      "hedgePnl": "95.45818512",
+      "netExposure": "56.35623282",
+      "realizedPnl": "-866.92141141",
+      "strategyAlpha": "-963.23880212",
+      "totalFees": "131.078386",
+      "totalPnl": "-867.78061700",
+      "unrealizedPnl": "-0.85920559"
+    },
+    "total_pnl": "-867.78061700"
+  },
+  "before": {
+    "at": "2026-07-26T17:11:31Z",
+    "gross": "786.04923373",
+    "net": "56.66859973",
+    "total_pnl": "-867.46825009"
+  },
+  "commit": "daa2d2bd635638beac809e433ba56c79be9fc1eb",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-0.68498691",
+    "net": "-0.31236691",
+    "total_pnl": "-0.31236691"
+  },
+  "note": "no material change (within noise band); risk-adj (PnL/$1 gross) worsened -1.10358\u2192-1.10494",
+  "revert": false,
+  "scoredAt": "2026-07-26T17:15:07Z",
+  "summary": "reversion sensor: add a continuous, self-calibrating range-position mean-reversion forecast source (fade the stretch, weighted by 1-ER so it refuses to fade a trend) so the desk has a measurable view in the CHOP regime its detector reports \u2014 not the trend source negated, and it must earn its own expectancy before the edge gate lets it size (ADR-0070)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
