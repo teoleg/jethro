@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T18:00:07Z",
+    "fees": "131.123236",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "95.38694807",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-867.73313105",
+      "strategyAlpha": "-963.12007912",
+      "totalFees": "131.123236",
+      "totalPnl": "-867.73313105",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-867.73313105"
+  },
+  "before": {
+    "at": "2026-07-26T17:56:18Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-867.73313105"
+  },
+  "commit": "68444929df5f59206c676710c057cd91f5afd4ee",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T18:00:07Z",
+  "summary": "sensor warm restart correction: anchor the seed window on the mark's provider timestamp instead of wall-clock now, so a feed running behind real time no longer empties the seed and the trend/reversion sensors can actually boot warm and be measured (ADR-0071 correction); also surface the app's own WARN/stack traces in the loop report",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
