@@ -93,6 +93,12 @@ than a checklist would. Two conditions on that freedom:
   fills, TCA, hypotheses, strategy dials + change history). Unzip only if you need that detail.
 - The repo working tree (you are inside the checkout), `git log`, the ADR index (`docs/adr/README.md`),
   and `CLAUDE.md` (the house rules — read them; they encode hard-won lessons).
+- **`docs/loop-playbook.md`** — your standing operator context (mission, the strategy thesis, hard
+  lessons already paid for, current focus). Read it every cycle; it is your memory across cold starts.
+- **Project skills — invoke them via the `Skill` tool; they package the house rigor:**
+  **`finance-math`** before/while touching ANY PnL / risk / pricing / position / FX calculation
+  (mandatory — do not hand-derive money math); **`adr`** when authoring or superseding an ADR;
+  **`design-review`** before shipping an architecturally-significant change.
 
 ## Scoring is already done for you (by code) before you start
 The loop wrapper runs `scripts/score-change.py score` **before** it invokes you: that script measures
