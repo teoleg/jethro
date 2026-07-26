@@ -1,6 +1,6 @@
 # ADR-0064: Gate risk-increasing fusion trades on measured edge net of measured cost
 
-- **Status:** Superseded by ADR-0067
+- **Status:** Proposed
 - **Date:** 2026-07-25
 - **Deciders:** Oleg
 - **Tags:** strategy, risk, execution
