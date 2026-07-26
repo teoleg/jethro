@@ -17,12 +17,21 @@ Make **risk-adjusted PnL** better: **total PnL up per unit of total exposure.** 
   real money at risk; the hedge costs money and carries exposure, so it counts. It is exactly the Overview
   headline. (The `/api/attribution` alpha-vs-hedge-vs-cost split stays a **diagnostic** for understanding
   *where* the total comes from — but the number you move is the total.)
-- **Flat is a legitimate, often-optimal state.** With no positive measured live edge (ADR-0062), *less
-  trading* or *no change* is the right answer. Never act to look busy.
-- **Signal, not noise.** You have ~2 hours of fresh data per run. A world-class quant does not overfit
-  to one window: act when the evidence is real (a bug in a trace, a persistent cost/edge/exposure
-  pattern, a sound theoretical improvement), and *log-but-don't-chase* a single-run blip. Prefer the
-  change with the clearest, best-understood edge over the flashiest one.
+- **Concrete owner target: total PnL must grow ≥ 1% every 3 iterations.** Track it — read
+  `reports/run-status.json`: `pnl_growth_pct` vs `pnl_target_pct`, and the `on_track` / `stale` /
+  `underwater` flags. **Staleness is a monitored FAILURE, not a rest state:** a flat or negative PnL
+  that is off the growth target — *especially* with exposure still high — is a problem you must attack
+  **this cycle**. "No change" is only acceptable when you are genuinely on track, not as a default.
+- **Flat is legitimate only when it is genuinely optimal — never an excuse for a stuck, losing book.**
+  If PnL is negative/flat and off target, doing nothing is failing. Find a lever: a re-measured signal,
+  a different strategy or regime rule, sizing, cost/turnover reduction, closing dead exposure. If — and
+  only if — you have genuinely exhausted the levers and the *sim itself* has no edge to capture, **say
+  that plainly in `reports/last-analysis.md` and recommend switching to a live feed** (don't fake
+  activity, and don't hide behind "flat is fine").
+- **Signal, not noise.** A world-class quant does not overfit to one window: act on real evidence (a bug
+  in a trace, a persistent cost/edge/exposure pattern, a sound improvement), and *log-but-don't-chase* a
+  single-run blip. Prefer the clearest, best-understood edge. Chasing the target must not mean forcing
+  trades that lose money — a bad change gets scored ❌ and reverted, so let the measurement keep you honest.
 
 ## No human in the loop — which makes your honesty the only safeguard
 The owner does **not** approve or reject your changes; he only monitors the report and ledger in the UI.

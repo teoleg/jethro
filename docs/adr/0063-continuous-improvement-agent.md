@@ -49,9 +49,14 @@ and the real money at risk, matching the Overview headline. **(Owner decision 20
 superseding the earlier alpha-only choice: the hedge costs real money and carries real
 exposure, so it must count in the number that is monitored and optimized. The attribution
 alpha-vs-hedge split remains a diagnostic for *where* the total comes from — it is not the
-objective.)** (c) **flat is an allowed, often-optimal plan** — when
-no `(name, algo)` has positive live edge (ADR-0062), doing nothing dominates on every
-dimension, so the agent is never forced to act. The specific metrics and the risk budget are
+objective.)** (c) **flat is allowed only when genuinely on-track — staleness is a monitored FAILURE.** Owner target
+(2026-07-26): **total PnL must grow ≥ 1% every 3 iterations** (`JETHRO_LOOP_PNL_TARGET_PCT` /
+`_WINDOW`); the scorer records `pnl_growth_pct`, `on_track`, `stale`, `underwater` in the heartbeat. A
+flat or negative PnL that is off target — *especially* with exposure still high — is a failure the agent
+must attack that cycle, not an acceptable rest state. Doing nothing is legitimate only while on-track;
+if the agent has truly exhausted the levers and the *sim* has no edge, it must say so plainly and
+recommend a live feed — never hide behind "flat is fine". (This supersedes the earlier unconditional
+"flat is often optimal" framing, per owner direction.) The specific metrics and the risk budget are
 owner-set money-risk dials (CLAUDE.md provenance rule); this ADR fixes the *shape* — a
 multi-dimensional objective on **total PnL/exposure**, exposure-aware, breaker-floored, no-trade allowed — not
 the numbers.

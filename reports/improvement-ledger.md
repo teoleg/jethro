@@ -26,6 +26,11 @@ PnL/exposure are the **firm total** (from `/api/risk` `.total`: total PnL net of
 exposure — all books incl. the hedge). "Before" is the vector at the moment the change was committed;
 "After" is the vector on the next run, once the book has traded under the new code.
 
+**Owner target (2026-07-26): total PnL must grow ≥ 1% every 3 iterations.** The per-run heartbeat
+(`reports/run-status.json`, shown on the Improve page) carries `pnl_growth_pct` vs `pnl_target_pct` and
+the `on_track` / `stale` / `underwater` flags. A flat or negative PnL off that target — especially with
+exposure still high — is a **failure state** the loop must actively work, not an acceptable "flat".
+
 | Scored (UTC) | Commit | What changed | PnL before→after (Δ) | Gross exp before→after (Δ) | Net exp before→after (Δ) | Verdict | Note |
 |---|---|---|---|---|---|---|---|
 | _(no changes scored yet — the loop appends a row here each time it makes and then measures a change)_ | | | | | | | |

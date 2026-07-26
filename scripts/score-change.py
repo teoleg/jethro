@@ -63,6 +63,14 @@ ANALYSIS = os.path.join(REPO, "reports", "last-analysis.md")  # Claude's own rea
 PNL_DEADBAND = Decimal(os.environ.get("JETHRO_SCORE_PNL_DEADBAND_USD", "50"))
 EXP_DEADBAND_FRAC = Decimal(os.environ.get("JETHRO_SCORE_EXPOSURE_DEADBAND_FRAC", "0.01"))
 
+# --- Owner-set PERFORMANCE TARGET (2026-07-26): total PnL must grow at least PNL_TARGET_PCT percent
+# every PNL_TARGET_WINDOW iterations. This is a KPI the loop is measured against and must actively
+# pursue — NOT a market/risk dial that gates a trade. Staleness (PnL flat/negative and not on track,
+# especially with exposure still high) is a monitored FAILURE state, not an acceptable "flat". Both
+# owner-set, env-overridable.
+PNL_TARGET_PCT = Decimal(os.environ.get("JETHRO_LOOP_PNL_TARGET_PCT", "1.0"))
+PNL_TARGET_WINDOW = int(os.environ.get("JETHRO_LOOP_PNL_TARGET_WINDOW", "3"))
+
 
 def fetch_json(path):
     req = urllib.request.Request(BASE + path, headers={"Accept": "application/json"})
@@ -358,6 +366,25 @@ def cmd_status(argv):
             return None
         return round(float((cur - p) / abs(p) * 100), 2)
 
+    # Owner target: total PnL up >= PNL_TARGET_PCT every PNL_TARGET_WINDOW iterations. Measured vs the
+    # entry WINDOW iterations back (positive = improvement, even climbing out of a loss). Staleness — a
+    # flat/negative PnL not on track — is a failure the loop must act on, surfaced here for the UI + prompt.
+    def growth_over(window):
+        if not available or len(entries) < window:
+            return None
+        ov = entries[window - 1].get("total_pnl", entries[window - 1].get("alpha_pnl"))
+        if ov in (None, ""):
+            return None
+        o = Decimal(str(ov))
+        if o == 0:
+            return None
+        return round(float((vec["pnl"] - o) / abs(o) * 100), 2)
+
+    pnl_growth = growth_over(PNL_TARGET_WINDOW)
+    on_track = pnl_growth is not None and Decimal(str(pnl_growth)) >= PNL_TARGET_PCT
+    underwater = available and vec["pnl"] <= 0
+    stale = available and pnl_growth is not None and not on_track
+
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     head = git("rev-parse", "--short", "HEAD", check=False).stdout.strip()
     snap = newest_snapshot() if scored else None
@@ -412,6 +439,12 @@ def cmd_status(argv):
         "fees": (str(vec["fees"]) if available else None),
         "pnl_pct": (pct(vec["pnl"], "total_pnl", "alpha_pnl") if available else None),
         "gross_pct": (pct(vec["gross"], "gross") if available else None),
+        "pnl_growth_pct": pnl_growth,                 # % PnL change vs WINDOW iterations ago
+        "pnl_growth_window": PNL_TARGET_WINDOW,
+        "pnl_target_pct": float(PNL_TARGET_PCT),      # owner target: >= this every WINDOW iters
+        "on_track": on_track,
+        "stale": stale,
+        "underwater": underwater,
         "action": action,
         "last_verdict": last_verdict,
         "decision": decision,
