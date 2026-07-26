@@ -68,6 +68,8 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 | [0062](0062-live-edge-gated-execution.md) | Gate execution on positive *measured live* edge, not only sim-OOS | Proposed | ☐ Not started (post-mortem #1: sim-OOS admits live-negative-edge names; add a live-telemetry edge gate to fusion routing) |
 | [0063](0063-continuous-improvement-agent.md) | Continuous improvement agent — automate the observe→diagnose→fix→rerun loop, gated on the PnL/exposure objective | Proposed | ◐ Scaffolding landed, inert (Claude Code headless on Max; one local cycle report→analyse→change→test→commit→push→rebuild+restart via `ops/loop-control.sh`; `report.md`+logs added to system-report.py). Never edits the deterministic floor (invariant 7 / ADR-0016); real money stays behind ADR-0015. Not enabled — awaits owner Accept + `loop-control.sh on`. Open: open-position restart safety; logs-in-bundle done) |
 
+| [0068](0068-equity-relative-firm-risk-budget.md) | Equity-relative firm risk budget & bleed cutoff — the danger-cut machinery exists (guardrail + firm breaker) but its loss/drawdown dials were big-book absolutes that go toothless on a reset; recalibrate to placeholders now, make them equity-relative next | Proposed | ◐ Config recalibrated (loss/drawdown lowered to PLACEHOLDER — Oleg to set); equity-relative mechanism deferred |
+
 ## Status vs Implementation
 
 **Status** is the ADR lifecycle (Proposed / Accepted / Superseded); **Implementation** is what is
