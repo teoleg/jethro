@@ -265,3 +265,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   Effective n is nearer 3 after cross-sectional correlation, so every t-statistic on this desk — the edge
   gate's and the weights' alike — is overstated ~2.8×. Not shipped this cycle because the correction only
   makes an already-shut gate stricter; it belongs with whatever change re-opens trading.
+
+### 2026-07-26T20:05Z — ADR-0077 (expectancy standard error across emission cohorts)
+- Situation: PnL frozen and entirely realised; gross AND net exposure zero — the book is completely flat,
+  no positions, last fill ~2h ago. Not bleeding, no breaker risk, but no forward earning power either.
+  The window's orders were two 1-share ALPHA buys with matching HEDGE trims under the reduce-only gate —
+  **no trigger opened a position**, so there is no market component and no change component to attribute:
+  with zero exposure neither could act. ADR-0076 scored ⚠️ MIXED "no material change", the **eighth**
+  consecutive inert cycle inside the fusion/gate/weights subsystem.
+- **The previous cycle's known-but-not-shipped item was worse than estimated, and it was about to cost
+  real money.** Grouping resolved observations by entry time: `trend`'s 115 are FIVE hourly bursts of 23;
+  `reversion`'s 23 — the only positive source, the one the gate waits on — are **ONE** burst (18:08:17,
+  resolved 19:08). `σ/√resolved` divided by √23 a dispersion measured across names *within the same hour*.
+  Measured understatement on the live trend cohorts: `12.8985/√5 = 5.7684` vs `27.7797/√115 = 2.5905`,
+  i.e. **2.23×**, t −2.31 read as −5.25. The estimate was 2.8× — the truth was worse for trend and total
+  for reversion (no standard error exists from one draw).
+- Change: `SignalScoring.aggregate` groups observations into cohorts by entry time (`jethro.signals.
+  cohort-window-seconds`, 60s, mine — merging is the conservative direction) and estimates Fama–MacBeth:
+  mean of cohort means, `stdErrorBps = sd(cohort means)/√B`, zero when B<2. Staggered emitters
+  (momentum/social/mean-reversion) come out byte-identical; equal-sized cohorts leave the point estimate
+  exactly unchanged. No dial value changed; `resolved`/`minSample`/`tHurdle` untouched.
+- Lesson / rule: **the timing of observations is part of the sample, not metadata.** A source that scores
+  its whole cross-section in one sweep produces ONE draw, not N. Before trusting any t-statistic on this
+  desk, `group by entry time` first and count the *bursts* — if B is small, the t is decoration. The
+  previous cycle flagged the mechanism from the log timestamps but deferred it as "only makes an already-
+  shut gate stricter"; that read missed that the gate was one resolution from OPENING on it.
+- Rule 2: **"inert" is not the same as "harmless to defer".** Eight cycles of gate refinement scored no-
+  material-change because nothing traded, and the tempting conclusion was that anything in that subsystem
+  is inert. But an inert path becomes live the moment the gate flips, and the flip was scheduled by an
+  accruing counter, not by a decision. When a change is deferred because "nothing trades right now", ask
+  what *starts* trading and when — a deferral is only safe until that date.
+- Rule 3: an overstated standard error is not conservative in either direction. The same inflation that
+  was about to certify `reversion` also made `trend` look decisively anti-predictive (t −5.25 vs −2.31)
+  and pinned it at the MIN weight floor. Fixing the statistic corrects both readings at once.
+- Next lever (deliberately NOT this change): evidence now accrues at one independent draw per source per
+  hour, which is slow and is the real binding constraint. Raise the **emission rate** — overlapping
+  cross-sections on a ~10-min cadence against the same 1h horizon — with a Newey–West/Hansen–Hodrick
+  correction for the induced overlap. Order matters: raising the rate on the i.i.d. estimator would have
+  inflated significance faster still, so it had to come second.

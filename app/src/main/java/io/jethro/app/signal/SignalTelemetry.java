@@ -39,15 +39,18 @@ public final class SignalTelemetry {
     private final double flatThresholdBps;
     private final int rollingDays;
     private final int sampleLimit;
+    private final long cohortWindowMillis;
 
     public SignalTelemetry(SignalTelemetryStore store, MarkSource marks, int horizonSeconds,
-                           double flatThresholdBps, int rollingDays, int sampleLimit) {
+                           double flatThresholdBps, int rollingDays, int sampleLimit,
+                           int cohortWindowSeconds) {
         this.store = store;
         this.marks = marks;
         this.horizonSeconds = Math.max(1, horizonSeconds);
         this.flatThresholdBps = flatThresholdBps;
         this.rollingDays = Math.max(1, rollingDays);
         this.sampleLimit = Math.max(1, sampleLimit);
+        this.cohortWindowMillis = Math.max(0, cohortWindowSeconds) * 1000L;
     }
 
     /** Records a source's directional call, unless it already has one open on this name. */
@@ -97,8 +100,12 @@ public final class SignalTelemetry {
         Instant since = Instant.now().minus(Duration.ofDays(rollingDays));
         List<SignalScoring.Stats> out = new ArrayList<>();
         for (String source : store.sources()) {
-            List<Double> returns = store.resolvedReturns(source, since, sampleLimit);
-            out.add(SignalScoring.aggregate(source, returns, flatThresholdBps, store.openCount(source)));
+            List<SignalScoring.Observation> observations = new ArrayList<>();
+            for (SignalTelemetryStore.Resolved r : store.resolvedObservations(source, since, sampleLimit)) {
+                observations.add(new SignalScoring.Observation(r.entryAt().toEpochMilli(), r.directionalReturn()));
+            }
+            out.add(SignalScoring.aggregate(source, observations, cohortWindowMillis, flatThresholdBps,
+                    store.openCount(source)));
         }
         return out;
     }

@@ -87,14 +87,24 @@ public final class SignalTelemetryStore {
         }
     }
 
-    /** Resolved directional returns for one source since {@code since} (this mode), newest first. */
-    public List<Double> resolvedReturns(String source, Instant since, int limit) {
+    /**
+     * A resolved observation: WHEN its call was recorded, and the realised directional return of
+     * following it. The entry instant is carried because sources emit their whole cross-section in one
+     * burst, and simultaneous calls are one draw of the market rather than many independent ones —
+     * {@link SignalScoring} groups on it to get an honest standard error (ADR-0077).
+     */
+    public record Resolved(Instant entryAt, double directionalReturn) {
+    }
+
+    /** Resolved observations for one source since {@code since} (this mode), newest first. */
+    public List<Resolved> resolvedObservations(String source, Instant since, int limit) {
         try {
             return jdbc.query("""
-                    select realized_return from signal_observations
+                    select entry_at, realized_return from signal_observations
                     where source = ? and resolved = true and feed_mode = ? and resolved_at >= ?
                     order by resolved_at desc limit ?
-                    """, (rs, i) -> rs.getBigDecimal("realized_return").doubleValue(),
+                    """, (rs, i) -> new Resolved(rs.getTimestamp("entry_at").toInstant(),
+                            rs.getBigDecimal("realized_return").doubleValue()),
                     source, mode(), Timestamp.from(since), limit);
         } catch (Exception e) {
             return List.of();

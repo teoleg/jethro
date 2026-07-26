@@ -35,9 +35,11 @@ public class SignalConfig {
                                     @Value("${jethro.signals.horizon-seconds:3600}") int horizonSeconds,
                                     @Value("${jethro.signals.flat-threshold-bps:10}") double flatThresholdBps,
                                     @Value("${jethro.signals.rolling-days:7}") int rollingDays,
-                                    @Value("${jethro.signals.sample-limit:500}") int sampleLimit) {
+                                    @Value("${jethro.signals.sample-limit:500}") int sampleLimit,
+                                    @Value("${jethro.signals.cohort-window-seconds:60}") int cohortWindowSeconds) {
         SignalTelemetry.MarkSource marks = instrument -> markFor(tradingCore, instrument);
-        return new SignalTelemetry(store, marks, horizonSeconds, flatThresholdBps, rollingDays, sampleLimit);
+        return new SignalTelemetry(store, marks, horizonSeconds, flatThresholdBps, rollingDays, sampleLimit,
+                cohortWindowSeconds);
     }
 
     @Bean(destroyMethod = "close")

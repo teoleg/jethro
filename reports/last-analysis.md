@@ -1,54 +1,67 @@
-The desk was claiming a full two-source diversification bonus while one source carried 91% of the weight — the multiplier now measures the breadth the weights actually deliver, so a source held at the floor for losing money stops buying leverage (ADR-0076).
+The edge gate is one hour from levering the whole book on a single hour of market — the t-statistic it trusts treats 23 names called in one 300ms burst as 23 independent draws, so the standard error behind every risk decision is 2.23× too small; fixed the statistic before it opened the gate (ADR-0077).
 
-## Situation (live endpoints, read first)
+## Situation triage (live endpoints, read first)
 
-**Money — flat, not bleeding.** Total PnL is unchanged run-over-run and unchanged across the last three
-runs; every move in that span sits inside the scorer's noise deadband. `stale` and `underwater` are both
-set and we are off the +1%-per-3-iterations target. The cause is arithmetic, not a loss: with zero
-exposure, PnL cannot move. The day's damage was done in a ~40-minute window this afternoon, when a large
-book was opened and then unwound in seven geometric halving steps, paying the round trip on every step;
-nothing has traded since.
+**1. Money.** Total PnL reads `-867.73` on `/api/risk` `.total`, unchanged run-over-run and across the
+last three runs (`run-status.json`: `pnl_growth_pct` 0.0 vs `pnl_target_pct` 1.0, `stale`, `underwater`).
+Not bleeding — frozen. It is frozen because it is entirely *realised*: unrealised PnL is `0.00`.
 
-**Risk — zero, no danger state.** Gross and net exposure are both flat at zero, VaR reports "no
-positions", the firm drawdown breaker is untripped, the hedge axis reads FLAT. Nothing to de-risk,
-nothing to cut, so the danger-state override does not apply.
+**2. Risk.** Gross exposure `0.00`, net `0.00`. The book is **completely flat** — no positions in any
+name, nowhere near the drawdown breaker, VaR reports no positions. There is no risk because there is no
+book, and equally no forward earning power. The last fill was ~2h ago.
 
-**Cause — last cycle's change did what it said and could not have moved the vector.** ADR-0075 opened the
-edge gate's cost comparison to each name's own round trip. It scored ⚠️ MIXED "no material change", and
-correctly: the gate is shut for reasons cost cannot fix. `reversion` — the one source with positive
-measured expectancy — has 23 resolved observations against a 30-observation minimum, and its t-statistic
-against a **zero** round trip is still short of the 2.0 hurdle. No cost refinement reaches that. Five
-consecutive cycles have now been spent on the gate; the gate is not the binding constraint.
+**3. Cause.** Last cycle's ADR-0076 (diversification multiplier on the weights actually used) scored
+⚠️ MIXED "no material change" — inert, exactly as it predicted of itself, because nothing trades. It is
+the **eighth** consecutive cycle inside the fusion/gate/weights subsystem to score no-material-change.
+Not the culprit; the culprit is that `/api/fusion/targets` reports `edgeGate.mayIncrease = false`, so all
+23 planned names carry `deltaQty = 0`.
 
-**Order-level post-mortem.** The window's only orders were two 1-share ALPHA buys with matching fractional
-HEDGE trims, both under the reduce-only gate. **No trigger opened a position**, so 100% of the (nil) PnL
-move is mark drift on a flat book — market, not change. Nothing to blame, nothing to credit.
+**4. Danger.** Not the bleeding-plus-rising-exposure danger state — the opposite. But there *is* a live
+danger one cycle out, and it is why this is not a no-change cycle: **the gate is about to open on
+evidence that does not exist.**
 
-## What I found instead
+## 5–7. Order post-mortem, memory, and change-vs-market
 
-Looking past the gate at what happens *when* it opens: the combiner sizes every target with a
-diversification multiplier taken from the **count** of contributing sources, under a precondition its own
-javadoc states — "for `n` equally-important forecasts" — that has not held since source trust became
-evidence-driven. Weights span a 12× band, and the live vector is `reversion 2.52` against `trend 0.25`:
-normalised, one source holds 91% of the vote and the desk was awarding itself the full two-equal-source
-multiplier. The error is one-directional and worst exactly when the evidence is worst — the more
-convincingly a source is measured to lose money, the more concentrated the weights become and the more the
-count over-states breadth, so a source pinned at the floor *for losing money* still bought a full extra
-unit of leverage.
+The window's orders are two 1-share ALPHA buys with matching fractional HEDGE trims, all under the
+reduce-only gate — **no trigger opened a position**. With a flat book and zero unrealised PnL, neither
+the market nor my last change had anything to act on; the honest split is that there is no market
+component and no change component, because there was no exposure. Nothing to credit or blame.
 
-## The change
+So I went to the evidence the gate consumes and grouped the resolved observations by entry time — the
+follow-up the previous cycle's finding explicitly left open:
 
-The multiplier is now computed from the concentration of the weight vector actually used:
-`DM = 1/√(Σwᵢ² + ρ(1−Σwᵢ²))`, which is the same formula evaluated at the inverse-Herfindahl **effective**
-number of sources instead of the roster size. No new dial, no new number — same ρ, same cap, same weights.
-Three properties are proved and tested: it is **identical** to the old rule at equal weights (cold start
-and `weights.mode=equal` are byte-unchanged); by Cauchy–Schwarz it is **never larger** than the old rule,
-so this can only shrink the book, never grow it; and it never falls below 1, so averaging cannot make the
-desk less confident than a single view. At the live weights the target book is materially smaller for an
-identical forecast — less capital at risk for the same view, which is the objective directly.
+- `trend`'s 115 resolved observations are **five** hourly bursts of 23 names.
+- `reversion`'s 23 — the source the gate is waiting on, and the only positive one — are **one** burst,
+  entered 18:08:17 and resolved 19:08.
+- `momentum`, `social` and `mean-reversion` are genuinely staggered, one name at a time.
 
-**Honest expectation.** With the gate shut and the book flat this will very likely score ⚠️ "no material
-change" again, and I am not going to pretend otherwise. It is not a bet on this window: it is the
-difference between the desk re-entering at honest size and re-entering over-levered once `reversion`
-clears its sample. I did *not* loosen the gate to manufacture activity — the evidence does not support
-trading yet, and forcing it is exactly how the ❌ BAD change earlier in the run was earned.
+`stdErrorBps` was `σ/√resolved`. For the burst emitters that divides by √23 a dispersion measured across
+*names within the same hour*. On the live `trend` cohorts the Fama–MacBeth standard error is
+`12.8985/√5 = 5.7684 bps` against the `27.7797/√115 = 2.5905 bps` the desk used — **2.23× too small**,
+turning t = −2.31 into t = −5.25. For `reversion` there is no standard error to form from one draw, yet
+`σ/√23` manufactured one, and with it t = 1.54. On the next resolution the raw count crosses
+`minSample = 30` and the naive t reaches ≈2.17 — **the gate opens and the desk levers into the full
+23-name target book on two hourly snapshots.** The ledger already records that exact failure once
+(ADR-0067's continuous risk appetite: gross $0 → $43,624, no PnL gain, ❌ BAD, auto-reverted), and the
+pending book is several times larger.
+
+## Decision
+
+Ship the statistic, not another gate refinement — the previous cycle's own rule was that the gate was
+never the binding constraint, the evidence was. `SignalScoring` now groups resolved observations into
+emission cohorts by entry time and estimates expectancy across cohorts (Fama & MacBeth, *JPE* 1973):
+point estimate = mean of cohort means, `stdErrorBps = sd(cohort means)/√B`, and **zero when B < 2** — one
+cross-section is not evidence however wide it is. Both consumers already read that correctly: the edge
+gate requires `se > 0`, and `TelemetryWeights` reads `t = 0` as `Φ(0) = ½`, a neutral weight. A staggered
+emitter has one observation per cohort and comes out byte-identical to today; equal-sized cohorts leave
+the point estimate exactly unchanged. `resolved`, `minSample` and `tHurdle` are untouched, so volume and
+significance keep their separate jobs. Proposed ADR-0077 in the same commit.
+
+**This keeps the book flat this cycle, and I want to be plain about that trade.** It is not a stall: it
+is the change that decides whether the imminent gate opening is trustworthy, and its error direction is
+one-way — merging observations can only widen the standard error, never narrow it. The honest cost is
+that evidence now accrues at one independent draw per source per hour, which is slow. **The next lever
+is the emission rate, not the gate:** overlapping cross-sections on a ~10-minute cadence against the same
+1h horizon multiply independent draws per hour, with a Newey–West/Hansen–Hodrick correction for the
+induced overlap. That must come after this change — raising the rate on the i.i.d. estimator would have
+inflated significance faster still.
