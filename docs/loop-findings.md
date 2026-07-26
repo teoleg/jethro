@@ -539,3 +539,42 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   wearing a cross-section's clothes, and it is a *selection* defect this change does not touch (this one
   equalises how much risk each name brings, not which names are chosen). Worth attacking once the gate
   actually trades and sizing quality becomes measurable.
+
+### 2026-07-26T23:45Z — ADR-0084 (the desk POSTS to enter and CROSSES to exit)
+- Situation: thirteenth consecutive cycle on a zero move — PnL frozen, gross and net exposure exactly
+  zero, no orders since 20:21, every fusion target `deltaQty: 0` against `currentQty: 0`. Attribution
+  is exact and empty: **0% market, 0% change**. Not a danger state (nothing held to cut), but a hard
+  miss on the growth target and the fifth consecutive change left unmeasurable by a book that will
+  not trade.
+- **The gate was NOT the blocker this time.** `reversion` clears at the ADR-0082-selected 225s rung on
+  391 observations / 17 cohorts, p = 0.0006 — ADR-0082 is working. The block is one layer down, in the
+  ADR-0075 per-name cost test: at reversion's measured standard error the largest survivable round trip
+  is ~1.95 bps, and every name's measured round trip is its full spread because the desk crosses on
+  both legs (MSFT 2.87 → GOOGL 20.11, unfilled names 6.34). The ONLY name that clears is ES at 0.35 bps
+  — and ES is the ONLY name the ADR-0049 OOS selector never evaluates, so it is vetoed for having no
+  verdict. A closed loop with exactly one exit, and that exit sealed by an unrelated gate.
+- Change: risk-INCREASING fusion deltas are posted as DAY LIMITs at the instrument's own arrival mark
+  (measured implementation shortfall zero by construction); risk-REDUCING deltas still cross as MARKET.
+  Working fusion orders — scoped by the `fusion:` key prefix — are retired at the top of each planning
+  tick. No hurdle, α, haircut or df was touched.
+- Lesson / rule: **when a gate is a comparison, check BOTH sides before changing either.** Five
+  consecutive cycles re-specified the statistics of `edge vs cost` — cohorts, degrees of freedom,
+  multiplicity, shrinkage — and every one of them was working on the term that was not binding. The
+  cost side had never been touched at all. Before tuning a test, compute what the test would need on
+  *each* input to flip, and attack the one with the most headroom.
+- Rule 2: **a desk's EXECUTION STYLE is a strategy parameter, not plumbing.** "Submit as MARKET" set
+  the hurdle every future signal must clear, and it did so invisibly — it appears nowhere in any dial,
+  ADR or config, only in a `OrderType.MARKET` literal. Any measured cost that is suspiciously equal to
+  the configured spread is telling you the desk chose to pay it.
+- Rule 3: **crossing to enter a mean-reversion trade pays away the exact premium the signal earns.**
+  Reversion says the price over-extended and will come back — which is a statement that the desk should
+  SUPPLY liquidity to the flow pushing it away. The correct execution style is implied by the signal,
+  and getting it wrong is not a small tax: on this book it was the entire edge.
+- Honest limitation, not hidden: a posted entry may not fill (opportunity cost, measured nowhere), and
+  a passive fill's cost migrates from the price into adverse selection (visible only in realised PnL).
+  Both are deferred-register rows. If the next verdict is ❌ BAD with fills happening, adverse selection
+  is the first suspect and the near-touch/mid choice is the first dial to revisit — NOT the gate.
+- Observed but NOT this change (next lever, still, third cycle running): **forecast saturation** —
+  `trend` and `reversion` sit at the ±20 cap on ~a quarter of names each and with opposite signs, so
+  20 of 23 combined forecasts point the same way and the cross-section carries almost no selection
+  information. Still unmeasurable until the desk actually trades.

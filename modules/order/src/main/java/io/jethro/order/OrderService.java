@@ -250,6 +250,16 @@ public final class OrderService {
      * @return the order after the attempt, or empty if the id is unknown.
      */
     public Optional<Order> cancel(String orderId) {
+        return cancel(orderId, "cancelled by user");
+    }
+
+    /**
+     * As {@link #cancel(String)}, with the reason recorded on the order and published with the
+     * event. A caller that cancels for its own reasons — a quoting loop replacing a stale passive
+     * order, say (ADR-0084) — must be able to say so, or the audit trail reads as an operator
+     * action that never happened.
+     */
+    public Optional<Order> cancel(String orderId, String reason) {
         Optional<Order> found = store.findById(orderId);
         if (found.isEmpty()) {
             return Optional.empty();
@@ -259,12 +269,12 @@ public final class OrderService {
             return Optional.of(order); // already done — report the terminal state, don't error
         }
         if (store.transitionIfCurrent(orderId, OrderStatus.ROUTED, OrderStatus.CANCELLED,
-                "cancelled by user", Instant.now())) {
+                reason, Instant.now())) {
             indexRemove(order);
             Order cancelled = order.withStatus(OrderStatus.CANCELLED);
-            publisher.publishOrderEvent(cancelled, "cancelled by user");
-            log.info("cancelled {} ({} {} {})", orderId,
-                    order.side(), order.quantity().toPlainString(), order.instrumentId().value());
+            publisher.publishOrderEvent(cancelled, reason);
+            log.info("cancelled {} ({} {} {}) — {}", orderId,
+                    order.side(), order.quantity().toPlainString(), order.instrumentId().value(), reason);
             return Optional.of(cancelled);
         }
         return store.findById(orderId); // lost to a concurrent fill/cancel — report what won
@@ -322,6 +332,27 @@ public final class OrderService {
     /** Working (ROUTED LIMIT) orders on one instrument — for tests/observability. */
     List<Order> workingOrders(String instrumentId) {
         return store.findWorkingLimitOrders(instrumentId);
+    }
+
+    /**
+     * Every working (ROUTED LIMIT) order across all instruments — what a caller that POSTS
+     * passively needs in order to replace its own stale intent (ADR-0084). Read-only.
+     */
+    public List<Order> workingOrders() {
+        return store.findAllWorkingLimitOrders();
+    }
+
+    /**
+     * The mark this module would stamp as an order's TCA arrival price right now, or empty when
+     * no mark for the instrument has arrived on {@code md.marks} yet.
+     *
+     * <p>Exposed so a caller that posts a passive LIMIT can price it off the SAME mark the
+     * arrival price is taken from. Pricing it off any other cache — trading-core's in-process
+     * one, say — would make measured slippage on a passive fill the difference between two
+     * clocks rather than a cost, and that measurement feeds the edge gate.
+     */
+    public Optional<BigDecimal> lastPrice(String instrumentId) {
+        return prices.lastPrice(new InstrumentId(instrumentId));
     }
 
     /** Guard exposed for callers that pre-validate MARKET orders need a price feed. */

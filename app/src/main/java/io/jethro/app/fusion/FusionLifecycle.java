@@ -127,6 +127,14 @@ public final class FusionLifecycle implements AutoCloseable {
     private void tick() {
         try {
             long now = System.currentTimeMillis();
+            // ADR-0084: retire last cycle's passive orders BEFORE reading the book. An entry now
+            // rests rather than crossing, so without this sweep the desk would plan against a
+            // position that ignores its own working intent and stack a fresh order on top of it
+            // every cycle. Sweeping first means the plan below is made against a book with no
+            // fusion order in flight, exactly as it was when every delta filled instantly.
+            if (routeOrders) {
+                executor.cancelStalePassiveOrders();
+            }
             Map<String, List<Forecast>> forecasts = registry.byInstrument(now);
             Map<String, BigDecimal> positions = positionsSupplier.get();
             FusionWeights weights = weightsSupplier.get(); // re-estimated from live telemetry each cycle (ADR-0055)

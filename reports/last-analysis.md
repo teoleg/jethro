@@ -1,56 +1,57 @@
-Every name in the book gets the same cash regardless of its volatility, and on this universe measured daily σ spans 7.4× — so the "23-name cross-section" was in risk terms a handful of names; the budget is now split by each name's own measured σ (ADR-0083).
+The desk holds a strong signal it cannot afford to trade — so I made it stop paying the spread to enter: entries now POST, exits still CROSS (ADR-0084).
 
 ## Situation (read from the live endpoints, not computed here)
 
-1. **Money.** Total PnL is **−$826.06**, identical to the last run and identical across the last three
-   (**+$0.00** over both windows). Not bleeding — **frozen**, for the twelfth consecutive cycle. The
-   strategy book's realised **−$895.94** against **$140.73** of fees is closed history; the hedge's
-   **+$69.88** is the only positive component. Against the owner target this is a clear miss:
-   `on_track=false`, `stale=true`, `underwater=true`.
-2. **Risk.** Gross and net exposure are both **$0.00**. VaR reads zero on "no positions", the drawdown
-   breaker is untripped, and there is no exposure to cut. Nothing is at risk because nothing is held.
-3. **Cause.** Last cycle's change (ADR-0082, the horizon ladder) scored **⚠️ MIXED — "no material change
-   (within noise band)"**. That verdict is **unmeasured, not refuted**: it shipped ~11 minutes before the
-   report, and its whole purpose was to make evidence accrue faster. It is visibly working — the new
-   225s rung already shows `reversion` with 46 resolved observations against the 3600s rung's 92 built up
-   over many hours, i.e. roughly 16× the cohort arrival rate. The gate is still shut, but for the first
-   time the quantity blocking it is falling on its own.
-4. **Danger.** **No.** Bleeding requires losses and exposure; there is neither. This is a stalled book,
-   not a dangerous one, so the danger-state override does not apply and de-risking is not the move —
-   there is nothing left to de-risk.
-5. **Order-level post-mortem.** The window's only order is a single tiny HEDGE ES sell. No strategy
-   orders were placed at all, so there is no losing trigger to fix and no winning one to strengthen.
-   Every fusion target shows `deltaQty: 0` against `currentQty: 0` — the gate holds the whole book
-   reduce-only, and reduce-only from flat is zero.
-6. **Memory.** `docs/loop-findings.md` records five straight cycles spent refining the edge gate's
-   *test* (ADR-0077/0079/0080/0081) while its *sample rate* was the binding constraint, and ADR-0082
-   finally attacked the rate. The compounding lesson is explicit: do not spend a sixth cycle on the gate.
-7. **Change vs. market.** Exactly separable and exactly zero on both sides: no position was opened,
-   closed or resized this window, and no position was held to be marked. **0% market, 0% change.** The
-   MIXED verdict reflects an untraded book, not a judgement on the code.
+1. **Money.** Total PnL is unchanged run-over-run and unchanged across the last three runs — it has
+   been frozen at the same figure for thirteen consecutive cycles. Not bleeding; *stuck*, and off the
+   +1% / 3-iteration target. `underwater` and `stale` are both set.
+2. **Risk.** Gross and net exposure are both exactly zero and have been all thirteen cycles. Nothing
+   held, nothing at risk, nowhere near the drawdown breaker. There is no exposure to cut.
+3. **Cause.** Last cycle's change (ADR-0083, the volatility-split per-name budget) scored ⚠️ MIXED on
+   a zero move — like the four before it, it is **unmeasured, not refuted**, because a sizing change
+   cannot show up in a book that never trades. The culprit is not any one of those changes; it is
+   that the desk has had **no route to a fill** since 20:21.
+4. **Danger.** No — this is the opposite of a danger state. Zero exposure, zero orders. The failure
+   mode here is inaction, not risk.
+5. **Order-level post-mortem.** The window's orders end at 20:21 with the MSFT churn (BUY 4 / SELL 49
+   / BUY 77 within minutes) and its ES hedge legs; nothing since. Every fusion target now shows
+   `deltaQty: 0` against `currentQty: 0` — the planner wants a book (SAP, BRK.B, JPM, …) and routes
+   none of it.
+6. **Change vs market.** Attribution is exact and empty: **0% market, 0% change**. No position was
+   opened, closed or resized, so nothing this cycle can be credited or blamed for anything.
 
-## Diagnosis and what I changed
+## Diagnosis — the mechanism
 
-With the gate self-repairing and nothing to de-risk, the highest-value work is making sure the book is
-worth holding *when* it opens — and it is not. `jethro.fusion.unit-notional-usd` is one flat cash figure
-applied to every instrument, so each name's risk contribution is proportional to its own volatility.
-Measured over the stored daily closes that spans **0.435%/day (EURUSD) to 3.236%/day (NVDA) — 7.4×**.
-ADR-0079 already prices the *correlation* half of this concentration problem and its own derivation
-names the gap it leaves: the independence benchmark `σ_indep = √(Σ eᵢ² Σᵢᵢ)` is unequal across names
-*precisely because* `Σᵢᵢ` is. It corrects for the names being one bet; nothing corrected for one name
-being seven times the bet of another. That is a first-order tax on exactly the quantity this loop
-optimises — PnL per unit of exposure — and it is invisible in gross notional, which looks evenly spread.
+The edge gate is **open**, not shut: `reversion` clears at the 225 s rung the ADR-0082 ladder
+selected, on 391 observations across 17 cohorts, p = 0.0006. ADR-0082 is visibly working. The block
+is one layer down, in **ADR-0075's per-name cost test**. Reversion's measured expectancy divided by
+its Fama-MacBeth standard error can survive a round trip of at most ~1.95 bps at the shipped
+confidence. Every name's *measured* round trip is its full bid/ask spread, because the desk submits
+MARKET orders and crosses on both legs: MSFT 2.87, JNJ 3.88, JPM 4.18, AAPL 4.21, GOOG 5.95, SAP
+8.16, GOOGL 20.11, unfilled names 6.34. Exactly one name clears — ES at 0.35 bps — and ES is the one
+name the ADR-0049 OOS selector never evaluates (its universe is the 17 equity/FX names), so the
+executor vetoes it for having no verdict. Every path to a fill is closed, and the last five changes
+all worked the *statistics* side of a comparison whose *cost* side was the binding one.
 
-So the per-name budget is now split by each name's own **measured** daily σ, from the same EWMA
-covariance that already prices parametric VaR, the hedge advisor and the ADR-0079 multiplier:
-`kᵢ = σ_ref/σ̃ᵢ` with `σ_ref` the **harmonic mean** of the winsorised σ. The harmonic mean is not a
-preference — it is the unique reference for which the covered budgets sum to exactly what they summed to
-before, so **Oleg's `unit-notional-usd` is untouched and keeps its meaning** (the cash for a name of
-*typical* volatility) and no new money number enters. Every covered name then contributes identical
-standalone risk by construction. The book is additionally capped at the gross it replaced, so an
-estimated σ can redistribute risk or shrink the book but can never lever it up; an uncovered name keeps
-the flat dial, because no measurement means no claim. Deliberately **not** the gate, for the reason
-memory records: ADR-0082 is mid-flight and stacking on it would make both unattributable.
+## Decision
 
-Verified: 12 new worked-number tests (the 2%/1%/0.5% three-name example is asserted to the exact
-quantity), full app suite green at 392 tests.
+Change the execution style, not the evidence bar. A risk-**increasing** fusion delta is now posted as
+a DAY LIMIT at the instrument's own arrival mark; a risk-**reducing** delta still crosses as MARKET,
+because a cut that waits for a better price is not a cut — the same asymmetry ADR-0065 and ADR-0080
+already apply to the gates and the adjustment rate. The layer retires its own working orders at the
+top of each planning tick so a fresh plan is never stacked on stale intent. The limit **is** the mark
+(no dial, no offset, no invented number), and it is also the right style for the source that is
+actually earning: reversion profits by supplying liquidity into an over-extension, and crossing to
+enter was paying away its own premium.
+
+The hurdle, the α, the Bonferroni haircut and the degrees of freedom are all untouched — I did not
+loosen a single control. What falls is the measured cost the same unchanged test reads. On the
+current numbers, the identical test that rejects every tradable name at a crossing cost accepts them
+at a passive one. And even if the gate stays shut a while longer, a cheaper entry is more PnL for the
+same exposure on every trade the desk ever does, which is the objective exactly.
+
+**The honest caveat, stated up front:** a posted entry may not fill, and a passive fill's cost
+migrates from the price (visible in TCA) into adverse selection (visible only in realised PnL). For a
+mean-reversion signal that "adverse" move strengthens the forecast, which is why this is sound for
+*this* source — but the ledger's realised-PnL verdict is what keeps it honest, and both gaps are
+written into the deferred register rather than glossed.
