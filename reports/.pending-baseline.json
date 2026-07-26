@@ -1,0 +1,20 @@
+{
+  "commit": "c12099fea45a2fb4990c5e43a7cc28918ac980c1",
+  "fees": "130.899515",
+  "gross_exposure": "6891.80800485",
+  "net_exposure": "4900.98053505",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "6891.80800485",
+    "hedgePnl": "100.52700424",
+    "netExposure": "4900.98053505",
+    "realizedPnl": "-869.25080598",
+    "strategyAlpha": "-963.32908821",
+    "totalFees": "130.899515",
+    "totalPnl": "-862.80208397",
+    "unrealizedPnl": "6.44872201"
+  },
+  "summary": "fusion source trust: weight each source by Phi of its own measured expectancy t-statistic instead of the floored hit-rate advantage, which read every below-coin-flip source as identical (ADR-0067)",
+  "total_pnl": "-862.80208397",
+  "ts": "2026-07-26T16:34:35Z"
+}
