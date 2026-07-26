@@ -1,70 +1,77 @@
-Built the desk's missing half: a continuous mean-reversion sensor for the chop regime the detector
-actually reports — every existing continuous source is a continuation bet, and all of them are measured
-losing (ADR-0070).
+Found why the desk has been stuck flat: both continuous sensors need more minutes of warm-up than the
+process lives between redeploys, so they are permanently cold-starting — now they boot warm from the
+durable mark history (ADR-0071).
 
 ## Situation (live endpoints, read first)
 
-**Money — the bleed has stopped; the level has not recovered.** Total PnL is `-$867.83`, **up** `$8.82`
-since last run. Over the last three runs it is down `$845.00`, but that whole figure is the sunk cost of
-the `fb9273505` round trip (scored ❌ BAD, auto-reverted) — a `$43k` book opened and worked back to
-nothing across 185 fills carrying `$131` of fees. The current run rate is small and slightly positive.
-The flag is UNDERWATER and we are nowhere near the ≥1%-per-3-iterations target — but the reason is no
-longer an active loss, it is that **the desk cannot trade at all**.
+**Money — flat, not bleeding.** Total PnL is `-$867.78`, down `$0.38` since last run and down `$4.55`
+across the last three — both inside the scorer's noise deadband. That $4.55 is the entire three-run
+move; the big `-$843` from earlier cycles was the `fb9273505` round trip, long since scored ❌ BAD,
+auto-reverted, and sunk. The flags read BLEEDING and UNDERWATER and we are nowhere near the
+≥1%-per-3-iterations target — but the reason is not an active loss. It is that **the desk does not
+trade**. You cannot grow PnL by 1% from a book that is forbidden to open a position.
 
-**Risk — collapsed, deliberately, and correctly.** Gross exposure fell from `$6,145.14` to `$785.03`
-(`-$5,360.47`) and net from `$5,417.85` to `$56.31`. Historical VaR95 is `$6.87` against that gross; the
-firm drawdown breaker is not tripped and is nowhere near. The residual book is two single-share stubs
-(AAPL, GOOG) and a hedge leg the advisor now reports ON-TARGET.
+**Risk — minimal and stable.** Gross `$785.55`, net `$56.36`, down `$0.41` on the window. Historical
+VaR95 is `$6.87` against that gross; the firm drawdown breaker is not tripped and is nowhere close.
+The residual book is two single-share stubs (AAPL, GOOG) plus an ON-TARGET hedge leg of 0.0015 ES.
+The `$5.4k` of gross that vanished two cycles ago was ADR-0069's stranded-hedge unwind, correctly.
 
-**Cause — last cycle's change did exactly what it was built to do.** ADR-0069's scale-relative hedge
-no-trade band scored ⚠️ MIXED, and the live move confirms the mechanism: the stranded ES leg that had
-been holding 84% of firm gross with no mechanism able to remove it is gone, and `/api/hedging` now reads
-`held 0.001546 → target 0.001545, largest delta under the 105.17 no-trade band` — the band is now sized
-from the hedge itself rather than from an absolute dollar floor five times larger than the position.
-Attributing honestly: the `-$5,360` of gross is **100% the change** (the only orders in the window are
-the hedge unwind it authorised); the `+$8.82` of PnL is essentially all **market** — mark drift on
-untouched stubs plus the one small commission the unwind cost. Good change, correctly credited on the
-exposure leg only.
+**Cause — last cycle's change did nothing measurable, exactly as predicted.** ADR-0070's `reversion`
+sensor scored ⚠️ MIXED, "no material change (within noise band)". Attributing this window honestly:
+the change opened, closed and resized **nothing** — there are no orders in the window at all — so
+100% of the `-$0.38` PnL and the `-$0.41` gross is mark drift on positions it never touched. That is
+**market, not change**, and far too small to read either way.
 
-**Danger — no.** We are not bleeding and adding; exposure is down an order of magnitude and the breaker
-is far away. So this cycle is free to fix a cause rather than cut risk.
+**Danger — no.** Not bleeding-and-adding; exposure is an order of magnitude below where it was and
+the breaker is far away. So this cycle is free to fix a cause rather than cut risk.
 
-## The cause worth fixing
+## The cause — and it is a deployment defect, not a signal defect
 
-The desk is flat because the ADR-0064 edge gate is reduce-only, and it is reduce-only because **every**
-routed source is measured negative: `trend` at a t-statistic several standard errors below zero over 46
-resolved observations, `momentum` and `social` negative alongside it, against a measured round-trip cost
-of 7.05 bps. The gate is right. What is wrong is the composition of the source set — `trend`, `momentum`
-and `social` are all **continuation** bets, and a range-bound tape is the one state in which that entire
-family is wrong together. It is also the state we are in: the regime detector reads CHOP with per-name
-efficiency ratios from 0.09 to 0.48, and the walk-forward selector — an independent, out-of-sample,
-cost-honest measurement — picks mean-reversion on every chop name it will trade, with momentum's median
-path PnL deeply negative on those same names. Three separate measurements, three separate data sets,
-one conclusion. The mean-reversion algo exists but is a *threshold detector*: it has fired once in this
-feed mode, so it contributes nothing to the fusion cross-section and accumulates no evidence about
-itself. The desk cannot even measure whether reversion pays here.
+The reversion sensor is not merely quiet. It is **structurally unable to speak**, and the arithmetic
+is mechanical. Its warm-up is `rangeSpan + 1 + normSpan/2` = 241 prices at a 10s cadence ≈ **40
+minutes** of continuous uptime before it publishes anything. The improvement loop redeploys the app
+on every accepted change; the observed restart interval over the last five cycles is **14–55
+minutes**, mostly under 25. Live JVM uptime at report time: **172 seconds**. All sensor state is heap
+and dies with the process. So the source I added last cycle to give the desk a view in the CHOP
+regime is, in deployment, dead code — it publishes nothing, appears in no fusion weight, and above
+all accumulates **no telemetry about itself**, so the ADR-0064 edge gate can never judge it. That is
+why it read as "no material change": there was no change to read.
+
+The same defect quietly damages the trend sensor, which is worse. `trend` warms at 193 prices × 5s ≈
+**16 minutes** — comparable to the process lifetime — so it speaks only in the last handful of
+minutes of each process life, always from a scale estimate built on the minimum possible sample.
+Every one of its 46 resolved observations was produced by a barely-warmed instrument, and it is those
+observations, at a t-statistic of −6.9, that hold the gate reduce-only. The number keeping the desk
+flat is measured on a permanently cold-starting sensor.
+
+Meanwhile the exact price series the sensors consume live is **already durable and already survives a
+restart**: the LMDB mark history behind the chart (ADR-0014/0017), 12h retention, ~1 Hz. I checked it
+on the live box — 1787 points over the last 92 minutes for AAPL, largest gap 60s, i.e. continuous
+across redeploys. The data needed to boot a calibrated sensor has been sitting on disk unused.
 
 ## What I changed
 
-Added `reversion`, a sixth fusion forecast source (ADR-0070): a continuous, self-calibrating
-**range-position** sensor — where a name sits inside its own realised Donchian range, faded, weighted by
-`(1 − efficiency ratio)`, normalised by its own typical reading. It is deliberately **not** the trend
-sensor negated (that is the classic overfit, and I refused it last cycle for the same reason): it is a
-bounded *level* statistic against realised extremes rather than a smoothed *rate-of-change* crossover,
-it is largest at the range edge where EWMAC is largest mid-move, and its quality weight is the exact
-dual of the trend sensor's — the two partition the efficiency ratio instead of competing for it, so the
-sensor refuses to fade a clean trend, which is the expensive way to trade reversion. It inherits
-ADR-0066's warmed scale estimator verbatim, so it publishes no view until it knows what "typical" means.
+`SensorWarmup` (ADR-0071): on first sight of an instrument, each continuous sensor replays that
+instrument's own stored recent prices through its ordinary update path before it consumes a live
+mark. The seed is thinned to **one price per evaluation interval** (replaying every 1 Hz mark would
+define the windows over a different horizon than live operation does), the sample count is read off
+the sensor itself via `warmupSamples()` so it cannot drift from the sensor's real arithmetic, the
+walk runs newest-first so the seed ends at the present, and it **stops at a hole** wider than 30
+intervals — a redeploy blip is bridged, a real outage truncates the seed rather than fabricating a
+price jump across it. Seed prices are deliberately **not** recorded in the signal telemetry: a
+historical price is not a call the desk made, and counting it would fabricate track record for a
+source the gate is about to judge. Because replaying the store into a sensor makes invariant 8
+load-bearing where it previously was not, the mark-history store is now namespaced by feed mode.
 
-It arrives with no evidence and no privilege: every reading is recorded in the phase-1 telemetry, so it
-must earn a cost-beating measured expectancy before the same gate that is holding the desk flat lets it
-size anything. **While the gate is reduce-only this change cannot increase exposure at all** — it can
-only change how a held position is worked down. At roughly one observation per name per horizon it hits
-the gate's 30-sample minimum within about an hour of warm running, so the hypothesis is tested fast and
-is falsifiable by construction. Both span dials are shape dials with their provenance stated (the
-20-minute range ≈ ⅓ of the 1h measurement horizon is mine and arbitrary); nothing here is a money, risk
-or exposure number. The deterministic floor is untouched.
+Nothing about sizing, the edge gate, the conviction floor, the guardrail or the firm breaker moves.
+This changes *when a sensor is calibrated*, not what it says or what the desk does with it — and
+while the gate is reduce-only it cannot increase exposure at all. Six new tests cover the cadence
+thinning, the newest-first cap, the gap stop, the no-history cold start, non-positive prices, and the
+property that matters: a seeded sensor speaks on its first live mark where a cold one stays silent.
 
-Honest expectation: the sensor spends its first ~40 minutes warming and silent, so the next scoring may
-well read as no material change. What it buys is the first legitimate path off a flat book — evidence,
-not a lowered bar.
+Honest expectation: the immediate PnL/exposure move should be nil, and against the ledger this may
+well score as another "no material change". What it buys is that the reversion hypothesis finally
+gets *measured* — the sensor now reaches the gate's 30-sample minimum in the ordinary course of a
+cycle instead of never — and that trend's expectancy stops being an artifact of permanent cold
+starts. That is the prerequisite for any legitimate path off a flat book; the next lever depends on
+what those measurements say.

@@ -33,6 +33,12 @@ import java.util.concurrent.TimeUnit;
  * <p>Stale marks are skipped — a repeated stale price would feed the sensor a fabricated zero-return
  * step, biasing both the range and the efficiency ratio toward "no movement". The forecaster is confined
  * to this single scheduled thread (it is not thread-safe).
+ *
+ * <p>On first sight of an instrument the sensor is warmed from the durable recent mark history
+ * ({@link SensorWarmup}, ADR-0071). Without it this sensor's warm-up — a full range window plus a scale
+ * warm-up, tens of minutes in wall clock — exceeds the process lifetime on a frequently redeployed desk,
+ * so it would publish nothing at all and could never accumulate the evidence the edge gate needs to
+ * judge it. With no history available this is a no-op and the sensor cold-starts.
  */
 public final class ReversionForecastLifecycle implements AutoCloseable {
 
@@ -45,18 +51,23 @@ public final class ReversionForecastLifecycle implements AutoCloseable {
     private final ForecastRegistry registry;
     private final TradingCoreLifecycle tradingCore;
     private final SignalTelemetry telemetry; // optional observer — null when signal telemetry is off
+    private final SensorWarmup.History history; // optional — null means cold-start (ADR-0071)
     private final ScheduledExecutorService scheduler;
     private final long intervalSeconds;
+    /** Instruments already warmed from history — touched only from the scheduled tick thread. */
+    private final java.util.Set<String> seeded = new java.util.HashSet<>();
 
     private Future<?> task;
 
     public ReversionForecastLifecycle(RangeReversionForecaster forecaster, ForecastRegistry registry,
                                       TradingCoreLifecycle tradingCore, SignalTelemetry telemetry,
+                                      SensorWarmup.History history,
                                       ScheduledExecutorService scheduler, long intervalSeconds) {
         this.forecaster = forecaster;
         this.registry = registry;
         this.tradingCore = tradingCore;
         this.telemetry = telemetry;
+        this.history = history;
         this.scheduler = scheduler;
         this.intervalSeconds = Math.max(1, intervalSeconds);
     }
@@ -82,6 +93,7 @@ public final class ReversionForecastLifecycle implements AutoCloseable {
                 if (mark.stale()) {
                     continue; // never advance the sensor's windows on a repeated stale price
                 }
+                warmIfFirstSight(mark.instrumentId());
                 var reading = forecaster.update(mark.instrumentId(), mark.price());
                 registry.submitReversion(mark.instrumentId(), reading.score());
                 if (telemetry != null && reading.score() != 0.0) {
@@ -91,6 +103,26 @@ public final class ReversionForecastLifecycle implements AutoCloseable {
             }
         } catch (Exception e) {
             log.debug("reversion sensor tick failed: {}", e.toString());
+        }
+    }
+
+    /**
+     * Replays this instrument's stored recent prices into the forecaster the first time we see it, so a
+     * redeploy does not restart its warm-up from zero (ADR-0071). The seed goes through the same
+     * {@code update} path as a live mark but is deliberately NOT recorded in the signal telemetry: a
+     * historical price is not a call the desk made, and counting it would fabricate track record.
+     */
+    private void warmIfFirstSight(String instrumentId) {
+        if (history == null || !seeded.add(instrumentId)) {
+            return;
+        }
+        int n = SensorWarmup.warm(history, instrumentId, System.currentTimeMillis(),
+                intervalSeconds * 1_000L, forecaster.warmupSamples(),
+                price -> forecaster.update(instrumentId, price));
+        if (n > 0) {
+            log.info("reversion sensor warmed {} from {} stored prices (needs {}) — {}",
+                    instrumentId, n, forecaster.warmupSamples(),
+                    forecaster.readingFor(instrumentId).warm() ? "warm" : "still warming");
         }
     }
 

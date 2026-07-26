@@ -140,6 +140,18 @@ public final class EwmacTrendForecaster {
         this.scaleWarmupSamples = Math.max(1, params.normalisationSpan() / 2);
     }
 
+    /**
+     * How many consecutive prices this sensor must see before it publishes a view: the slow EWMA and
+     * the efficiency-ratio window need {@code slowSpan + 1} prices, and the scale estimator absorbs
+     * {@code scaleWarmupSamples} readings after that. A count of samples — it sizes nothing.
+     *
+     * <p>Used by the ADR-0071 warm-restart seed to decide how much stored history to replay, so the
+     * requirement is read off the sensor rather than restated by the caller.
+     */
+    public int warmupSamples() {
+        return params.slowSpan() + 1 + scaleWarmupSamples;
+    }
+
     /** Standard EWMA smoothing constant for a span: {@code α = 2/(span+1)}. */
     private static BigDecimal alpha(int span) {
         return BigDecimal.valueOf(2).divide(BigDecimal.valueOf(span + 1L), MC);

@@ -146,6 +146,18 @@ public final class RangeReversionForecaster {
     }
 
     /**
+     * How many consecutive prices this sensor must see before it publishes a view: the Donchian window
+     * needs {@code rangeSpan + 1} prices, and the scale estimator absorbs {@code scaleWarmupSamples}
+     * readings after that. A count of samples — it sizes nothing.
+     *
+     * <p>Used by the ADR-0071 warm-restart seed to decide how much stored history to replay, so the
+     * requirement is read off the sensor rather than restated by the caller.
+     */
+    public int warmupSamples() {
+        return params.rangeSpan() + 1 + scaleWarmupSamples;
+    }
+
+    /**
      * Feeds one fresh price and returns this instrument's current reading. A stale or non-positive
      * price must not be passed — a repeated stale mark would fake a zero-return step and bias both the
      * range and the efficiency ratio toward "no movement" (the same rule {@link TrendDetector} and

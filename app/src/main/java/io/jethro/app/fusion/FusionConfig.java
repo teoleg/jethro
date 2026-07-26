@@ -141,11 +141,12 @@ public class FusionConfig {
             @Value("${jethro.fusion.trend.fast-span:16}") int fastSpan,
             @Value("${jethro.fusion.trend.slow-span:64}") int slowSpan,
             @Value("${jethro.fusion.trend.normalisation-span:256}") int normalisationSpan,
+            ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
             @Value("${jethro.fusion.trend.interval-seconds:5}") long intervalSeconds) {
         var forecaster = new io.jethro.trading.algo.strategy.EwmacTrendForecaster(
                 new io.jethro.trading.algo.strategy.EwmacTrendForecaster.Params(fastSpan, slowSpan, normalisationSpan));
         var lifecycle = new TrendForecastLifecycle(forecaster, registry, tradingCore.getIfAvailable(),
-                telemetry.getIfAvailable(), scheduler, intervalSeconds);
+                telemetry.getIfAvailable(), storedPrices(markHistory), scheduler, intervalSeconds);
         lifecycle.start();
         return lifecycle;
     }
@@ -166,13 +167,38 @@ public class FusionConfig {
             @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
             @Value("${jethro.fusion.reversion.range-span:120}") int rangeSpan,
             @Value("${jethro.fusion.reversion.normalisation-span:240}") int normalisationSpan,
+            ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
             @Value("${jethro.fusion.reversion.interval-seconds:10}") long intervalSeconds) {
         var forecaster = new io.jethro.trading.algo.strategy.RangeReversionForecaster(
                 new io.jethro.trading.algo.strategy.RangeReversionForecaster.Params(rangeSpan, normalisationSpan));
         var lifecycle = new ReversionForecastLifecycle(forecaster, registry, tradingCore.getIfAvailable(),
-                telemetry.getIfAvailable(), scheduler, intervalSeconds);
+                telemetry.getIfAvailable(), storedPrices(markHistory), scheduler, intervalSeconds);
         lifecycle.start();
         return lifecycle;
+    }
+
+    /**
+     * Adapts the durable chart price history to the sensors' warm-restart seed (ADR-0071). It is the
+     * same {@code md.marks} series the sensors consume live, already persisted and already surviving a
+     * restart (ADR-0014 derived data) — so warming from it replays the stream the sensor would have
+     * seen, not a different one. Absent (in-memory profile, tests) → the sensors cold-start as before.
+     */
+    private static SensorWarmup.History storedPrices(ObjectProvider<io.jethro.uigateway.MarkHistory> provider) {
+        io.jethro.uigateway.MarkHistory history = provider.getIfAvailable();
+        if (history == null) {
+            return null;
+        }
+        return (instrumentId, sinceMillis) -> {
+            var out = new java.util.ArrayList<SensorWarmup.Point>();
+            for (var point : history.since(instrumentId, sinceMillis)) {
+                try {
+                    out.add(new SensorWarmup.Point(point.t(), new BigDecimal(point.price())));
+                } catch (NumberFormatException | NullPointerException e) {
+                    // a single unparseable stored price must not cost the whole seed
+                }
+            }
+            return out;
+        };
     }
 
     @Bean

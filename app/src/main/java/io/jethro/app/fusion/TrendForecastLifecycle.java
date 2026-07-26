@@ -29,6 +29,11 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Stale marks are skipped — a repeated stale price would feed the sensor a fabricated zero-return
  * step. The forecaster is confined to this single scheduled thread (it is not thread-safe).
+ *
+ * <p>On first sight of an instrument the sensor is warmed from the durable recent mark history
+ * ({@link SensorWarmup}, ADR-0071) so it boots calibrated instead of spending its whole warm-up silent
+ * after every redeploy. With no history available this is a no-op and the sensor cold-starts exactly as
+ * before.
  */
 public final class TrendForecastLifecycle implements AutoCloseable {
 
@@ -41,18 +46,23 @@ public final class TrendForecastLifecycle implements AutoCloseable {
     private final ForecastRegistry registry;
     private final TradingCoreLifecycle tradingCore;
     private final SignalTelemetry telemetry; // optional observer — null when signal telemetry is off
+    private final SensorWarmup.History history; // optional — null means cold-start (ADR-0071)
     private final ScheduledExecutorService scheduler;
     private final long intervalSeconds;
+    /** Instruments already warmed from history — touched only from the scheduled tick thread. */
+    private final java.util.Set<String> seeded = new java.util.HashSet<>();
 
     private Future<?> task;
 
     public TrendForecastLifecycle(EwmacTrendForecaster forecaster, ForecastRegistry registry,
                                   TradingCoreLifecycle tradingCore, SignalTelemetry telemetry,
+                                  SensorWarmup.History history,
                                   ScheduledExecutorService scheduler, long intervalSeconds) {
         this.forecaster = forecaster;
         this.registry = registry;
         this.tradingCore = tradingCore;
         this.telemetry = telemetry;
+        this.history = history;
         this.scheduler = scheduler;
         this.intervalSeconds = Math.max(1, intervalSeconds);
     }
@@ -78,6 +88,7 @@ public final class TrendForecastLifecycle implements AutoCloseable {
                 if (mark.stale()) {
                     continue; // never advance the sensor's windows on a repeated stale price
                 }
+                warmIfFirstSight(mark.instrumentId());
                 var reading = forecaster.update(mark.instrumentId(), mark.price());
                 registry.submitTrend(mark.instrumentId(), reading.score());
                 if (telemetry != null && reading.score() != 0.0) {
@@ -87,6 +98,26 @@ public final class TrendForecastLifecycle implements AutoCloseable {
             }
         } catch (Exception e) {
             log.debug("trend sensor tick failed: {}", e.toString());
+        }
+    }
+
+    /**
+     * Replays this instrument's stored recent prices into the forecaster the first time we see it, so a
+     * redeploy does not restart its warm-up from zero (ADR-0071). The seed goes through the same
+     * {@code update} path as a live mark but is deliberately NOT recorded in the signal telemetry: a
+     * historical price is not a call the desk made, and counting it would fabricate track record.
+     */
+    private void warmIfFirstSight(String instrumentId) {
+        if (history == null || !seeded.add(instrumentId)) {
+            return;
+        }
+        int n = SensorWarmup.warm(history, instrumentId, System.currentTimeMillis(),
+                intervalSeconds * 1_000L, forecaster.warmupSamples(),
+                price -> forecaster.update(instrumentId, price));
+        if (n > 0) {
+            log.info("trend sensor warmed {} from {} stored prices (needs {}) — {}",
+                    instrumentId, n, forecaster.warmupSamples(),
+                    forecaster.readingFor(instrumentId).warm() ? "warm" : "still warming");
         }
     }
 

@@ -55,3 +55,26 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   regime — never the losing source negated (that inherits its biases with the sign flipped).
 - Rule 2: attribute exposure and PnL separately. A change can own 100% of the exposure move and 0% of
   the PnL move in the same window; crediting it with both is how a hedge unwind gets mistaken for alpha.
+
+### 2026-07-26T17:30Z — ADR-0071 (sensors warm-restart from durable mark history)
+- Situation: PnL -$867.78 (-$0.38 this window, -$4.55 over 3 runs), gross $785.55 / net $56.36 (-$0.41).
+  **Zero orders in the window**, so 100% of both moves is mark drift on untouched stubs — market, not
+  change. Last cycle's ADR-0070 reversion sensor scored ⚠️ MIXED "no material change" because there was
+  literally nothing to measure. Not bleeding; the failure is that the desk cannot open a position.
+- Cause: **sensor warm-up exceeds process lifetime.** `reversion` needs 241 prices × 10s ≈ 40 min of
+  continuous uptime before it publishes; `trend` needs 193 × 5s ≈ 16 min. The loop redeploys every
+  14–55 min (uptime at report time: 172s) and all sensor state is heap. So reversion *never* speaks and
+  is invisible to the edge gate, and every one of trend's 46 observations — the t=−6.9 that holds the
+  gate reduce-only — came from a barely-warmed instrument. A deployment defect masquerading as a signal
+  result. Fixed by replaying the already-durable LMDB mark history (12h, ~1 Hz, continuous across
+  restarts: 1787 pts/92 min, max gap 60s) into each sensor on first sight of a name.
+- Lesson / rule: **any stateful sensor must have its warm-up compared against the deploy cadence, not
+  just against its own span.** A warm-up longer than the process lifetime is silent dead code, and a
+  warm-up comparable to it produces permanently minimum-sample calibration — both look like "the signal
+  doesn't work" in the telemetry. When adding a sensor, state its warm-up in wall clock and check it.
+- Rule 2: **a source that publishes nothing cannot be falsified.** Before concluding a new source has no
+  edge, verify it actually appeared in `fusion_targets.weights` / `signals_telemetry`. Absence from the
+  weights map is the tell — ADR-0070's `reversion` never appeared there once.
+- Rule 3: seed a sensor from history through its *ordinary* update path, thinned to its own cadence, and
+  never record seed prices as telemetry calls — replaying at the tape rate redefines its horizon, and
+  counting historical prices as calls fabricates track record for the gate that is about to judge it.
