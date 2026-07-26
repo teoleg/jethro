@@ -1,0 +1,20 @@
+{
+  "commit": "7282ab516066793fe7e9153c1ac4613182d6919d",
+  "fees": "158.453066",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "69.88228362",
+    "netExposure": "0.00000000",
+    "realizedPnl": "-826.05938139",
+    "strategyAlpha": "-895.94166501",
+    "totalFees": "158.453066",
+    "totalPnl": "-826.05938139",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "the fusion order path sizes and rounds in the instrument's own contract terms: cash-at-risk becomes a quantity by dividing by price x contract multiplier \u2014 the money value of one unit \u2014 so |qty| x price x multiplier equals the unit notional asked for in every asset class, and rounding is whole-units only for multiplier-1 names (equities/FX unchanged exactly) and at order scale for a contract; a name with no contract spec plans flat rather than being sized as if it were a share (ADR-0078)",
+  "total_pnl": "-826.05938139",
+  "ts": "2026-07-26T20:45:52Z"
+}
