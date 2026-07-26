@@ -102,70 +102,108 @@ class EdgeGateTest {
         assertEquals(0.0, d.sources().get(0).tStat(), 1e-9);
     }
 
-    // ---- ADR-0072: the same test, at the granularity cost is actually incurred -------------------
+    // ---- ADR-0075: the same test, at the granularity cost is actually incurred, on BOTH sides -----
+
+    /** The desk's own measured TCA shape, converted to a round trip (2 × one-way). */
+    private static final double BLENDED_ROUND_TRIP = 6.9270;   // one-way 3.4635
+    private static final java.util.Map<String, Double> COSTS = java.util.Map.of(
+            "ES", 0.29122,       // one-way 0.14561
+            "MSFT", 2.92748,     // one-way 1.46374
+            "GOOGL", 20.10561);  // one-way 10.05281
 
     /**
-     * The desk's OWN measured TCA on 2026-07-26, converted to a round trip (2 x one-way), against a
-     * source measured at +18.00 bps gross that clears the blended hurdle:
+     * The change ADR-0075 makes, in one case. A source measured at +5.00 bps gross with se 2.00:
      * <pre>
-     *   blended one-way 3.4635 bps → round trip  6.9270 → net +11.073 → gate OPEN
-     *   ES     one-way 0.14561 bps → round trip  0.29122 → keep 18.00 − 0.29122 = +17.709 bps  ✓
-     *   MSFT   one-way 1.46374 bps → round trip  2.92748 → keep 18.00 − 2.92748 = +15.073 bps  ✓
-     *   GOOGL  one-way 10.05281 bps → round trip 20.10561 → keep 18.00 − 20.10561 = −2.106 bps ✗
+     *   blended round trip 6.92700 → net −1.92700 → t = −0.9635  ✗ (the old desk-wide verdict: SHUT)
+     *   ES     round trip 0.29122 → net +4.70878 → t = +2.3544  ✓ open, and ES may be increased
+     *   MSFT   round trip 2.92748 → net +2.07252 → t = +1.0363  ✗ reduce-only
+     *   GOOGL  round trip 20.10561 → net −15.10561 → t = −7.5528 ✗ reduce-only
+     *   JNJ    never filled → charged the blend → t = −0.9635   ✗ reduce-only
      * </pre>
-     * The blended hurdle admits all three; GOOGL is a certain loss on every round trip at the very
-     * expectancy that opened the gate. That is the trade this veto exists to refuse.
+     * A real, executable edge — it survives a 0.29 bp round trip with better than 2 standard errors —
+     * was being refused everywhere because the AVERAGE name costs twenty times what the name it would
+     * actually trade in costs. Nothing else moves: the unmeasured name faces exactly the bar it faced
+     * before, and the expensive names are refused as they always were.
+     */
+    @Test
+    void anEdgeThatSurvivesACheapNameOpensThatNameAndOnlyThatName() {
+        var d = EdgeGate.evaluate(List.of(stat("reversion", 36, 5.0, 12.0)), BLENDED_ROUND_TRIP, COSTS, P);
+        assertTrue(d.mayIncrease());
+        assertEquals(2.0, d.sources().get(0).stdErrorBps(), 1e-9);
+        assertEquals(2.3544, d.sources().get(0).tStat(), 1e-4);   // stated at the cheapest round trip
+        assertEquals(4.70878, d.sources().get(0).netEdgeBps(), 1e-9);
+        assertTrue(d.mayIncrease("ES"));
+        assertFalse(d.mayIncrease("MSFT"));
+        assertFalse(d.mayIncrease("GOOGL"));
+        assertFalse(d.mayIncrease("JNJ"));
+        // ...and the blended test alone would have shut the gate on the same measurements.
+        assertFalse(EdgeGate.evaluate(List.of(stat("reversion", 36, 5.0, 12.0)), BLENDED_ROUND_TRIP, P)
+                .mayIncrease());
+    }
+
+    /**
+     * The other half of the same rule. A source measured at +18.00 bps gross, se 5.00:
+     * <pre>
+     *   ES     round trip 0.29122 → net +17.70878 → t = +3.5418  ✓
+     *   MSFT   round trip 2.92748 → net +15.07252 → t = +3.0145  ✓
+     *   GOOGL  round trip 20.10561 → net −2.10561 → t = −0.4211  ✗
+     * </pre>
+     * GOOGL is a certain loss on every round trip at the very expectancy that opened the gate — the
+     * trade the per-name veto exists to refuse (ADR-0072), unchanged.
      */
     @Test
     void anOpenGateStillRefusesANameThatCostsMoreThanTheEdge() {
-        var costs = java.util.Map.of(
-                "ES", 0.29122,
-                "MSFT", 2.92748,
-                "GOOGL", 20.10561);
-        // n = 36, sd 30 → se = 5.0; net of the blended 6.9270 = 11.073 → t = 2.2146 ≥ 2 → open.
-        var d = EdgeGate.evaluate(List.of(stat("reversion", 36, 18.0, 30.0)), 6.9270, costs, P);
+        var d = EdgeGate.evaluate(List.of(stat("reversion", 36, 18.0, 30.0)), BLENDED_ROUND_TRIP, COSTS, P);
         assertTrue(d.mayIncrease());
-        assertEquals(2.2146, d.sources().get(0).tStat(), 1e-4);
-        assertEquals(18.0, d.bestGrossEdgeBps(), 1e-9);
+        assertEquals(3.5418, d.sources().get(0).tStat(), 1e-4);
         assertTrue(d.mayIncrease("ES"));
         assertTrue(d.mayIncrease("MSFT"));
         assertFalse(d.mayIncrease("GOOGL"));
     }
 
+    /**
+     * An expensive name is now judged on significance, not on a raw comparison of means — strictly
+     * tighter than the ADR-0072 veto it replaces. Cost 17.00 against a mean of 18.00: the old rule
+     * admitted it (18.00 > 17.00), but 1.00 bps of surplus on a 5.00 bps standard error is t = 0.20.
+     * A round trip that eats 94% of the measured edge is not a trade the measurement supports.
+     */
     @Test
-    void anUnmeasuredNameIsNotVetoedOnAnAssumedCost() {
-        // JNJ has never filled in this feed mode, so there is no cost to compare against. The gate
-        // asserts none rather than inventing one — the desk-wide verdict stands alone for that name.
-        var d = EdgeGate.evaluate(List.of(stat("reversion", 36, 18.0, 30.0)), 6.9270,
+    void aNameThatEatsMostOfTheEdgeIsRefusedEvenThoughTheRawMeanExceedsItsCost() {
+        var d = EdgeGate.evaluate(List.of(stat("reversion", 36, 18.0, 30.0)), BLENDED_ROUND_TRIP,
+                java.util.Map.of("ES", 0.29122, "SAP", 17.0), P);
+        assertTrue(d.mayIncrease());
+        assertTrue(d.mayIncrease("ES"));
+        assertFalse(d.mayIncrease("SAP"));
+    }
+
+    @Test
+    void anUnmeasuredNameFacesTheDeskBlendNotAnInventedCost() {
+        // JNJ has never filled in this feed mode, so it has no cost of its own. It is charged the
+        // desk's measured blend — the same bar it faced before ADR-0075 — never an invented number.
+        var d = EdgeGate.evaluate(List.of(stat("reversion", 36, 18.0, 30.0)), BLENDED_ROUND_TRIP,
                 java.util.Map.of("GOOGL", 20.10561), P);
-        assertTrue(d.mayIncrease("JNJ"));
+        assertTrue(d.mayIncrease("JNJ"));   // (18 − 6.9270)/5 = 2.2146 ≥ 2
         assertTrue(d.mayIncrease(null));
         assertFalse(d.mayIncrease("GOOGL"));
     }
 
     @Test
     void aShutGateVetoesEveryNameIncludingCheapOnes() {
-        // No source passed, so there is no edge to spend anywhere — a 0.29 bps round trip is still
-        // paying for nothing. Per-name permission can only ever subtract from the desk-wide verdict.
-        var d = EdgeGate.evaluate(List.of(stat("trend", 69, -17.31, 31.53)), 6.9270,
+        // A measured-NEGATIVE source cannot clear any cost, however cheap: at a 0.29 bps round trip
+        // its surplus is still −17.60. No cost cross-section can rescue a source that loses money.
+        var d = EdgeGate.evaluate(List.of(stat("trend", 69, -17.31, 31.53)), BLENDED_ROUND_TRIP,
                 java.util.Map.of("ES", 0.29122), P);
         assertFalse(d.mayIncrease());
         assertFalse(d.mayIncrease("ES"));
-        assertEquals(0.0, d.bestGrossEdgeBps(), 1e-9);
     }
 
     @Test
-    void theClaimableEdgeComesFromAPassingSourceNotTheLoudestMean() {
-        // "social" has the bigger mean but only 12 observations, so it never passed and its 40 bps is
-        // not an edge the desk may spend. The claimable edge is the passing source's 18.00, which is
-        // NOT enough to pay GOOGL's 20.11 round trip.
-        var d = EdgeGate.evaluate(List.of(
-                        stat("social", 12, 40.0, 20.0),
-                        stat("reversion", 36, 18.0, 30.0)),
-                6.9270, java.util.Map.of("GOOGL", 20.10561), P);
-        assertTrue(d.mayIncrease());
-        assertEquals(18.0, d.bestGrossEdgeBps(), 1e-9);
-        assertFalse(d.mayIncrease("GOOGL"));
+    void aThinSampleCannotOpenACheapNameEither() {
+        // "social" has the loudest mean but only 12 observations. The minimum sample binds per name
+        // exactly as it binds desk-wide — a cheap round trip is not a substitute for evidence.
+        var d = EdgeGate.evaluate(List.of(stat("social", 12, 40.0, 20.0)), BLENDED_ROUND_TRIP, COSTS, P);
+        assertFalse(d.mayIncrease());
+        assertFalse(d.mayIncrease("ES"));
     }
 
     @Test

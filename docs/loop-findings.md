@@ -194,3 +194,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - Rule 4: with a flat book and a shut gate nothing can move the vector — expect ⚠️ "no material change"
   and say so up front. The honest test is what the FIRST trades look like once `reversion` resolves,
   not this cycle's PnL.
+
+### 2026-07-26T19:30Z — ADR-0075 (per-name cost on BOTH sides of the edge gate)
+- Situation: PnL unchanged run-over-run and flat over three; gross AND net exposure zero, VaR "no
+  positions", breaker untripped, hedge FLAT. Not bleeding, no danger state. The window's only orders
+  were the ADR-0065 flattening tail (1-share ALPHA closes + matching fractional HEDGE ES trims) under a
+  reduce-only gate — **no trigger opened a position**, so 100% of the (nil) move is mark drift + prior
+  policy: market, not change. ADR-0074 scored ⚠️ MIXED "no material change", as it predicted of itself
+  (it rotates conviction between sources and cannot scale exposure).
+- **New fact: `reversion` is the first source with a POSITIVE measured expectancy** — 23 resolved, 7W/2L,
+  and 23 still open, so it clears the 30-observation minimum within a window or two. Every other source
+  is significantly negative and cannot be rescued by anything. The gate's behaviour on a passing source
+  stopped being academic this cycle.
+- Change: the gate compared each source's expectancy to ONE blended round-trip cost. ADR-0072 had already
+  established that cost is a per-name property and fixed the half where the blend *under-charges*
+  expensive names (the veto). The other half was still live: the blend *over-charges* the cheap names, so
+  an edge that survives the index future's round trip is refused everywhere because the AVERAGE name costs
+  a large multiple of it — and `reversion`'s measured expectancy sits exactly in that band. Now one rule:
+  a name may increase when some source's expectancy survives THAT name's own measured round trip at the
+  same t-hurdle and minimum sample; the desk-wide verdict is the same test at the cheapest round trip the
+  desk can actually pay; an unfilled name is charged the measured blend (never an invented cost).
+- Lesson / rule: **when you fix half of a granularity defect, write down which half you left.** ADR-0072
+  recorded the correct rule — "compare edge to cost at the granularity cost is incurred" — then applied it
+  to only one of the gate's two comparisons, and the unfixed half was the one that kept the book flat for
+  four cycles. A one-sided fix to a two-sided error reads as done.
+- Rule 2: **before loosening any gate, prove the monotonicity out loud.** New ⊆ old for every name costing
+  more than the blend (significance replaces a raw comparison of means); identical for unmeasured names;
+  only a name measured CHEAPER than the blend can gain permission. And a measured-negative source clears
+  nothing at any cost, since its surplus is negative even at a zero round trip. That is what distinguishes
+  this from the continuous risk-appetite gate that scored ❌ BAD — that one let below-hurdle sources size.
+  If you cannot state the containment, you are tuning, not fixing.
+- Rule 3: **two bars for the same question is a defect even when both look reasonable.** The desk-wide test
+  was a t-test and the per-name veto a raw comparison of means, so a name that ate 94% of the edge passed
+  the per-name bar while a larger surplus could fail the desk-wide one. Whenever the same comparison is
+  written twice, check they are the same shape.

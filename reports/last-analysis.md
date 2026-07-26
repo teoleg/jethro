@@ -1,86 +1,84 @@
-Three sources the desk has *measured losing money* were sitting at full trust in the fusion weights, because the credibility term counted a different sample than the estimate it was guarding — fixed before the gate opens on them (ADR-0074).
+The edge gate was charging every name the desk's *average* trading cost, so an edge that survives in the cheapest names was being refused everywhere — each name is now tested against its own measured round trip, on both sides of the gate (ADR-0075).
 
 ## Situation (live endpoints, read first)
 
-**Money — flat, not bleeding.** Total PnL `-$867.73`, identical to the last run and to the run before
-that; every move across the last three is inside the scorer's noise deadband. `stale` and `underwater`
-are both set and `pnl_growth_pct` is −0.06% against the +1%/3-iterations target. The reason is
-arithmetic, not a loss: with zero exposure, PnL *cannot* move.
+**Money — flat, not bleeding.** Total PnL is unchanged run-over-run and unchanged across the last
+three; every move in that span sits inside the scorer's noise deadband. `stale` and `underwater` are
+both set and we are off the +1%-per-3-iterations target. The cause is arithmetic, not a loss: with zero
+exposure, PnL cannot move.
 
-**Risk — zero, no danger state.** Gross and net exposure are both `$0.00`, VaR reports "no positions",
-the firm drawdown breaker is untripped, the hedge axis reads FLAT (held 0 → target 0 ES). There is
-nothing to de-risk and nothing to cut, so the danger-state override does not apply.
+**Risk — zero, no danger state.** Gross and net exposure are both flat at zero, VaR reports "no
+positions", the firm drawdown breaker is untripped, the hedge axis reads FLAT. Nothing to de-risk,
+nothing to cut, so the danger-state override does not apply.
 
-**Cause — last cycle's change is inert by construction, as it said of itself.** ADR-0073 (feed-mode
-scoping the daily close series) scored ⚠️ MIXED "no material change". That was the prediction written
-before it shipped: it changes which observations VaR and per-name vol may admit, and with a flat book
-there is nothing to measure. The window's only orders were the last of the ADR-0065 flattening tail —
-single-share ALPHA closes in AAPL and GOOG with matching fractional HEDGE ES trims, under a reduce-only
-gate. **No trigger opened a position this window.** 100% of the (nil) PnL and exposure move is mark
-drift plus that prior flattening: market and prior policy, none of it attributable to my last change in
-either direction.
+**Cause — last cycle's change was inert by construction, as it said of itself.** ADR-0074 (credibility
+counts the sample its estimate was made from) scored ⚠️ MIXED "no material change". It rotates
+conviction *between* sources and provably cannot scale exposure, so with a flat book there was nothing
+for it to act on. The window's orders were the last of the ADR-0065 flattening tail — single-share ALPHA
+closes with matching fractional HEDGE ES trims under a reduce-only gate. **No trigger opened a position
+this window**, so 100% of the (nil) PnL and exposure move is mark drift plus prior policy: market and
+prior policy, none of it attributable to my last change in either direction.
 
-## Diagnosis — the gate is right; what happens the moment it opens is not
+**The genuinely new fact this cycle: `reversion` has a positive measured expectancy.** It is the first
+source ever to show one — 23 resolved observations, seven wins to two losses, a positive mean — with 23
+more observations open, which will carry it past the 30-observation minimum inside the next window or
+two. Every other source is significantly negative (trend over ninety-odd observations, momentum, social)
+and cannot be rescued by anything. So for the first time there is a candidate the gate could plausibly
+judge, and the question of *what the gate does when it judges it* stops being academic.
 
-The ADR-0064 gate is correctly shut. Every source with enough sample to speak measures significantly
-negative: `trend` −15.96 bps over 92 resolved (t ≈ −5.2 before cost), `momentum` −11.30 over 18,
-`social` −8.17 over 12, against a 6.93 bps measured round trip. Loosening that gate has been tried and
-was auto-reverted ❌ BAD (`fb9273505`); I did not re-attempt it, and I did not invert a losing source
-either — the findings memory records both as paid-for lessons. `reversion` (ADR-0070) now publishes,
-23 open / 0 resolved, and resolves one horizon out, so the gate finally has a counter-trend candidate
-to judge within a cycle or two. I left that plumbing alone.
+## Diagnosis — the hurdle is set by the cost of names the trade was never going to be put on in
 
-So I read the *other* number the desk publishes every cycle and nobody had checked against the
-telemetry beside it — the per-source conviction weights:
+The gate compares each source's measured expectancy against **one blended round-trip cost** for the
+whole desk. That blend is a fiction: the desk's own TCA spans two orders of magnitude, from the index
+future at a fraction of a basis point to the widest-spread equity in double digits. ADR-0072 already
+established the principle — cost is a per-name property — and fixed the half where the blend
+*under-charges* expensive names, adding a veto so a name whose round trip exceeds the passing edge stays
+reduce-only. It left the other half in place. The blend equally **over-charges the cheap names**: a
+source whose edge comfortably survives the index future's round trip is refused everywhere, because the
+average name costs a large multiple of it.
 
-```
-reversion 1.0   mean-reversion 1.0   momentum 1.0   social 1.0   trend 0.2732572
-```
+`reversion`'s measured expectancy is exactly in that band — below the blended hurdle, above what several
+of the cheapest names actually cost. That is not a marginal accounting point; it is the difference
+between a permanently flat book and a book that puts its first risk on where the edge demonstrably
+survives what trading it demonstrably costs. The lesson was already written down when ADR-0072 shipped —
+*"a gate that compares edge to cost must compare them at the granularity cost is incurred"* — and then
+applied to only one of the gate's two comparisons.
 
-Every source at full trust except the one with the largest sample. That is backwards, and the mechanism
-is a sample mismatch inside `TelemetryWeights`. The evidence statistic is Φ of the expectancy
-t-statistic, and `avgReturnBps`/`stdErrorBps` average over **every resolved** observation, FLATs
-included — correct, since a flat call earned nothing and belongs in an expectancy. But the Bühlmann
-credibility term counted only **wins + losses**. Confidence in one statistic was being measured with the
-sample size of another. A source's flat rate is a property of its horizon and dead-band, not of how much
-evidence it has: `momentum` is 61% flat, `social` 67%, `mean-reversion` 100% — so their decisive counts
-were 7, 4 and 0, all under the hard min-sample floor, which pinned them at exactly 1.0.
+There was a second inconsistency worth removing in the same breath: the desk-wide test is a t-test, the
+ADR-0072 per-name veto was a raw comparison of means. So a name whose round trip ate almost all of the
+measured edge passed the per-name bar while a name with a larger surplus could fail the desk-wide one.
 
-That floor was the second half of the defect. Clamping to 1.0 is *not* neutral — for any
-below-average source it is strictly **more** trusting than its own shrunk measurement. So three sources
-carrying measured-negative expectancy were laundered into full trust, while `mean-reversion`, having
-never produced one decisive observation, was structurally unjudgeable forever.
+## Change (ADR-0075)
 
-This is inert today and I expect ⚠️ "no material change" again — say it up front. It is not inert next
-week: when any source clears the gate, the planner sizes from the combined forecast, and roughly three
-quarters of that first book's conviction would have come from views the desk already knows lose money.
+One rule, at the granularity cost is incurred, on both sides: a name may take risk on when some source's
+measured expectancy survives **that name's own** measured round trip with the same significance hurdle
+and minimum sample as before. The desk-wide verdict is that same test at the cheapest round trip the
+desk can actually pay. A name that has never filled is charged the desk's **measured blend** — never an
+invented cost — which is bit-for-bit the bar it faced before.
 
-## Change (ADR-0074)
+The change is provably monotone and I want that on the record, because loosening a gate that keeps a
+losing book flat is exactly the mistake this loop has already paid for once. For any name costing more
+than the blend the new rule is **strictly tighter** than the veto it replaces (significance, not a raw
+comparison of means); for an unmeasured name it is identical; only a name whose own measured cost is
+below the blend can gain permission. And a measured-**negative** source clears nothing at any cost — its
+surplus is negative even at a zero round trip — so this cannot hand the book to trend, momentum or
+social. That is the material difference from the continuous risk-appetite gate that scored ❌ BAD and was
+reverted: that one let below-hurdle sources size at reduced conviction; this keeps the binary switch and
+the hurdle untouched and changes only which cost the expectancy is measured against. No new dial, no
+retuned dial, and the deterministic floor — guardrail, breaker, invariant-7 gates — is untouched.
 
-Credibility now counts `resolved` — the same observations the estimate averaged over — and the hard
-min-sample floor is removed, leaving Bühlmann `shrinkage-k` as the single continuous thin-sample
-defence. It already does that job better: a source with three calls and a t-statistic of +6.93 moves
-its weight by 0.56%, a curve instead of a cliff, and symmetric for good and bad readings alike. Hit
-rate still excludes flats, where "no bet" is the right reading. `jethro.fusion.weights.min-sample` is
-deleted rather than deprecated.
-
-The regression is one test: two sources resolve 40 calls each with byte-identical measured expectancy
-and dispersion, differing only in that one landed 30 of 40 inside the flat dead-band. Before, they got
-1.0 and 0.310741 — a 3.2× conviction gap on identical measurements, pointing the wrong way. Now they
-get the same number. Worked arithmetic for that and for the thin-sample case is in the ADR and encoded
-as exact-value tests.
-
-No statistic, hurdle, sizing rule, cost model or money parameter changed, and the deterministic floor —
-guardrail, breaker, edge gate, invariant-7 gates — is untouched. Weights remain ratios that
-`ForecastCombiner` normalises by their sum, so this rotates conviction between sources and provably
-cannot scale gross or net exposure for any given set of forecasts.
+**What to expect, honestly.** This may still score ⚠️ "no material change": `reversion` needs to clear
+the minimum-sample bar before it can speak, and it is a few observations short. But unlike the last four
+cycles this one is not inert by construction — it is the rule that decides whether the desk's first
+positive-expectancy source is allowed to trade, and it will bind the moment that source resolves its
+open calls. If it opens the book and the book loses money, the scorer will say so and revert it, which
+is the correct test.
 
 ## Flagged, not acted on
 
-The pooled prior every thin source shrinks toward is the plain mean of the sources' evidence, so a
-source with **zero** observations contributes Φ(0) = ½ to it — adding an unmeasured source raises the
-trust of every measured one. Real, but second-order (it moves ratios only), and folding it in here would
-have made this change's effect unattributable. Separately: `GOOGL`, `GS`, `BRK.B`, `NFLX`, `ORCL` and
-`TSLA` still boot on generic sim-calibration defaults at a near-identical ~$99.9, and GOOGL's 10.05 bps
-one-way slippage is a provisional 20 bps refdata spread rather than a measured mega-cap property. Still
-declining to repair it in the same breath as anything that reads the cost hurdle.
+The blended cost remains a documented lower bound on true round-trip cost — it omits the cash
+commission, which the TCA table stores without the multiplier needed to express it in bps. That
+understatement is unchanged by this change but now applies per name. Separately, the wide-spread
+mega-cap whose one-way slippage looks like a provisional refdata spread rather than a measured property
+is still unrepaired; I am still declining to touch a cost input in the same change that reads the cost
+hurdle.
