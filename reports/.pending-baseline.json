@@ -1,0 +1,20 @@
+{
+  "commit": "a76a0e6ca45eb5a494f325ccec3c1780fd3fca38",
+  "fees": "3.998473",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "0",
+    "netExposure": "0.00000000",
+    "realizedPnl": "-22.82979500",
+    "strategyAlpha": "-22.82979500",
+    "totalFees": "3.998473",
+    "totalPnl": "-22.82979500",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "trend sensor: warm the scale estimator over half a normalisation span before dividing by it, so a freshly-warmed name no longer opens pinned at the forecast cap (ADR-0066 correction)",
+  "total_pnl": "-22.82979500",
+  "ts": "2026-07-26T14:51:41Z"
+}
