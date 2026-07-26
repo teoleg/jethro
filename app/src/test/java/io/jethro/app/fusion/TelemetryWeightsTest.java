@@ -9,10 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * ADR-0067 expectancy-weighted source trust: evidence in (per-source measured mean return, dispersion,
- * decisive sample), weight out — Φ of the sample t-statistic, shrunk toward the pooled prior by
- * credibility and bounded. Worked examples verified by hand (delta on the dimensionless ratios; the
- * money boundary is downstream in scaled decimals).
+ * ADR-0067 expectancy-weighted source trust, on the ADR-0074 sample: evidence in (per-source measured
+ * mean return, dispersion, resolved sample), weight out — Φ of the sample t-statistic, shrunk toward
+ * the pooled prior by credibility over the SAME resolved observations the statistic averaged, and
+ * bounded. Worked examples verified by hand (delta on the dimensionless ratios; the money boundary is
+ * downstream in scaled decimals).
  */
 class TelemetryWeightsTest {
 
@@ -21,9 +22,16 @@ class TelemetryWeightsTest {
     /** A source's measured record: mean return per observation and its dispersion, both in bps. */
     private static SignalScoring.Stats stat(String source, double avgBps, double stdBps,
                                             long wins, long losses) {
-        long resolved = wins + losses;
-        double hitRate = resolved > 0 ? (double) wins / resolved : 0.0;
-        return new SignalScoring.Stats(source, resolved, wins, losses, 0, 0, hitRate, avgBps, stdBps);
+        return stat(source, avgBps, stdBps, wins, losses, 0);
+    }
+
+    /** As above, with FLAT observations — calls that resolved inside the dead-band, earning nothing. */
+    private static SignalScoring.Stats stat(String source, double avgBps, double stdBps,
+                                            long wins, long losses, long flats) {
+        long resolved = wins + losses + flats;
+        long decisive = wins + losses;
+        double hitRate = decisive > 0 ? (double) wins / decisive : 0.0;
+        return new SignalScoring.Stats(source, resolved, wins, losses, flats, 0, hitRate, avgBps, stdBps);
     }
 
     @Test
@@ -88,14 +96,63 @@ class TelemetryWeightsTest {
     }
 
     @Test
-    void aThinSourceStaysNeutralUntilItEarnsTheSample() {
-        // A spectacular reading on 3 decisive calls is luck, not evidence: the min-sample floor holds it
-        // at neutral 1.0 while a well-sampled source is allowed to differentiate.
+    void aThinSourceStaysEssentiallyNeutralUntilItEarnsTheSample() {
+        // ADR-0074: credibility alone, no hard floor. A spectacular reading on 3 calls is luck, not
+        // evidence — c = 3/(3+20) = 0.130435, so the source sits ~87% on the pooled prior and lands a
+        // whisker off neutral rather than being pinned there by a branch.
+        // social:   mean +80 bps, σ 20, n 3   → SE 11.547005 → t +6.9282 → Φ 1.0        c 0.130435
+        // momentum: mean +10 bps, σ 50, n 100 → SE  5.0      → t +2.0    → Φ 0.97724994 c 0.833333
+        // pool = 0.98862497
+        // shrunk(social) = 0.130435·1.0 + 0.869565·0.98862497 = 0.99010867
+        // shrunk(momentum) = 0.833333·0.97724994 + 0.166667·0.98862497 = 0.97914578
+        // mean = 0.98462722 → w(social) = 1.005567, w(momentum) = 0.994433
         var w = TelemetryWeights.compute(List.of(
-                stat("social", 80.0, 20.0, 2, 1),        // 3 decisive < 20 → neutral
+                stat("social", 80.0, 20.0, 2, 1),
                 stat("momentum", 10.0, 50.0, 60, 40)), K20);
-        assertEquals(1.0, w.get("social"), 1e-9, "thin lucky source must not up-weight");
+        assertEquals(1.005567, w.get("social"), 1e-5, "thin lucky source must not meaningfully up-weight");
+        assertTrue(Math.abs(w.get("social") - 1.0) < 0.02, "three calls buy almost no conviction");
         assertTrue(w.get("momentum") != 1.0, "a well-sampled source still differentiates");
+    }
+
+    @Test
+    void flatOutcomesCountAsEvidenceJustAsTheExpectancyCountsThem() {
+        // THE REGRESSION this change exists for (ADR-0074). Both sources resolved 40 calls with the
+        // SAME measured expectancy and the SAME dispersion — byte-identical evidence — and differ only
+        // in how their outcomes bucketed: one landed 30 of 40 inside the flat dead-band, the other none.
+        // avgReturnBps and stdErrorBps average over ALL resolved calls, so the evidence is identical;
+        // the old credibility term counted wins+losses only, so "flat-heavy" had 10 decisive against
+        // "decisive"'s 40 and fell under the old min-sample floor — pinned at a MORE trusting 1.0 while
+        // its twin was down-weighted to 0.310741. A 3.2x conviction gap on identical measurements.
+        //
+        // both: mean −12 bps, σ 30, n 40 → SE 4.743416 → t −2.529822 → Φ 0.00570604, c = 40/60 = 2/3
+        // reference: mean +12 bps, σ 30, n 40 → t +2.529822 → Φ 0.99429396, c = 2/3
+        // pool = 0.33523535
+        // shrunk(flat-heavy) = shrunk(decisive) = ⅔·0.00570604 + ⅓·0.33523535 = 0.11554914
+        // shrunk(reference)  = ⅔·0.99429396 + ⅓·0.33523535 = 0.77460776   mean = 0.33523535
+        // w = 0.3446807 / 0.3446807 / 2.3106387
+        var w = TelemetryWeights.compute(List.of(
+                stat("flat-heavy", -12.0, 30.0, 3, 7, 30),
+                stat("decisive", -12.0, 30.0, 12, 28, 0),
+                stat("reference", 12.0, 30.0, 20, 20, 0)), K20);
+        assertEquals(w.get("decisive"), w.get("flat-heavy"), 1e-12,
+                "identical evidence over an identical sample must buy identical conviction");
+        assertEquals(0.3446807, w.get("flat-heavy"), 1e-6);
+        assertEquals(0.3446807, w.get("decisive"), 1e-6);
+        assertEquals(2.3106387, w.get("reference"), 1e-6);
+    }
+
+    @Test
+    void aFlatHeavyLoserNoLongerReadsAsNoEvidence() {
+        // The live shape this was found in: a source with 18 resolved calls averaging −11.3 bps, 11 of
+        // them FLAT, sat at full trust 1.0 because only 7 were decisive — measured-negative evidence
+        // read as absent. It must now carry LESS conviction than a source with no reading at all.
+        var w = TelemetryWeights.compute(List.of(
+                stat("momentum", -11.296798, 30.457460, 1, 6, 11),
+                stat("unmeasured", 0.0, 0.0, 0, 0, 0),
+                stat("reference", 0.0, 30.0, 20, 20, 0)), K20);
+        assertTrue(w.get("momentum") < 1.0, "a measured loss must cost conviction, flats and all");
+        assertTrue(w.get("momentum") < w.get("unmeasured"),
+                "a source measured losing must be trusted less than one never measured");
     }
 
     @Test

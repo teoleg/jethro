@@ -1,71 +1,86 @@
-The desk's risk sensor has been wrong by 10–12× on every name that has lived through a sim↔live switch — the daily close series was never feed-mode scoped, so a feed handover was being measured as a ±40–75% market day (ADR-0073).
+Three sources the desk has *measured losing money* were sitting at full trust in the fusion weights, because the credibility term counted a different sample than the estimate it was guarding — fixed before the gate opens on them (ADR-0074).
 
 ## Situation (live endpoints, read first)
 
-**Money — flat, not bleeding.** Total PnL `-$867.73`, unchanged run-over-run and effectively flat
-across the last three; every move in that span is inside the scorer's noise deadband. `stale` and
-`underwater` are both set and we are nowhere near the ≥1%-per-3-iterations target. The reason is not a
-loss: with zero exposure, PnL cannot move at all.
+**Money — flat, not bleeding.** Total PnL `-$867.73`, identical to the last run and to the run before
+that; every move across the last three is inside the scorer's noise deadband. `stale` and `underwater`
+are both set and `pnl_growth_pct` is −0.06% against the +1%/3-iterations target. The reason is
+arithmetic, not a loss: with zero exposure, PnL *cannot* move.
 
-**Risk — zero, and no danger state.** Gross and net exposure are both `$0.00`, VaR reports "no
-positions", the firm drawdown breaker is untripped. There is nothing to de-risk and nothing to cut, so
-the danger-state override does not apply this cycle.
+**Risk — zero, no danger state.** Gross and net exposure are both `$0.00`, VaR reports "no positions",
+the firm drawdown breaker is untripped, the hedge axis reads FLAT (held 0 → target 0 ES). There is
+nothing to de-risk and nothing to cut, so the danger-state override does not apply.
 
-**Cause — last cycle's change is inert by construction, exactly as stated in advance.** ADR-0072
-(per-name execution cost in the edge gate) scored ⚠️ MIXED "no material change". That was the
-prediction written before it shipped: with the gate shut and the book flat it can only ever subtract
-permission, so there is nothing for it to act on yet. The window's only orders were the last leg of the
-ADR-0065 flattening — single-share buys closing the remaining ALPHA shorts (AAPL, GOOG) and the matching
-HEDGE ES trims — under a reduce-only gate. **No trigger opened a position this window**, so 100% of the
-(nil) PnL and exposure move is mark drift plus that flattening: market and prior policy, none of it
-attributable to my last change, good or bad.
+**Cause — last cycle's change is inert by construction, as it said of itself.** ADR-0073 (feed-mode
+scoping the daily close series) scored ⚠️ MIXED "no material change". That was the prediction written
+before it shipped: it changes which observations VaR and per-name vol may admit, and with a flat book
+there is nothing to measure. The window's only orders were the last of the ADR-0065 flattening tail —
+single-share ALPHA closes in AAPL and GOOG with matching fractional HEDGE ES trims, under a reduce-only
+gate. **No trigger opened a position this window.** 100% of the (nil) PnL and exposure move is mark
+drift plus that prior flattening: market and prior policy, none of it attributable to my last change in
+either direction.
 
-**One genuinely new fact: `reversion` speaks.** For the first time it appears in `fusion_targets.weights`
-and in per-name contributions, with 23 open observations and none yet resolved. That is the
-absence-is-the-tell check the findings memory told me to run, and it now passes: ADR-0070 + the ADR-0071
-warm restart work. Its calls resolve one signal horizon out, so it becomes measurable — and the edge gate
-can finally judge it — within the next cycle or two. The plumbing is done; I did not touch it again.
+## Diagnosis — the gate is right; what happens the moment it opens is not
 
-## Diagnosis — the risk sensor, not the signal
+The ADR-0064 gate is correctly shut. Every source with enough sample to speak measures significantly
+negative: `trend` −15.96 bps over 92 resolved (t ≈ −5.2 before cost), `momentum` −11.30 over 18,
+`social` −8.17 over 12, against a 6.93 bps measured round trip. Loosening that gate has been tried and
+was auto-reverted ❌ BAD (`fb9273505`); I did not re-attempt it, and I did not invert a losing source
+either — the findings memory records both as paid-for lessons. `reversion` (ADR-0070) now publishes,
+23 open / 0 resolved, and resolves one horizon out, so the gate finally has a counter-trend candidate
+to judge within a cycle or two. I left that plumbing alone.
 
-With the gate correctly shut on measurement (trend −17.31 bps over 69 observations, momentum and social
-negative alongside it), the honest place to spend this cycle is the first sensor in the owner's thesis:
-*know how much is at risk right now*. It has been lying.
+So I read the *other* number the desk publishes every cycle and nobody had checked against the
+telemetry beside it — the per-source conviction weights:
 
-`daily_close` is the return series behind historical + parametric VaR, behind per-name daily volatility
-— which **vol-targets position sizing** — and behind every change chip on the UI. It was the one
-end-of-day artifact never scoped by feed mode. The defect is visible in its starkest form inside a single
-method: `EodService.rollover()` and `MarketHistoryRecorder.recordOnce()` each write `firm_equity` **with**
-`feed_mode`, and three lines away write `daily_close` **without** it. So a LIVE session's closes and a SIM
-session's closes share one series and overwrite each other, and the close-to-close "return" at a handover
-is the ratio of two unrelated price levels — the seed's AAPL at 190.00 against the live feed's at 326.95
-is a fabricated **+72%** day, then −43% back to the sim, then +76%, then −42%. Four phantom days in the
-last eight observations of the window, and EWMA(λ=0.94) weights the most recent observations hardest.
+```
+reversion 1.0   mean-reversion 1.0   momentum 1.0   social 1.0   trend 0.2732572
+```
 
-Measured against the clean block, that overstates daily vol by 10.1× on GOOG, 10.7× on AAPL, 12.4× on
-JPM, 11.9× on ES. The tell is decisive: names that have only ever run under one feed — GOOGL, BRK.B, GS,
-TSLA — sit at a sane 0.4–0.9%. **The 10–12× is a function of how many feed boundaries a name has lived
-through, not of the name.** It is also a hard-invariant-8 violation, and `training_bars` already keeps a
-private copy of the series precisely because the runtime one is "sim-contaminated at the tail" — someone
-worked around this once already instead of fixing it.
+Every source at full trust except the one with the largest sample. That is backwards, and the mechanism
+is a sample mismatch inside `TelemetryWeights`. The evidence statistic is Φ of the expectancy
+t-statistic, and `avgReturnBps`/`stdErrorBps` average over **every resolved** observation, FLATs
+included — correct, since a flat call earned nothing and belongs in an expectancy. But the Bühlmann
+credibility term counted only **wins + losses**. Confidence in one statistic was being measured with the
+sample size of another. A source's flat rate is a property of its horizon and dead-band, not of how much
+evidence it has: `momentum` is 61% flat, `social` 67%, `mean-reversion` 100% — so their decisive counts
+were 7, 4 and 0, all under the hard min-sample floor, which pinned them at exactly 1.0.
 
-## Change (ADR-0073)
+That floor was the second half of the defect. Clamping to 1.0 is *not* neutral — for any
+below-average source it is strictly **more** trusting than its own shrunk measurement. So three sources
+carrying measured-negative expectancy were laundered into full trust, while `mean-reversion`, having
+never produced one decisive observation, was structurally unjudgeable forever.
 
-Tag every recorded close with the stream that produced it, and never take a return across a handover.
-`daily_close` gains `feed_mode` with PK `(day, instrument, feed_mode)`; both session writers stamp
-`Provenance.mode()` like the `firm_equity` write beside them; the bootstrap history is tagged `SEED` —
-reference history loaded before any session ran, the prior every mode starts from. Readers admit the
-running mode's rows plus `SEED`, and take a return **only between two closes from the same stream** —
-that second rule is what actually kills the phantom, since filtering rows alone leaves the boundary pair.
-History is re-tagged deterministically from the platform's own record (`firm_equity.feed_mode`), never
-from a rule about prices; session-era days whose mode cannot be established are dropped as inadmissible
-observations. I dry-ran the migration in a rolled-back transaction: it leaves a clean 1,557-day seed
-block, 4 LIVE days and 1 SIM day, so VaR keeps a full window and vol stays measured — just correct.
+This is inert today and I expect ⚠️ "no material change" again — say it up front. It is not inert next
+week: when any source clears the gate, the planner sizes from the combined forecast, and roughly three
+quarters of that first book's conviction would have come from views the desk already knows lose money.
 
-No risk formula, estimator, dial or gate changed; the deterministic floor is untouched. This changes only
-**which observations are admissible**, which is why it carries no number of its own.
+## Change (ADR-0074)
 
-**What to expect, honestly:** with exposure at zero this cannot move PnL this cycle either, and I expect
-another ⚠️ "no material change" — say it up front rather than dress it up. What it buys is that when
-`reversion` earns its keep and the gate opens, every position is sized against a real σ instead of one
-ten times too large, and the VaR the owner watches stops counting a feed switch as a market crash.
+Credibility now counts `resolved` — the same observations the estimate averaged over — and the hard
+min-sample floor is removed, leaving Bühlmann `shrinkage-k` as the single continuous thin-sample
+defence. It already does that job better: a source with three calls and a t-statistic of +6.93 moves
+its weight by 0.56%, a curve instead of a cliff, and symmetric for good and bad readings alike. Hit
+rate still excludes flats, where "no bet" is the right reading. `jethro.fusion.weights.min-sample` is
+deleted rather than deprecated.
+
+The regression is one test: two sources resolve 40 calls each with byte-identical measured expectancy
+and dispersion, differing only in that one landed 30 of 40 inside the flat dead-band. Before, they got
+1.0 and 0.310741 — a 3.2× conviction gap on identical measurements, pointing the wrong way. Now they
+get the same number. Worked arithmetic for that and for the thin-sample case is in the ADR and encoded
+as exact-value tests.
+
+No statistic, hurdle, sizing rule, cost model or money parameter changed, and the deterministic floor —
+guardrail, breaker, edge gate, invariant-7 gates — is untouched. Weights remain ratios that
+`ForecastCombiner` normalises by their sum, so this rotates conviction between sources and provably
+cannot scale gross or net exposure for any given set of forecasts.
+
+## Flagged, not acted on
+
+The pooled prior every thin source shrinks toward is the plain mean of the sources' evidence, so a
+source with **zero** observations contributes Φ(0) = ½ to it — adding an unmeasured source raises the
+trust of every measured one. Real, but second-order (it moves ratios only), and folding it in here would
+have made this change's effect unattributable. Separately: `GOOGL`, `GS`, `BRK.B`, `NFLX`, `ORCL` and
+`TSLA` still boot on generic sim-calibration defaults at a near-identical ~$99.9, and GOOGL's 10.05 bps
+one-way slippage is a provisional 20 bps refdata spread rather than a measured mega-cap property. Still
+declining to repair it in the same breath as anything that reads the cost hurdle.

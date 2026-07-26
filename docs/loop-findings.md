@@ -162,3 +162,35 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   from a rule about prices — a "returns bigger than X are fake" threshold is an invented number gating
   risk, and it would silently eat the real gap risk VaR exists to measure. Rows whose mode cannot be
   established are inadmissible observations, not rows to guess at.
+
+### 2026-07-26T19:00Z — ADR-0074 (credibility counts the sample the estimate was made from)
+- Situation: PnL -$867.73, identical run-over-run and flat over three; gross AND net exposure $0.00,
+  VaR "no positions", breaker untripped, hedge axis FLAT. Not bleeding, no danger state. The window's
+  only orders were the ADR-0065 flattening tail (1-share ALPHA closes in AAPL/GOOG + matching fractional
+  HEDGE ES trims) under a reduce-only gate — **no trigger opened a position**, so 100% of the (nil)
+  move is mark drift + prior policy: market, not change. ADR-0073 scored ⚠️ MIXED "no material change",
+  exactly as it predicted of itself with a flat book.
+- Change: the published fusion weights were `reversion/mean-reversion/momentum/social = 1.0`, `trend
+  = 0.2732572` — every source at FULL trust except the one with the largest sample. Mechanism: the
+  evidence statistic Φ(t) is built from `avgReturnBps`/`stdErrorBps`, which average over ALL resolved
+  observations (flats included, correctly — a flat call earned nothing). The Bühlmann credibility term
+  counted only wins+losses. Flat rates are a property of a sensor's horizon and dead-band, not of its
+  evidence: momentum 61% flat (7 decisive of 18), social 67% (4 of 12), mean-reversion 100% (0 of 2) —
+  all under the hard min-sample floor, all pinned at 1.0 while carrying measured-negative expectancy
+  (−11.30 / −8.17 / −0.48 bps). Fixed: credibility counts `resolved`; the floor is removed.
+- Lesson / rule: **a credibility/confidence term must count the observations its own estimate averaged
+  over.** Measuring confidence in statistic A with the sample size of statistic B is silent and reads
+  exactly like "that source has no track record". Whenever a method uses two counts, check they are the
+  same set — here `stdErrorBps()` divided by `resolved` three lines from a credibility term dividing by
+  `wins+losses`.
+- Rule 2: **a hard floor at the NEUTRAL value is not neutral.** Clamping a below-average source to 1.0
+  is strictly MORE trusting than its own shrunk estimate, so a "safety" floor laundered measured-negative
+  evidence into no-evidence. If a continuous shrinkage term already handles thin samples, a floor on top
+  is a second, asymmetric copy of it — delete it rather than tune it.
+- Rule 3: **check whether a gating counter is one the subject can structurally never satisfy.** A
+  threshold detector resolves ~every call FLAT, so `mean-reversion` had zero decisive observations and
+  could never have differentiated no matter how long it ran — the same shape as the ADR-0071 lesson
+  (warm-up longer than process lifetime). Ask what the counter looks like in the limit, not just today.
+- Rule 4: with a flat book and a shut gate nothing can move the vector — expect ⚠️ "no material change"
+  and say so up front. The honest test is what the FIRST trades look like once `reversion` resolves,
+  not this cycle's PnL.

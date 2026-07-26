@@ -24,7 +24,7 @@ import java.util.Map;
  * <pre>
  *   t_s         = avgReturnBps_s / stdErrorBps_s   // sample t of expectancy vs zero (0 ⇒ no dispersion yet)
  *   e_s         = Φ(t_s) ∈ (0,1)                   // evidence the true expectancy is positive; Φ(0)=½ exactly
- *   n_s         = wins_s + losses_s                 // decisive obs (FLATs were no bet)
+ *   n_s         = resolved_s                        // the SAME observations e_s was estimated from
  *   c_s         = n_s / (n_s + K)                   // credibility: trust the data as the sample grows
  *   pool        = mean_s(e_s)                       // the pooled prior every source shrinks toward
  *   shrunk_s    = c_s·e_s + (1−c_s)·pool            // thin sources ≈ pool; rich sources ≈ their own edge
@@ -32,6 +32,27 @@ import java.util.Map;
  * </pre>
  * Cold start (no resolved obs ⇒ no standard error): every e = Φ(0) = ½ ⇒ every shrunk = pool ⇒ every
  * weight = 1.0. Equal by symmetry, not by a fallback branch.
+ *
+ * <p><b>Credibility counts the sample the estimate was made from (ADR-0074).</b> {@code n_s} is the
+ * resolved count, because {@code e_s} is a function of {@code avgReturnBps} and {@code stdErrorBps},
+ * and both of those average over EVERY resolved observation — FLATs included. A FLAT is not "no bet"
+ * to an expectancy: it is a call that earned nothing, and it lowers the mean and the standard error
+ * exactly as it should. Counting only wins+losses in the credibility term therefore measured the
+ * confidence of one statistic with the sample size of a different one, and the discrepancy is not
+ * small: a source whose calls mostly land inside the flat dead-band — a property of its horizon and
+ * threshold, not of how much evidence it has — was permanently treated as thin however long it ran.
+ * Two sources with byte-identical measured expectancy and identical resolved samples could differ
+ * more than threefold in conviction purely on how their outcomes bucketed. Hit rate still excludes
+ * FLATs (there, "no bet" is the right reading); credibility does not.
+ *
+ * <p><b>Shrinkage is the whole thin-sample defence (ADR-0074).</b> There is deliberately no hard
+ * minimum-sample floor pinning a source at exactly 1.0. Bühlmann credibility already does that job,
+ * continuously and in the right direction: at K = 20 a source with three resolved calls sits ~87% on
+ * the pooled prior no matter how spectacular its reading, so a lucky run cannot up-weight it. A hard
+ * floor on top was a second, discontinuous copy of the same protection — and not a neutral one, since
+ * clamping to 1.0 is strictly MORE trusting than the shrunk value for every below-average source. It
+ * read measured-negative evidence as no evidence, and put a cliff in the weight function at n = the
+ * threshold.
  *
  * <p><b>Why Φ and not the raw t.</b> Φ is bounded in (0,1) and monotone, so a weight can never be
  * negative — a measured-bad source is DOWN-weighted toward MIN, never inverted into a contrarian bet
@@ -57,11 +78,11 @@ public final class TelemetryWeights {
 
     /**
      * Modelling dials — MINE, to validate against OOS, NOT market conventions. shrinkageK: the number of
-     * decisive observations at which a source's data is half-trusted vs the pooled prior (higher ⇒ more
+     * resolved observations at which a source's data is half-trusted vs the pooled prior (higher ⇒ more
      * shrinkage toward equal). min/max bound each weight around the 1.0 null so no source is silenced or
      * dominates on thin evidence (the analogue of Carver's diversification-multiplier cap).
      */
-    public record Params(double shrinkageK, double min, double max, int minSample) {
+    public record Params(double shrinkageK, double min, double max) {
         public Params {
             shrinkageK = shrinkageK > 0 ? shrinkageK : 20.0;
             if (min <= 0) {
@@ -70,14 +91,6 @@ public final class TelemetryWeights {
             if (max < min) {
                 max = Math.max(min, 3.0);
             }
-            if (minSample < 0) {
-                minSample = 20;
-            }
-        }
-
-        /** Back-compat 3-arg (minSample defaults to 20). */
-        public Params(double shrinkageK, double min, double max) {
-            this(shrinkageK, min, max, 20);
         }
     }
 
@@ -92,7 +105,6 @@ public final class TelemetryWeights {
         }
         Map<String, Double> evidence = new HashMap<>();
         Map<String, Double> credibility = new HashMap<>();
-        Map<String, Long> decisive = new HashMap<>();
         double poolSum = 0;
         for (SignalScoring.Stats s : stats) {
             // Evidence that this source's true expectancy is positive: Φ of its own sample t-statistic.
@@ -100,10 +112,11 @@ public final class TelemetryWeights {
             double se = s.stdErrorBps();
             double t = se > 0 ? s.avgReturnBps() / se : 0.0;
             double ev = standardNormalCdf(t);
-            long nDecisive = s.wins() + s.losses();
+            // Credibility is the confidence in THAT statistic, so it counts the observations THAT
+            // statistic averaged over — every resolved call, FLATs included (ADR-0074).
+            long n = s.resolved();
             evidence.put(s.source(), ev);
-            decisive.put(s.source(), nDecisive);
-            credibility.put(s.source(), nDecisive / (nDecisive + p.shrinkageK()));
+            credibility.put(s.source(), n / (n + p.shrinkageK()));
             poolSum += ev;
         }
         double pool = poolSum / evidence.size();
@@ -126,13 +139,11 @@ public final class TelemetryWeights {
             return out;
         }
         for (var e : shrunk.entrySet()) {
-            // Min-sample floor: a source with too few decisive observations sits at NEUTRAL (1.0) — thin
-            // evidence (e.g. 3 lucky social calls) must not up- or down-weight it. It differentiates only
-            // once it has earned enough decisive samples. Well-sampled sources get the shrunk weight.
-            double w = decisive.getOrDefault(e.getKey(), 0L) < p.minSample()
-                    ? 1.0
-                    : clamp(e.getValue() / meanShrunk, p.min(), p.max());
-            out.put(e.getKey(), w);
+            // No hard min-sample floor (ADR-0074): the credibility term above already holds a thin
+            // source next to the pooled prior — continuously, and symmetrically for good and bad
+            // readings alike — so a lucky run cannot up-weight it and a measured loss is not read as
+            // "no evidence". Everyone gets the shrunk weight, bounded.
+            out.put(e.getKey(), clamp(e.getValue() / meanShrunk, p.min(), p.max()));
         }
         return out;
     }
