@@ -93,7 +93,7 @@ public final class ReversionForecastLifecycle implements AutoCloseable {
                 if (mark.stale()) {
                     continue; // never advance the sensor's windows on a repeated stale price
                 }
-                warmIfFirstSight(mark.instrumentId());
+                warmIfFirstSight(mark.instrumentId(), mark.providerTimestamp());
                 var reading = forecaster.update(mark.instrumentId(), mark.price());
                 registry.submitReversion(mark.instrumentId(), reading.score());
                 if (telemetry != null && reading.score() != 0.0) {
@@ -111,18 +111,28 @@ public final class ReversionForecastLifecycle implements AutoCloseable {
      * redeploy does not restart its warm-up from zero (ADR-0071). The seed goes through the same
      * {@code update} path as a live mark but is deliberately NOT recorded in the signal telemetry: a
      * historical price is not a call the desk made, and counting it would fabricate track record.
+     *
+     * <p>The seed window is anchored on the mark's own <b>provider</b> timestamp, because that is the
+     * clock the store is keyed by. Anchoring on wall-clock now empties the seed by exactly the feed's
+     * delay (see {@link SensorWarmup} — one clock only).
      */
-    private void warmIfFirstSight(String instrumentId) {
+    private void warmIfFirstSight(String instrumentId, java.time.Instant providerTimestamp) {
         if (history == null || !seeded.add(instrumentId)) {
             return;
         }
-        int n = SensorWarmup.warm(history, instrumentId, System.currentTimeMillis(),
-                intervalSeconds * 1_000L, forecaster.warmupSamples(),
+        int needed = forecaster.warmupSamples();
+        long anchor = providerTimestamp != null ? providerTimestamp.toEpochMilli() : System.currentTimeMillis();
+        int n = SensorWarmup.warm(history, instrumentId, anchor,
+                intervalSeconds * 1_000L, needed,
                 price -> forecaster.update(instrumentId, price));
-        if (n > 0) {
-            log.info("reversion sensor warmed {} from {} stored prices (needs {}) — {}",
-                    instrumentId, n, forecaster.warmupSamples(),
-                    forecaster.readingFor(instrumentId).warm() ? "warm" : "still warming");
+        boolean warm = forecaster.readingFor(instrumentId).warm();
+        if (warm) {
+            log.info("reversion sensor warmed {} from {} stored prices (needs {}) — warm", instrumentId, n, needed);
+        } else {
+            // WARN, not INFO: a sensor that never warms is silent dead code the edge gate can never
+            // judge, and that failure has to be loud enough to reach the report (ADR-0071 correction).
+            log.warn("reversion sensor still cold for {} after seeding {} of {} stored prices — it will not "
+                    + "publish until the mark history has accumulated its warm-up span", instrumentId, n, needed);
         }
     }
 

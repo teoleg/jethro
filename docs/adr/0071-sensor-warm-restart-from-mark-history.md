@@ -102,3 +102,35 @@ after the namespace change) every sensor cold-starts exactly as it does today.
   "warmed N from M stored prices" log line.
 - Related: ADR-0014 (derived state on local disk), ADR-0017 (the chart the store exists for),
   ADR-0029 / invariant 8 (feed-mode namespacing), ADR-0064 (the gate this feeds), ADR-0066, ADR-0070.
+
+## Correction (2026-07-26) — the seed must be anchored on the feed clock, not the wall clock
+
+The first implementation asked the store for `System.currentTimeMillis() - lookback`. The store is
+keyed by **provider** timestamps, and provider time trails wall time by the feed's delay — that is why
+invariant 5 makes every event carry both stamps, and why `/api/feeds` reports `delayed` /
+`delaySeconds` at all. A delayed vendor feed (15-minute-delayed equity data is an industry standard), a
+replay, or a simulated clock running behind real time all put the whole stored series *older* than the
+wall-clock lower bound. The window then admits only the sliver of the series newer than
+`wallNow - lookback`, and once the feed's lag exceeds the lookback it admits **nothing at all**.
+
+Measured on the running desk: with the feed roughly half an hour behind, both sensors seeded **4
+prices** against warm-ups of 193 (`trend`) and 241 (`reversion`) — so `reversion` never published a
+single reading, never appeared in `fusion_targets.weights`, and remained invisible to the ADR-0064
+edge gate; and every `trend` observation the gate is judging still came from a cold start. The warm
+restart was, in effect, not running, while logging that it had succeeded.
+
+The fix is one line per sensor: anchor the seed window on the provider timestamp of the mark being
+processed, so the window is expressed in the same clock the store is keyed by. Nothing else changes —
+same thinning, same gap tolerance, same replay path, no money or risk number anywhere near it.
+
+Two hygiene changes ride along, because this defect stayed invisible for two cycles:
+
+- A sensor that is **still cold after seeding now logs at WARN**, not INFO. A sensor that never warms
+  is silent dead code that the edge gate can never judge; that has to be loud.
+- The improvement loop's report captured `docker compose logs` only. The app runs on the host, so
+  **none of the platform's own warnings ever reached the report** — the "warmed 4 of 241" line was
+  written every boot and read by nobody. The report now captures `logs/jethro-app.log` as well.
+
+**Rule this establishes.** Any lookback, retention or staleness window applied to a store keyed by
+provider time must be anchored on provider time. Mixing the two clocks fails silently and in the
+direction that looks like "the signal doesn't work".

@@ -15,6 +15,7 @@ Produces  logs/jethro-report-<timestamp>.zip  containing:
 Dependency-free: Python 3 standard library only. Env: JETHRO_URL (default http://localhost:8080).
 """
 import datetime, json, os, subprocess, sys, urllib.request, zipfile
+from collections import deque
 
 BASE = os.environ.get("JETHRO_URL", "http://localhost:8080").rstrip("/")
 OUT_DIR = os.environ.get("JETHRO_OUT", "logs")
@@ -228,20 +229,43 @@ def write_xlsx(path, sheets):
             z.writestr("xl/worksheets/sheet%d.xml" % (i + 1), _sheet_xml(h, r))
 
 
+def _filter_log_lines(text):
+    return [ln for ln in text.splitlines()
+            if any(k in ln for k in ("WARN", "ERROR", "Exception", "Caused by")) or ln.strip().startswith("at ")]
+
+
 def capture_logs(max_lines=400):
-    """Best-effort recent WARN/ERROR/Exception + stack-frame lines from the compose stack.
+    """Best-effort recent WARN/ERROR/Exception + stack-frame lines from the whole stack.
     The code-level causes an auto-fix loop must act on often live only in a stack trace, not in
     the risk/P&L workbook (e.g. a NUMERIC->double ClassCastException surfaces as a blank sheet,
-    never a number). Never raises — a missing 'docker compose' just yields a note."""
+    never a number). Never raises — a missing 'docker compose' just yields a note.
+
+    Covers BOTH the compose services and the app's own log. The app runs on the host, not in
+    compose, so a docker-only capture omitted every warning the trading platform itself emits —
+    which is how a sensor that silently failed to warm on boot stayed invisible to the loop for
+    two cycles even though it logged the reason every time (ADR-0071 correction)."""
+    sections = []
     try:
         p = subprocess.run(["docker", "compose", "logs", "--no-color", "--tail", "1500"],
                            capture_output=True, text=True, timeout=45)
-        text = p.stdout or ""
+        compose = _filter_log_lines(p.stdout or "")
     except Exception as e:
-        return "log capture unavailable (%s: %s)" % (type(e).__name__, e)
-    keep = [ln for ln in text.splitlines()
-            if any(k in ln for k in ("WARN", "ERROR", "Exception", "Caused by")) or ln.strip().startswith("at ")]
-    return "\n".join(keep[-max_lines:]) if keep else "(no WARN/ERROR/Exception lines in recent logs)"
+        compose = ["compose log capture unavailable (%s: %s)" % (type(e).__name__, e)]
+    # The app's own log: split the budget so a chatty container can never crowd it out.
+    app = []
+    try:
+        app_log = os.path.join(OUT_DIR, "jethro-app.log")
+        if os.path.exists(app_log):
+            with open(app_log, "r", errors="replace") as fh:
+                app = _filter_log_lines("".join(deque(fh, maxlen=4000)))
+    except Exception as e:
+        app = ["app log capture unavailable (%s: %s)" % (type(e).__name__, e)]
+    half = max(1, max_lines // 2)
+    if app:
+        sections.append("--- jethro-app (host JVM) ---\n" + "\n".join(app[-half:]))
+    sections.append("--- compose services ---\n" + "\n".join(compose[-(max_lines - half):]))
+    body = "\n".join(sections).strip()
+    return body if body else "(no WARN/ERROR/Exception lines in recent logs)"
 
 
 def _esc_md(v):

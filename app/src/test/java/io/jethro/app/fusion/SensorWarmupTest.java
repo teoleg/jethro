@@ -114,4 +114,37 @@ class SensorWarmupTest {
         assertThat(warmed.update("AAPL", live).warm()).isTrue();
         assertThat(cold.update("AAPL", live).warm()).isFalse();
     }
+
+    /**
+     * ADR-0071 correction — <b>one clock only</b>. The store is keyed by provider time; a delayed,
+     * replayed or simulated feed puts provider time behind the wall clock. Anchoring the seed window on
+     * wall-clock now then admits only the sliver of the series newer than {@code wallNow - lookback},
+     * and once the lag exceeds the lookback it admits nothing at all — a permanently cold sensor that
+     * still reports a successful warm. Anchoring on the mark's own provider timestamp is immune to the
+     * lag, whatever it is.
+     */
+    @Test
+    void anchorsOnTheFeedClockSoAFeedRunningBehindWallTimeStillSeeds() {
+        int samples = 20;
+        long interval = 5_000L;
+        // The series ends half an hour behind the wall clock — the lag of a delayed or simulated feed.
+        long feedLag = 1_800_000L;
+        long newestProviderMillis = NOW - feedLag;
+        List<SensorWarmup.Point> points = new ArrayList<>();
+        for (int i = 199; i >= 0; i--) {
+            points.add(new SensorWarmup.Point(newestProviderMillis - i * 1_000L, BigDecimal.valueOf(300 - i)));
+        }
+        SensorWarmup.History history = (instrumentId, since) ->
+                points.stream().filter(p -> p.timestampMillis() >= since).toList();
+
+        // Anchored on the feed's own clock: a full seed, ending on the newest stored price.
+        List<BigDecimal> onFeedClock =
+                SensorWarmup.seedPrices(history, "AAPL", newestProviderMillis, interval, samples);
+        assertThat(onFeedClock).hasSize(samples);
+        assertThat(onFeedClock.get(samples - 1)).isEqualByComparingTo("300");
+
+        // The defect being fixed: a wall-clock anchor, with a lag far wider than the lookback window,
+        // reads a window entirely in the feed's future and seeds nothing.
+        assertThat(SensorWarmup.seedPrices(history, "AAPL", NOW, interval, samples)).isEmpty();
+    }
 }

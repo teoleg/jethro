@@ -39,6 +39,18 @@ import java.util.List;
  * redeploy blip is bridged, a genuine outage (or a feed-mode change, which necessarily involves one)
  * truncates the seed rather than fabricating a jump across it.
  *
+ * <p><b>One clock only — the feed's.</b> The seed window is expressed in the <em>same</em> clock the
+ * store is keyed by: provider time. Callers pass the anchor from the mark they are processing, never
+ * from {@code System.currentTimeMillis()}. Mixing the two is silently fatal, because provider time
+ * trails wall clock by the feed's delay — invariant 5 is why both stamps exist at all, and the feeds
+ * endpoint reports {@code delayed}/{@code delaySeconds} precisely because a lagging feed is normal
+ * (15-minute-delayed equity data is an industry standard; a replay or a slow simulated clock lags
+ * arbitrarily far). A wall-clock lower bound on a provider-keyed store admits only the sliver of the
+ * series newer than {@code wallNow - lookback}, and once the feed's lag exceeds the lookback it admits
+ * <b>nothing at all</b> — the sensor then cold-starts forever while the seed reports success. That is
+ * exactly how the first cut of ADR-0071 failed in practice: seeds of 4 points against warm-ups of 193
+ * and 241, on a feed running half an hour behind the wall clock.
+ *
  * <p>Everything here is a price series and a count of samples. There is no money, risk or exposure
  * number in this class, and nothing it produces is a size — the sensors it warms publish a conviction,
  * which the deterministic fusion layer, the edge gate, the conviction floor and the pre-trade floor all
@@ -78,11 +90,15 @@ public final class SensorWarmup {
 
     /**
      * The prices to replay into a sensor, oldest first: at most {@code samples} points, spaced at least
-     * {@code intervalMillis} apart, ending as close to {@code nowMillis} as the history allows.
+     * {@code intervalMillis} apart, ending as close to {@code anchorMillis} as the history allows.
      *
+     * @param anchorMillis the newest point of interest, <b>in the store's own clock</b> — i.e. the
+     *                     provider timestamp of the mark being processed, never wall-clock now. See the
+     *                     class note: a wall-clock anchor on a provider-keyed store silently empties the
+     *                     seed on any delayed, replayed or simulated feed.
      * @return an empty list when there is no usable history — the caller then cold-starts exactly as before
      */
-    public static List<BigDecimal> seedPrices(History history, String instrumentId, long nowMillis,
+    public static List<BigDecimal> seedPrices(History history, String instrumentId, long anchorMillis,
                                               long intervalMillis, int samples) {
         if (history == null || instrumentId == null || samples <= 0 || intervalMillis <= 0) {
             return List.of();
@@ -90,7 +106,7 @@ public final class SensorWarmup {
         long lookback = intervalMillis * (long) samples * LOOKBACK_MULTIPLE;
         List<Point> points;
         try {
-            points = history.since(instrumentId, nowMillis - lookback);
+            points = history.since(instrumentId, anchorMillis - lookback);
         } catch (RuntimeException e) {
             return List.of(); // a history read must never stop a sensor from starting
         }
@@ -123,11 +139,12 @@ public final class SensorWarmup {
     /**
      * Replays one instrument's seed prices, oldest first, into a sensor's ordinary update path.
      *
+     * @param anchorMillis the store's own clock, as in {@link #seedPrices} — a provider timestamp
      * @return how many prices were replayed — 0 when there is no usable history (a plain cold start)
      */
-    public static int warm(History history, String instrumentId, long nowMillis, long intervalMillis,
+    public static int warm(History history, String instrumentId, long anchorMillis, long intervalMillis,
                            int samples, java.util.function.Consumer<BigDecimal> sensor) {
-        List<BigDecimal> prices = seedPrices(history, instrumentId, nowMillis, intervalMillis, samples);
+        List<BigDecimal> prices = seedPrices(history, instrumentId, anchorMillis, intervalMillis, samples);
         for (BigDecimal price : prices) {
             sensor.accept(price);
         }

@@ -78,3 +78,26 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - Rule 3: seed a sensor from history through its *ordinary* update path, thinned to its own cadence, and
   never record seed prices as telemetry calls — replaying at the tape rate redefines its horizon, and
   counting historical prices as calls fabricates track record for the gate that is about to judge it.
+
+### 2026-07-26T17:45Z — ADR-0071 correction (seed anchored on the feed clock)
+- Situation: PnL -$867.28 (-$0.10 this window, +$9.36 over 3 runs), gross $785.99 / net $56.85 (+$0.79).
+  **Zero orders in the window** — 100% of both moves is mark drift on two untouched stubs: market, not
+  change. The DANGER/"EXPOSURE RISING" flag fired on $0.79 against a $786 book; against VaR95 $6.87 and an
+  untripped breaker that is a threshold artifact, not a risk build. Not bleeding — the desk simply cannot
+  open a position.
+- Cause: last cycle's ADR-0071 warm restart **never actually ran**. It computed the seed window from
+  `System.currentTimeMillis()` while the mark store is keyed by **provider** timestamps, and this feed runs
+  ~30 min behind wall clock (lag confirmed growing monotonically across four report snapshots). The window
+  therefore sat in the feed's future and admitted a ~20 s sliver — 4 samples against warm-ups of 193
+  (trend) and 241 (reversion). Reversion still never appeared in `fusion_targets.weights`.
+- Lesson / rule: **any lookback, retention or staleness window applied to a provider-keyed store must be
+  anchored on provider time, never wall clock.** The two clocks differ by the feed's delay (invariant 5 is
+  why both stamps exist; `/api/feeds` reports `delayed`/`delaySeconds` because lag is normal). The failure
+  is silent, it reports success, and it looks exactly like "the signal doesn't work".
+- Rule 2: **the loop was structurally blind to the platform's own logs.** `system-report.py` captured only
+  `docker compose logs`, and the app runs on the host — so every WARN/stack trace the trading platform
+  emitted was missing from the report. The evidence for this bug was printed on every boot for two cycles
+  and read by nobody. Fixed here. When a change "does nothing", check the app log directly before
+  concluding anything about the signal.
+- Rule 3: a fix that only restores *measurability* will still score "no material change" — expect it, say
+  so up front, and judge it next cycle on whether the source now appears in the weights map, not on PnL.
