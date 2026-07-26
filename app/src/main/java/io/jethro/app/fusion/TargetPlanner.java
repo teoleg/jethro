@@ -18,7 +18,10 @@ import java.math.RoundingMode;
  *       fraction toward it, and not at all inside a no-trade band around it. This is what makes the
  *       policy cost-aware: small frequent corrections are suppressed so we don't pay spread to chase
  *       noise. Because there is ONE combined target per instrument, the delta is inherently netted
- *       across every sleeve — no two subsystems trade the same name against each other.</li>
+ *       across every sleeve — no two subsystems trade the same name against each other. The rate is
+ *       <em>derived</em> from the horizon the desk's edge is measured over — see
+ *       {@link #adjustmentRateFor} — and it applies only to the risk-INCREASING part of a delta
+ *       (ADR-0080).</li>
  * </ol>
  */
 public final class TargetPlanner {
@@ -63,9 +66,70 @@ public final class TargetPlanner {
     }
 
     /**
+     * The per-cycle partial-adjustment fraction that makes the desk's own holding period equal the
+     * horizon its sources' expectancy is measured over (ADR-0080). Dimensionless — a fraction of a
+     * gap, not a money, risk or exposure number; it is <em>derived</em>, never chosen.
+     *
+     * <p><b>Why this identity and not a dial.</b> The edge gate asks "does a source's measured
+     * expectancy beat the desk's measured ROUND-TRIP execution cost?" — one round trip's cost against
+     * one observation's return. That comparison is only dimensionally sound when the desk's position
+     * actually persists for the horizon the return was measured over. Under partial adjustment at
+     * fraction {@code a} per cycle of length {@code c}, a unit of the gap survives {@code (1−a)} per
+     * cycle, so exposure e-folds toward its target with time constant {@code τ = −c / ln(1−a)}.
+     * Setting {@code τ = h} inverts to
+     * <pre>
+     *   a = 1 − exp(−c / h)
+     * </pre>
+     * so the position lives exactly one measurement horizon and the desk pays one round trip per
+     * horizon of return, which is the trade the gate priced. Any faster rate silently pays N round
+     * trips against one horizon's return — the gate is then over-permissive by that factor N, which
+     * is the mechanism, not a market view. (Gârleanu &amp; Pedersen, "Dynamic Trading with Predictable
+     * Returns and Transaction Costs", <i>JF</i> 68(6), 2013: the optimal trading rate falls as
+     * transaction costs rise relative to the rate at which the signal decays.)
+     *
+     * <p>Worked example at the shipped configuration — cycle 30 s, horizon 3600 s:
+     * {@code a = 1 − e^(−30/3600) = 0.008298…}, and {@code τ = −30 / ln(1 − 0.008298…) = 3600 s}
+     * exactly, by construction. The previous fixed 0.5 gave {@code τ = −30/ln 0.5 = 43.3 s} — the desk
+     * held a view for 43 seconds while being graded on an hour of it.
+     *
+     * @param cycleSeconds   how often the planner re-decides (the fusion loop interval)
+     * @param horizonSeconds how far ahead each source's realised return is measured (signal telemetry)
+     * @return a fraction in (0, 1]; both inputs are floored at one second so the result is always a
+     *         usable rate rather than a configuration trap
+     */
+    public static double adjustmentRateFor(long cycleSeconds, long horizonSeconds) {
+        double c = Math.max(1L, cycleSeconds);
+        double h = Math.max(1L, horizonSeconds);
+        double a = 1.0 - Math.exp(-c / h);
+        return Math.max(Double.MIN_NORMAL, Math.min(1.0, a));
+    }
+
+    /**
      * The Gârleanu-Pedersen order delta: signed quantity to trade THIS cycle toward {@code target}.
      * Zero inside the no-trade band (|target − current| ≤ |target| × {@code bufferFraction}); otherwise
-     * {@code adjustmentRate} of the gap. Exiting toward a zero target always trades (band collapses to 0).
+     * the gap is split and the two halves are treated differently (ADR-0080):
+     *
+     * <ul>
+     *   <li>the part that <b>reduces</b> |position| — the walk from {@code current} to flat, when the
+     *       gap opposes the position — trades <b>in full, this cycle</b>;</li>
+     *   <li>the part that <b>increases</b> |position| — building toward a target, or the far side of a
+     *       sign flip — trades at {@code adjustmentRate} of itself.</li>
+     * </ul>
+     *
+     * <p><b>Why the asymmetry.</b> Smoothing exists to stop the desk paying spread to chase a noisy
+     * forecast <em>into</em> risk; it has nothing to say about taking risk <em>off</em>. Applying it to
+     * exits does not make the desk safer, it makes it slower to cut — and "cut when risk enters the
+     * danger zone" is the whole asymmetry a trend book earns its living from (let winners run, cut
+     * losers fast). A symmetric rate of {@code a} would stretch a full exit over {@code −1/ln(1−a)}
+     * cycles; at the derived rate that is an hour to close a position the desk has decided it does not
+     * want, which is a worse risk than the churn the smoothing prevents. It cannot create churn either:
+     * a reduction is bounded by the position, so "always reduce fully" strictly lowers turnover versus
+     * grinding the same exit out over many cycles. The same asymmetry the ADR-0065 gates already use
+     * ({@link #isRiskReducing}), applied to the sizing step.
+     *
+     * <p>Exiting toward a zero target always trades — the band collapses to 0 and the whole gap is a
+     * reduction. Exact decimal throughout; only the increasing part is multiplied by the dimensionless
+     * rate, with an explicit scale and rounding.
      */
     public static BigDecimal orderDelta(BigDecimal target, BigDecimal current,
                                         double bufferFraction, double adjustmentRate) {
@@ -76,8 +140,14 @@ public final class TargetPlanner {
         if (gap.abs().compareTo(band) <= 0) {
             return BigDecimal.ZERO; // inside the no-trade band — don't pay spread to chase noise
         }
+        // Split the gap at flat. The gap reduces |position| only while it runs against the position,
+        // and only for as much of it as the position has to give; everything beyond that opens or
+        // grows exposure on one side or the other.
+        BigDecimal reducing = reduceOnly(gap, cur);
+        BigDecimal increasing = gap.subtract(reducing);
         double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
-        return gap.multiply(BigDecimal.valueOf(rate)).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+        return reducing.add(increasing.multiply(BigDecimal.valueOf(rate)))
+                .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
     }
 
     /**

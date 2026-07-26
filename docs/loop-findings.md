@@ -388,3 +388,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   sources on a horizon the desk never holds is both statistically slow and economically the wrong
   question. Also watch `portfolioRiskMultiplier` / `covarianceCoveredNames` on the target book: coverage
   is 13 of 35 names, so this control currently bites unevenly and reshapes the cross-section.
+
+### 2026-07-26T21:20Z — ADR-0080 (holding period derived from the evidence horizon)
+- Situation: nothing traded this window — flat at both endpoints, zero orders, PnL and exposure both
+  unchanged. Attribution is exact and empty: 0% market, 0% change. ADR-0079's ⚠️ MIXED is **unmeasured,
+  not refuted**; nothing to revert. The desk is not bleeding — it is **frozen**: the edge gate is
+  reduce-only and the book is flat, so the reduce-only projection returns zero on every one of the 23
+  targets, and that state sustains itself until the gate opens on its own evidence.
+- **The trigger behind the last real orders was a units mismatch, not a bad view.** The 20:08–20:21
+  window put eleven MSFT legs through in thirteen minutes — buys and sells netting to *exactly* zero —
+  each paired with an ES hedge clip. Nothing was gained or lost on the position; the whole move was
+  spread and fees. That cadence is not a mystery: `adjustment-rate=0.5` at a 30s cycle gives an exposure
+  time constant of `-30/ln0.5 = 43s`, so a round trip every ~70s is what the policy *asks for*.
+- Change: the rate is no longer a dial. `TargetPlanner.adjustmentRateFor` returns
+  `a = 1 - exp(-cycle/horizon)`, the unique fraction whose time constant `τ = -cycle/ln(1-a)` equals
+  `jethro.signals.horizon-seconds` exactly, read from the same property the telemetry is configured by.
+  And only the **risk-increasing** part of a delta is rated: the walk to flat trades in full in one
+  cycle, where it was previously an asymptotic ~7-cycle grind paying a round trip per step.
+- Lesson / rule: **a gate that compares a return to a cost is only sound if the desk holds for as long
+  as the return was measured over.** The edge gate credits one horizon of expectancy and charges ONE
+  round trip; at a 43-second time constant the desk was paying ~83 of them against that single credit,
+  so a source clearing the hurdle by 10× was still losing an order of magnitude. Whenever a rule
+  compares a *per-trade* cost against a *per-period* return, go find the period the desk actually
+  holds — the mismatch is invisible in both components and lives only in their ratio.
+- Rule 2: **when two config values describe the same physical quantity, derive one from the other
+  instead of dialling both.** `horizon-seconds` and `adjustment-rate` were both "how long is a view
+  good for", set years apart by different reasoning, and neither was wrong on its own terms. A
+  derivation makes the disagreement impossible to reintroduce; two dials guarantee it comes back.
+- Rule 3: **smoothing that is symmetric is a risk control pointed the wrong way.** The partial-adjustment
+  rate exists to stop the desk paying spread to chase noise INTO risk. Applied to exits it only makes
+  the desk slower to cut — the opposite of the thesis. Check every rate/band/floor for which direction
+  it should bite; the ADR-0065 gates already had this asymmetry, the sizer did not.
+- Next lever (deliberately NOT this change): the measurement horizon itself. Evidence still accrues at
+  ONE cohort per source per hour (`SignalTelemetry.record` holds one open call per source+instrument at
+  a 3600s horizon), so `reversion` has 69 resolved observations in 3 cohorts and its standard error
+  cannot shrink at any useful rate — the gate is structurally slow to open even on a real edge. That is
+  now a pure measurement question, unentangled from cost: shortening the horizon shrinks per-observation
+  return against a fixed round trip, so it must be justified by evidence that the edge is fast, not by
+  a wish for more samples. Note the trading rate now FOLLOWS that property automatically.

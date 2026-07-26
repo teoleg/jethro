@@ -65,7 +65,8 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.assumed-correlation:0.5}") double assumedCorrelation,
                                     @Value("${jethro.fusion.unit-notional-usd:10000}") BigDecimal unitNotional,
                                     @Value("${jethro.fusion.buffer-fraction:0.2}") double bufferFraction,
-                                    @Value("${jethro.fusion.adjustment-rate:0.5}") double adjustmentRate,
+                                    @Value("${jethro.fusion.adjustment-rate:0}") double adjustmentRate,
+                                    @Value("${jethro.signals.horizon-seconds:3600}") long evidenceHorizonSeconds,
                                     @Value("${jethro.fusion.route-orders:false}") boolean routeOrders,
                                     @Value("${jethro.fusion.interval-seconds:30}") long intervalSeconds,
                                     @Value("${jethro.fusion.min-forecast-to-route:5.0}") double minForecastToRoute,
@@ -79,7 +80,14 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.edge-gate.min-sample:30}") int edgeGateMinSample,
                                     @Value("${jethro.fusion.edge-gate.t-hurdle:2.0}") double edgeGateTHurdle,
                                     @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
-        var params = new FusionPlanner.Params(assumedCorrelation, unitNotional, bufferFraction, adjustmentRate);
+        // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
+        // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
+        // the edge gate credits and the round-trip cost it charges are denominated over the same
+        // trade. A positive explicit value still overrides (escape hatch); the shipped config sets 0.
+        double rate = adjustmentRate > 0
+                ? adjustmentRate
+                : TargetPlanner.adjustmentRateFor(intervalSeconds, evidenceHorizonSeconds);
+        var params = new FusionPlanner.Params(assumedCorrelation, unitNotional, bufferFraction, rate);
         // ADR-0055 item 6: per-source weights are re-estimated from the phase-1 telemetry each cycle
         // (evidence, not decree), shrunk toward equal so a thin sample can't dominate. mode=equal forces
         // the flat placeholder; telemetry (default) falls back to equal when the store is absent or cold.

@@ -184,12 +184,54 @@ class FusionEngineTest {
         // target 100, current 95: gap 5, band = 100·0.2 = 20 → inside → no trade.
         assertEquals(0, BigDecimal.ZERO.compareTo(
                 TargetPlanner.orderDelta(bd(100), bd(95), 0.2, 0.5)));
-        // target 100, current 40: gap 60 > band 20 → trade 0.5·60 = 30.
+        // target 100, current 40: gap 60 > band 20, all of it INCREASES the long → 0.5·60 = 30.
         assertEquals(0, new BigDecimal("30.000000").compareTo(
                 TargetPlanner.orderDelta(bd(100), bd(40), 0.2, 0.5)));
-        // exit toward a zero target always trades (band collapses to 0): 0.5·(0−80) = −40.
-        assertEquals(0, new BigDecimal("-40.000000").compareTo(
+        // ADR-0080: exiting toward a zero target trades the WHOLE gap — the rate never slows a cut.
+        assertEquals(0, new BigDecimal("-80.000000").compareTo(
                 TargetPlanner.orderDelta(BigDecimal.ZERO, bd(80), 0.2, 0.5)));
+    }
+
+    /**
+     * ADR-0080: cut in full, add at the derived rate. The gap is split at flat and only the part that
+     * grows |position| is rated; exact decimal on every leg.
+     */
+    @Test
+    void onlyTheRiskIncreasingPartOfADeltaIsRated() {
+        double rate = 0.01; // a clean rate so the arithmetic is checkable by hand
+        // flat → long 150: nothing to reduce, so the whole gap is rated: 0.01·150 = 1.5.
+        assertEquals(0, new BigDecimal("1.500000").compareTo(
+                TargetPlanner.orderDelta(bd(150), BigDecimal.ZERO, 0.5, rate)));
+        // long 100 → target 10: gap −90 runs against the position and is inside it, so it is ALL a
+        // reduction → trade −90 in full (band = 10·0.5 = 5, cleared).
+        assertEquals(0, new BigDecimal("-90.000000").compareTo(
+                TargetPlanner.orderDelta(bd(10), bd(100), 0.5, rate)));
+        // long 100 → short 200: gap −300 = −100 to flat (full) + −200 of new short (rated):
+        // −100 + 0.01·(−200) = −102.
+        assertEquals(0, new BigDecimal("-102.000000").compareTo(
+                TargetPlanner.orderDelta(bd(-200), bd(100), 0.5, rate)));
+        // short 100 → target −150: the gap −50 grows the short, so it is rated: 0.01·(−50) = −0.5.
+        assertEquals(0, new BigDecimal("-0.500000").compareTo(
+                TargetPlanner.orderDelta(bd(-150), bd(-100), 0.2, rate)));
+    }
+
+    /**
+     * ADR-0080: the rate is the solution of τ = −cycle/ln(1−a) = horizon, so a round trip through the
+     * identity must return the horizon it was derived from — that identity IS the provenance.
+     */
+    @Test
+    void adjustmentRateMakesTheHoldingPeriodEqualTheEvidenceHorizon() {
+        for (long horizon : new long[] {60, 300, 900, 3600, 86_400}) {
+            double a = TargetPlanner.adjustmentRateFor(30, horizon);
+            double tau = -30.0 / Math.log(1 - a);
+            assertEquals(horizon, tau, horizon * 1e-9, "exposure e-folds in exactly one horizon");
+        }
+        // The shipped configuration: 30s cycle against the 3600s telemetry horizon.
+        assertEquals(0.008298707361, TargetPlanner.adjustmentRateFor(30, 3600), 1e-12);
+        // A horizon at or below the cycle cannot be smoothed — take the whole gap, never more.
+        assertEquals(1.0, TargetPlanner.adjustmentRateFor(3600, 1), 1e-12);
+        // Degenerate configuration must still yield a usable rate rather than a division trap.
+        assertTrue(TargetPlanner.adjustmentRateFor(0, 0) > 0);
     }
 
     private static BigDecimal bd(double v) {
