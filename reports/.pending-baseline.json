@@ -1,0 +1,20 @@
+{
+  "commit": "1398ff555a08d69783e528bc8eeab6d571313d25",
+  "fees": "3.989139",
+  "gross_exposure": "99.80037400",
+  "net_exposure": "99.80037400",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "99.80037400",
+    "hedgePnl": "0",
+    "netExposure": "99.80037400",
+    "realizedPnl": "-16.15726300",
+    "strategyAlpha": "-16.36578600",
+    "totalFees": "3.989139",
+    "totalPnl": "-16.36578600",
+    "unrealizedPnl": "-0.20852300"
+  },
+  "summary": "trend sensor: a continuous, self-normalising EWMAC forecast source (ADR-0066) so the fusion book has a directional view to plan from",
+  "total_pnl": "-16.36578600",
+  "ts": "2026-07-26T14:14:48Z"
+}
