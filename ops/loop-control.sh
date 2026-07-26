@@ -19,7 +19,10 @@ DEPLOY="${JETHRO_DEPLOY_CMD:-}"
 SCHED="${JETHRO_LOOP_CRON:-0 */2 * * *}"
 # The cron line carries JETHRO_DEPLOY_CMD (and JETHRO_URL if set) so it survives independent of your
 # interactive shell.
-ENVP="JETHRO_REPO=$REPO JETHRO_DEPLOY_CMD='$DEPLOY'"
+# Bake the current (interactive) PATH into the cron line so `claude`, gradle, docker, psql etc. are
+# found — cron's default PATH is bare and would otherwise drop them. improve-loop.sh also re-adds the
+# usual dirs as a fallback.
+ENVP="PATH='$PATH' JETHRO_REPO=$REPO JETHRO_DEPLOY_CMD='$DEPLOY'"
 [ -n "${JETHRO_URL:-}" ] && ENVP="$ENVP JETHRO_URL=$JETHRO_URL"
 LINE="$SCHED cd $REPO && $ENVP ops/improve-loop.sh $TAG"
 
