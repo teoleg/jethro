@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T16:00:12Z",
+    "fees": "9.242990",
+    "gross": "43624.31896656",
+    "net": "-2223.06538544",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "43624.31896656",
+      "hedgePnl": "36.31979494",
+      "netExposure": "-2223.06538544",
+      "realizedPnl": "-37.31885200",
+      "strategyAlpha": "-79.57755408",
+      "totalFees": "9.242990",
+      "totalPnl": "-43.25775914",
+      "unrealizedPnl": "-5.93890714"
+    },
+    "total_pnl": "-43.25775914"
+  },
+  "before": {
+    "at": "2026-07-26T15:46:56Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-22.82979500"
+  },
+  "commit": "fb9273505304378f59904dabd8bf98d89db82a38",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "43624.31896656",
+    "net": "-2223.06538544",
+    "total_pnl": "-20.42796414"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj n/a (zero gross)",
+  "revert": true,
+  "scoredAt": "2026-07-26T16:00:12Z",
+  "summary": "edge gate: replace the binary measured-edge switch with a continuous risk appetite (Phi of the best-evidenced t-stat) scaling the per-name notional, keeping full reduce-only for measured harm (ADR-0067, supersedes ADR-0064)",
+  "verdict": "\u274c BAD"
+}
