@@ -35,9 +35,10 @@ public final class FusionLifecycle implements AutoCloseable {
     public record TargetBook(long atMillis, boolean routing, int instruments,
                              Map<String, Double> weights, List<FusionPlanner.Target> targets,
                              EdgeGate.Decision edgeGate,
-                             double portfolioRiskMultiplier, int covarianceCoveredNames) {
+                             double portfolioRiskMultiplier, int covarianceCoveredNames,
+                             int volBudgetNames, double volBudgetDispersion, double volBudgetLeverCap) {
         static TargetBook empty() {
-            return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0);
+            return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0, 0, 1.0, 1.0);
         }
     }
 
@@ -59,6 +60,8 @@ public final class FusionLifecycle implements AutoCloseable {
     private final Supplier<ReturnCovarianceSource> covariance;
     /** ADR-0082 fallback: the desk's stated base measurement horizon, used when no rung is selected. */
     private final long baseHorizonSeconds;
+    /** ADR-0083: the percentile each tail of the measured σ cross-section is winsorised at. */
+    private final double volBudgetWinsorPct;
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -70,7 +73,9 @@ public final class FusionLifecycle implements AutoCloseable {
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
                            ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
                            Supplier<EdgeGate.Decision> edgeGate,
-                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds) {
+                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
+                           double volBudgetWinsorPct) {
+        this.volBudgetWinsorPct = volBudgetWinsorPct;
         this.baseHorizonSeconds = Math.max(1, baseHorizonSeconds);
         this.edgeGate = edgeGate;
         this.covariance = covariance;
@@ -135,13 +140,21 @@ public final class FusionLifecycle implements AutoCloseable {
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
                     multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), cycleParams);
+            ReturnCovarianceSource cov = covariance == null ? ReturnCovarianceSource.NONE : covariance.get();
+            // ADR-0083: split the per-name cash budget by each name's own MEASURED volatility before
+            // anything looks at the book as a whole, so every name contributes the same standalone risk
+            // instead of the same cash. Applied FIRST because the correlation control below prices how
+            // much of the book is one bet, and that question is only well posed once the names are
+            // comparable — otherwise it measures a concentration this step was always going to remove.
+            var budgeted = VolatilityBudget.apply(targets, multiplierFor, cov, volBudgetWinsorPct,
+                    cycleParams);
+            targets = budgeted.targets();
             // ADR-0079: the per-name budget sizes each name as if it were the only position, which is
             // the independence assumption. Scale the book back to the risk that assumption implies
             // once the names' MEASURED correlation is counted, so a cross-section that is really one
             // bet cannot carry N budgets of it. Applied before the edge gate: the gate clamps what the
             // desk actually intends to hold, and the operator's book shows the sizes that will route.
-            var normalised = PortfolioRiskNormaliser.apply(targets, multiplierFor,
-                    covariance == null ? ReturnCovarianceSource.NONE : covariance.get(), cycleParams);
+            var normalised = PortfolioRiskNormaliser.apply(targets, multiplierFor, cov, cycleParams);
             targets = normalised.targets();
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
             // paying for are the ones that take risk OFF. ADR-0072 asks the same question per name, so
@@ -152,7 +165,8 @@ public final class FusionLifecycle implements AutoCloseable {
                 targets = reduceOnlyWhere(targets, gate);
             }
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
-                    normalised.multiplier(), normalised.coveredNames());
+                    normalised.multiplier(), normalised.coveredNames(),
+                    budgeted.coveredNames(), budgeted.dispersion(), budgeted.leverCap());
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {

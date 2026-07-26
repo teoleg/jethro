@@ -79,6 +79,7 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.edge-gate.enabled:true}") boolean edgeGateEnabled,
                                     @Value("${jethro.fusion.edge-gate.min-sample:30}") int edgeGateMinSample,
                                     @Value("${jethro.fusion.edge-gate.t-hurdle:2.0}") double edgeGateTHurdle,
+                                    @Value("${jethro.fusion.vol-budget.winsor-pct:10.0}") double volBudgetWinsorPct,
                                     @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
@@ -148,7 +149,8 @@ public class FusionConfig {
                 () -> firmPositions(risk),
                 () -> heldInRoutedBooks(risk, hedgeBook),
                 weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
-                minForecastToRoute, gateSupplier, covarianceSupplier, evidenceHorizonSeconds);
+                minForecastToRoute, gateSupplier, covarianceSupplier, evidenceHorizonSeconds,
+                volBudgetWinsorPct);
         lifecycle.start();
         return lifecycle;
     }

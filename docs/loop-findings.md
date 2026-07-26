@@ -496,3 +496,46 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   constants, so a hair of movement flips the sign of the whole book — that is the mechanism behind the
   20:08–20:21 MSFT churn. Worth attacking once the gate can actually trade; sizing quality is
   unmeasurable while the book is flat.
+
+### 2026-07-26T22:45Z — ADR-0083 (the per-name budget is split by measured volatility)
+- Situation: twelfth consecutive cycle on a zero move — PnL and exposure both unchanged, no strategy
+  orders at all, every fusion target `deltaQty: 0` against `currentQty: 0`. Attribution is exact and
+  empty: **0% market, 0% change**. ADR-0082's ⚠️ MIXED is **unmeasured, not refuted** — it shipped ~11
+  minutes before the report. Not a danger state (nothing held, nothing to cut), but a hard miss on the
+  growth target.
+- **ADR-0082 is visibly working and was deliberately left alone.** Its new 225s rung already carries 46
+  resolved `reversion` observations against the 3600s rung's 92 accumulated over many hours — roughly
+  16× the cohort arrival rate, which is exactly the quantity that was blocking the gate. Stacking a
+  sixth consecutive gate change on top would have made both unattributable and risked breaking a fix
+  mid-flight.
+- Change: new pure `VolatilityBudget` splits the per-name cash budget by each name's own MEASURED daily
+  σ — `kᵢ = σ_ref/σ̃ᵢ`, `σ_ref` = harmonic mean of the winsorised σ over the covered names — from the
+  same EWMA covariance that already prices parametric VaR, the ADR-0038 hedge advisor and the ADR-0079
+  multiplier. Applied before the correlation control. Measured dispersion on the live universe: EURUSD
+  0.435%/day to NVDA 3.236%/day, **7.4×**.
+- Lesson / rule: **a flat per-name cash budget is a volatility bet nobody placed.** Equal dollars means
+  risk contribution proportional to σ, so a 23-name "cross-section" at 7.4× σ dispersion is a handful of
+  names plus rounding — and it is invisible in gross notional, which is the number the operator watches.
+  Whenever a budget is stated in CASH, check what it implies in RISK before believing the book is
+  diversified.
+- Rule 2: **when a control corrects one term of a product, check whether the other term is also
+  unequal.** ADR-0079's own derivation contained the answer in plain sight — its independence benchmark
+  `σ_indep = √(Σ eᵢ² Σᵢᵢ)` is unequal across names *precisely because* `Σᵢᵢ` is. The correlation fix and
+  the volatility fix are orthogonal halves of one concentration problem, and shipping only the first
+  leaves the second looking handled. Read a control's own algebra for the terms it does NOT touch.
+- Rule 3: **the reference point is where a redistribution smuggles in a money number — pick the one that
+  makes it provably neutral.** Any `σ_ref` produces `1/σ` weights; only the HARMONIC mean makes
+  `Σkᵢ = |C|`, leaving the owner-set `unit-notional-usd` untouched and its meaning intact ("cash for a
+  name of typical volatility"). Plus a one-way gross cap, because budget neutrality is neutrality of the
+  BUDGETS and realised gross also carries each name's forecast. An estimated σ must never be the reason
+  the desk carries more exposure.
+- Rule 4: **document the range where a robustness device does nothing, rather than tuning until the test
+  passes.** Nearest-rank winsorisation only clips the lowest name above `100/p` covered names; below
+  that the honest protections are the structural `Σkᵢ = |C|` bound and the gross cap. Stated at the call
+  site and in the ADR's negatives — a silent cap reads as "covered" when it isn't.
+- Observed but NOT this change (next lever, still): **forecast saturation.** `trend` sits at the ±20 cap
+  on ~26% of names and `reversion` on ~22%, with `trend` skewed almost entirely positive and `reversion`
+  almost entirely negative — so 20 of 23 combined forecasts point the same way. That is one macro bet
+  wearing a cross-section's clothes, and it is a *selection* defect this change does not touch (this one
+  equalises how much risk each name brings, not which names are chosen). Worth attacking once the gate
+  actually trades and sizing quality becomes measurable.
