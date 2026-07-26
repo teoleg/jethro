@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-26T15:47:13Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-22.82979500",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "fees": "3.998473",
+    "pnl_pct": 0.0,
+    "gross_pct": null,
+    "pnl_growth_pct": null,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": false,
+    "stale": false,
+    "underwater": true,
+    "action": "changed",
+    "last_verdict": "\u26a0\ufe0f MIXED",
+    "decision": "made a change: edge gate: replace the binary measured-edge switch with a continuous risk appetite (Phi of the best-evidenced t-stat) scaling the per-name notional, keeping full reduce-only for measured harm (ADR-0067, supersedes ADR-0064) \u00b7 prev \u26a0\ufe0f MIXED",
+    "reasoning": "Un-froze the desk: the edge gate demanded a t-stat no real signal can reach, so it was never going to\nre-open \u2014 replaced the on/off switch with sizing proportional to the evidence (ADR-0067).\n\nThe telemetry showed a desk that was not idle but *blocked*. The fusion loop was planning a full target\nbook across 23 names with real dispersion in the forecasts \u2014 the trend sensor's warm-up fix from last\ncycle worked, and names now disagree instead of all pinning at the cap \u2014 yet every single `deltaQty`\ncame back zero against a zero position. Gross exposure was flat at zero, PnL frozen at the residual\nfrom before the sim reset, and the last ledger row scored \"no material change\" for exactly that reason.\nA book that cannot open a position cannot grow PnL, so the owner's \u22651%/3-iteration target was not merely\nmissed, it was unreachable. That is the failure state the loop is supposed to attack, and it is the one\nthing worth spending this cycle on.\n\nThe cause is a design defect in ADR-0064, my own earlier change \u2014 and the defect is visible in one\nidentity it never wrote down. Its gate opens only when some source clears `t = (mean \u2212 cost)/SE \u2265 2`,\nbut `t = ((mean \u2212 cost)/\u03c3)\u00b7\u221an`, so that is a demand for a *realised Sharpe of 2/\u221an over the sample\nwindow*. At the configured minimum sample of 30, against the per-observation dispersion this platform\nactually measures on its own LIVE telemetry, it works out to needing a mean hourly return of order\n25\u201330 bps. A genuinely good trend system contributes well under 1 bp per hour. So the gate could only\never open on a fluke, and the \"it re-opens by itself the moment a source earns its cost\" property that\nmade it safe to run unattended is simply not true \u2014 it re-opens never. Worse, it collapsed two different\nstates into one verdict: its own worked example admits a reading is \"not evidence of an edge, and not\nevidence of a reliable anti-edge either\", then stops the desk exactly as hard as a proven loser would.\nRequiring proof of edge before permitting the trading that generates the proof is a closed loop.\n\nThe fix keeps the measurement and throws away the switch. The gate now returns a continuous risk\nappetite, \u03a6 of the best-evidenced t-stat, which scales the per-name notional before planning \u2014 bet in\nproportion to the probability you are right, which is ordinary fractional-Kelly reasoning. It introduces\nno new dial: with no evidence either way \u03a6(0) is one half exactly, by symmetry rather than by my choice,\nand the appetite is clamped to [0,1] so it can only ever shrink the notional Oleg configured, never grow\nit. ADR-0064's reduce-only projection survives untouched for the case it was actually built for \u2014 a\nsource measured significantly *below* its cost still stops the desk dead. The deterministic floor is\nnot touched at all: conviction floor, backtest veto, pre-trade guardrail and firm breaker are all still\nupstream of every fill, and the guardrail's gross caps bound whatever this puts on.\n\nI want to be honest about the risk, because it is real and it is the reason this could score badly. The\nbook goes from nothing to a genuinely risk-bearing size on evidence that is *absent*, not favourable.\nHalf-size on no information is a defensible prior for a trend desk with a century of out-of-sample\nliterature behind it, but it is a prior, and if this sim has no trend to capture it will cost money\nbefore the telemetry accumulates enough to shrink the appetite back down. That is the trade I am\nchoosing deliberately over a permanently frozen book, and the scorer is the right judge of it. Three\nthings I found but deliberately did not fold in \u2014 they are separate changes and are now in the deferred\nregister: the cost hurdle is one blended average dominated by a single wide-spread name, the 30-second\nre-plan cadence is badly mismatched to the one-hour signal horizon, and there is no firm risk budget, so\nbreadth growing from 7 names to 23 multiplied gross exposure with nobody deciding that it should.",
+    "commit": "8988c3e"
+  },
+  {
     "ts": "2026-07-26T14:52:02Z",
     "feedMode": "SIM",
     "available": true,
