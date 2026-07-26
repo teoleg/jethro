@@ -426,3 +426,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   now a pure measurement question, unentangled from cost: shortening the horizon shrinks per-observation
   return against a fixed round trip, so it must be justified by evidence that the edge is fast, not by
   a wish for more samples. Note the trading rate now FOLLOWS that property automatically.
+
+### 2026-07-26T21:50Z — ADR-0081 (the hurdle read against the distribution the statistic follows)
+- Situation: nothing traded this window — flat at both endpoints, zero orders, PnL and exposure both
+  unchanged. Attribution is exact and empty: 0% market, 0% change. ADR-0080's ⚠️ MIXED is **unmeasured,
+  not refuted**; nothing to revert. Tenth consecutive cycle scored on a zero move.
+- **The danger was a permission, not a position.** The held book is flat and safe; the *planned* book is
+  23 sized targets held at `deltaQty = 0` solely by the reduce-only gate. The one thing holding it back
+  was `reversion` sitting a hair under the fixed 2.0 t-hurdle — **on three resolved cohorts**. One
+  favourable burst flips a binary switch and the whole planned book arrives at once. Read the gate's
+  margin, not just the book's exposure: a control about to release is a live risk state.
+- Change: `EdgeGate` converts `t-hurdle` once into the confidence it always claimed
+  (`α = 1 − Φ(t-hurdle)`, 2.0 ⇒ 0.02275, unchanged) and tests the surplus against α under Student's t on
+  `cohorts − 1` df, via a new pure `Significance` class. Exactly a no-op as df → ∞; strictly conservative
+  below it. Evidence ordered by p-value, the only statistic comparable across differing df.
+- Lesson / rule: **when you change what a standard error is estimated FROM, you have changed which
+  distribution the ratio follows — go re-check the critical value in the same breath.** ADR-0077 correctly
+  moved the denominator to a Fama–MacBeth estimate over a handful of cohorts and left the numerator's
+  hurdle at a normal quantile. Both halves were individually defensible; the mismatch lived only in their
+  comparison, and it ran one way — at 3 cohorts a "97.7%" gate was operating at roughly 91%.
+- Rule 2: **a minimum-sample floor must count the index the statistic's precision actually depends on.**
+  `min-sample = 30` counts *observations*; 69 observations in 3 cohorts passes it comfortably while
+  supporting almost no precision. Whenever a threshold guards a statistic, check that it is denominated
+  in the same units as that statistic's degrees of freedom — ADR-0079 recorded the identical mistake one
+  level up (per-name vs across-name), and this is its within/across-time twin.
+- Rule 3: **prefer a continuous correction to a second discontinuous floor.** The alternative here was a
+  hard minimum cohort count; the t-distribution already penalises thin samples continuously and correctly,
+  and adding a floor beside it only creates two mechanisms that can disagree (the ADR-0074 lesson).
+- Next lever (deliberately NOT this change, for the fourth cycle): the measurement horizon. It is now
+  unambiguously the binding constraint — permission accrues at `1 / horizon` cohorts per hour, and no
+  statistical fix can speed that up. But its own stated condition still holds: shortening the horizon
+  shrinks per-observation expectancy against a fixed round-trip cost, so it must be justified by evidence
+  that the edge is FAST, not by a wish for more samples. The honest way to get that evidence is to measure
+  expectancy at a ladder of horizons and let the data choose — with a multiple-testing haircut for the
+  number of horizons tried. That, not a horizon guess, is the next change to build.

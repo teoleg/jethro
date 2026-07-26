@@ -206,6 +206,105 @@ class EdgeGateTest {
         assertFalse(d.mayIncrease("ES"));
     }
 
+    // ---- ADR-0081: the hurdle is read against the distribution the statistic actually follows ------
+
+    /** Stats whose standard error is estimated from a stated number of emission cohorts (ADR-0077). */
+    private static SignalScoring.Stats cohortStat(String source, long resolved, double meanBps,
+                                                  long cohorts, double stdCohortMeanBps) {
+        return new SignalScoring.Stats(source, resolved, 0, 0, 0, 0, 0.0, meanBps, stdCohortMeanBps,
+                cohorts, stdCohortMeanBps);
+    }
+
+    /**
+     * The change ADR-0081 makes, as a controlled pair. Both sources are measured at +13.50 bps with an
+     * identical standard error of 5.20, so both produce the IDENTICAL t-statistic of 2.50 against a
+     * 0.50 bps round trip. The only difference is how many independent draws that standard error was
+     * estimated from:
+     * <pre>
+     *   4 cohorts   → se = 10.40/√4  = 5.20 → t = 13.00/5.20 = 2.50, df = 3  → p ≈ 0.0438 &gt; α  ✗
+     *   100 cohorts → se = 52.00/√100 = 5.20 → t = 13.00/5.20 = 2.50, df = 99 → p ≈ 0.0071 &lt; α  ✓
+     * </pre>
+     * The old rule compared 2.50 against a fixed 2.00 and opened the gate in BOTH cases. Three or four
+     * draws of the market cannot support a 97.7% claim, however wide the cross-section they span, and
+     * this is exactly the shape the live desk presents: a source with dozens of resolved observations
+     * that are only a handful of independent cohorts.
+     */
+    @Test
+    void theSameTStatIsEvidenceFromManyDrawsAndNotFromFour() {
+        var thin = EdgeGate.evaluate(List.of(cohortStat("reversion", 92, 13.5, 4, 10.4)), 0.5, P);
+        var deep = EdgeGate.evaluate(List.of(cohortStat("reversion", 100, 13.5, 100, 52.0)), 0.5, P);
+
+        assertEquals(5.2, thin.sources().get(0).stdErrorBps(), 1e-12);
+        assertEquals(5.2, deep.sources().get(0).stdErrorBps(), 1e-12);
+        assertEquals(2.5, thin.sources().get(0).tStat(), 1e-12);
+        assertEquals(2.5, deep.sources().get(0).tStat(), 1e-12);
+
+        assertFalse(thin.mayIncrease());
+        assertTrue(deep.mayIncrease());
+        assertTrue(thin.sources().get(0).pValue() > P.alpha());
+        assertTrue(deep.sources().get(0).pValue() < P.alpha());
+    }
+
+    /**
+     * The dial keeps its meaning exactly: t-hurdle 2.0 asserts a one-sided α of 0.02275, and in the
+     * large-sample limit the Student-t test IS the normal test the gate used to run. So this correction
+     * can only ever bite where the normal approximation was invalid — it is a no-op everywhere else.
+     */
+    @Test
+    void theHurdleIsUnchangedOnceTheSampleIsLargeEnoughForItToHaveBeenRight() {
+        assertEquals(0.02275, P.alpha(), 1e-5);
+        // A t of 2.05 — a whisker over the dial — on 10,000 cohorts: se = 1000/√10000 = 10.
+        var deep = EdgeGate.evaluate(List.of(cohortStat("trend", 10_000, 20.505, 10_000, 1000.0)), 0.005, P);
+        assertEquals(2.05, deep.sources().get(0).tStat(), 1e-12);
+        assertTrue(deep.mayIncrease());
+        // ...and the identical statistic on four cohorts is not evidence. Same t, same dial, same α.
+        var thin = EdgeGate.evaluate(List.of(cohortStat("trend", 92, 20.505, 4, 20.0)), 0.005, P);
+        assertEquals(2.05, thin.sources().get(0).tStat(), 1e-12);
+        assertFalse(thin.mayIncrease());
+    }
+
+    /**
+     * A single cross-section supports no standard error at all (ADR-0077 sets it to zero there), and one
+     * cohort has zero degrees of freedom. Both readings must land on "no evidence" rather than on a
+     * division that manufactures certainty from one draw of the market.
+     */
+    @Test
+    void oneCohortIsNeverEvidenceHoweverWideItIs() {
+        var d = EdgeGate.evaluate(List.of(cohortStat("reversion", 200, 400.0, 1, 0.0)), 0.5, P);
+        assertFalse(d.mayIncrease());
+        assertFalse(d.sources().get(0).passes());
+        assertEquals(1.0, d.sources().get(0).pValue(), 1e-12);
+    }
+
+    /**
+     * The per-name test (ADR-0075) is the same test, so it inherits the same correction: a name whose
+     * own round trip is cheap enough to flip the arithmetic still cannot be opened on four draws.
+     */
+    @Test
+    void thePerNameTestInheritsTheCorrection() {
+        var d = EdgeGate.evaluate(List.of(cohortStat("reversion", 92, 13.5, 4, 10.4)),
+                BLENDED_ROUND_TRIP, COSTS, P);
+        assertFalse(d.mayIncrease());
+        assertFalse(d.mayIncrease("ES"));      // t = (13.5 − 0.29122)/5.2 = 2.54 on df 3 → not evidence
+        assertFalse(d.mayIncrease("GOOGL"));
+    }
+
+    /**
+     * Evidence is ordered by its tail probability, not by its t-statistic: across sources with different
+     * cohort counts those disagree, and the p-value is the comparable one. Here the weaker-looking t of
+     * 2.10 on 100 cohorts is far stronger evidence than 2.50 on 4, and must lead the list.
+     */
+    @Test
+    void theEvidenceListLeadsWithTheBestEvidencedSourceNotTheLoudestTStat() {
+        var d = EdgeGate.evaluate(List.of(
+                cohortStat("reversion", 92, 13.5, 4, 10.4),      // t = 2.50, df 3
+                cohortStat("momentum", 100, 11.42, 100, 52.0)),  // t = 2.10, df 99
+                0.5, P);
+        assertEquals("momentum", d.sources().get(0).source());
+        assertTrue(d.sources().get(0).tStat() < d.sources().get(1).tStat());
+        assertTrue(d.mayIncrease());
+    }
+
     @Test
     void reduceOnlyProjectionNeverGrowsAPosition() {
         BigDecimal longPos = new BigDecimal("100");

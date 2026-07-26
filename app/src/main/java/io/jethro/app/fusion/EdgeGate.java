@@ -55,6 +55,19 @@ import java.util.List;
  * Bailey, Borwein, López de Prado &amp; Zhu, "The Probability of Backtest Overfitting", <i>J. Comp.
  * Finance</i> 2017). The hurdle is a statistical convention, not a money number.
  *
+ * <p><b>…read against the right distribution (ADR-0081).</b> The comparison is made in PROBABILITY
+ * space, not in units of standard error. The dial {@code tHurdle} states a confidence level the only
+ * way it ever could — as a normal quantile — so the gate converts it once, {@code α = 1 − Φ(tHurdle)},
+ * and then asks whether the surplus clears that α under the distribution the statistic actually
+ * follows: Student's t on {@code cohorts − 1} degrees of freedom, because the ADR-0077 standard error
+ * is ESTIMATED from those cohorts rather than known. This is not a refinement at this desk's sample
+ * sizes — it is the difference between evidence and none. A cross-sectional source emits ONE cohort per
+ * measurement horizon, so B stays single-digit for hours; at B = 3 the true 97.7% one-sided point is
+ * ≈ 4.5 standard errors, and a fixed 2.0 there is roughly a 91% test wearing a 97.7% label. Three draws
+ * of the market, dressed as proof. The correction is exactly a no-op in the large-sample limit
+ * (Student's t → normal as df → ∞), so it can only ever bite where the normal approximation was
+ * invalid in the first place, and it bites only in the conservative direction.
+ *
  * <p>Pure, dimensionless, exactly testable: in come measured bps and counts, out comes a boolean and
  * a human-readable reason. It sizes nothing and prices nothing (ADR-0016 / invariant 7), and it sits
  * strictly ABOVE the deterministic floor — the pre-trade guardrail and the firm breaker still decide
@@ -64,8 +77,9 @@ public final class EdgeGate {
 
     /**
      * Statistical dials — conventions, not market numbers. {@code minSample}: resolved observations
-     * before a source's expectancy is allowed to speak at all. {@code tHurdle}: how many standard
-     * errors of surplus expectancy count as evidence rather than a lucky window.
+     * before a source's expectancy is allowed to speak at all. {@code tHurdle}: the confidence the desk
+     * demands, stated as a normal quantile — how many standard errors of surplus expectancy would count
+     * as evidence rather than a lucky window IF the standard error were known exactly.
      */
     public record Params(int minSample, double tHurdle) {
         public Params {
@@ -76,6 +90,16 @@ public final class EdgeGate {
                 tHurdle = 2.0;
             }
         }
+
+        /**
+         * The one-sided tail probability the dial asserts (ADR-0081). This — not the raw quantile — is
+         * what the gate tests against, so the SAME confidence is delivered at every sample size instead
+         * of only in the large-sample limit where a normal quantile happens to be right. The dial's
+         * meaning is unchanged: {@code tHurdle} 2.0 is α = 0.02275, exactly as it always was.
+         */
+        public double alpha() {
+            return Significance.normalUpperTail(tHurdle);
+        }
     }
 
     /**
@@ -83,15 +107,28 @@ public final class EdgeGate {
      * and {@code tStat} are stated at the cheapest round trip the desk can actually pay, which is the
      * statistic the desk-wide verdict turns on; {@link #clears(double, Params)} re-states the same
      * arithmetic at any other name's cost.
+     *
+     * <p>{@code cohorts} is the INDEPENDENT sample the standard error was estimated from (ADR-0077), and
+     * therefore what sets the reference distribution's degrees of freedom; {@code pValue} is the tail
+     * probability of {@code tStat} under it (ADR-0081) — the number the verdict actually turns on, and
+     * the honest one to show an operator, since a t-stat means nothing without its df.
      */
-    public record SourceEdge(String source, long resolved, double avgReturnBps, double stdErrorBps,
-                             double netEdgeBps, double tStat, boolean passes) {
+    public record SourceEdge(String source, long resolved, long cohorts, double avgReturnBps,
+                             double stdErrorBps, double netEdgeBps, double tStat, double pValue,
+                             boolean passes) {
 
-        /** Does this source's measured expectancy survive {@code roundTripBps} with significance? */
+        /**
+         * Does this source's measured expectancy survive {@code roundTripBps} with significance? The
+         * surplus is divided by its estimated standard error and the ratio read against Student's t on
+         * {@code cohorts − 1} degrees of freedom — the distribution it follows when the denominator is
+         * itself an estimate — rather than against a fixed normal quantile (ADR-0081).
+         */
         public boolean clears(double roundTripBps, Params params) {
-            return resolved >= params.minSample()
-                    && stdErrorBps > 0
-                    && (avgReturnBps - roundTripBps) / stdErrorBps >= params.tHurdle();
+            if (resolved < params.minSample() || !(stdErrorBps > 0) || cohorts < 2) {
+                return false;
+            }
+            double t = (avgReturnBps - roundTripBps) / stdErrorBps;
+            return Significance.studentTUpperTail(t, cohorts - 1.0) <= params.alpha();
         }
     }
 
@@ -196,13 +233,26 @@ public final class EdgeGate {
             double net = s.avgReturnBps() - cheapest;
             double se = s.stdErrorBps();
             double t = se > 0 ? net / se : 0.0;
-            boolean passes = s.resolved() >= params.minSample() && se > 0 && t >= params.tHurdle();
-            edges.add(new SourceEdge(s.source(), s.resolved(), s.avgReturnBps(), se, net, t, passes));
+            long cohorts = s.cohorts();
+            // The tail probability of this surplus under the distribution the statistic follows when
+            // its denominator is estimated from `cohorts` draws (ADR-0081). A degenerate sample reads
+            // p = 1 — no evidence — rather than dividing into an infinite t-stat.
+            double p = se > 0 && cohorts >= 2 ? Significance.studentTUpperTail(t, cohorts - 1.0) : 1.0;
+            boolean passes = s.resolved() >= params.minSample() && se > 0 && cohorts >= 2
+                    && p <= params.alpha();
+            edges.add(new SourceEdge(s.source(), s.resolved(), cohorts, s.avgReturnBps(), se, net, t,
+                    p, passes));
             if (passes) {
                 passing = passing == null ? s.source() : passing + ", " + s.source();
             }
         }
-        edges.sort((a, b) -> Double.compare(b.tStat(), a.tStat()));
+        // Best-evidenced first. Ordering on the p-value rather than the t-stat is the same ordering
+        // within one source's history, but the honest one ACROSS sources, whose cohort counts — and so
+        // whose degrees of freedom — differ: a t of 2.5 on 3 cohorts is weaker evidence than 2.1 on 40.
+        edges.sort((a, b) -> {
+            int byP = Double.compare(a.pValue(), b.pValue());
+            return byP != 0 ? byP : Double.compare(b.tStat(), a.tStat());
+        });
         if (passing != null) {
             return new Decision(true, roundTripCostBps,
                     "measured edge clears the cheapest measured round trip with significance: " + passing
@@ -211,7 +261,8 @@ public final class EdgeGate {
                     edges, costs, params);
         }
         return new Decision(false, roundTripCostBps,
-                "no source's measured expectancy beats measured execution cost with significance in any "
-                        + "name — reduce-only (ADR-0064)", edges, costs, params);
+                "no source's measured expectancy beats measured execution cost at the demanded confidence "
+                        + "in any name, read against the degrees of freedom its standard error was "
+                        + "estimated from — reduce-only (ADR-0064, ADR-0081)", edges, costs, params);
     }
 }
