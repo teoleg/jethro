@@ -34,9 +34,10 @@ public final class FusionLifecycle implements AutoCloseable {
      */
     public record TargetBook(long atMillis, boolean routing, int instruments,
                              Map<String, Double> weights, List<FusionPlanner.Target> targets,
-                             EdgeGate.Decision edgeGate) {
+                             EdgeGate.Decision edgeGate,
+                             double portfolioRiskMultiplier, int covarianceCoveredNames) {
         static TargetBook empty() {
-            return new TargetBook(0, false, 0, Map.of(), List.of(), null);
+            return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0);
         }
     }
 
@@ -54,6 +55,8 @@ public final class FusionLifecycle implements AutoCloseable {
     private final long intervalSeconds;
     private final double minForecastToRoute; // ADR-0059: conviction floor — don't route weak/oscillating signals
     private final Supplier<EdgeGate.Decision> edgeGate; // ADR-0064: measured edge vs measured cost
+    /** ADR-0079: measured daily-return covariance — how much of the book is one bet repeated. */
+    private final Supplier<ReturnCovarianceSource> covariance;
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -64,8 +67,10 @@ public final class FusionLifecycle implements AutoCloseable {
                            Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
                            FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
                            ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
-                           Supplier<EdgeGate.Decision> edgeGate) {
+                           Supplier<EdgeGate.Decision> edgeGate,
+                           Supplier<ReturnCovarianceSource> covariance) {
         this.edgeGate = edgeGate;
+        this.covariance = covariance;
         this.registry = registry;
         this.priceFor = priceFor;
         this.multiplierFor = multiplierFor;
@@ -103,6 +108,14 @@ public final class FusionLifecycle implements AutoCloseable {
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
                     multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
+            // ADR-0079: the per-name budget sizes each name as if it were the only position, which is
+            // the independence assumption. Scale the book back to the risk that assumption implies
+            // once the names' MEASURED correlation is counted, so a cross-section that is really one
+            // bet cannot carry N budgets of it. Applied before the edge gate: the gate clamps what the
+            // desk actually intends to hold, and the operator's book shows the sizes that will route.
+            var normalised = PortfolioRiskNormaliser.apply(targets, multiplierFor,
+                    covariance == null ? ReturnCovarianceSource.NONE : covariance.get(), params);
+            targets = normalised.targets();
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
             // paying for are the ones that take risk OFF. ADR-0072 asks the same question per name, so
             // a name whose own round trip costs more than the passing source's measured edge is
@@ -112,7 +125,8 @@ public final class FusionLifecycle implements AutoCloseable {
             if (gate != null) {
                 targets = reduceOnlyWhere(targets, gate);
             }
-            lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate);
+            lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
+                    normalised.multiplier(), normalised.coveredNames());
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {

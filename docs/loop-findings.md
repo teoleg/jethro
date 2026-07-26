@@ -350,3 +350,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   refuse to credit them) — it is a **measurement horizon matched to the actual holding period**, which
   the MSFT round trip says is ~13 minutes, not an hour. Grading sources on a horizon the desk never holds
   is both statistically slow and economically the wrong question.
+
+### 2026-07-26T21:05Z — ADR-0079 (portfolio diversification multiplier on the target book)
+- Situation: nothing traded this window — flat at both endpoints, zero orders, PnL and exposure both
+  unchanged. Attribution is therefore exact and empty: 0% market, 0% change. ADR-0078's ⚠️ MIXED score
+  is **unmeasured, not refuted**; a correctness fix on an untraded book can only score zero. Nothing to
+  revert. Growth is still above the 1%-per-3 bar on realized PnL.
+- **The danger was in the planned book, not the held one — for the second cycle running.** Every one of
+  the 23 fusion targets was SHORT (combined forecasts −13 to −18), because `reversion` was pinned at its
+  −20 cap on name after name simultaneously. The telemetry says the same thing in the other units: 46
+  resolved observations in **2 cohorts**. That is two draws of the market counted 23 times. Each name
+  was still sized at a full per-name budget (~$65k–$89k), so the intended book was ~$1.8M gross and
+  essentially the same net, against a firm exposure history that peaks near $415k.
+- Change: `PortfolioRiskNormaliser` scales the whole covered book by `PDM = min(1, σ_indep/σ_actual)`
+  off the EWMA(λ=0.94) daily-return covariance that already prices parametric VaR and the ADR-0038 hedge
+  advisor. `σ_indep` is not a new budget — sizing each name alone IS the independence assumption, so it
+  is the risk the per-name dial already claimed. Uncorrelated ⇒ PDM 1 (byte-identical book); N perfectly
+  correlated ⇒ 1/√N; capped at 1 so an internally-hedged book is never levered up; uniform and positive
+  so no name flips side. Uncovered names are neither summed nor scaled.
+- Lesson / rule: **a control that measures concentration WITHIN a name says nothing about concentration
+  ACROSS names, and the two are easy to mistake for each other.** ADR-0076 spent a whole cycle getting
+  the source-level diversification multiplier right, and its existence made the book *look* like it had
+  correlation handling. It did not: every name was still sized as if it were the only position. Before
+  believing a risk control covers an axis, check which index its sum actually runs over.
+- Rule 2: **when a source reads its CAP on many names at once, that is a common-mode reading, not
+  breadth.** The cross-section's width flatters the book — 23 names looks diversified — while the cohort
+  count (2) tells the truth about how many independent draws are in it. Whenever a forecast source pins
+  at its bound across the universe, treat the book as ONE position until proven otherwise, and go read
+  the cohort count rather than the name count.
+- Rule 3: order of operations, again. Last cycle's "next lever" was a faster expectancy measurement
+  horizon to open the gate sooner. That had to wait: opening the gate faster on a book with no
+  cross-name correlation control would have *accelerated* the arrival of $1.8M of one-way exposure. Fix
+  the sizing of what gets let through before speeding up what lets it through.
+- Next lever (deliberately NOT this change): the measurement horizon, now unblocked. Evidence still
+  accrues at ONE cohort per source per hour because `SignalTelemetry.record` refuses a new call while one
+  is open and the horizon is 3600s, while the desk's only observed round trip held ~13 minutes. Grading
+  sources on a horizon the desk never holds is both statistically slow and economically the wrong
+  question. Also watch `portfolioRiskMultiplier` / `covarianceCoveredNames` on the target book: coverage
+  is 13 of 35 names, so this control currently bites unevenly and reshapes the cross-section.

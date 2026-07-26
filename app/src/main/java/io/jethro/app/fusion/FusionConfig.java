@@ -59,6 +59,7 @@ public class FusionConfig {
                                     ObjectProvider<TradingCoreLifecycle> tradingCore,
                                     io.jethro.trading.riskpnl.InstrumentRefSource refs,
                                     ObjectProvider<RiskProjection> risk,
+                                    ObjectProvider<io.jethro.app.risk.VarService> varService,
                                     ObjectProvider<FusionExecutor> executor,
                                     @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
                                     @Value("${jethro.fusion.assumed-correlation:0.5}") double assumedCorrelation,
@@ -114,6 +115,23 @@ public class FusionConfig {
                         return null;
                     }
                 };
+        // ADR-0079: the same EWMA daily-return covariance the parametric VaR and the ADR-0038 hedge
+        // advisor already price risk with — so the sizer and the risk engine cannot disagree about how
+        // correlated the book is. Re-read each cycle (VarService memoises it for 30s), and a warm-up,
+        // an absent estimate or a failed read all degrade to NONE, which leaves the book exactly as
+        // planned rather than asserting a correlation nothing measured.
+        java.util.function.Supplier<ReturnCovarianceSource> covarianceSupplier = () -> {
+            var v = varService.getIfAvailable();
+            if (v == null) {
+                return ReturnCovarianceSource.NONE;
+            }
+            try {
+                return v.covarianceSnapshot().map(FusionConfig::returnCovariance)
+                        .orElse(ReturnCovarianceSource.NONE);
+            } catch (RuntimeException e) {
+                return ReturnCovarianceSource.NONE;
+            }
+        };
         var lifecycle = new FusionLifecycle(registry,
                 instrument -> priceFor(tradingCore, instrument),
                 // ADR-0078: the contract spec comes from the instrument master — the same source
@@ -124,9 +142,31 @@ public class FusionConfig {
                 () -> firmPositions(risk),
                 () -> heldInRoutedBooks(risk, hedgeBook),
                 weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
-                minForecastToRoute, gateSupplier);
+                minForecastToRoute, gateSupplier, covarianceSupplier);
         lifecycle.start();
         return lifecycle;
+    }
+
+    /**
+     * Adapts a {@link io.jethro.trading.riskpnl.CovMath.Covariance} snapshot to the fusion layer's
+     * narrow read interface (ADR-0079). The name→index map is built once per snapshot so the pairwise
+     * walk over the target book is a hash lookup rather than a linear scan; a name outside the
+     * estimate's strict-coverage intersection reads empty, and the caller makes no claim about it.
+     */
+    private static ReturnCovarianceSource returnCovariance(io.jethro.trading.riskpnl.CovMath.Covariance cov) {
+        java.util.List<String> names = cov.instruments();
+        java.util.Map<String, Integer> index = new java.util.HashMap<>(names.size() * 2);
+        for (int i = 0; i < names.size(); i++) {
+            index.put(names.get(i), i);
+        }
+        double[][] sigma = cov.sigma();
+        return (a, b) -> {
+            Integer i = index.get(a);
+            Integer j = index.get(b);
+            return i == null || j == null
+                    ? java.util.OptionalDouble.empty()
+                    : java.util.OptionalDouble.of(sigma[i][j]);
+        };
     }
 
     /**

@@ -22,7 +22,7 @@ public final class FusionController {
     public FusionLifecycle.TargetBook targets() {
         FusionLifecycle f = fusion.getIfAvailable();
         return f == null
-                ? new FusionLifecycle.TargetBook(0, false, 0, java.util.Map.of(), java.util.List.of(), null)
+                ? new FusionLifecycle.TargetBook(0, false, 0, java.util.Map.of(), java.util.List.of(), null, 1.0, 0)
                 : f.book();
     }
 }
