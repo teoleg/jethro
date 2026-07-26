@@ -61,6 +61,39 @@ class CorrelatedFactorSimulatorTest {
     }
 
     @Test
+    void equityFactorCarriesRealTrendAutocorrelation_adr0069() {
+        // ES loads purely on the equity factor (betaEq=1, betaUsd=0), so its returns track fEq — which
+        // now carries the AR(1) trend. The base i.i.d. ADR-0026 model gives lag-1 return autocorrelation
+        // ~0 (no rideable trend); with the trend it must be CLEARLY positive, yet stay weak (not free
+        // money). SE ≈ 1/√n ≈ 0.006 for n=30k, so 0.04 is many standard errors above zero.
+        var s = sim(7, singleRegime("CALM", 0, RISK_OFF_CORR));
+        int n = 30_000;
+        double[] r = new double[n];
+        double prev = s.priceScaled(0);
+        for (int t = 0; t < n; t++) {
+            s.nextTick();
+            double p = s.priceScaled(0);
+            r[t] = Math.log(p / prev);
+            prev = p;
+        }
+        double mean = 0;
+        for (double v : r) {
+            mean += v;
+        }
+        mean /= n;
+        double c0 = 0, c1 = 0;
+        for (int t = 0; t < n; t++) {
+            c0 += (r[t] - mean) * (r[t] - mean);
+        }
+        for (int t = 1; t < n; t++) {
+            c1 += (r[t] - mean) * (r[t - 1] - mean);
+        }
+        double ac1 = c1 / c0;
+        assertTrue(ac1 > 0.04, "lag-1 autocorrelation should be clearly positive (a rideable trend), was " + ac1);
+        assertTrue(ac1 < 0.5, "trend must stay weak/realistic — not free money — was " + ac1);
+    }
+
+    @Test
     void overnightGapIsDeterministicAndCarriesAWholeGapMove() {
         var a = sim(42, singleRegime("CALM", 0, RISK_OFF_CORR));
         var b = sim(42, singleRegime("CALM", 0, RISK_OFF_CORR));

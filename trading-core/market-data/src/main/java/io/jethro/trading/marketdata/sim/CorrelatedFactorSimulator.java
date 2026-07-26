@@ -39,6 +39,18 @@ public final class CorrelatedFactorSimulator {
     public static final double DEFAULT_PRICE_BAND = 4.0;
     private static final long MIN_PRICE_SCALED = 10_000L; // 0.01 — no zero/negative prices
 
+    // --- Latent equity TREND (ADR-0069): the base ADR-0026 draw is i.i.d. per tick, so returns have
+    // NO serial predictability — a trend/mean-reversion strategy has nothing real to capture (measured
+    // edge ≈ 0). Real equity factors carry weak, persistent momentum. We add a slow AR(1) trend to the
+    // equity factor: t_k = φ·t_{k-1} + √(1−φ²)·ε (unit stationary variance), injected in place of a
+    // √(1−w²)-scaled share of the noise so TOTAL factor variance is preserved — only its serial
+    // structure changes. Result: ~φ one-lag return autocorrelation, a rideable trend that is still
+    // weak enough that costs punish over-trading. Deterministic via a separate RNG stream (does not
+    // perturb the factor-innovation order). PLACEHOLDER sim-realism dials (NOT money/risk gates) —
+    // refine via scripts/calibrate_sim.py against real momentum stats.
+    private static final double TREND_PERSISTENCE = 0.98;   // φ per tick — a trend persists ~1/(1−φ)=50 ticks
+    private static final double TREND_VOL_FRACTION = 0.35;  // trend = 35% of equity-factor STD (in quadrature)
+
     private SplittableRandom random;          // non-final: a live reseed (ADR-0031) swaps it
     private final FactorModelConfig cfg;
     private final double dtDays;
@@ -63,6 +75,8 @@ public final class CorrelatedFactorSimulator {
 
     private int regimeIndex;
     private int shockSign;                    // -1 on a shock-entry tick, else 0
+    private SplittableRandom trendRandom;     // ADR-0069: separate stream for the AR(1) equity trend
+    private double trendEq;                    // latent equity-trend state (unit stationary variance)
     private double lastLevelDelta;            // fraction (e.g. -0.0004 = -4bp), consumed by the curve
     private double lastSlopeDelta;
 
@@ -94,6 +108,8 @@ public final class CorrelatedFactorSimulator {
             throw new IllegalArgumentException("start prices must align with instruments");
         }
         this.random = new SplittableRandom(seed);
+        this.trendRandom = new SplittableRandom(seed ^ 0x9E3779B97F4A7C15L); // decorrelated from `random`
+        this.trendEq = 0.0;
         this.control = control;
         this.startPricesScaled = startPricesScaled.clone();
         this.cfg = cfg;
@@ -181,6 +197,8 @@ public final class CorrelatedFactorSimulator {
         long reseed = control.consumeReseed();
         if (reseed != SimControl.NO_RESEED) {
             random = new SplittableRandom(reseed);
+            trendRandom = new SplittableRandom(reseed ^ 0x9E3779B97F4A7C15L);
+            trendEq = 0.0;
             for (int i = 0; i < ids.length; i++) {
                 price[i] = startPricesScaled[i] / 1_000_000.0;
             }
@@ -224,8 +242,16 @@ public final class CorrelatedFactorSimulator {
         double[] x = multiply(cholesky[regimeIndex], z);
         double tScale = studentTScale();
 
+        // Equity factor with a variance-preserving AR(1) TREND (ADR-0069): evolve the latent trend
+        // (unit stationary variance), then split the factor STD between fat-tailed noise (share
+        // √(1−w²)) and the persistent trend (share w). Total variance is unchanged — only the serial
+        // structure — so a trend strategy has real momentum to capture while vol stays calibrated.
+        trendEq = TREND_PERSISTENCE * trendEq
+                + Math.sqrt(1.0 - TREND_PERSISTENCE * TREND_PERSISTENCE) * trendRandom.nextGaussian();
+        double eqVolStep = cfg.equityFactorVolAnnual() / Math.sqrt(TRADING_DAYS_PER_YEAR) * sqrtDDays * volMult;
+        double eqNoiseShare = Math.sqrt(1.0 - TREND_VOL_FRACTION * TREND_VOL_FRACTION);
         double fEq = regime.equityDriftAnnual() * dDays / TRADING_DAYS_PER_YEAR
-                + cfg.equityFactorVolAnnual() / Math.sqrt(TRADING_DAYS_PER_YEAR) * sqrtDDays * volMult * tScale * x[F_EQ];
+                + eqVolStep * (eqNoiseShare * tScale * x[F_EQ] + TREND_VOL_FRACTION * trendEq);
         double fUsd = regime.usdDriftAnnual() * dDays / TRADING_DAYS_PER_YEAR
                 + cfg.usdFactorVolAnnual() / Math.sqrt(TRADING_DAYS_PER_YEAR) * sqrtDDays * volMult * tScale * x[F_USD];
         lastLevelDelta = regime.ratesDriftBpPerDay() * 1e-4 * dDays

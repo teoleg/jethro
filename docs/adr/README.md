@@ -70,6 +70,8 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 
 | [0068](0068-equity-relative-firm-risk-budget.md) | Equity-relative firm risk budget & bleed cutoff — the danger-cut machinery exists (guardrail + firm breaker) but its loss/drawdown dials were big-book absolutes that go toothless on a reset; recalibrate to placeholders now, make them equity-relative next | Proposed | ◐ Config recalibrated (loss/drawdown lowered to PLACEHOLDER — Oleg to set); equity-relative mechanism deferred |
 
+| [0069](0069-sim-exploitable-trend-structure.md) | Exploitable trend structure in the sim — the ADR-0026 factor draw is i.i.d. (no momentum), so no strategy can win; add a variance-preserving AR(1) equity trend so a trend strategy has real, weak, cost-sensitive edge to capture (a dev/validation ground, not proof of real edge) | Proposed | ◐ Equity-factor AR(1) trend implemented + tested (autocorrelation clearly positive, vol preserved, deterministic); USD/rates + config-ified dials deferred |
+
 ## Status vs Implementation
 
 **Status** is the ADR lifecycle (Proposed / Accepted / Superseded); **Implementation** is what is

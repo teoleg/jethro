@@ -74,6 +74,12 @@ never hardcoded price levels, so the same strategy adapts to any feed. Never spe
 
 ## Current focus (update as it evolves)
 - Sim book has been reset to zero — judge changes on growth from 0, not against the old legacy loss.
+- **The sim now has REAL trend edge to capture (ADR-0069):** the equity factor carries a weak AR(1)
+  trend (~0.1 one-lag return autocorrelation), so "grow PnL" is now *achievable in sim* by a good trend
+  strategy — "no edge, go live" is **no longer** the default conclusion. Your job in sim: make the trend
+  sensor actually detect and ride that trend, net of costs. It is deliberately weak, so a sloppy/over-
+  trading strategy still loses; a disciplined risk-managed one wins. (It remains a *validation* ground,
+  not proof of real-market edge — invariant 9.)
 - Highest-leverage next moves (from the owner strategy discussion): sharper **regime detection** →
   regime-conditional momentum/mean-reversion; richer decision features (vol, the sim's regime-coupled
   **volume**, breadth); **factor-level** signals over per-name noise; conviction/vol-scaled sizing + hard
