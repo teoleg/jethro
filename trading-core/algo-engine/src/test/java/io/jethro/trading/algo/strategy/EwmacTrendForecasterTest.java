@@ -117,6 +117,79 @@ class EwmacTrendForecasterTest {
         assertEquals(0.0, nullId.score());
     }
 
+    /**
+     * A stationary stream with trends and reversals at several timescales, built from incommensurate
+     * sinusoids so it is statistically homogeneous AND fully deterministic — no RNG, so the assertions
+     * below are exact facts about the sensor rather than a flaky sample.
+     */
+    private static double[] mixedRegimes(int steps) {
+        double[] out = new double[steps];
+        for (int t = 0; t < steps; t++) {
+            out[t] = 100.0 * (1 + 0.020 * Math.sin(t / 7.3)
+                                + 0.013 * Math.sin(t / 17.1)
+                                + 0.008 * Math.sin(t / 3.7));
+        }
+        return out;
+    }
+
+    /** Production-shaped spans (slow = 4×fast, normalisation = 4×slow), scaled down to keep tests quick. */
+    private static final Params SHAPED = new Params(4, 16, 64);
+
+    /** Every reading the sensor actually publishes — i.e. those it reports itself warm for. */
+    private static java.util.List<Double> published(Params params, double[] prices) {
+        EwmacTrendForecaster f = new EwmacTrendForecaster(params);
+        java.util.List<Double> out = new java.util.ArrayList<>();
+        for (double p : prices) {
+            Reading r = f.update("X", BigDecimal.valueOf(p));
+            if (r.warm()) {
+                out.add(r.score());
+            }
+        }
+        return out;
+    }
+
+    @Test
+    void saysNothingUntilItHasMeasuredWhatTypicalMeansOnThisStream() {
+        // The scale estimator needs normalisationSpan/2 readings; until then the sensor has a price
+        // window but no calibration, and a reading divided by an uncalibrated scale is not a reading.
+        EwmacTrendForecaster f = new EwmacTrendForecaster(SHAPED);
+        double[] prices = ramp(100, 0.5, 16 + 64 / 2); // past the slow window, still inside scale warm-up
+        Reading r = feed(f, "AAPL", prices);
+        assertFalse(r.warm(), "the sensor must not speak while its scale is still being measured");
+        assertEquals(0.0, r.score(), "no view means no view — never a placeholder conviction");
+
+        Reading later = feed(f, "AAPL", ramp(100 + 0.5 * prices.length, 0.5, 40));
+        assertTrue(later.warm(), "once the scale estimator is warm the sensor speaks");
+    }
+
+    @Test
+    void aFreshlyWarmedNameDoesNotOpenAtMaximumConviction() {
+        // Regression (ADR-0066): the scale EWMA used to be seeded from ONE observation, so the first
+        // readings were divided by a single noisy draw rather than an estimate of typical size. On this
+        // stream that pinned 5 of the first 10 readings at |score| >= 2 — the point at which the desk's
+        // forecast clips to its ±20 cap, i.e. maximum position size on every such name, decided at the
+        // moment the sensor knew least. Saturation also destroys the sensor's whole purpose: a clipped
+        // forecast cannot rank a clean trend above a noisy one.
+        java.util.List<Double> pub = published(SHAPED, mixedRegimes(600));
+        assertTrue(pub.size() >= 10, "expected the sensor to publish readings, got " + pub.size());
+
+        for (int i = 0; i < 10; i++) {
+            assertTrue(Math.abs(pub.get(i)) < 2.0,
+                    "reading " + i + " opened at the forecast cap (|score|=" + Math.abs(pub.get(i))
+                            + "): the scale estimator is not warm enough to divide by");
+        }
+    }
+
+    @Test
+    void aTypicalReadingStaysTheUnitOfConvictionOverTheLongRun() {
+        // The warm-up must not disturb what the score MEANS: E|score| ~ 1 = "one typical trend", which
+        // is what lets TARGET_ABS map a typical trend onto a typical conviction for every source.
+        java.util.List<Double> pub = published(SHAPED, mixedRegimes(600));
+        double mean = pub.stream().mapToDouble(Math::abs).average().orElseThrow();
+        assertTrue(mean > 0.6 && mean < 1.6,
+                "a typical reading must still be ~1 by construction, got E|score|=" + mean);
+    }
+
     @Test
     void eachInstrumentIsMeasuredOnItsOwnBehaviour() {
         EwmacTrendForecaster f = new EwmacTrendForecaster(FAST);

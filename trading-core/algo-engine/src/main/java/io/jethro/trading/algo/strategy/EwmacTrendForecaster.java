@@ -34,6 +34,19 @@ import java.util.Map;
  *   score       = q / scale                                       E|score| ≈ 1 by construction
  * </pre>
  *
+ * <p><b>The scale estimator is warmed before it is trusted.</b> {@code scale} is the denominator of
+ * every reading, so a scale built from too little history is not a calibration — it is an arbitrary
+ * anchor, and the sensor divides by it. Seeding the EWMA from a <em>single</em> observation (its
+ * natural but wrong initialisation) anchors "typical" to whatever the stream happened to be doing at
+ * one instant; because Nn is deliberately long, the EWMA then needs most of a span to walk that anchor
+ * off. A name whose first reading lands in a quiet patch therefore reports every subsequent ordinary
+ * move as an extreme one, and pins at the forecast cap — maximum conviction at the moment the sensor
+ * knows least, which is precisely backwards. So the first {@code Nn/2} readings are accumulated into a
+ * <em>running mean</em> of {@code |q|} and the sensor publishes <b>no view</b> (score 0, not warm)
+ * until it has them; only then does it switch to exponential updating. The slowness of the EWMA itself
+ * is intentional and unchanged — a fast normaliser would divide out the very trend strength the score
+ * exists to report.
+ *
  * <p><b>Self-calibration is the point</b> (and what makes it feed-agnostic — invariant 9). Every step
  * is expressed relative to the instrument's own measured behaviour: the crossover in units of its own
  * step vol, the result in units of its own typical reading. Nothing is a price level, a bps constant,
@@ -83,7 +96,11 @@ public final class EwmacTrendForecaster {
         }
     }
 
-    /** One instrument's reading — {@code score} plus the parts it was built from, for the UI/tests. */
+    /**
+     * One instrument's reading — {@code score} plus the parts it was built from, for the UI/tests.
+     * {@code warm} means the sensor is <b>speaking</b>: both the price windows and the scale estimator
+     * have their history, so {@code score} is a calibrated reading rather than a placeholder zero.
+     */
     public record Reading(String instrumentId, double score, double rawTrend, double efficiencyRatio,
                           boolean warm) {
         static Reading cold(String instrumentId) {
@@ -97,7 +114,9 @@ public final class EwmacTrendForecaster {
         private BigDecimal vol;      // EWMA of |Δprice|
         private BigDecimal last;
         private final Deque<BigDecimal> window = new ArrayDeque<>();
-        private double absScale;     // EWMA of |quality-weighted trend|
+        private double absScale;     // EWMA of |quality-weighted trend| (running mean while warming)
+        private double absScaleSum;  // sum of |q| over the warm-up readings, for that running mean
+        private int scaleSamples;    // how many |q| readings the scale estimator has absorbed
         private long steps;
     }
 
@@ -105,6 +124,8 @@ public final class EwmacTrendForecaster {
     private final BigDecimal alphaFast;
     private final BigDecimal alphaSlow;
     private final double alphaScale;
+    /** Readings the scale estimator must absorb before the sensor speaks — see the class doc. */
+    private final int scaleWarmupSamples;
     private final Map<String, State> states = new LinkedHashMap<>();
     private final Map<String, Reading> readings = new LinkedHashMap<>();
 
@@ -113,6 +134,10 @@ public final class EwmacTrendForecaster {
         this.alphaFast = alpha(params.fastSpan());
         this.alphaSlow = alpha(params.slowSpan());
         this.alphaScale = 2.0 / (params.normalisationSpan() + 1.0);
+        // Half the normalisation span: derived from the configured span rather than a new dial, so
+        // there is one place to tune "how long is "typical" measured over". A shape/warm-up length,
+        // not a money, risk or exposure number — it delays the first reading, it never sizes anything.
+        this.scaleWarmupSamples = Math.max(1, params.normalisationSpan() / 2);
     }
 
     /** Standard EWMA smoothing constant for a span: {@code α = 2/(span+1)}. */
@@ -163,7 +188,16 @@ public final class EwmacTrendForecaster {
             return remember(Reading.cold(instrumentId));
         }
         double absQ = Math.abs(q);
-        s.absScale = s.absScale == 0.0 ? absQ : s.absScale + alphaScale * (absQ - s.absScale);
+        s.scaleSamples++;
+        if (s.scaleSamples <= scaleWarmupSamples) {
+            // Still measuring what "typical" is on this stream: hold the estimate as the running mean
+            // of the readings so far and report no view. Dividing by a one-sample anchor here is what
+            // used to pin a freshly-warmed name at the forecast cap.
+            s.absScaleSum += absQ;
+            s.absScale = s.absScaleSum / s.scaleSamples;
+            return remember(new Reading(instrumentId, 0.0, raw, er, false));
+        }
+        s.absScale += alphaScale * (absQ - s.absScale);
         if (!(s.absScale > 0)) {
             return remember(new Reading(instrumentId, 0.0, raw, er, true));
         }

@@ -86,6 +86,33 @@ to the same expected magnitude whatever they are, so changing them changes *whic
 how large the book is. Position size remains governed by `unit-notional-usd`, the conviction floor, the
 edge gate and the guardrail — none of which this ADR touches.
 
+### Correction (2026-07-26, same day, before ratification): warming the scale estimator
+
+The `scale = EWMA of |q|` line above is the denominator of every reading, and the first implementation
+seeded that EWMA from a **single observation** — the natural initialisation, and the wrong one. It
+anchors "typical" to whatever the stream happened to be doing at one instant, and because `Nn` is
+deliberately long the EWMA then needs most of a span to walk the anchor off. The result observed live,
+minutes after the sensor first ran: **every** name reporting the extreme of the forecast scale at once,
+including 2-year and 5-year Treasury futures pinned at *opposite* extremes — two expressions of one
+rates factor, which no genuine trend read would place in maximum opposition.
+
+That is a calibration failure with a direct cost: a saturated forecast is a clipped forecast, so it
+carries no sizing information, and the discrimination this ADR exists to provide — a clean trend
+outranking a noisy one — is exactly what is lost. It also asks for maximum position size at the moment
+the sensor knows least.
+
+The fix keeps the model and repairs the estimator: the first `Nn/2` readings are accumulated into a
+**running mean** of `|q|`, the sensor publishes **no view** until it has them, and only then does it
+switch to exponential updating. `Nn/2` is derived from the configured normalisation span rather than
+introduced as a new dial, and it is a **warm-up length — it delays the first reading and sizes
+nothing**. The slowness of the EWMA itself is deliberately unchanged: a fast normaliser would divide
+out the very trend strength the score exists to report.
+
+Measured on a deterministic multi-timescale stream at these span proportions, this takes the first ten
+published readings from five-of-ten clipped at the cap (peak reading 6.5× a typical trend) to none
+clipped, while leaving the long-run calibration `E|score| ≈ 1` intact. Both properties are locked in by
+`EwmacTrendForecasterTest`.
+
 ## Alternatives considered
 
 - **Re-tune the existing momentum strategy (longer lookback, lower threshold).** Rejected as the

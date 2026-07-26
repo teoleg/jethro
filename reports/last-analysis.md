@@ -1,29 +1,40 @@
-Added a continuous trend sensor (EWMAC) as a fifth fusion forecast source — the desk had no source that
-speaks every cycle, so the book had nothing to plan from and sat flat at zero.
+Fixed the trend sensor's scale estimator: it was seeded from one observation, so every name opened at
+maximum conviction — the sensor was asking for the biggest possible book at the moment it knew least.
 
-The telemetry showed a completely idle desk: no positions, no exposure, no PnL, no fusion targets, no
-strategy signals — the sim book had been reset and the selector was still measuring. That is the
-expected end-state of my last two changes (ADR-0064's cost-aware gate, ADR-0065's held-name targets):
-both were de-risking changes and both did their job, but removing trades that had no measured edge
-cannot by itself produce trades that do, and a flat book earns nothing. The gap I diagnosed is
-structural rather than a bad parameter: every deterministic source the platform has is a *threshold
-detector* that fires on an unusual short-window move and is silent otherwise, which can answer "did
-something just happen?" but not "are we in a trend here, which way, and how much should we own?" — the
-question a risk-managed trend book must answer for every name on every cycle. Since fusion is the sole
-order origin, silence across all sources is a flat book by construction.
+Context first, because it explains the empty report: `scripts/reset-sim.sh` was run a few minutes before
+this cycle. That wipes the SIM book and, by design, the loop's sim-derived records — so the pending
+baseline for last cycle's trend sensor went with it and the scorer correctly reported nothing to score.
+Last cycle's change is therefore deployed but unmeasured, not judged. The bundled report was captured ten
+seconds after the restart and shows an idle desk for that reason alone; I read the live endpoints instead,
+and they showed something quite different.
 
-So this run adds `trend` (ADR-0066, Proposed): an EWMA crossover normalised by each name's own step
-volatility, weighted by Kaufman's efficiency ratio so a clean trend outranks a noisy one, then rescaled
-by an EWMA of its own typical reading so its output means the same thing on any stream — sim, live or
-replay, with no price levels or bps constants anywhere. It is a sensor, not an authority: it publishes
-into the same registry as every other source, records every call in the signal telemetry so its
-expectancy is measured like anyone else's, and cannot put risk on until the edge gate, the conviction
-floor, the backtest-support veto and the deterministic floor all allow it. I expect this to show
-exposure up in the next ledger row — putting a diversified trend book on is the point — so the verdict
-turns on whether the PnL earned justifies it. If it does not, the scorer reverts it and I take a
-different lever next run.
+What they showed is a defect in my own last change. Every single name the trend source spoke about was
+pinned at the extreme of the forecast scale, simultaneously — including the 2-year and 5-year Treasury
+futures pinned at *opposite* extremes. Those two are the same rates factor; no real trend read puts them
+in maximum opposition. That is the signature of a saturated forecast, not a directional view. The
+mechanism is in the normaliser: the sensor divides each reading by an EWMA of its own typical magnitude,
+and that EWMA was seeded from a *single* observation. One draw is not an estimate of "typical" — it is an
+arbitrary anchor, and because the normalisation span is deliberately long, the EWMA needs most of a span
+to walk it off. Any name whose first reading landed in a quiet patch then reported every ordinary move
+afterwards as an extreme one. I reproduced it deterministically: on a stream built from incommensurate
+sinusoids at production span proportions, five of the first ten published readings clipped at the cap,
+peaking at six and a half times a typical trend.
 
-One unrelated repair was needed to verify anything at all: the branch was already red before this change
-on a social-pipeline test whose fixture had gone stale (its synthetic pump could land on the same ticker
-as the legitimate event, and its copypasta varied only by emoji, which the spam filter normalises away —
-so the burst was shed before the detector could flag it). Test-fixture only; no production behaviour.
+This costs risk-adjusted PnL in both terms of the ratio. A clipped forecast carries no sizing
+information, so the discrimination that justified ADR-0066 — a clean trend outranking a noisy one — is
+destroyed exactly when it matters; and every saturated name asks for the maximum position the scale
+allows, so exposure inflates with no conviction behind it. It also renders the conviction floor a no-op,
+since nothing sits below a threshold when everything is at the ceiling.
+
+The fix repairs the estimator and leaves the model alone: the first half-span of readings accumulate into
+a running mean of the raw magnitude, the sensor publishes no view at all until it has them, and only then
+does it switch to exponential updating. It stays silent longer and speaks calibrated when it does. I
+deliberately did *not* speed up the EWMA — a fast normaliser would divide out the very trend strength the
+score exists to report. The warm-up length is derived from the existing normalisation span rather than
+added as a new dial, and it delays the first reading without sizing anything. Both the regression and the
+long-run calibration are locked in by tests that I verified fail against the old seed, and the correction
+is recorded in ADR-0066 itself, which is still Proposed.
+
+I expect the sensor to be quiet for its warm-up and then to speak with real dispersion instead of a wall
+of maximum readings. If the next ledger row says otherwise, the lever after this is the fusion weighting
+rather than the sensor.
