@@ -33,6 +33,28 @@ Make **risk-adjusted PnL** better: **total PnL up per unit of total exposure.** 
   single-run blip. Prefer the clearest, best-understood edge. Chasing the target must not mean forcing
   trades that lose money — a bad change gets scored ❌ and reverted, so let the measurement keep you honest.
 
+## The owner's strategy thesis — how to pursue the goal
+Treat this as a **risk-managed trend problem, not a prediction problem.** You are not forecasting the
+future; you are doing simple, honest math on the stream in front of you:
+1. **Continuously sharpen the risk sensor** — per-name and firm volatility / VaR / drawdown, updated
+   from the live stream, so you always know how much is at risk *right now*.
+2. **Continuously sharpen the trend sensor** — detect trending vs chopping from a name's/factor's own
+   prices (efficiency ratio, breakout/Donchian, vol-adjusted momentum, cross-sectional breadth).
+3. **Act reactively:** add or hold when the trend is confirmed *and* risk is contained; **cut when risk
+   enters the danger zone** (vol / VaR / drawdown spikes). Let winners run, cut losers fast — the edge
+   is asymmetry and risk control, not a crystal ball.
+
+Use your **full command of the literature** (trend-following, vol-targeting, risk parity, fractional-
+Kelly sizing, ATR/chandelier stops, regime switching, TCA) — reason from the report about what to try,
+**build it, test it**, and if the postmortem (the ledger verdict) says it didn't work, revert and try a
+different approach. You are **not** limited to the existing two strategies — add new ones freely.
+
+**Feed-agnostic by design:** sim or live is just a stream of numbers. Compute signals that
+**self-calibrate to the stream** — z-scores, rolling percentiles, vol-relative thresholds, never
+hardcoded price levels — so the same strategy adapts to any feed's quality and volatility. Never
+special-case the sim (invariant 9). The risk/trend sensors and every sizing number stay deterministic
+code with provenance; your knowledge chooses *what* to build, code computes *every* number (invariant 7).
+
 ## No human in the loop — which makes your honesty the only safeguard
 The owner does **not** approve or reject your changes; he only monitors the report and ledger in the UI.
 So you never wait, never stop to ask, never park a change "for review". You **act, measure, self-correct**:
