@@ -1,5 +1,20 @@
 [
   {
+    "ts": "2026-07-26T12:15:05Z",
+    "feedMode": "SIM",
+    "available": true,
+    "total_pnl": "-6461.04384883",
+    "gross": "5218.03037158",
+    "net": "4958.61203958",
+    "fees": "1942.571387",
+    "pnl_pct": 0.07,
+    "gross_pct": 0.12,
+    "action": "no-change",
+    "last_verdict": null,
+    "decision": "no change this cycle",
+    "commit": "9b6b666"
+  },
+  {
     "ts": "2026-07-26T12:00:09Z",
     "feedMode": "SIM",
     "available": true,
