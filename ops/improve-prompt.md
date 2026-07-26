@@ -135,9 +135,9 @@ that is bleeding while adding exposure is the single most important thing to see
    which opened a **winner** (keep or strengthen it). Cross the losers/winners against the per-name PnL.
 6. **Query your memory (you drive it).** Recall relevant past changes with YOUR OWN queries:
    `python3 scripts/improvement_memory.py retrieve "<what you want to recall>"` returns the most
-   relevant past changes + their outcomes; you can also Grep/Read `docs/loop-findings.md` and the ledger
-   directly. The query and the reasoning are yours (the embedding model is only a similarity calculator).
-   Use it to avoid repeating a mistake or re-trying a reverted idea.
+   relevant past changes + their outcomes (lexical match over the committed findings + ledger snapshots —
+   no embedding service); you can also Grep/Read `docs/loop-findings.md` and the ledger directly. The query
+   and the reasoning are entirely yours. Use it to avoid repeating a mistake or re-trying a reverted idea.
 7. **Change vs. market — attribute honestly (this is the crux).** Split the window's PnL/exposure move into:
    (a) **market conditions** — moves on positions you did **not** touch this cycle, which would have
    happened regardless of your code; and (b) the **direct impact of your last change** — moves on positions

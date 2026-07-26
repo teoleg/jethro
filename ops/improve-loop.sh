@@ -37,10 +37,10 @@ echo "==== $(date -Is) cycle start ====" >> "$LOG"
 python3 scripts/system-report.py >> "$LOG" 2>&1 || {
   echo "report generation failed — skipping cycle" >> "$LOG"; exit 0; }
 
-# 1b. RAG memory of the loop's own history (ADR-0035): index any new changes/findings, then append the
-#     most-relevant past changes to the report so the cycle opens with them. Claude also queries it with
-#     its own queries during analysis. Best-effort — never fails the cycle.
-python3 scripts/improvement_memory.py ingest >> "$LOG" 2>&1 || true
+# 1b. Improvement memory (ADR-0063): append the past changes/findings most relevant to the current
+#     situation to the report, so the cycle opens with them. Claude also queries it with its own queries
+#     during analysis. Pure lexical recall over the COMMITTED findings + ledger snapshots — no embedding
+#     service (Ollama serves the social feed and is off-limits here). Best-effort — never fails the cycle.
 python3 scripts/improvement_memory.py retrieve >> logs/report.md 2>>"$LOG" || true
 
 # 2. Work on the feature branch.
