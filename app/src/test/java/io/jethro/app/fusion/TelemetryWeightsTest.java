@@ -185,18 +185,23 @@ class TelemetryWeightsTest {
     }
 
     @Test
-    void reWeightingRotatesConvictionButCannotScaleTheBook() {
-        // The safety property that makes this change exposure-neutral by construction: the combiner
-        // normalises by Σweights, so two sources saying the same thing produce the SAME combined
-        // forecast — and therefore the same target position — whatever their relative weights are.
+    void reWeightingRotatesConvictionAndCanOnlyShrinkTheBook() {
+        // The safety property, strengthened by ADR-0076. The combiner still normalises by Σweights, so
+        // the weighted AVERAGE of two sources saying the same thing is identical however they are
+        // weighted — re-weighting rotates conviction. What re-weighting also does now is set the
+        // diversification multiplier from the breadth the weights deliver, so a skewed vector earns
+        // LESS scale-up than an equal one. Direction is one-way: never larger than equal weights.
         var f = Forecast.of("a", "AAPL", 10.0);
         var g = Forecast.of("b", "AAPL", 10.0);
         var equal = ForecastCombiner.combine("AAPL", List.of(
                 new ForecastCombiner.Weighted(f, 1.0), new ForecastCombiner.Weighted(g, 1.0)), 0.5);
         var skewed = ForecastCombiner.combine("AAPL", List.of(
                 new ForecastCombiner.Weighted(f, 0.25), new ForecastCombiner.Weighted(g, 3.0)), 0.5);
-        assertEquals(equal.value(), skewed.value(), 1e-12);
-        assertEquals(equal.activeSources(), skewed.activeSources());
+        assertEquals(equal.activeSources(), skewed.activeSources(), "no source is silenced");
+        assertTrue(skewed.value() < equal.value(), "a 12:1 weight split is nearly one view, not two");
+        assertTrue(skewed.value() >= 10.0, "…and never below the un-diversified forecast itself");
+        // Equal weights reproduce the pre-ADR-0076 count rule exactly, so the null case is unchanged.
+        assertEquals(10.0 / Math.sqrt(0.75), equal.value(), 1e-12);
     }
 
     @Test

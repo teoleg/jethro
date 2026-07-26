@@ -1,84 +1,54 @@
-The edge gate was charging every name the desk's *average* trading cost, so an edge that survives in the cheapest names was being refused everywhere — each name is now tested against its own measured round trip, on both sides of the gate (ADR-0075).
+The desk was claiming a full two-source diversification bonus while one source carried 91% of the weight — the multiplier now measures the breadth the weights actually deliver, so a source held at the floor for losing money stops buying leverage (ADR-0076).
 
 ## Situation (live endpoints, read first)
 
-**Money — flat, not bleeding.** Total PnL is unchanged run-over-run and unchanged across the last
-three; every move in that span sits inside the scorer's noise deadband. `stale` and `underwater` are
-both set and we are off the +1%-per-3-iterations target. The cause is arithmetic, not a loss: with zero
-exposure, PnL cannot move.
+**Money — flat, not bleeding.** Total PnL is unchanged run-over-run and unchanged across the last three
+runs; every move in that span sits inside the scorer's noise deadband. `stale` and `underwater` are both
+set and we are off the +1%-per-3-iterations target. The cause is arithmetic, not a loss: with zero
+exposure, PnL cannot move. The day's damage was done in a ~40-minute window this afternoon, when a large
+book was opened and then unwound in seven geometric halving steps, paying the round trip on every step;
+nothing has traded since.
 
 **Risk — zero, no danger state.** Gross and net exposure are both flat at zero, VaR reports "no
 positions", the firm drawdown breaker is untripped, the hedge axis reads FLAT. Nothing to de-risk,
 nothing to cut, so the danger-state override does not apply.
 
-**Cause — last cycle's change was inert by construction, as it said of itself.** ADR-0074 (credibility
-counts the sample its estimate was made from) scored ⚠️ MIXED "no material change". It rotates
-conviction *between* sources and provably cannot scale exposure, so with a flat book there was nothing
-for it to act on. The window's orders were the last of the ADR-0065 flattening tail — single-share ALPHA
-closes with matching fractional HEDGE ES trims under a reduce-only gate. **No trigger opened a position
-this window**, so 100% of the (nil) PnL and exposure move is mark drift plus prior policy: market and
-prior policy, none of it attributable to my last change in either direction.
+**Cause — last cycle's change did what it said and could not have moved the vector.** ADR-0075 opened the
+edge gate's cost comparison to each name's own round trip. It scored ⚠️ MIXED "no material change", and
+correctly: the gate is shut for reasons cost cannot fix. `reversion` — the one source with positive
+measured expectancy — has 23 resolved observations against a 30-observation minimum, and its t-statistic
+against a **zero** round trip is still short of the 2.0 hurdle. No cost refinement reaches that. Five
+consecutive cycles have now been spent on the gate; the gate is not the binding constraint.
 
-**The genuinely new fact this cycle: `reversion` has a positive measured expectancy.** It is the first
-source ever to show one — 23 resolved observations, seven wins to two losses, a positive mean — with 23
-more observations open, which will carry it past the 30-observation minimum inside the next window or
-two. Every other source is significantly negative (trend over ninety-odd observations, momentum, social)
-and cannot be rescued by anything. So for the first time there is a candidate the gate could plausibly
-judge, and the question of *what the gate does when it judges it* stops being academic.
+**Order-level post-mortem.** The window's only orders were two 1-share ALPHA buys with matching fractional
+HEDGE trims, both under the reduce-only gate. **No trigger opened a position**, so 100% of the (nil) PnL
+move is mark drift on a flat book — market, not change. Nothing to blame, nothing to credit.
 
-## Diagnosis — the hurdle is set by the cost of names the trade was never going to be put on in
+## What I found instead
 
-The gate compares each source's measured expectancy against **one blended round-trip cost** for the
-whole desk. That blend is a fiction: the desk's own TCA spans two orders of magnitude, from the index
-future at a fraction of a basis point to the widest-spread equity in double digits. ADR-0072 already
-established the principle — cost is a per-name property — and fixed the half where the blend
-*under-charges* expensive names, adding a veto so a name whose round trip exceeds the passing edge stays
-reduce-only. It left the other half in place. The blend equally **over-charges the cheap names**: a
-source whose edge comfortably survives the index future's round trip is refused everywhere, because the
-average name costs a large multiple of it.
+Looking past the gate at what happens *when* it opens: the combiner sizes every target with a
+diversification multiplier taken from the **count** of contributing sources, under a precondition its own
+javadoc states — "for `n` equally-important forecasts" — that has not held since source trust became
+evidence-driven. Weights span a 12× band, and the live vector is `reversion 2.52` against `trend 0.25`:
+normalised, one source holds 91% of the vote and the desk was awarding itself the full two-equal-source
+multiplier. The error is one-directional and worst exactly when the evidence is worst — the more
+convincingly a source is measured to lose money, the more concentrated the weights become and the more the
+count over-states breadth, so a source pinned at the floor *for losing money* still bought a full extra
+unit of leverage.
 
-`reversion`'s measured expectancy is exactly in that band — below the blended hurdle, above what several
-of the cheapest names actually cost. That is not a marginal accounting point; it is the difference
-between a permanently flat book and a book that puts its first risk on where the edge demonstrably
-survives what trading it demonstrably costs. The lesson was already written down when ADR-0072 shipped —
-*"a gate that compares edge to cost must compare them at the granularity cost is incurred"* — and then
-applied to only one of the gate's two comparisons.
+## The change
 
-There was a second inconsistency worth removing in the same breath: the desk-wide test is a t-test, the
-ADR-0072 per-name veto was a raw comparison of means. So a name whose round trip ate almost all of the
-measured edge passed the per-name bar while a name with a larger surplus could fail the desk-wide one.
+The multiplier is now computed from the concentration of the weight vector actually used:
+`DM = 1/√(Σwᵢ² + ρ(1−Σwᵢ²))`, which is the same formula evaluated at the inverse-Herfindahl **effective**
+number of sources instead of the roster size. No new dial, no new number — same ρ, same cap, same weights.
+Three properties are proved and tested: it is **identical** to the old rule at equal weights (cold start
+and `weights.mode=equal` are byte-unchanged); by Cauchy–Schwarz it is **never larger** than the old rule,
+so this can only shrink the book, never grow it; and it never falls below 1, so averaging cannot make the
+desk less confident than a single view. At the live weights the target book is materially smaller for an
+identical forecast — less capital at risk for the same view, which is the objective directly.
 
-## Change (ADR-0075)
-
-One rule, at the granularity cost is incurred, on both sides: a name may take risk on when some source's
-measured expectancy survives **that name's own** measured round trip with the same significance hurdle
-and minimum sample as before. The desk-wide verdict is that same test at the cheapest round trip the
-desk can actually pay. A name that has never filled is charged the desk's **measured blend** — never an
-invented cost — which is bit-for-bit the bar it faced before.
-
-The change is provably monotone and I want that on the record, because loosening a gate that keeps a
-losing book flat is exactly the mistake this loop has already paid for once. For any name costing more
-than the blend the new rule is **strictly tighter** than the veto it replaces (significance, not a raw
-comparison of means); for an unmeasured name it is identical; only a name whose own measured cost is
-below the blend can gain permission. And a measured-**negative** source clears nothing at any cost — its
-surplus is negative even at a zero round trip — so this cannot hand the book to trend, momentum or
-social. That is the material difference from the continuous risk-appetite gate that scored ❌ BAD and was
-reverted: that one let below-hurdle sources size at reduced conviction; this keeps the binary switch and
-the hurdle untouched and changes only which cost the expectancy is measured against. No new dial, no
-retuned dial, and the deterministic floor — guardrail, breaker, invariant-7 gates — is untouched.
-
-**What to expect, honestly.** This may still score ⚠️ "no material change": `reversion` needs to clear
-the minimum-sample bar before it can speak, and it is a few observations short. But unlike the last four
-cycles this one is not inert by construction — it is the rule that decides whether the desk's first
-positive-expectancy source is allowed to trade, and it will bind the moment that source resolves its
-open calls. If it opens the book and the book loses money, the scorer will say so and revert it, which
-is the correct test.
-
-## Flagged, not acted on
-
-The blended cost remains a documented lower bound on true round-trip cost — it omits the cash
-commission, which the TCA table stores without the multiplier needed to express it in bps. That
-understatement is unchanged by this change but now applies per name. Separately, the wide-spread
-mega-cap whose one-way slippage looks like a provisional refdata spread rather than a measured property
-is still unrepaired; I am still declining to touch a cost input in the same change that reads the cost
-hurdle.
+**Honest expectation.** With the gate shut and the book flat this will very likely score ⚠️ "no material
+change" again, and I am not going to pretend otherwise. It is not a bet on this window: it is the
+difference between the desk re-entering at honest size and re-entering over-levered once `reversion`
+clears its sample. I did *not* loosen the gate to manufacture activity — the evidence does not support
+trading yet, and forcing it is exactly how the ❌ BAD change earlier in the run was earned.

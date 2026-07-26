@@ -228,3 +228,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   was a t-test and the per-name veto a raw comparison of means, so a name that ate 94% of the edge passed
   the per-name bar while a larger surplus could fail the desk-wide one. Whenever the same comparison is
   written twice, check they are the same shape.
+
+### 2026-07-26T19:45Z — ADR-0076 (diversification multiplier on the weights actually used)
+- Situation: PnL unchanged run-over-run and across three; gross AND net exposure zero, VaR "no positions",
+  breaker untripped, hedge FLAT. Not bleeding, no danger state. The window's only orders were two 1-share
+  ALPHA buys with matching fractional HEDGE trims under the reduce-only gate — **no trigger opened a
+  position**, so 100% of the (nil) move is mark drift on a flat book: market, not change. ADR-0075 scored
+  ⚠️ MIXED "no material change", as it predicted of itself.
+- **The gate is not the binding constraint, and five cycles were spent as if it were.** `reversion` has 23
+  resolved observations against a min-sample of 30, and its t-statistic against a **zero** round trip is
+  still under the 2.0 hurdle. No amount of cost refinement — ADR-0064/0072/0075, three cycles of it —
+  reaches a source that fails at zero cost. Rule: **before refining a gate again, evaluate it at its most
+  permissive input.** If it still refuses at cost = 0 / hurdle = floor, the binding constraint is the
+  evidence, not the gate, and further gate work is guaranteed inert.
+- Change: `ForecastCombiner` took the diversification multiplier from the COUNT of contributing sources,
+  under the precondition its own javadoc stated — "for n *equally-important* forecasts". Since ADR-0067
+  made trust evidence-driven that has been false: weights span [0.25, 3.0] and the live vector was
+  `reversion 2.52` vs `trend 0.25`, i.e. 91% of the vote on one source drawing the full two-equal-source
+  multiplier. Now `DM = 1/√(Σwᵢ² + ρ(1−Σwᵢ²))` — the same formula at the inverse-Herfindahl EFFECTIVE
+  number of sources. No new dial.
+- Lesson / rule: **a javadoc precondition is a live assertion, not prose.** "For n equally-important
+  forecasts" was written when weights *were* equal and quietly became false when ADR-0067 shipped. When a
+  change makes an input non-uniform, grep every consumer that assumed uniformity — the count-based DM was
+  three commits downstream of the change that invalidated it and nobody re-read it.
+- Rule 2: **a floor that keeps a bad source "contributing" also keeps it *counting*.** ADR-0074 recorded
+  that MIN>0 leaves "the active-source count, and with it the diversification multiplier, unchanged" — and
+  read that as a neutral property. It was a cost: the worse a source is measured to be, the more
+  concentrated the weights, and the more a count-based breadth over-levers. Whenever a knob is described
+  as leaving something "unchanged", ask whether unchanged is *correct*, not just safe.
+- Rule 3: monotonicity stated out loud (per the ADR-0075 rule): Σwᵢ² ≥ 1/n by Cauchy–Schwarz and the
+  denominator is increasing in Σwᵢ² for ρ<1 ⇒ the new DM is never LARGER than the old, identical at equal
+  weights (cold start, `weights.mode=equal`), and never below 1. Exposure can only fall. That is what
+  distinguishes it from the continuous risk-appetite gate that scored ❌ BAD.
+- Known-but-not-shipped: every source emits its whole cross-section in ONE ~200ms batch per horizon (23
+  names at 19:08:21.449–19:08:21.656), yet `stdErrorBps = σ/√23` treats them as 23 independent draws.
+  Effective n is nearer 3 after cross-sectional correlation, so every t-statistic on this desk — the edge
+  gate's and the weights' alike — is overstated ~2.8×. Not shipped this cycle because the correction only
+  makes an already-shut gate stricter; it belongs with whatever change re-opens trading.
