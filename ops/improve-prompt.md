@@ -116,16 +116,23 @@ touch the ledger, the snapshots, or `reports/.pending-baseline.json` by hand.
 ## Situation triage — answer these PRECISELY, first, every cycle (before any diagnosis)
 Open every cycle by stating the live money situation in plain numbers — mandatory, and it goes at the TOP
 of `reports/last-analysis.md`. Do not jump to a clever code fix before you have answered:
+0. **Regime + factor vol FIRST — this is where the edge lives (playbook: "Where this sim's edge actually
+   lives").** From the report's regime + vol telemetry: what regime are we in, and **is firm/equity-factor
+   volatility rising or falling** vs its baseline? This is the single most important read: **rising factor
+   vol = the cut signal** (the down-drift regimes here are the high-vol ones), **calm + positive factor
+   drift = the hold-long signal.** Anchor the whole diagnosis on it — the trend and the risk are the same
+   read at the factor level, not per-name (per-name is idio noise). State it in one plain sentence.
 1. **Money** — is total PnL higher or lower than the last run, and across the last 3? By how many dollars?
    Is the book **bleeding** (PnL falling run-over-run)?
 2. **Risk** — is gross / net exposure **rising or falling**? Within the firm risk budget? How close to the
    drawdown breaker?
 3. **Cause** — did the change deployed **last cycle help or hurt**? State its scored verdict AND the live
    PnL/exposure move since it went in. Name the culprit if there is one.
-4. **Danger** — are we **bleeding AND exposure rising** (or near the breaker)? If yes, that is a live
-   danger state and it **overrides everything else**: the right move this cycle is to **de-risk / cut /
-   revert the culprit**, NOT ship a new signal. Cutting risk that is losing money is always a valid change.
-Only after answering 1–4 in words do you diagnose further. **Trust the numbers over the report narrative**
+4. **Danger** — are we **bleeding AND exposure rising** (or near the breaker, or factor vol spiking)? If yes,
+   that is a live danger state and it **overrides everything else**: the right move this cycle is to
+   **de-risk / cut / revert the culprit**, NOT ship a new signal. Cutting risk that is losing money is
+   always a valid change.
+Only after answering 0–4 in words do you diagnose further. **Trust the numbers over the report narrative**
 — if the live endpoints show deterioration the report did not foreground, *that* is your target. A book
 that is bleeding while adding exposure is the single most important thing to see; never miss it.
 

@@ -86,10 +86,32 @@ public class StrategyConfig {
             StrategyProperties props,
             StrategyControl control,
             ObjectProvider<StrategySelector> selector,
+            InstrumentRefSource refs,
             @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.enabled:true}") boolean trendEnabled,
             @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.window:20}") int trendWindow,
             @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.upper-band:0.5}") String trendUpper,
-            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.lower-band:0.3}") String trendLower) {
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.trend.lower-band:0.3}") String trendLower,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.factor-trend.enabled:false}") boolean factorTrendEnabled,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.factor-trend.trend-window:20}") int ftTrendWindow,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.factor-trend.vol-window:30}") int ftVolWindow,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.factor-trend.trend-threshold-sigmas:1.0}") double ftThreshold,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.factor-trend.vol-upper:1.5}") String ftVolUpper,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.factor-trend.vol-lower:1.1}") String ftVolLower,
+            @org.springframework.beans.factory.annotation.Value("${jethro.strategy.factor-trend.ewma-lambda:0.97}") double ftLambda) {
+        // ADR-0070: the factor-level, vol-gated trend follower. When enabled it becomes THE live
+        // strategy (it takes a single directional stance from the shared equity factor — the level where
+        // this market's edge actually lives). Default OFF: a new strategy must be OOS-validated and turned
+        // on deliberately, never silently replace the per-name selector. Its basket is the refdata EQUITY
+        // universe (invariant 9: refdata is the universe, no sim list).
+        if (factorTrendEnabled) {
+            java.util.Set<String> equityBasket = new java.util.LinkedHashSet<>();
+            for (String id : refs.instrumentIds()) {
+                refs.find(id).filter(r -> "EQUITY".equals(r.assetClass())).ifPresent(r -> equityBasket.add(id));
+            }
+            return new io.jethro.trading.algo.strategy.FactorTrendStrategy(
+                    equityBasket, ftTrendWindow, ftVolWindow, ftThreshold,
+                    new java.math.BigDecimal(ftVolUpper), new java.math.BigDecimal(ftVolLower), ftLambda);
+        }
         StrategySelector sel = selector.getIfAvailable();
         if (sel == null) {
             return "mean-reversion".equals(props.algoOrDefault()) ? meanReversion(props, control) : momentum(props, control);

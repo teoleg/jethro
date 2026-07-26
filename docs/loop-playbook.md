@@ -72,6 +72,18 @@ never hardcoded price levels, so the same strategy adapts to any feed. Never spe
 - **AI boundary (invariant 7):** if you build/extend the AI sleeve, the model proposes *direction and
   conviction only* — deterministic code sets every number that touches positions/PnL/risk.
 
+## Where this sim's edge actually lives (measured from the calibration, not guessed)
+It is NOT tick-to-tick prediction — it is **regime persistence + vol clustering at the equity-FACTOR level.**
+Up-regimes (CALM +5%, TREND_UP +25%/yr) are **low-vol** and last ~14–20 days; down-regimes (TREND_DOWN −30%,
+RISK_OFF −120%, INFLATION −60%/yr) are **high-vol** and last ~3–10 days. So **firm/factor vol rising IS the cut
+signal; calm positive drift IS the hold-long signal** — the risk sensor and the trend sensor are the same read.
+Round-trip cost ~6–7bp ≪ the regime drift gap, so this is **winnable net of costs by regime positioning** — and
+lost by churning on per-name noise (idiosyncratic vol drowns the shared trend at the single-name level). Build
+the signal at the **factor/breadth** level, not per-name. `FactorTrendStrategy` (ADR-0070) is the first cut of
+exactly this — enable it (`jethro.strategy.factor-trend.enabled=true`) only after an OOS run, then iterate on it
+(threshold, windows, sizing, a short leg) rather than re-tuning per-name momentum. A new factor-level stance is
+architecturally significant → Proposed ADR in the same commit.
+
 ## Current focus (update as it evolves)
 - Sim book has been reset to zero — judge changes on growth from 0, not against the old legacy loss.
 - **The sim now has REAL trend edge to capture (ADR-0069):** the equity factor carries a weak AR(1)
