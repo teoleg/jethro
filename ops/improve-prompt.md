@@ -17,12 +17,43 @@ Make **risk-adjusted PnL** better: **total PnL up per unit of total exposure.** 
   real money at risk; the hedge costs money and carries exposure, so it counts. It is exactly the Overview
   headline. (The `/api/attribution` alpha-vs-hedge-vs-cost split stays a **diagnostic** for understanding
   *where* the total comes from — but the number you move is the total.)
-- **Flat is a legitimate, often-optimal state.** With no positive measured live edge (ADR-0062), *less
-  trading* or *no change* is the right answer. Never act to look busy.
-- **Signal, not noise.** You have ~2 hours of fresh data per run. A world-class quant does not overfit
-  to one window: act when the evidence is real (a bug in a trace, a persistent cost/edge/exposure
-  pattern, a sound theoretical improvement), and *log-but-don't-chase* a single-run blip. Prefer the
-  change with the clearest, best-understood edge over the flashiest one.
+- **Concrete owner target: total PnL must grow ≥ 1% every 3 iterations.** Track it — read
+  `reports/run-status.json`: `pnl_growth_pct` vs `pnl_target_pct`, and the `on_track` / `stale` /
+  `underwater` flags. **Staleness is a monitored FAILURE, not a rest state:** a flat or negative PnL
+  that is off the growth target — *especially* with exposure still high — is a problem you must attack
+  **this cycle**. "No change" is only acceptable when you are genuinely on track, not as a default.
+- **Flat is legitimate only when it is genuinely optimal — never an excuse for a stuck, losing book.**
+  If PnL is negative/flat and off target, doing nothing is failing. Find a lever: a re-measured signal,
+  a different strategy or regime rule, sizing, cost/turnover reduction, closing dead exposure. If — and
+  only if — you have genuinely exhausted the levers and the *sim itself* has no edge to capture, **say
+  that plainly in `reports/last-analysis.md` and recommend switching to a live feed** (don't fake
+  activity, and don't hide behind "flat is fine").
+- **Signal, not noise.** A world-class quant does not overfit to one window: act on real evidence (a bug
+  in a trace, a persistent cost/edge/exposure pattern, a sound improvement), and *log-but-don't-chase* a
+  single-run blip. Prefer the clearest, best-understood edge. Chasing the target must not mean forcing
+  trades that lose money — a bad change gets scored ❌ and reverted, so let the measurement keep you honest.
+
+## The owner's strategy thesis — how to pursue the goal
+Treat this as a **risk-managed trend problem, not a prediction problem.** You are not forecasting the
+future; you are doing simple, honest math on the stream in front of you:
+1. **Continuously sharpen the risk sensor** — per-name and firm volatility / VaR / drawdown, updated
+   from the live stream, so you always know how much is at risk *right now*.
+2. **Continuously sharpen the trend sensor** — detect trending vs chopping from a name's/factor's own
+   prices (efficiency ratio, breakout/Donchian, vol-adjusted momentum, cross-sectional breadth).
+3. **Act reactively:** add or hold when the trend is confirmed *and* risk is contained; **cut when risk
+   enters the danger zone** (vol / VaR / drawdown spikes). Let winners run, cut losers fast — the edge
+   is asymmetry and risk control, not a crystal ball.
+
+Use your **full command of the literature** (trend-following, vol-targeting, risk parity, fractional-
+Kelly sizing, ATR/chandelier stops, regime switching, TCA) — reason from the report about what to try,
+**build it, test it**, and if the postmortem (the ledger verdict) says it didn't work, revert and try a
+different approach. You are **not** limited to the existing two strategies — add new ones freely.
+
+**Feed-agnostic by design:** sim or live is just a stream of numbers. Compute signals that
+**self-calibrate to the stream** — z-scores, rolling percentiles, vol-relative thresholds, never
+hardcoded price levels — so the same strategy adapts to any feed's quality and volatility. Never
+special-case the sim (invariant 9). The risk/trend sensors and every sizing number stay deterministic
+code with provenance; your knowledge chooses *what* to build, code computes *every* number (invariant 7).
 
 ## No human in the loop — which makes your honesty the only safeguard
 The owner does **not** approve or reject your changes; he only monitors the report and ledger in the UI.
@@ -76,9 +107,13 @@ touch the ledger, the snapshots, or `reports/.pending-baseline.json` by hand.
    about the numbers — do not transcribe them anywhere.
 2. **Diagnose** like the expert you are: what is costing risk-adjusted PnL, and why — the *mechanism*,
    not the symptom? A WARN/ERROR/stack trace pointing at a real bug is a valid, high-value target.
-3. **Decide.** If nothing has a real, well-understood edge this run, write one line to
-   `logs/improve-YYYY-MM-DD.log` saying why and **stop with no code change** — common and correct. (The
-   wrapper has already updated the ledger; there is nothing else for you to commit.)
+3. **Always leave your reasoning where the owner can see it.** EVERY run — change or not — overwrite
+   `reports/last-analysis.md` with 2–5 sentences: what the telemetry showed, what you decided, and
+   **why**. Make the **first line** a plain one-liner (it becomes the visible "decision" on the Improve
+   page). This is the owner's window into your thinking — never leave it blank or boilerplate. If
+   nothing has a real, well-understood edge this run, say so concretely (what you checked, why it's not
+   actionable) and **stop with no code change** — common and correct. Committing `reports/last-analysis.md`
+   is fine (reports-only, no restart).
 4. If there is a clear improvement, make the **one coherent change** (config, code, new strategy/risk
    model — with a Proposed ADR in the same commit if it is architecturally significant).
 5. **Verify:** `./gradlew -Pci test` (or the narrowest relevant module). Not green → revert your edit

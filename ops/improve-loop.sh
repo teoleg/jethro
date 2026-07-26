@@ -12,6 +12,11 @@ REPO="${JETHRO_REPO:-$HOME/kernel-code/jethro}"
 BRANCH="claude/auto-improve"
 cd "$REPO"
 
+# cron runs with a bare PATH (usually just /usr/bin:/bin), so tools the cycle needs go missing —
+# notably `claude` (the native Max installer puts it in ~/.local/bin), plus gradle/docker/psql. Put the
+# usual locations back so a cron cycle behaves like an interactive one.
+export PATH="$HOME/.local/bin:$HOME/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:$PATH"
+
 unset ANTHROPIC_API_KEY || true   # bill to Max, never the API account
 
 mkdir -p logs
@@ -52,18 +57,25 @@ python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-
 # 9>&- closes the single-flight lock fd for Claude and everything it spawns — otherwise a persistent
 # child (notably the Gradle DAEMON that `./gradlew -Pci test` leaves running for hours) inherits the
 # lock and holds it long after the cycle ends, wedging every later cycle into "skipped".
-claude -p "$(cat ops/improve-prompt.md)" \
-  --allowedTools "Bash Read Edit Grep Glob" \
-  --permission-mode acceptEdits \
-  >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero (see above)" >> "$LOG"
+BRAIN_RAN=0
+if ! command -v claude >/dev/null 2>&1; then
+  echo "ERROR: 'claude' not found on PATH — analysis/change step SKIPPED (report + score + heartbeat" \
+       "still ran). Install Claude Code for the cron user, or add its dir to PATH. PATH=$PATH" >> "$LOG"
+else
+  BRAIN_RAN=1
+  claude -p "$(cat ops/improve-prompt.md)" \
+    --allowedTools "Bash Read Edit Grep Glob" \
+    --permission-mode acceptEdits \
+    >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero (see above)" >> "$LOG"
+fi
 
 # 3b. Per-cycle heartbeat for the UI (reports/run-status.json) — DETERMINISTIC, computed in code
 #     (invariant 7): current PnL/exposure, % change vs the previous run, and this cycle's decision.
 #     Runs EVERY cycle, including no-change ones, so the UI shows a line for each run. --changed = the
 #     agent recorded a NEW baseline this cycle; --scored = a prior change was scored at cycle start.
 CHANGED=0; [ -f reports/.pending-baseline.json ] && CHANGED=1
-python3 scripts/score-change.py status --scored "$HAD_PENDING" --changed "$CHANGED" >> "$LOG" 2>&1 \
-  || echo "status writer exited non-zero (see above)" >> "$LOG"
+python3 scripts/score-change.py status --scored "$HAD_PENDING" --changed "$CHANGED" --brain-ran "$BRAIN_RAN" \
+  >> "$LOG" 2>&1 || echo "status writer exited non-zero (see above)" >> "$LOG"
 
 AFTER=$(git rev-parse HEAD)
 if [ "$BEFORE" = "$AFTER" ]; then

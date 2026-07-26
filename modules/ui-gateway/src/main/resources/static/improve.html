@@ -38,6 +38,12 @@
   .pillv.good{color:var(--up);border-color:var(--up)} .pillv.bad{color:var(--alert);border-color:var(--alert)} .pillv.mixed{color:var(--warn);border-color:var(--warn)}
   .act { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
   .act.changed{color:var(--brand)} .act.reverted{color:var(--alert)} .act.nochange{color:var(--dim)}
+  .act.noanalysis{color:var(--alert); font-weight:700}
+  .reasoning { padding:6px 16px 12px; color:var(--txt); font-size:12.5px; line-height:1.6; white-space:pre-wrap; }
+  .reasoning.warn { color:var(--alert); }
+  .alert { margin:8px 8px 0; padding:9px 13px; border-radius:9px; font-size:12.5px; font-weight:600; }
+  .alert.bad { background:rgba(240,85,63,.12); border:1px solid var(--alert); color:var(--alert); }
+  .alert.good { background:rgba(53,192,122,.10); border:1px solid var(--up); color:var(--up); }
 </style>
 </head>
 <body>
@@ -65,15 +71,18 @@
 </div></div>
 <main>
   <div class="panel">
+    <div class="alert" id="hAlert" style="display:none"></div>
     <div class="hero">
-      <div class="metric"><span class="k">Goal</span><span class="goal">PnL&nbsp;↑ &nbsp;·&nbsp; Exposure&nbsp;↓</span></div>
+      <div class="metric"><span class="k">Goal</span><span class="goal">Total&nbsp;PnL&nbsp;↑&nbsp;≥1%&nbsp;/&nbsp;3&nbsp;iter &nbsp;·&nbsp; Exposure&nbsp;↓</span></div>
       <div class="metric"><span class="k">Total PnL</span><span class="v mono" id="hPnl">—</span></div>
+      <div class="metric"><span class="k">PnL growth · 3-iter</span><span class="v mono" id="hGrowth">—</span></div>
       <div class="metric"><span class="k">Gross exposure</span><span class="v mono" id="hGross">—</span></div>
       <div class="metric"><span class="k">Net exposure</span><span class="v mono" id="hNet">—</span></div>
       <div class="metric"><span class="k">Cost (fees)</span><span class="v mono" id="hFees">—</span></div>
       <div class="metric"><span class="k">As of run (UTC)</span><span class="v mono" id="hTime" style="font-size:15px">—</span></div>
     </div>
     <div class="decision" id="hDecision">waiting for the first cycle…</div>
+    <div class="reasoning" id="hReason"></div>
   </div>
 
   <div class="note" style="font-size:11.5px; padding:2px 8px; line-height:1.65; border:1px solid var(--line-2); border-radius:10px; background:var(--surface)">
@@ -138,8 +147,35 @@
     document.getElementById("hGross").textContent = money(top.gross);
     document.getElementById("hNet").textContent = money(top.net);
     document.getElementById("hFees").textContent = money(top.fees);
+    var gEl = document.getElementById("hGrowth");
+    gEl.textContent = (top.pnl_growth_pct == null) ? "—" : pctText(top.pnl_growth_pct);
+    gEl.className = "v mono " + (top.pnl_growth_pct == null ? "" : (top.on_track ? "up" : "down"));
     document.getElementById("hTime").textContent = fmtTs(top.ts);
+
+    var alertEl = document.getElementById("hAlert");
+    var tgt = (top.pnl_target_pct != null ? top.pnl_target_pct : 1) + "% / " + (top.pnl_growth_window || 3) + " iters";
+    if (top.brain_ran === false) {
+      alertEl.style.display = ""; alertEl.className = "alert bad";
+      alertEl.textContent = "⚠️ Analysis step is NOT running — Claude isn't being invoked, so nothing is being improved. Fix the loop PATH.";
+    } else if (top.stale) {
+      alertEl.style.display = ""; alertEl.className = "alert bad";
+      alertEl.textContent = "⚠️ STALE — total PnL is " + (top.underwater ? "negative and " : "") + "not growing to target ("
+        + tgt + "). The loop should be attacking this; if it keeps failing here, the sim likely has no edge → consider a live feed.";
+    } else if (top.on_track) {
+      alertEl.style.display = ""; alertEl.className = "alert good";
+      alertEl.textContent = "✅ On track — PnL growth meets the target (" + tgt + ").";
+    } else {
+      alertEl.style.display = "none";
+    }
     document.getElementById("hDecision").innerHTML = '<b>Latest decision:</b> ' + esc(top.decision || "—");
+    var reasonEl = document.getElementById("hReason");
+    if (top.brain_ran === false) {
+      reasonEl.className = "reasoning warn";
+      reasonEl.textContent = "The analysis step did not run this cycle — Claude was not invoked, so no reasoning was produced. (Usually a PATH/setup issue on the box.)";
+    } else {
+      reasonEl.className = "reasoning";
+      reasonEl.textContent = top.reasoning || "";
+    }
 
     rows.innerHTML = list.map(function (e) {
       var pnl = (e.total_pnl != null ? e.total_pnl : e.alpha_pnl);   // fallback for old-format rows
