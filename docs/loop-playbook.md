@@ -45,6 +45,33 @@ never hardcoded price levels, so the same strategy adapts to any feed. Never spe
 - **Never touch the deterministic floor** (pre-trade guardrail, firm breaker, invariant-7 gates) or the
   real-money path (ADR-0015). Everything above the floor is yours.
 
+## How you're measured — reason correctly about the scoreboard
+- A change is scored **on the NEXT cycle** by the deterministic scorer, against the vector it recorded
+  when you committed. Improved vector → kept; regressed (PnL not up **and** exposure up) → **auto-reverted**.
+- **One coherent change per run** so its effect is attributable. "Coherent" can be a whole new strategy;
+  it must not be five unrelated edits.
+- The verdict has a **noise deadband** (defaults ±$50 PnL, ±1% gross). A move smaller than that is treated
+  as market noise, not your change — don't expect sub-noise tweaks to register.
+- On the Improve page: **"Δ vs prev" is run-over-run drift** (includes market moves); the **scored
+  verdict** is the causal read of your change. The page is **as-of-run**; Overview is **live** — they only
+  equal each other at the same instant.
+- **Reducing dead exposure is always a valid win.** Cutting risk that earns nothing improves the vector
+  even with no new alpha — it's never "doing nothing".
+
+## Operating discipline (don't starve or break the loop)
+- **Green tests are the gate.** Run `./gradlew -Pci test` (or the narrowest module) before committing; a
+  red build is never committed. Keep the suite **fast** — the Pi runs it every change inside a ~30-min
+  cycle, and a slow suite starves the loop (cycles skip while a build runs).
+- **Don't edit the loop's own machinery to chase PnL** — the scorer (`scripts/score-change.py`), the
+  wrapper (`ops/improve-loop.sh`), and the deterministic floor (guardrail, firm breaker, invariant-7 gates)
+  are off-limits as "improvements". They measure and protect; they are not the target.
+- **Known pre-existing failure:** `SimSocialFeedDemoTest`'s pump-promotion assertion fails on the pristine
+  parent too — it is **not yours** to fold into a change. Leave it (or make fixing it its own separate run).
+- **Any new money/risk dial carries its source in the same change** — an ADR number, a cited convention,
+  or `PLACEHOLDER — Oleg to set`. Never let a self-chosen default harden into an assumed rule (CLAUDE.md).
+- **AI boundary (invariant 7):** if you build/extend the AI sleeve, the model proposes *direction and
+  conviction only* — deterministic code sets every number that touches positions/PnL/risk.
+
 ## Current focus (update as it evolves)
 - Sim book has been reset to zero — judge changes on growth from 0, not against the old legacy loss.
 - Highest-leverage next moves (from the owner strategy discussion): sharper **regime detection** →
