@@ -101,3 +101,30 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   concluding anything about the signal.
 - Rule 3: a fix that only restores *measurability* will still score "no material change" — expect it, say
   so up front, and judge it next cycle on whether the source now appears in the weights map, not on PnL.
+
+### 2026-07-26T18:00Z — ADR-0072 (per-name execution cost in the edge gate)
+- Situation: PnL -$867.73, unchanged run-over-run and effectively flat over three. Gross AND net
+  exposure now **$0.00** — the window's only orders were the ADR-0065 planner's last flattening leg
+  (1-share buys closing the ALPHA shorts + matching HEDGE ES trims) under a reduce-only gate. Not
+  bleeding, no danger state, nothing to de-risk: with zero exposure the ONLY way PnL can move is to
+  trade, and the gate forbids it. `on_track: true` is an artifact of the hedge unwind three runs ago.
+- ADR-0071 verdict, honestly: the warm restart now **does run** (app log: seeded 60/193 trend,
+  175/241 reversion — up from 4). Replaying the seed algorithm against the live LMDB series yields
+  193/236 today, so the binding constraint was never the code after the clock fix — it was the store's
+  **provider-time depth at boot**, which grows each cycle and has now passed both warm-ups. Sensors
+  boot warm from here; `reversion` should publish for the first time. Plumbing is done — stop working it.
+- Change: the gate charged ONE blended round trip (6.9270 bps) across a universe whose measured costs
+  span 69:1 (ES 0.2912 vs GOOGL 20.1056). Once a source passes at e.g. +18 bps gross, the planner sizes
+  GOOGL too — **−2.11 bps per round trip by arithmetic**. Now each name is re-tested against its own
+  measured round trip; it can only subtract permission, never grant it.
+- Lesson / rule: **a gate that compares edge to cost must compare them at the granularity cost is
+  incurred.** A blended hurdle is only defensible when the cost cross-section is homogeneous; at 69:1 it
+  is simultaneously too strict (suppresses surviving edge in cheap names) and too loose (admits certain
+  losers in expensive ones). Check the dispersion before pooling any per-name quantity into one number.
+- Rule 2: **when exposure is zero and the gate is shut, no change can move the vector — say so up front
+  and spend the cycle on what makes the FIRST trades good, not on faking activity.** Expect ⚠️ "no
+  material change"; the honest test is next cycle's order-level post-mortem, not this cycle's PnL.
+- Rule 3: **do not "fix" an input that also happens to relax your own test in the same change.** GOOGL's
+  10 bps slippage looks like a provisional 20 bps refdata spread on a mega-cap, and repairing it would
+  lower the cost hurdle. That is a real data-quality item — make it on its own merits, separately, or it
+  is indistinguishable from tuning the measurement until it passes.

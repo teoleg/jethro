@@ -109,7 +109,7 @@ public class FusionConfig {
                         Double roundTripBps = q.averageSlippageBps()
                                 .map(oneWay -> oneWay.doubleValue() * 2.0)
                                 .orElse(null);
-                        return EdgeGate.evaluate(t.stats(), roundTripBps, gateParams);
+                        return EdgeGate.evaluate(t.stats(), roundTripBps, roundTripByInstrument(q), gateParams);
                     } catch (RuntimeException e) {
                         return null;
                     }
@@ -175,6 +175,30 @@ public class FusionConfig {
                 telemetry.getIfAvailable(), storedPrices(markHistory), scheduler, intervalSeconds);
         lifecycle.start();
         return lifecycle;
+    }
+
+    /**
+     * The desk's MEASURED round-trip execution cost per instrument (ADR-0072): twice the
+     * implementation-shortfall slippage its own fills in this feed mode actually incurred, which is the
+     * same construction the desk-wide hurdle uses — only not blended across names that cost two orders
+     * of magnitude apart.
+     *
+     * <p>Price-quoted names only. A rate-quoted instrument's slippage "bp" is an additive basis point of
+     * RATE, not a fraction of notional, so it is not comparable with an expectancy expressed in bps of
+     * price; those rows are excluded rather than silently blended (the same unit rule
+     * {@code averageSlippageBps} applies). A name with no fill in this mode simply does not appear —
+     * absence means "not measured", and the gate asserts no cost for it.
+     */
+    private static java.util.Map<String, Double> roundTripByInstrument(
+            io.jethro.order.ExecutionQualityRepository tca) {
+        var out = new java.util.HashMap<String, Double>();
+        for (var a : tca.aggregates()) {
+            if (a.rateQuoted() || a.instrument() == null || a.avgSlippageBps() == null) {
+                continue;
+            }
+            out.put(a.instrument(), a.avgSlippageBps().doubleValue() * 2.0);
+        }
+        return out;
     }
 
     /**

@@ -28,6 +28,18 @@ import java.util.List;
  * closed, none may be opened or grown. Note the asymmetry — the gate can only ever <i>subtract</i>
  * trades from what the planner already wanted; it can never add one.
  *
+ * <p><b>Cost is a per-name property, not a desk-wide constant (ADR-0072).</b> The desk-wide blend above
+ * decides whether the desk has <em>any</em> edge worth paying for. It cannot decide <em>where</em> to
+ * spend it: measured one-way slippage across this book spans two orders of magnitude (a rates future at
+ * a fraction of a bp against a wide-spread equity in double digits), so one blended hurdle
+ * simultaneously over-charges the cheap names — vetoing trades that would have kept almost all of their
+ * edge — and under-charges the expensive ones, admitting round trips whose cost exceeds the very
+ * expectancy that opened the gate. Once a source has passed, each name is therefore re-tested against
+ * <b>its own</b> measured round-trip cost, exactly as the desk-wide test is framed: increases are
+ * allowed only where the passing source's measured gross expectancy exceeds what that name's round trip
+ * has actually cost. A name the desk has never filled has no measured cost, so no veto is asserted for
+ * it — an unmeasured cost is not a cost we may invent (ADR-0016 / invariant 7).
+ *
  * <p><b>A significance hurdle, not a positive average.</b> Gating on the raw sign of a mean would
  * flip the book on noise: with per-signal dispersion an order of magnitude above the mean, a positive
  * window means nothing. Requiring a t-stat is the standard multiple-testing discipline for exactly
@@ -66,12 +78,40 @@ public final class EdgeGate {
     /**
      * The gate's answer. {@code mayIncrease} false ⇒ reduce-only. {@code reason} is prose for the
      * operator; {@code sources} is the per-source arithmetic so the verdict can be recomputed.
+     *
+     * <p>{@code bestGrossEdgeBps} is the largest measured expectancy among the sources that actually
+     * passed — the edge the desk may claim, BEFORE cost — and {@code roundTripBpsByInstrument} is the
+     * desk's own measured round-trip cost per name. Together they answer the per-name question in
+     * {@link #mayIncrease(String)}. Both are empty/zero whenever the gate is shut or inactive, where
+     * the question does not arise.
      */
     public record Decision(boolean mayIncrease, double roundTripCostBps, String reason,
-                           List<SourceEdge> sources) {
+                           List<SourceEdge> sources, double bestGrossEdgeBps,
+                           java.util.Map<String, Double> roundTripBpsByInstrument) {
+
+        public Decision {
+            sources = sources == null ? List.of() : List.copyOf(sources);
+            roundTripBpsByInstrument = roundTripBpsByInstrument == null
+                    ? java.util.Map.of() : java.util.Map.copyOf(roundTripBpsByInstrument);
+        }
 
         static Decision open(String reason) {
-            return new Decision(true, 0.0, reason, List.of());
+            return new Decision(true, 0.0, reason, List.of(), 0.0, java.util.Map.of());
+        }
+
+        /**
+         * May the desk put risk ON in this specific name (ADR-0072)? Only when the gate is open at all
+         * AND the passing source's measured gross expectancy exceeds this name's own measured
+         * round-trip cost — the same comparison the desk-wide test makes, at the granularity cost is
+         * actually incurred. Unknown name ⇒ no measured cost ⇒ no veto: the desk-wide verdict stands
+         * alone rather than a cost being assumed for it.
+         */
+        public boolean mayIncrease(String instrument) {
+            if (!mayIncrease) {
+                return false;
+            }
+            Double cost = instrument == null ? null : roundTripBpsByInstrument.get(instrument);
+            return cost == null || bestGrossEdgeBps > cost;
         }
     }
 
@@ -87,6 +127,21 @@ public final class EdgeGate {
      * @param params            the significance hurdle
      */
     public static Decision evaluate(List<SignalScoring.Stats> stats, Double roundTripCostBps, Params params) {
+        return evaluate(stats, roundTripCostBps, java.util.Map.of(), params);
+    }
+
+    /**
+     * As above, plus the desk's MEASURED round-trip cost per instrument (ADR-0072), used to re-test each
+     * name against its own cost once a source has passed. Names absent from the map have not been filled
+     * in this feed mode, so no cost is asserted for them and no per-name veto applies.
+     *
+     * @param roundTripBpsByInstrument measured round-trip slippage in bps, keyed by instrumentId;
+     *                                 price-quoted names only (a rate-quoted "bp" is an additive
+     *                                 basis point of RATE, not a fraction of notional — blending the
+     *                                 two would be a unit error, so the caller excludes them)
+     */
+    public static Decision evaluate(List<SignalScoring.Stats> stats, Double roundTripCostBps,
+                                    java.util.Map<String, Double> roundTripBpsByInstrument, Params params) {
         if (roundTripCostBps == null) {
             // No cost measurement yet (no fills in this mode) — we cannot state a cost-adjusted edge,
             // and inventing one would be a number without provenance. Leave the gate open and let the
@@ -99,6 +154,7 @@ public final class EdgeGate {
         List<SourceEdge> edges = new java.util.ArrayList<>(stats.size());
         boolean anyPasses = false;
         String passing = null;
+        double bestGross = 0.0;
         for (SignalScoring.Stats s : stats) {
             double net = s.avgReturnBps() - roundTripCostBps;
             double se = s.stdErrorBps();
@@ -106,6 +162,9 @@ public final class EdgeGate {
             boolean passes = s.resolved() >= params.minSample() && se > 0 && t >= params.tHurdle();
             edges.add(new SourceEdge(s.source(), s.resolved(), s.avgReturnBps(), net, t, passes));
             if (passes) {
+                // The edge the desk may claim per round trip, gross of cost — only a source that
+                // actually cleared the hurdle gets to contribute one (ADR-0072).
+                bestGross = anyPasses ? Math.max(bestGross, s.avgReturnBps()) : s.avgReturnBps();
                 anyPasses = true;
                 passing = passing == null ? s.source() : passing + ", " + s.source();
             }
@@ -113,10 +172,13 @@ public final class EdgeGate {
         edges.sort((a, b) -> Double.compare(b.tStat(), a.tStat()));
         if (anyPasses) {
             return new Decision(true, roundTripCostBps,
-                    "measured edge clears cost with significance: " + passing, edges);
+                    "measured edge clears cost with significance: " + passing
+                            + " — per-name increases limited to names whose own measured round trip "
+                            + "costs less than that edge (ADR-0072)",
+                    edges, bestGross, roundTripBpsByInstrument);
         }
         return new Decision(false, roundTripCostBps,
                 "no source's measured expectancy beats measured execution cost with significance "
-                        + "— reduce-only (ADR-0064)", edges);
+                        + "— reduce-only (ADR-0064)", edges, 0.0, java.util.Map.of());
     }
 }

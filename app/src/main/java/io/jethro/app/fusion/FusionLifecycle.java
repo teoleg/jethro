@@ -100,10 +100,13 @@ public final class FusionLifecycle implements AutoCloseable {
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
                     id -> positions.getOrDefault(id, BigDecimal.ZERO), params);
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
-            // paying for are the ones that take risk OFF. Clamp before anything else sees the deltas.
+            // paying for are the ones that take risk OFF. ADR-0072 asks the same question per name, so
+            // a name whose own round trip costs more than the passing source's measured edge is
+            // reduce-only even when the desk as a whole may increase. Clamp before anything else sees
+            // the deltas — the operator's target book must show what will actually be routed.
             EdgeGate.Decision gate = edgeGate == null ? null : edgeGate.get();
-            if (gate != null && !gate.mayIncrease()) {
-                targets = reduceOnly(targets);
+            if (gate != null) {
+                targets = reduceOnlyWhere(targets, gate);
             }
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate);
             if (routeOrders) {
@@ -132,11 +135,19 @@ public final class FusionLifecycle implements AutoCloseable {
         }
     }
 
-    /** Every target with its delta projected onto "reduce or hold" (ADR-0064). */
-    private static List<FusionPlanner.Target> reduceOnly(List<FusionPlanner.Target> targets) {
+    /**
+     * Every target the gate declines to let grow, with its delta projected onto "reduce or hold"
+     * (ADR-0064 desk-wide, ADR-0072 per name). Targets the gate allows are returned untouched, so a
+     * shut gate still clamps everything and an open one clamps only the names that cannot pay for
+     * themselves.
+     */
+    private static List<FusionPlanner.Target> reduceOnlyWhere(List<FusionPlanner.Target> targets,
+                                                              EdgeGate.Decision gate) {
         List<FusionPlanner.Target> out = new java.util.ArrayList<>(targets.size());
         for (FusionPlanner.Target t : targets) {
-            BigDecimal clamped = TargetPlanner.reduceOnly(t.deltaQty(), t.currentQty());
+            BigDecimal clamped = gate.mayIncrease(t.instrument())
+                    ? t.deltaQty()
+                    : TargetPlanner.reduceOnly(t.deltaQty(), t.currentQty());
             out.add(clamped.compareTo(t.deltaQty()) == 0 ? t
                     : new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
                             t.diversificationMultiplier(), t.price(), t.targetQty(), t.currentQty(),

@@ -102,6 +102,72 @@ class EdgeGateTest {
         assertEquals(0.0, d.sources().get(0).tStat(), 1e-9);
     }
 
+    // ---- ADR-0072: the same test, at the granularity cost is actually incurred -------------------
+
+    /**
+     * The desk's OWN measured TCA on 2026-07-26, converted to a round trip (2 x one-way), against a
+     * source measured at +18.00 bps gross that clears the blended hurdle:
+     * <pre>
+     *   blended one-way 3.4635 bps → round trip  6.9270 → net +11.073 → gate OPEN
+     *   ES     one-way 0.14561 bps → round trip  0.29122 → keep 18.00 − 0.29122 = +17.709 bps  ✓
+     *   MSFT   one-way 1.46374 bps → round trip  2.92748 → keep 18.00 − 2.92748 = +15.073 bps  ✓
+     *   GOOGL  one-way 10.05281 bps → round trip 20.10561 → keep 18.00 − 20.10561 = −2.106 bps ✗
+     * </pre>
+     * The blended hurdle admits all three; GOOGL is a certain loss on every round trip at the very
+     * expectancy that opened the gate. That is the trade this veto exists to refuse.
+     */
+    @Test
+    void anOpenGateStillRefusesANameThatCostsMoreThanTheEdge() {
+        var costs = java.util.Map.of(
+                "ES", 0.29122,
+                "MSFT", 2.92748,
+                "GOOGL", 20.10561);
+        // n = 36, sd 30 → se = 5.0; net of the blended 6.9270 = 11.073 → t = 2.2146 ≥ 2 → open.
+        var d = EdgeGate.evaluate(List.of(stat("reversion", 36, 18.0, 30.0)), 6.9270, costs, P);
+        assertTrue(d.mayIncrease());
+        assertEquals(2.2146, d.sources().get(0).tStat(), 1e-4);
+        assertEquals(18.0, d.bestGrossEdgeBps(), 1e-9);
+        assertTrue(d.mayIncrease("ES"));
+        assertTrue(d.mayIncrease("MSFT"));
+        assertFalse(d.mayIncrease("GOOGL"));
+    }
+
+    @Test
+    void anUnmeasuredNameIsNotVetoedOnAnAssumedCost() {
+        // JNJ has never filled in this feed mode, so there is no cost to compare against. The gate
+        // asserts none rather than inventing one — the desk-wide verdict stands alone for that name.
+        var d = EdgeGate.evaluate(List.of(stat("reversion", 36, 18.0, 30.0)), 6.9270,
+                java.util.Map.of("GOOGL", 20.10561), P);
+        assertTrue(d.mayIncrease("JNJ"));
+        assertTrue(d.mayIncrease(null));
+        assertFalse(d.mayIncrease("GOOGL"));
+    }
+
+    @Test
+    void aShutGateVetoesEveryNameIncludingCheapOnes() {
+        // No source passed, so there is no edge to spend anywhere — a 0.29 bps round trip is still
+        // paying for nothing. Per-name permission can only ever subtract from the desk-wide verdict.
+        var d = EdgeGate.evaluate(List.of(stat("trend", 69, -17.31, 31.53)), 6.9270,
+                java.util.Map.of("ES", 0.29122), P);
+        assertFalse(d.mayIncrease());
+        assertFalse(d.mayIncrease("ES"));
+        assertEquals(0.0, d.bestGrossEdgeBps(), 1e-9);
+    }
+
+    @Test
+    void theClaimableEdgeComesFromAPassingSourceNotTheLoudestMean() {
+        // "social" has the bigger mean but only 12 observations, so it never passed and its 40 bps is
+        // not an edge the desk may spend. The claimable edge is the passing source's 18.00, which is
+        // NOT enough to pay GOOGL's 20.11 round trip.
+        var d = EdgeGate.evaluate(List.of(
+                        stat("social", 12, 40.0, 20.0),
+                        stat("reversion", 36, 18.0, 30.0)),
+                6.9270, java.util.Map.of("GOOGL", 20.10561), P);
+        assertTrue(d.mayIncrease());
+        assertEquals(18.0, d.bestGrossEdgeBps(), 1e-9);
+        assertFalse(d.mayIncrease("GOOGL"));
+    }
+
     @Test
     void reduceOnlyProjectionNeverGrowsAPosition() {
         BigDecimal longPos = new BigDecimal("100");
