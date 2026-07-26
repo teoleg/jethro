@@ -78,10 +78,15 @@ if ! command -v claude >/dev/null 2>&1; then
        "still ran). Install Claude Code for the cron user, or add its dir to PATH. PATH=$PATH" >> "$LOG"
 else
   BRAIN_RAN=1
-  claude -p "$(cat ops/improve-prompt.md)" \
+  # Hard timeout so a hung analysis (a stuck gradle test, a reasoning loop) can NEVER hold the lock
+  # forever and wedge every later cycle. SIGTERM at the limit, SIGKILL 60s later. Default 45 min —
+  # generous headroom for a real change-cycle (think + one gradle -Pci test) on a slow Pi; override
+  # with JETHRO_CLAUDE_TIMEOUT (seconds).
+  timeout -k 60 "${JETHRO_CLAUDE_TIMEOUT:-2700}" \
+    claude -p "$(cat ops/improve-prompt.md)" \
     --allowedTools "Bash Read Edit Grep Glob Skill" \
     --permission-mode acceptEdits \
-    >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero (see above)" >> "$LOG"
+    >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero OR timed out (see above)" >> "$LOG"
 fi
 
 # 3b. Per-cycle heartbeat for the UI (reports/run-status.json) — DETERMINISTIC, computed in code
