@@ -12,21 +12,46 @@ import java.util.Map;
  * the pooled average so a thin sample can't dominate and a cold start reads equal. This replaces the
  * phase-4 equal-weight placeholder — a decayed source is "down-weighted by measurement, not decree."
  *
- * <p>Method (Grinold–Kahn advantage + Bühlmann credibility shrinkage + Carver-style bounding):
+ * <p><b>Trust is measured on EXPECTANCY, not on hit rate</b> (ADR-0067). What makes a source worth
+ * listening to is the money its calls make per observation relative to the noise in them — its realised
+ * information ratio — not how often it is merely on the right side. Hit rate is only the sign-based
+ * proxy for Grinold–Kahn's IC, and that proxy is valid solely when payoffs are symmetric; a trend source
+ * is *designed* to be right under half the time and paid by asymmetry, so ranking it on hit rate reads
+ * its intended shape as failure. The statistic below is each source's own measured mean return against
+ * its own standard error — magnitude, dispersion and sample size in one number.
+ *
+ * <p>Method (measured expectancy + Bühlmann credibility shrinkage + Carver-style bounding):
  * <pre>
- *   advantage_s = max(0, 2·hitRate_s − 1)          // directional skill in [0,1]; a coin-flip/worse ⇒ 0.
- *                                                   // Floored, never inverted (contrarian = overfitting).
- *   n_s         = wins_s + losses_s                 // decisive obs (hitRate's own denominator; FLATs = no bet)
+ *   t_s         = avgReturnBps_s / stdErrorBps_s   // sample t of expectancy vs zero (0 ⇒ no dispersion yet)
+ *   e_s         = Φ(t_s) ∈ (0,1)                   // evidence the true expectancy is positive; Φ(0)=½ exactly
+ *   n_s         = wins_s + losses_s                 // decisive obs (FLATs were no bet)
  *   c_s         = n_s / (n_s + K)                   // credibility: trust the data as the sample grows
- *   pool        = mean_s(advantage_s)              // the pooled prior every source shrinks toward
- *   shrunk_s    = c_s·advantage_s + (1−c_s)·pool   // thin sources ≈ pool; rich sources ≈ their own edge
+ *   pool        = mean_s(e_s)                       // the pooled prior every source shrinks toward
+ *   shrunk_s    = c_s·e_s + (1−c_s)·pool            // thin sources ≈ pool; rich sources ≈ their own edge
  *   w_s         = clamp(shrunk_s / mean_s(shrunk_s), MIN, MAX)   // centre on 1.0 (equal = the null)
  * </pre>
- * Cold start (no decisive obs): c=0 ⇒ every shrunk = pool ⇒ every weight = 1.0 (equal). No measured
- * edge anywhere (all advantages 0): mean is 0 ⇒ fall back to equal. {@link ForecastCombiner} normalises
- * by Σweights, so only the RATIOS matter; MIN&gt;0 keeps a decayed source CONTRIBUTING (down-weighted,
- * not dropped — the combiner skips weight≤0). Pure, dimensionless, exactly testable — a conviction
- * weight, never a size or a price (ADR-0016 / invariant 7).
+ * Cold start (no resolved obs ⇒ no standard error): every e = Φ(0) = ½ ⇒ every shrunk = pool ⇒ every
+ * weight = 1.0. Equal by symmetry, not by a fallback branch.
+ *
+ * <p><b>Why Φ and not the raw t.</b> Φ is bounded in (0,1) and monotone, so a weight can never be
+ * negative — a measured-bad source is DOWN-weighted toward MIN, never inverted into a contrarian bet
+ * (inverting a losing signal is the canonical overfit; Harvey, Liu &amp; Zhu, <i>RFS</i> 2016). It also
+ * keeps the null at exactly ½ for every source regardless of sample, so "no evidence" reads equal.
+ * Crucially the previous statistic, {@code max(0, 2·hitRate−1)}, was floored at zero, which made every
+ * below-coin-flip source identical: when the whole desk is losing — precisely when discrimination is
+ * worth most — it collapsed to the degenerate all-zero case and weighted a measured loser exactly like
+ * everyone else. Φ has no such flat region.
+ *
+ * <p>Expectancy is measured GROSS of execution cost here on purpose: cost decides *whether the desk
+ * should pay to trade at all*, which is {@link EdgeGate}'s job (ADR-0064), while these weights decide
+ * only *whose view counts more* among sources that all face the same cost. Keeping the two separate
+ * stops one measurement from being charged twice.
+ *
+ * <p>{@link ForecastCombiner} normalises by Σweights, so only the RATIOS matter — this can rotate
+ * conviction between sources but can never scale the target book up or down; MIN&gt;0 keeps a decayed
+ * source CONTRIBUTING (down-weighted, not dropped — the combiner skips weight≤0) so the active-source
+ * count, and with it the diversification multiplier, is unchanged. Pure, dimensionless, exactly testable
+ * — a conviction weight, never a size or a price (ADR-0016 / invariant 7).
  */
 public final class TelemetryWeights {
 
@@ -65,23 +90,27 @@ public final class TelemetryWeights {
         if (stats == null || stats.isEmpty()) {
             return out;
         }
-        Map<String, Double> advantage = new HashMap<>();
+        Map<String, Double> evidence = new HashMap<>();
         Map<String, Double> credibility = new HashMap<>();
         Map<String, Long> decisive = new HashMap<>();
         double poolSum = 0;
         for (SignalScoring.Stats s : stats) {
-            double adv = Math.max(0.0, 2.0 * s.hitRate() - 1.0);
+            // Evidence that this source's true expectancy is positive: Φ of its own sample t-statistic.
+            // No standard error yet (≤1 observation, or no dispersion) ⇒ t=0 ⇒ Φ(0)=½, i.e. no evidence.
+            double se = s.stdErrorBps();
+            double t = se > 0 ? s.avgReturnBps() / se : 0.0;
+            double ev = standardNormalCdf(t);
             long nDecisive = s.wins() + s.losses();
-            advantage.put(s.source(), adv);
+            evidence.put(s.source(), ev);
             decisive.put(s.source(), nDecisive);
             credibility.put(s.source(), nDecisive / (nDecisive + p.shrinkageK()));
-            poolSum += adv;
+            poolSum += ev;
         }
-        double pool = poolSum / advantage.size();
+        double pool = poolSum / evidence.size();
 
         Map<String, Double> shrunk = new HashMap<>();
         double shrunkSum = 0;
-        for (var e : advantage.entrySet()) {
+        for (var e : evidence.entrySet()) {
             double c = credibility.get(e.getKey());
             double v = c * e.getValue() + (1 - c) * pool;
             shrunk.put(e.getKey(), v);
@@ -89,7 +118,8 @@ public final class TelemetryWeights {
         }
         double meanShrunk = shrunkSum / shrunk.size();
         if (!(meanShrunk > 0)) {
-            // No source shows any measured edge yet → honest equal weighting.
+            // Unreachable while Φ > 0, but a defensive floor: if every source's evidence underflowed
+            // to zero there is no ratio to form → honest equal weighting.
             for (String src : shrunk.keySet()) {
                 out.put(src, 1.0);
             }
@@ -109,5 +139,35 @@ public final class TelemetryWeights {
 
     private static double clamp(double v, double lo, double hi) {
         return v < lo ? lo : (v > hi ? hi : v);
+    }
+
+    /**
+     * Standard normal CDF Φ(x) — Abramowitz &amp; Stegun 26.2.17 (Zelen &amp; Severo), |error| &lt; 7.5e-8.
+     * A statistical convention, not a market number: it maps a dimensionless t-statistic onto the
+     * bounded evidence scale (0,1), with Φ(0) = ½ exactly by construction. Package-private so the
+     * mapping itself is unit-testable against published values.
+     */
+    static double standardNormalCdf(double x) {
+        if (Double.isNaN(x)) {
+            return 0.5; // no statistic ⇒ no evidence
+        }
+        if (x > 40.0) {
+            return 1.0;
+        }
+        if (x < -40.0) {
+            return 0.0;
+        }
+        final double p = 0.2316419;
+        final double b1 = 0.319381530;
+        final double b2 = -0.356563782;
+        final double b3 = 1.781477937;
+        final double b4 = -1.821255978;
+        final double b5 = 1.330274429;
+        double ax = Math.abs(x);
+        double t = 1.0 / (1.0 + p * ax);
+        double poly = t * (b1 + t * (b2 + t * (b3 + t * (b4 + t * b5))));
+        double density = Math.exp(-0.5 * ax * ax) / Math.sqrt(2.0 * Math.PI);
+        double upperTail = density * poly; // ≈ 1 − Φ(|x|)
+        return x >= 0 ? 1.0 - upperTail : upperTail;
     }
 }
