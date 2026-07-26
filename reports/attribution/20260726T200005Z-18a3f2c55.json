@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T20:00:05Z",
+    "fees": "131.123236",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "95.38694807",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-867.73313105",
+      "strategyAlpha": "-963.12007912",
+      "totalFees": "131.123236",
+      "totalPnl": "-867.73313105",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-867.73313105"
+  },
+  "before": {
+    "at": "2026-07-26T19:55:11Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-867.73313105"
+  },
+  "commit": "18a3f2c55e048ed3f279d71194cf60decf9fb5b3",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T20:00:05Z",
+  "summary": "the fusion diversification multiplier is sized by the concentration of the weights actually used rather than the source count: DM = 1/sqrt(sum(w^2) + rho(1-sum(w^2))) over the normalised weights, i.e. the same formula at the inverse-Herfindahl effective number of sources \u2014 identical to the old rule at equal weights, never larger than it, and never below 1, so a source held at the MIN floor for measured-negative expectancy no longer buys a full extra unit of diversification leverage (ADR-0076)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
