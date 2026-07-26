@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-26T19:55:32Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-867.73313105",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "fees": "131.123236",
+    "pnl_pct": 0.0,
+    "gross_pct": null,
+    "pnl_growth_pct": 0.0,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": false,
+    "stale": true,
+    "underwater": true,
+    "action": "changed",
+    "last_verdict": "\u26a0\ufe0f MIXED",
+    "decision": "made a change: the fusion diversification multiplier is sized by the concentration of the weights actually used rather than the source count: DM = 1/sqrt(sum(w^2) + rho(1-sum(w^2))) over the normalised weights, i.e. the same formula at the inverse-Herfindahl effective number of sources \u2014 identical to the old rule at equal weights, never larger than it, and never below 1, so a source held at the MIN floor for measured-negative expectancy no longer buys a full extra unit of diversification leverage (ADR-0076) \u00b7 prev \u26a0\ufe0f MIXED",
+    "reasoning": "The desk was claiming a full two-source diversification bonus while one source carried 91% of the weight \u2014 the multiplier now measures the breadth the weights actually deliver, so a source held at the floor for losing money stops buying leverage (ADR-0076).\n\n## Situation (live endpoints, read first)\n\n**Money \u2014 flat, not bleeding.** Total PnL is unchanged run-over-run and unchanged across the last three\nruns; every move in that span sits inside the scorer's noise deadband. `stale` and `underwater` are both\nset and we are off the +1%-per-3-iterations target. The cause is arithmetic, not a loss: with zero\nexposure, PnL cannot move. The day's damage was done in a ~40-minute window this afternoon, when a large\nbook was opened and then unwound in seven geometric halving steps, paying the round trip on every step;\nnothing has traded since.\n\n**Risk \u2014 zero, no danger state.** Gross and net exposure are both flat at zero, VaR reports \"no\npositions\", the firm drawdown breaker is untripped, the hedge axis reads FLAT. Nothing to de-risk,\nnothing to cut, so the danger-state override does not apply.\n\n**Cause \u2014 last cycle's change did what it said and could not have moved the vector.** ADR-0075 opened the\nedge gate's cost comparison to each name's own round trip. It scored \u26a0\ufe0f MIXED \"no material change\", and\ncorrectly: the gate is shut for reasons cost cannot fix. `reversion` \u2014 the one source with positive\nmeasured expectancy \u2014 has 23 resolved observations against a 30-observation minimum, and its t-statistic\nagainst a **zero** round trip is still short of the 2.0 hurdle. No cost refinement reaches that. Five\nconsecutive cycles have now been spent on the gate; the gate is not the binding constraint.\n\n**Order-level post-mortem.** The window's only orders were two 1-share ALPHA buys with matching fractional\nHEDGE trims, both under the reduce-only gate. **No trigger opened a position**, so 100% of the (nil) PnL\nmove is mark drift on a flat book \u2014 market, not change. Nothing to blame, nothing to credit.\n\n## What I found instead\n\nLooking past the gate at what happens *when* it opens: the combiner sizes every target with a\ndiversification multiplier taken from the **count** of contributing sources, under a precondition its own\njavadoc states \u2014 \"for `n` equally-important forecasts\" \u2014 that has not held since source trust became\nevidence-driven. Weights span a 12\u00d7 band, and the live vector is `reversion 2.52` against `trend 0.25`:\nnormalised, one source holds 91% of the vote and the desk was awarding itself the full two-equal-source\nmultiplier. The error is one-directional and worst exactly when the evidence is worst \u2014 the more\nconvincingly a source is measured to lose money, the more concentrated the weights become and the more the\ncount over-states breadth, so a source pinned at the floor *for losing money* still bought a full extra\nunit of leverage.\n\n## The change\n\nThe multiplier is now computed from the concentration of the weight vector actually used:\n`DM = 1/\u221a(\u03a3w\u1d62\u00b2 + \u03c1(1\u2212\u03a3w\u1d62\u00b2))`, which is the same formula evaluated at the inverse-Herfindahl **effective**\nnumber of sources instead of the roster size. No new dial, no new number \u2014 same \u03c1, same cap, same weights.\nThree properties are proved and tested: it is **identical** to the old rule at equal weights (cold start\nand `weights.mode=equal` are byte-unchanged); by Cauchy\u2013Schwarz it is **never larger** than the old rule,\nso this can only shrink the book, never grow it; and it never falls below 1, so averaging cannot make the\ndesk less confident than a single view. At the live weights the target book is materially smaller for an\nidentical forecast \u2014 less capital at risk for the same view, which is the objective directly.\n\n**Honest expectation.** With the gate shut and the book flat this will very likely score \u26a0\ufe0f \"no material\nchange\" again, and I am not going to pretend otherwise. It is not a bet on this window: it is the\ndifference between the desk re-entering at honest size and re-entering over-levered once `reversion`\nclears its sample. I did *not* loosen the gate to manufacture activity \u2014 the evidence does not support\ntrading yet, and forcing it is exactly how the \u274c BAD change earlier in the run was earned.",
+    "commit": "79d2408"
+  },
+  {
     "ts": "2026-07-26T19:40:20Z",
     "feedMode": "SIM",
     "available": true,
