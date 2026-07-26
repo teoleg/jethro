@@ -1,76 +1,68 @@
-Fixed the fusion's source-trust weighting: it was blind to *how badly* a source was losing, so it gave a measured loser the same conviction as an unmeasured peer.
+Cut the stranded hedge: an absolute $10k min-trade guard had frozen an ES leg at five times its own target, holding two thirds of firm gross exposure with no mechanism that could ever remove it.
 
-## Situation (live endpoints, read at the top of this cycle)
+## Situation (live endpoints, read first)
 
-**Money — bleeding.** Total PnL has fallen every reading today: it sat at the post-reset residual, was
-lower when the scorer measured last cycle's change, and is lower again now — a loss of a few tens of
-dollars over about a quarter of an hour on a book of only two positions. The damage is almost entirely
-*realised*, not marked: the realised leg dwarfs the unrealised one. That is the signature of churn, not
-of an adverse market. Fees are already several dollars against a book measured in low tens of thousands.
-Nowhere near the ≥1%-per-3-iterations growth target; the target is not merely missed, PnL is going the
-wrong way.
+**Money — bleeding, but the bleed has essentially stopped.** Total PnL is `-$866.49`, down `$3.26`
+since last run and down `$843.66` across the last three. Nowhere near the ≥1%-per-3-iterations target;
+the flags read BLEEDING and UNDERWATER. The shape matters more than the level: realised is `-$869.25`
+against unrealised of `+$2.77`, and today's fills carry `$130.90` of fees on 185 fills. That is not an
+adverse market — it is the transaction cost of one round trip. Almost the entire `-$843` came from the
+`fb9273505` change (already scored ❌ BAD and auto-reverted) opening a `$43k` book and then working it
+back to nothing: the order log shows the unwind decaying by halves every 30 s — 78, 39, 20, 10, 5, 2, 1
+— each clip crossing a spread. The money is spent and sunk; the current run rate is small.
 
-**Risk — spiked, now unwinding.** Gross exposure went from flat to tens of thousands after last cycle's
-change opened the desk, and is already back down by roughly two thirds as the revert takes hold. Net is
-small and long. Historical VaR is a low three-figure number against that gross, ES roughly triple it.
-The firm drawdown breaker is **not** tripped and is not close — the losses are small in absolute terms;
-the problem is their sign and their cause, not their size.
+**Risk — flat, and stuck.** Gross `$6,885.14`, net `$4,897.35`, both barely moving (`-$5.76` gross this
+window). The firm drawdown breaker is not tripped and is not close; historical VaR95 is `$78.58` against
+that gross. But the composition is wrong: `$5,791.23` of the `$6,885.14` gross — 84% — is a single ES
+future in the HEDGE book, against an ALPHA book that is `-$893.88` net short and consists of five
+single-share stubs. The hedge is more than six times the exposure it exists to neutralise, and it is
+what makes firm *net* `+$4.9k` long.
 
-**Cause — my own last change, and it is already reverted.** Last cycle I replaced ADR-0064's binary
-edge gate with a continuous risk appetite that sized the book at half notional when evidence was
-*absent*. The scorer marked it ❌ BAD (exposure grew, PnL did not) and auto-reverted it. The live
-numbers say the verdict was right, and they say *why* I was wrong: I read the desk's state as "no
-evidence yet" because no source had reached the gate's 30-observation minimum. But the evidence was
-there and it was negative — the trend source has 23 resolved observations at a mean return well below
-zero, roughly two and a half standard errors below, and every other source is negative too. I sized on
-the absence of proof while the telemetry was quietly reporting proof of harm. The revert restored the
-reduce-only gate, which is why exposure is falling; the book is being worked flat and the residual loss
-is the cost of that round trip.
+**Cause — last cycle's change is not the culprit; the market isn't either.** `c12099fea` (expectancy-
+weighted source trust) scored ⚠️ MIXED, "no material change", which is what I predicted: the edge gate is
+reduce-only, so re-weighting rotates conviction without resizing the book. Attributing this window
+honestly: the change opened, closed and resized **nothing** — the only order after it went in was a
+single JNJ buy completing a stub unwind — so all of the `-$3.26`/`-$5.76` is mark drift on positions it
+never touched. Market, not change, and too small to read either way. The real culprit is older and still
+live, and it is the thing the report did not foreground.
 
-**Danger — no.** We were bleeding *and* adding exposure an hour ago, which is the state that overrides
-everything; the revert has already de-risked it and gross is falling toward flat under a gate that
-cannot re-open. So the de-risking move is done, and this cycle is free to fix a cause rather than a
-symptom.
+**Danger — no, but there is a stranded risk position.** We are not bleeding-and-adding; exposure is flat
+and the breaker is far away. So this cycle is free to fix a cause. The cause is that the ES hedge is
+frozen: `/api/hedging` says *"held 0.021254 → target 0.004011 ES — largest delta under the $10,000.00 min
+trade, holding"*. The advisor has correctly re-sized itself down and correctly computed the delta, and
+then refused to trade it, because ADR-0039's churn guard is an absolute dollar amount compared against a
+delta with no reference to the size of the hedge it guards. Once the hedged book shrank below `$10k`,
+every delta a small hedge can produce — up to and including its own full unwind — fell under the guard,
+so the position became untradable in both directions. That silently repeals ADR-0039's own promise that
+"no underlying, no hedge"; the naked proxy leg lingers permanently.
 
-## What I changed and why
+## What I changed
 
-Three independent measurements now agree that this desk's momentum/trend family is anti-predictive on
-this stream: the live signal telemetry (all three routed sources negative, the only well-sampled one
-significantly so), the historical observation ledger across both feed modes, and the strategy selector's
-own walk-forward backtest, which reports momentum losing on twelve of seventeen names and picks
-mean-reversion wherever it picks anything. The regime detector independently says CHOP, with every
-name's efficiency ratio below a half. That is a coherent picture, not a one-window blip.
+The no-trade band is now the **smaller** of the absolute `$10k` guard and 25% of the hedge's own scale
+(`max(|target|,|held|)` notional) — trade when the delta is material in absolute terms *or* material
+relative to the hedge itself (ADR-0069, `HedgeAdvisor.noTradeBand`). Taking the minimum is the point: on
+a large book `0.25 × scale` exceeds `$10k`, so ADR-0039 behaviour is bit-for-bit unchanged (the existing
+`$8k`-trim-on-a-`$1.8M`-hedge regression test still holds its trade); on a small book the relative leg
+governs and the hedge can be trimmed. Because the fraction is clamped at 1, a zero target gives
+`|delta| = scale ≥ band`, so a full unwind is now always executable at any book size — the promise
+becomes structural rather than true-only-above-`$10k`. The `0.25` is the 25% leg of the standard 5/25
+band-rebalancing convention, flagged `PLACEHOLDER — Oleg to set`; sizing the band from measured ES/NQ
+round-trip cost is the economically correct form and is in the deferred register, since the exchange
+rate between residual exposure and cost is a risk-appetite decision, not a number I may invent. Three
+new tests cover the stranded-trim case, the always-unwind property, and that a 1% drift on a small hedge
+still trades nothing. Deliberately not touched: the strategy book's own ±1-share stubs are a different
+mechanism (whole-unit truncation) already in the register, and the deterministic floor is untouched.
 
-Against that, the fusion layer reports its per-source weights as exactly equal — 1.0 for every source.
-That is not a coincidence, it is a defect, and I could reproduce it from the code by hand. Source trust
-was computed as `max(0, 2·hitRate − 1)`: every source at or below a coin flip floors to zero, the pooled
-mean goes to zero, and the method takes its "no measured edge anywhere" branch and returns 1.0 for
-everyone. The whole desk being underwater is exactly the case the statistic cannot see. Worse, hit rate
-is the wrong quantity for a trend follower in the first place — it is *designed* to be right under half
-the time and paid by asymmetry, so hit rate reads its intended shape as failure and cannot distinguish
-it from real failure.
+Honest expectation: this removes roughly `$4.7k` of exposure the hedging system itself says it does not
+want, so gross and net should fall sharply while PnL moves only by the one small commission. Against the
+ledger's ratio annotation that will *look* worse — PnL per $1 gross gets more negative when PnL is
+negative and gross shrinks — but the vector is the right one: same money, far less money at risk, and a
+whole class of stranded position closed. I also found `docs/adr/0068` and a set of firm drawdown/max-loss
+property edits left uncommitted in the tree by an interrupted cycle; I reverted the property edits
+unshipped and kept the ADR as a not-built record, because retuning the breaker is exactly the floor edit
+that ADR forbids the loop from making — and an unscored second dial change would confound this cycle's
+attribution.
 
-So I replaced the statistic and kept everything around it: source trust is now Φ of the source's own
-sample t-statistic of expectancy — its measured mean return against its own standard error — which folds
-magnitude, dispersion and sample size into one bounded number with no flat region. Credibility shrinkage,
-the pooled prior, the min-sample floor and the MIN/MAX bound are untouched, and no new dial is
-introduced: Φ(0) is one half exactly, so a cold start still reads equal by symmetry rather than by a
-fallback branch. It is bounded in (0,1), so a measured-bad source is quietened toward the floor, never
-inverted into a contrarian bet on its own failure — inverting a losing signal is the classic overfit and
-I am deliberately not doing it. ADR-0067 records the decision; the deferred register regained two
-findings the revert had dropped.
-
-One property matters for how this should be judged, and it is the reason I chose this lever after last
-cycle's reversal: the combiner normalises by the sum of the weights, and the floor keeps every source
-active, so re-weighting **rotates conviction between sources but cannot resize the book**. Identical
-forecasts produce an identical target position under any weights — there is a test asserting exactly
-that. Unlike last cycle's change, this one cannot grow exposure. It is not a retry of the reverted
-idea: that one scaled the notional through the gate, this one changes only whose view counts.
-
-Honest expectation for the next scoring: the gate is closed and the book is winding to flat, so the
-vector will likely read as little or no change and this will score MIXED. That is the correct outcome
-for a change that fixes how the desk will decide once it has something worth deciding on, and I would
-rather bank a real correction than manufacture a trade. The standing problem remains that no source has
-positive measured expectancy, so the gate has nothing legitimate to open on — the next lever I intend is
-a source built for the regime the detector is actually reporting, measured honestly before it is
-allowed to size anything.
+Next lever if this lands: the standing problem is unchanged — no fusion source has positive measured
+expectancy, so the reduce-only gate has nothing legitimate to open on. A source built for the CHOP regime
+the detector actually reports, measured honestly before it sizes anything, is the next thing to build.

@@ -22,6 +22,7 @@ public class HedgeConfig {
             @Value("${jethro.hedge.mode:ADVISE}") String mode,
             @Value("${jethro.hedge.equity-rebalance-floor-usd:0}") BigDecimal rebalanceFloorUsd,
             @Value("${jethro.hedge.min-trade-notional-usd:10000}") BigDecimal minTradeNotionalUsd,
+            @Value("${jethro.hedge.no-trade-band-fraction:0.25}") BigDecimal noTradeBandFraction,
             @Value("${jethro.hedge.effectiveness-floor:0.25}") double effectivenessFloor,
             @Value("${jethro.hedge.min-covariance-days:40}") int minCovarianceDays,
             @Value("${jethro.hedge.equity-proxy-candidates:ES,NQ}") java.util.List<String> proxyCandidates,
@@ -39,7 +40,8 @@ public class HedgeConfig {
                     : java.util.Optional.empty();
         };
         return new HedgeAdvisor(HedgeAdvisor.Mode.valueOf(mode.trim().toUpperCase(java.util.Locale.ROOT)),
-                rebalanceFloorUsd, minTradeNotionalUsd, effectivenessFloor, minCovarianceDays,
+                rebalanceFloorUsd, minTradeNotionalUsd, noTradeBandFraction,
+                effectivenessFloor, minCovarianceDays,
                 proxyCandidates, proxySwitchMargin, equityProxy, multiplierOf);
     }
 

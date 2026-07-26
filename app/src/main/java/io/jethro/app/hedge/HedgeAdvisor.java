@@ -29,10 +29,19 @@ import java.util.stream.Collectors;
  *
  * <p><b>The proposal is a DELTA, not the full hedge</b> (ADR-0039's {@code net = e + h}): per-proxy
  * targets are the selected proxy's sized target and ZERO for every other held proxy; the cycle
- * executes the largest delta above the ADR-0039 min-trade notional — so on-target books propose
- * nothing, flat books unwind their residual hedge, and a proxy switch unwinds the old instrument
- * before building the new. Without this feedback, AUTO re-submits the full hedge every cooldown
- * and compounds the position without bound (2026-07-18 math review, P1-1).
+ * executes the largest delta above the no-trade band — so on-target books propose nothing, flat
+ * books unwind their residual hedge, and a proxy switch unwinds the old instrument before building
+ * the new. Without this feedback, AUTO re-submits the full hedge every cooldown and compounds the
+ * position without bound (2026-07-18 math review, P1-1).
+ *
+ * <p><b>The no-trade band is scale-relative</b> (ADR-0069): a delta trades when it clears the
+ * absolute ADR-0039 churn guard <b>or</b> a fraction of the hedge's own scale
+ * ({@code max(|target|, |held|)} notional) — i.e. the threshold is the SMALLER of the two. An
+ * absolute-dollar guard alone is an absolute barrier once the hedged book shrinks below it: the
+ * whole hedge becomes untradable, including unwinding it, so a stale proxy leg is stranded on the
+ * book forever and ADR-0039's "no underlying, no hedge" promise silently fails. Because the band
+ * fraction is at most 1, {@code |delta| = scale} whenever the target is zero, so a full unwind is
+ * always executable at any book size.
  *
  * <p>Pure evaluation — all live state is passed in, so the whole decision is unit-testable and,
  * being deterministic, reproducible from the same inputs (invariant 7). Mode is OFF/ADVISE/AUTO;
@@ -60,6 +69,7 @@ public final class HedgeAdvisor {
     private volatile Mode mode;
     private final BigDecimal rebalanceFloorUsd;
     private final BigDecimal minTradeNotionalUsd;
+    private final BigDecimal noTradeBandFraction;
     private final double effectivenessFloor;
     private final int minCovarianceDays;
     private final List<String> proxyCandidates;
@@ -68,6 +78,10 @@ public final class HedgeAdvisor {
     private final Function<String, Optional<BigDecimal>> multiplierOf;
 
     /**
+     * @param minTradeNotionalUsd  absolute churn guard on the hedge delta (ADR-0039 Decision 2)
+     * @param noTradeBandFraction  the delta also trades at this fraction of the hedge's own scale
+     *                             (ADR-0069) — clamped to [0,1]; 0 disables the relative leg and
+     *                             restores the pure-absolute ADR-0039 behaviour
      * @param proxyCandidates    equity proxies evaluated each cycle (ADR-0042), e.g. [ES, NQ]
      * @param proxySwitchMargin  ρ² edge a challenger needs over the HELD proxy to switch
      * @param structuralProxyId  the proxy assigned betas are quoted against (structural tier)
@@ -75,12 +89,15 @@ public final class HedgeAdvisor {
      *                           by the caller)
      */
     public HedgeAdvisor(Mode mode, BigDecimal rebalanceFloorUsd, BigDecimal minTradeNotionalUsd,
+                        BigDecimal noTradeBandFraction,
                         double effectivenessFloor, int minCovarianceDays,
                         List<String> proxyCandidates, double proxySwitchMargin,
                         String structuralProxyId, Function<String, Optional<BigDecimal>> multiplierOf) {
         this.mode = mode;
         this.rebalanceFloorUsd = rebalanceFloorUsd == null ? BigDecimal.ZERO : rebalanceFloorUsd.abs();
         this.minTradeNotionalUsd = minTradeNotionalUsd == null ? BigDecimal.ZERO : minTradeNotionalUsd.abs();
+        this.noTradeBandFraction = noTradeBandFraction == null ? BigDecimal.ZERO
+                : noTradeBandFraction.abs().min(BigDecimal.ONE);
         this.effectivenessFloor = effectivenessFloor;
         this.minCovarianceDays = Math.max(2, minCovarianceDays);
         this.proxyCandidates = proxyCandidates == null || proxyCandidates.isEmpty()
@@ -186,6 +203,7 @@ public final class HedgeAdvisor {
         String bestProxy = null;
         BigDecimal bestDelta = null;
         BigDecimal bestNotional = null;
+        BigDecimal bestScaleNotional = null;
         Candidate bestCandidate = null;
         for (var e : targets.entrySet()) {
             BigDecimal have = held.getOrDefault(e.getKey(), BigDecimal.ZERO);
@@ -198,11 +216,15 @@ public final class HedgeAdvisor {
             if (c == null) {
                 continue;
             }
-            BigDecimal notional = delta.abs().multiply(c.price()).multiply(c.multiplier());
+            BigDecimal contractUsd = c.price().multiply(c.multiplier());
+            BigDecimal notional = delta.abs().multiply(contractUsd);
+            // The hedge's own scale on this proxy — what the band is measured against (ADR-0069).
+            BigDecimal scaleNotional = e.getValue().abs().max(have.abs()).multiply(contractUsd);
             if (bestNotional == null || notional.compareTo(bestNotional) > 0) {
                 bestProxy = e.getKey();
                 bestDelta = delta;
                 bestNotional = notional;
+                bestScaleNotional = scaleNotional;
                 bestCandidate = c;
             }
         }
@@ -210,14 +232,15 @@ public final class HedgeAdvisor {
         BigDecimal heldSelected = held.getOrDefault(target.proxy().id(), BigDecimal.ZERO);
         String heldVsTarget = "held " + plain(heldSelected) + " → target " + plain(target.signedQty())
                 + " " + target.proxy().id();
-        if (bestProxy == null || bestNotional.compareTo(minTradeNotionalUsd) < 0) {
+        BigDecimal band = noTradeBand(bestScaleNotional);
+        if (bestProxy == null || bestNotional.compareTo(band) < 0) {
             String status = target.signedQty().signum() == 0 && allFlat(held) ? "FLAT" : "ON-TARGET";
             return new Axis("EQUITY", target.proxy().id(), money(net), rebalanceFloorUsd,
                     eff(target), false, false, null, null, null,
                     target.effectiveness(), target.grossSigmaUsd(), target.residualSigmaUsd(),
                     plain(heldSelected), plain(target.signedQty()), status, target.tier(),
-                    heldVsTarget + " — largest delta under the " + money(minTradeNotionalUsd)
-                            + " min trade, holding");
+                    heldVsTarget + " — largest delta under the " + money(band)
+                            + " no-trade band, holding");
         }
         boolean unwindingOther = !bestProxy.equals(target.proxy().id());
         String side = bestDelta.signum() < 0 ? "SELL" : "BUY";
@@ -232,6 +255,26 @@ public final class HedgeAdvisor {
                 target.effectiveness(), target.grossSigmaUsd(), target.residualSigmaUsd(),
                 plain(held.getOrDefault(bestProxy, BigDecimal.ZERO)),
                 plain(targets.get(bestProxy)), status, target.tier(), story);
+    }
+
+    /**
+     * The no-trade band on the hedge delta (ADR-0069): the SMALLER of the absolute ADR-0039 churn
+     * guard and {@code fraction × scale}, where {@code scale = max(|target|,|held|)} notional on
+     * the proxy being traded. Equivalently: trade when the delta is material in absolute terms OR
+     * material relative to the hedge itself.
+     *
+     * <p>Taking the minimum (never the maximum) is what keeps the absolute guard from becoming an
+     * absolute barrier: on a book far larger than the guard the relative leg is the looser of the
+     * two and the ADR-0039 $10k behaviour is unchanged, while on a book smaller than the guard the
+     * relative leg governs and the hedge can still be trimmed or unwound. With the fraction clamped
+     * at 1 and a zero target, {@code delta == scale ≥ band}, so an unwind is always executable.
+     */
+    private BigDecimal noTradeBand(BigDecimal scaleNotional) {
+        if (scaleNotional == null || scaleNotional.signum() <= 0
+                || noTradeBandFraction.signum() <= 0) {
+            return minTradeNotionalUsd;
+        }
+        return minTradeNotionalUsd.min(scaleNotional.multiply(noTradeBandFraction));
     }
 
     /**

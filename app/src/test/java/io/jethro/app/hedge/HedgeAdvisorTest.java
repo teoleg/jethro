@@ -46,10 +46,11 @@ class HedgeAdvisorTest {
 
     private static HedgeAdvisor advisor(HedgeAdvisor.Mode mode, String rebalanceFloorUsd,
                                         double switchMargin) {
-        // min-trade $10k (ADR-0039); min-covariance 40d (ADR-0041; fixture covs have 60 obs);
-        // candidates ES,NQ with refdata-style multipliers (ES 50, NQ 20); structural proxy ES.
+        // min-trade $10k (ADR-0039) with the 25%-of-scale relative leg (ADR-0069); min-covariance
+        // 40d (ADR-0041; fixture covs have 60 obs); candidates ES,NQ with refdata-style
+        // multipliers (ES 50, NQ 20); structural proxy ES.
         return new HedgeAdvisor(mode, new BigDecimal(rebalanceFloorUsd), new BigDecimal("10000"),
-                0.25, 40, List.of("ES", "NQ"), switchMargin, "ES", MULTIPLIERS);
+                new BigDecimal("0.25"), 0.25, 40, List.of("ES", "NQ"), switchMargin, "ES", MULTIPLIERS);
     }
 
     private static final Function<String, Optional<BigDecimal>> MULTIPLIERS = id -> switch (id) {
@@ -129,6 +130,48 @@ class HedgeAdvisorTest {
         var axis = eval(advisor(HedgeAdvisor.Mode.AUTO, "0"), Optional.of(cov2()),
                 LONG_1M, NO_BETA, Map.of("ES", new BigDecimal("-6.4")), ALL_TRADABLE);
         assertFalse(axis.hedging(), "an $8k trim is churn, not a hedge");
+        assertEquals("ON-TARGET", axis.status());
+    }
+
+    @Test
+    void smallBookResidualHedgeIsTrimmedNotStranded() {
+        // ADR-0069, the live 2026-07-26 defect: the equity book collapsed to a fraction of its
+        // former size, leaving a hedge far above its own target. β̂=1.8 on $2,800 net equity →
+        // target −0.018 ES ($5,040 at $280k/contract); held −0.045 ES ($12,600). The delta is
+        // 0.027 ES = $7,560 — under the $10k ABSOLUTE guard, so the pure-ADR-0039 rule held it
+        // forever and $7.6k of unwanted proxy exposure sat on the firm book. The relative leg is
+        // 25% × $12,600 = $3,150, and $7,560 clears it, so the excess is trimmed.
+        var axis = eval(advisor(HedgeAdvisor.Mode.AUTO, "0"), Optional.of(cov2()),
+                Map.of("STOCK", new BigDecimal("2800")), NO_BETA,
+                Map.of("ES", new BigDecimal("-0.045")), ALL_TRADABLE);
+        assertTrue(axis.hedging(), "a 150%-of-target excess is not churn: " + axis.rationale());
+        assertEquals("BUY", axis.hedgeSide(), "buying back part of a too-short hedge");
+        assertEquals(0, new BigDecimal("0.027").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void tinyResidualHedgeIsAlwaysUnwound() {
+        // ADR-0039 Decision 1 promises "no underlying, no hedge". Under a pure absolute guard that
+        // promise failed silently for any residual smaller than the guard: equities flat, held
+        // −0.02 ES = $5,600 < $10k, so the naked proxy leg lingered. With the band at 25% of the
+        // hedge's own scale ($1,400) a zero target is reachable at any size.
+        var axis = eval(advisor(HedgeAdvisor.Mode.AUTO, "0"), Optional.of(cov2()),
+                Map.of(), NO_BETA, Map.of("ES", new BigDecimal("-0.02")), ALL_TRADABLE);
+        assertTrue(axis.hedging());
+        assertEquals("UNWIND", axis.status());
+        assertEquals("BUY", axis.hedgeSide());
+        assertEquals(0, new BigDecimal("0.02").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void smallBookStillDampsSubBandChurn() {
+        // The relative leg must not turn into a churn machine: β̂=1.8 on $3,080 → target −0.0198
+        // ES, held −0.02 → a 0.0002 ES / $56 trim, which is 1% of the $5,600 hedge and far under
+        // the $1,400 band. Nothing trades.
+        var axis = eval(advisor(HedgeAdvisor.Mode.AUTO, "0"), Optional.of(cov2()),
+                Map.of("STOCK", new BigDecimal("3080")), NO_BETA,
+                Map.of("ES", new BigDecimal("-0.02")), ALL_TRADABLE);
+        assertFalse(axis.hedging(), "a 1% drift is churn at any book size: " + axis.rationale());
         assertEquals("ON-TARGET", axis.status());
     }
 
