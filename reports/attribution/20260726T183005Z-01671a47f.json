@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T18:30:05Z",
+    "fees": "131.123236",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "95.38694807",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-867.73313105",
+      "strategyAlpha": "-963.12007912",
+      "totalFees": "131.123236",
+      "totalPnl": "-867.73313105",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-867.73313105"
+  },
+  "before": {
+    "at": "2026-07-26T18:15:09Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-867.73313105"
+  },
+  "commit": "01671a47f85621f1370649801fc84aec30ecb03a",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T18:30:05Z",
+  "summary": "per-name execution cost in the edge gate: once a source clears the desk-wide hurdle, each name is re-tested against its own measured round-trip slippage and one that costs more than the passing source's measured gross expectancy is reduce-only, so the desk stops paying more to enter a name than the edge it entered on (ADR-0072)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
