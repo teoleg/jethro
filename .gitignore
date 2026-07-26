@@ -19,3 +19,6 @@ __pycache__/
 
 # continuous-improvement loop single-flight lock
 .improve-loop.lock
+
+# RAG memory vector cache — derived from committed findings/snapshots, rebuilt by improvement_memory.py ingest
+reports/memory-index.jsonl
