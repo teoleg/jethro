@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T15:30:27Z",
+    "fees": "3.998473",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "0",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-22.82979500",
+      "strategyAlpha": "-22.82979500",
+      "totalFees": "3.998473",
+      "totalPnl": "-22.82979500",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-22.82979500"
+  },
+  "before": {
+    "at": "2026-07-26T14:51:41Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-22.82979500"
+  },
+  "commit": "a76a0e6ca45eb5a494f325ccec3c1780fd3fca38",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T15:30:27Z",
+  "summary": "trend sensor: warm the scale estimator over half a normalisation span before dividing by it, so a freshly-warmed name no longer opens pinned at the forecast cap (ADR-0066 correction)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
