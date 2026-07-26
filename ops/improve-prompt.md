@@ -108,9 +108,25 @@ you start, the ledger (`reports/improvement-ledger.md`) already reflects last cy
 BAD/MIXED verdict on your last idea tells you what NOT to repeat (try a *different* lever). Do not
 touch the ledger, the snapshots, or `reports/.pending-baseline.json` by hand.
 
+## Situation triage — answer these PRECISELY, first, every cycle (before any diagnosis)
+Open every cycle by stating the live money situation in plain numbers — mandatory, and it goes at the TOP
+of `reports/last-analysis.md`. Do not jump to a clever code fix before you have answered:
+1. **Money** — is total PnL higher or lower than the last run, and across the last 3? By how many dollars?
+   Is the book **bleeding** (PnL falling run-over-run)?
+2. **Risk** — is gross / net exposure **rising or falling**? Within the firm risk budget? How close to the
+   drawdown breaker?
+3. **Cause** — did the change deployed **last cycle help or hurt**? State its scored verdict AND the live
+   PnL/exposure move since it went in. Name the culprit if there is one.
+4. **Danger** — are we **bleeding AND exposure rising** (or near the breaker)? If yes, that is a live
+   danger state and it **overrides everything else**: the right move this cycle is to **de-risk / cut /
+   revert the culprit**, NOT ship a new signal. Cutting risk that is losing money is always a valid change.
+Only after answering 1–4 in words do you diagnose further. **Trust the numbers over the report narrative**
+— if the live endpoints show deterioration the report did not foreground, *that* is your target. A book
+that is bleeding while adding exposure is the single most important thing to see; never miss it.
+
 ## Procedure
-1. **Read** `logs/report.md` (telemetry, stack traces, cost/turnover) and the top of the ledger. Reason
-   about the numbers — do not transcribe them anywhere.
+1. **Read** `logs/report.md` (telemetry, stack traces, cost/turnover), the top of the ledger, and the
+   recent `reports/run-status.json` trend. Reason about the numbers — do not transcribe them anywhere.
 2. **Diagnose** like the expert you are: what is costing risk-adjusted PnL, and why — the *mechanism*,
    not the symptom? A WARN/ERROR/stack trace pointing at a real bug is a valid, high-value target.
 3. **Always leave your reasoning where the owner can see it.** EVERY run — change or not — overwrite
