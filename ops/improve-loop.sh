@@ -41,6 +41,21 @@ python3 scripts/system-report.py >> "$LOG" 2>&1 || {
 git fetch origin >> "$LOG" 2>&1 || true
 git checkout -B "$BRANCH" >> "$LOG" 2>&1
 BEFORE=$(git rev-parse HEAD)
+
+# 2a. Auto-merge maintainer fixes from the upstream branch so they NEVER need merging by hand. The
+#     loop commits its own experiments to $BRANCH; maintainer changes land on $UPSTREAM and are pulled
+#     in here. They fall inside BEFORE..AFTER below, so they also get pushed and (if code changed)
+#     deployed. A conflict (rare — different files) is aborted and skipped, not left half-applied.
+UPSTREAM="${JETHRO_UPSTREAM_BRANCH:-origin/claude/new-session-smb8v6}"
+if git rev-parse --verify --quiet "$UPSTREAM" >/dev/null 2>&1; then
+  if git merge --no-edit "$UPSTREAM" >> "$LOG" 2>&1; then
+    echo "auto-merged $UPSTREAM" >> "$LOG"
+  else
+    git merge --abort >> "$LOG" 2>&1 || true
+    echo "WARN: auto-merge of $UPSTREAM conflicted — skipped this cycle (resolve by hand)" >> "$LOG"
+  fi
+fi
+
 # Was a prior change awaiting its score at cycle start? Drives the run-status "scored/reverted" state.
 HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
 

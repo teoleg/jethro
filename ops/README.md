@@ -66,6 +66,14 @@ The box works on **`claude/auto-improve`** and runs whatever is committed there.
 autonomy, leave it as-is. To review each change before it runs live, set `JETHRO_DEPLOY_CMD` empty
 (so it commits+pushes but doesn't restart) and rebuild/restart yourself after you've looked.
 
+**Auto-updating from the maintainer branch.** Each cycle the loop `git merge`s `$UPSTREAM`
+(default `origin/claude/new-session-smb8v6`, override with `JETHRO_UPSTREAM_BRANCH`) into
+`auto-improve` before it works — so maintainer fixes pushed there are picked up **automatically, no
+manual merge**. The loop only ever commits its own experiments to `auto-improve`; the maintainer only
+ever writes `$UPSTREAM`; so the two never fight over one branch. A rare merge conflict is aborted and
+logged, not left half-applied. (One-time bootstrap: the box needs this version of `improve-loop.sh`
+first, so do a single manual merge once; after that it is automatic.)
+
 ## Watch it in the UI — the Improve page
 Every cycle (change or not) writes one deterministic heartbeat line to `reports/run-status.json`, which
 the running app serves at `/api/improve/status` and the **Improve** tab renders: time, alpha PnL,
