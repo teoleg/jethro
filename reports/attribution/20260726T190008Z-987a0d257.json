@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T19:00:08Z",
+    "fees": "131.123236",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "95.38694807",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-867.73313105",
+      "strategyAlpha": "-963.12007912",
+      "totalFees": "131.123236",
+      "totalPnl": "-867.73313105",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-867.73313105"
+  },
+  "before": {
+    "at": "2026-07-26T18:49:39Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-867.73313105"
+  },
+  "commit": "987a0d257350356c0c28097b4854987f9712fff5",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T19:00:08Z",
+  "summary": "feed-mode scope the daily close series so VaR and per-name volatility stop measuring a sim/live handover as a market move: daily_close gains feed_mode with the mode in its primary key, both session writers stamp the running mode, the bootstrap history is tagged SEED, and a return is admissible only between two closes from the same stream (ADR-0073)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
