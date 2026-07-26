@@ -1,5 +1,19 @@
 [
   {
+    "ts": "2026-07-26T02:00:07Z",
+    "feedMode": "SIM",
+    "available": true,
+    "alpha_pnl": "-7013.01659511",
+    "gross": "1123.13507784",
+    "net": "-1123.13507784",
+    "pnl_pct": -0.04,
+    "gross_pct": 0.3,
+    "action": "no-change",
+    "last_verdict": null,
+    "decision": "no change this cycle",
+    "commit": "7571dc1"
+  },
+  {
     "ts": "2026-07-26T01:45:06Z",
     "feedMode": "SIM",
     "available": true,
