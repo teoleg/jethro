@@ -77,6 +77,21 @@ public final class SourceForecasts {
     }
 
     /**
+     * Price-derived mean-reversion sensor (ADR-0070). {@code score} is the range-position forecaster's
+     * self-normalised reading, built so its expected absolute value on the running stream is ≈ 1 — "one
+     * typical stretch". Multiplying by {@code targetAbs} puts it on the desk's shared convention exactly
+     * as {@link #fromTrend} does, so the sizing dials keep their meaning across sources. The sign is
+     * already the traded direction (the forecaster fades, so a stretch to the top of the range reads
+     * negative); this mapper only changes units.
+     */
+    public static Forecast fromReversion(String instrument, double score, double targetAbs) {
+        if (!Double.isFinite(score)) {
+            return Forecast.of("reversion", instrument, 0.0);
+        }
+        return Forecast.of("reversion", instrument, score * targetAbs);
+    }
+
+    /**
      * Learned advisory label (ADR-0053) — contributes ONLY when its walk-forward gate says it ships;
      * otherwise it is silent (0), never a phantom edge on the order path. The directional edge
      * {@code P(up) − P(down)} in [−1,1] scales up to the cap.

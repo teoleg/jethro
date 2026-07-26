@@ -36,3 +36,22 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   cites a fixed dollar threshold, check it against the *current* book size, not the book it was written for.
 - Rule 2: the ledger's PnL-per-$1-gross annotation is degenerate while PnL is negative — cutting unwanted
   exposure makes the ratio look worse. Judge de-risking on the vector (PnL flat, exposure down), not the ratio.
+
+### 2026-07-26T17:15Z — ADR-0070 (continuous mean-reversion forecast source)
+- Situation: PnL -$867.83 (+$8.82 this window), gross $6,145 → $785, net $5,418 → $56. The whole gross
+  collapse is ADR-0069's hedge unwind — the only orders in the window — so exposure is **100% change**;
+  the PnL move is mark drift on untouched stubs plus one commission, i.e. **market**. Book now flat:
+  two 1-share stubs and an ON-TARGET hedge leg. Not bleeding; the failure is that it cannot trade.
+- Cause: the ADR-0064 gate is reduce-only because every routed source is measured negative (trend
+  several SE below zero over 46 obs; momentum and social too) vs a 7.05 bps round trip. Root cause is
+  the **source set's composition**: trend/momentum/social are all *continuation* bets, and the desk is
+  in CHOP (ER 0.09–0.48; the walk-forward selector picks mean-reversion on every chop name it trades).
+  The mean-reversion algo is a *threshold detector* — 1 firing in this feed mode, so it contributes
+  nothing to fusion and generates no evidence about itself.
+- Lesson / rule: **a threshold detector cannot serve as a fusion source — it is silent exactly when its
+  regime is on, so it never accumulates the telemetry the edge gate needs.** Anything the gate is meant
+  to judge must publish a reading every cycle. Corollary: when the whole source set is one signal family
+  and it measures negative, the fix is a source built on a *different* statistic for the observed
+  regime — never the losing source negated (that inherits its biases with the sign flipped).
+- Rule 2: attribute exposure and PnL separately. A change can own 100% of the exposure move and 0% of
+  the PnL move in the same window; crediting it with both is how a hedge unwind gets mistaken for alpha.

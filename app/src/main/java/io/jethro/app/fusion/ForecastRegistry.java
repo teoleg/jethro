@@ -55,6 +55,11 @@ public final class ForecastRegistry {
         put(SourceForecasts.fromTrend(instrument, score, Forecast.TARGET_ABS));
     }
 
+    /** Price-derived range-position reversion reading (ADR-0070); {@code score} is self-normalised. */
+    public void submitReversion(String instrument, double score) {
+        put(SourceForecasts.fromReversion(instrument, score, Forecast.TARGET_ABS));
+    }
+
     public void submitLearned(String instrument, double pUp, double pDown, boolean ships) {
         put(SourceForecasts.fromLearned(instrument, pUp, pDown, ships, params.learnedScale()));
     }

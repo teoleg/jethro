@@ -150,6 +150,31 @@ public class FusionConfig {
         return lifecycle;
     }
 
+    /**
+     * The ADR-0070 mean-reversion sensor — the chop-regime counterpart of the trend sensor above, and
+     * under exactly the same contract. It publishes a continuous, self-normalised range-position reading
+     * per name into the same registry and records its calls in the phase-1 telemetry, so it must earn a
+     * measured expectancy before the edge gate lets it put risk on. It cannot place an order and cannot
+     * relax a gate; while the gate is reduce-only it can only change how a held position is worked down.
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.fusion.reversion", name = "enabled", havingValue = "true", matchIfMissing = true)
+    ReversionForecastLifecycle reversionForecastLifecycle(
+            ForecastRegistry registry,
+            ObjectProvider<TradingCoreLifecycle> tradingCore,
+            ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
+            @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
+            @Value("${jethro.fusion.reversion.range-span:120}") int rangeSpan,
+            @Value("${jethro.fusion.reversion.normalisation-span:240}") int normalisationSpan,
+            @Value("${jethro.fusion.reversion.interval-seconds:10}") long intervalSeconds) {
+        var forecaster = new io.jethro.trading.algo.strategy.RangeReversionForecaster(
+                new io.jethro.trading.algo.strategy.RangeReversionForecaster.Params(rangeSpan, normalisationSpan));
+        var lifecycle = new ReversionForecastLifecycle(forecaster, registry, tradingCore.getIfAvailable(),
+                telemetry.getIfAvailable(), scheduler, intervalSeconds);
+        lifecycle.start();
+        return lifecycle;
+    }
+
     @Bean
     @ConditionalOnProperty(prefix = "jethro.fusion", name = "enabled", havingValue = "true", matchIfMissing = true)
     FusionController fusionController(ObjectProvider<FusionLifecycle> fusion) {

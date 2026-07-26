@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Exact-value tests for ADR-0055 phase-2 forecast normalisation: Carver scaling, the cap, ordinal
@@ -89,6 +90,23 @@ class ForecastTest {
         assertEquals(20.0, SourceForecasts.fromTrend("AAPL", 9.0, Forecast.TARGET_ABS).value(), 1e-12);
         assertEquals(0.0, SourceForecasts.fromTrend("AAPL", Double.NaN, Forecast.TARGET_ABS).value(), 1e-12);
         assertEquals(0.0, SourceForecasts.fromTrend("AAPL", 0.0, Forecast.TARGET_ABS).value(), 1e-12);
+    }
+
+    @Test
+    void reversionScoreMapsOntoTheHouseConvention() {
+        // ADR-0070: same convention as the trend sensor — expected |score| ≈ 1 ("one typical stretch"),
+        // and the sign is ALREADY the traded direction (the forecaster fades before it publishes), so
+        // this mapper must not flip it a second time.
+        assertEquals(10.0, SourceForecasts.fromReversion("AAPL", 1.0, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals(-10.0, SourceForecasts.fromReversion("AAPL", -1.0, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals("reversion", SourceForecasts.fromReversion("AAPL", 0.5, Forecast.TARGET_ABS).source());
+        // It is a SEPARATE source from trend — the two are combined and weighted independently, never
+        // collapsed into one view.
+        assertNotEquals(SourceForecasts.fromTrend("AAPL", 1.0, Forecast.TARGET_ABS).source(),
+                SourceForecasts.fromReversion("AAPL", 1.0, Forecast.TARGET_ABS).source());
+        assertEquals(20.0, SourceForecasts.fromReversion("AAPL", 9.0, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals(0.0, SourceForecasts.fromReversion("AAPL", Double.NaN, Forecast.TARGET_ABS).value(), 1e-12);
+        assertEquals(0.0, SourceForecasts.fromReversion("AAPL", 0.0, Forecast.TARGET_ABS).value(), 1e-12);
     }
 
     @Test
