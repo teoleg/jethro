@@ -1,0 +1,20 @@
+{
+  "commit": "e73252ad38aaefe247b5474a42f34ec4d3dd9eb0",
+  "fees": "158.453066",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "69.88228362",
+    "netExposure": "0.00000000",
+    "realizedPnl": "-826.05938139",
+    "strategyAlpha": "-895.94166501",
+    "totalFees": "158.453066",
+    "totalPnl": "-826.05938139",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "the edge gate's significance hurdle is read against the distribution its statistic actually follows \u2014 Student's t on the cohorts its Fama-MacBeth standard error was estimated from, not a fixed normal quantile: the t-hurdle dial is converted once into the confidence it always claimed (alpha = 1 - Phi(hurdle), value unchanged) and the surplus tested against it on cohorts-1 degrees of freedom, so a source with three resolved cohorts can no longer release the whole planned book on a ~91% test wearing a 97.7% label; exactly a no-op in the large-sample limit, strictly conservative below it (ADR-0081)",
+  "total_pnl": "-826.05938139",
+  "ts": "2026-07-26T21:58:09Z"
+}
