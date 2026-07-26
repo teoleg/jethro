@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T16:45:12Z",
+    "fees": "130.899515",
+    "gross": "6886.46189797",
+    "net": "4898.28006685",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "6886.46189797",
+      "hedgePnl": "96.08370464",
+      "netExposure": "4898.28006685",
+      "realizedPnl": "-869.25080598",
+      "strategyAlpha": "-962.17154499",
+      "totalFees": "130.899515",
+      "totalPnl": "-865.56090891",
+      "unrealizedPnl": "3.68989707"
+    },
+    "total_pnl": "-865.56090891"
+  },
+  "before": {
+    "at": "2026-07-26T16:34:35Z",
+    "gross": "6891.80800485",
+    "net": "4900.98053505",
+    "total_pnl": "-862.80208397"
+  },
+  "commit": "c12099fea45a2fb4990c5e43a7cc28918ac980c1",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-5.34610688",
+    "net": "-2.70046820",
+    "total_pnl": "-2.75882494"
+  },
+  "note": "no material change (within noise band); risk-adj (PnL/$1 gross) worsened -0.12519\u2192-0.12569",
+  "revert": false,
+  "scoredAt": "2026-07-26T16:45:12Z",
+  "summary": "fusion source trust: weight each source by Phi of its own measured expectancy t-statistic instead of the floored hit-rate advantage, which read every below-coin-flip source as identical (ADR-0067)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
