@@ -52,6 +52,7 @@ LEDGER = os.path.join(REPO, "reports", "improvement-ledger.md")
 SNAP_DIR = os.path.join(REPO, "reports", "attribution")
 STATUS = os.path.join(REPO, "reports", "run-status.json")  # per-cycle heartbeat the UI reads
 STATUS_CAP = 300
+ANALYSIS = os.path.join(REPO, "reports", "last-analysis.md")  # Claude's own reasoning, written each run
 
 # --- Deadbands: below these a move is treated as market noise, not an effect of the change. They
 # gate the GOOD/BAD/revert decision, so per CLAUDE.md they carry provenance and are NOT silent
@@ -310,16 +311,21 @@ def cmd_status(argv):
 
     Every number (current vector + % change vs the previous run) is computed here, in exact decimal —
     never by the model. The wrapper passes only two booleans about what happened this cycle:
-      --scored 0|1   a pending change was scored this cycle (so a fresh snapshot verdict exists)
-      --changed 0|1  the agent recorded a NEW change this cycle (a new pending baseline)
+      --scored 0|1     a pending change was scored this cycle (so a fresh snapshot verdict exists)
+      --changed 0|1    the agent recorded a NEW change this cycle (a new pending baseline)
+      --brain-ran 0|1  did the Claude analysis step actually run? (0 = it was skipped, e.g. claude
+                       not found) — surfaced so a silent brain-down never masquerades as "no change"
     """
     scored = changed = False
+    brain_ran = True  # default true for backward compat if the flag isn't passed
     it = iter(argv)
     for a in it:
         if a == "--scored":
             scored = next(it, "0") == "1"
         elif a == "--changed":
             changed = next(it, "0") == "1"
+        elif a == "--brain-ran":
+            brain_ran = next(it, "1") == "1"
 
     available = True
     vec = raw = None
@@ -358,9 +364,26 @@ def cmd_status(argv):
     last_verdict = snap.get("verdict") if snap else None
     reverted = bool(snap and snap.get("revert"))
 
-    action = "reverted" if reverted else ("changed" if changed else "no-change")
+    # Claude's own reasoning for this cycle, if it wrote one (reports/last-analysis.md). Only trust it
+    # when the brain actually ran this cycle — a stale file from a prior run must not look current.
+    reasoning = ""
+    if brain_ran and os.path.exists(ANALYSIS):
+        try:
+            with open(ANALYSIS, "r", encoding="utf-8") as f:
+                reasoning = f.read().strip()
+        except Exception:
+            reasoning = ""
+    analysis_line = reasoning.splitlines()[0].strip() if reasoning else ""
 
-    if not available:
+    if not brain_ran:
+        action = "no-analysis"
+    else:
+        action = "reverted" if reverted else ("changed" if changed else "no-change")
+
+    if not brain_ran:
+        decision = ("⚠️ ANALYSIS STEP DID NOT RUN this cycle — `claude` was not invoked (not found on "
+                    "PATH?). No diagnosis was made; the heartbeat/score still ran. Fix the loop's PATH.")
+    elif not available:
         decision = f"app unreachable — not measured ({err})"
     elif reverted:
         short = (snap.get("commit") or "")[:9]
@@ -373,14 +396,16 @@ def cmd_status(argv):
                     summ = json.load(f).get("summary", "")
             except Exception:
                 pass
-        decision = f"made a change: {summ}" + (f" · prev {last_verdict}" if last_verdict else "")
+        decision = f"made a change: {summ or analysis_line}" + (f" · prev {last_verdict}" if last_verdict else "")
     else:
-        decision = "no change this cycle" + (f" · prev {last_verdict}" if last_verdict else "")
+        # no change — show Claude's actual stated reason, not a generic placeholder
+        decision = (analysis_line or "no change this cycle") + (f" · prev {last_verdict}" if last_verdict else "")
 
     entry = {
         "ts": ts,
         "feedMode": (raw.get("feedMode") if raw else None),
         "available": available,
+        "brain_ran": brain_ran,
         "total_pnl": (str(vec["pnl"]) if available else None),
         "gross": (str(vec["gross"]) if available else None),
         "net": (str(vec["net"]) if available else None),
@@ -390,6 +415,7 @@ def cmd_status(argv):
         "action": action,
         "last_verdict": last_verdict,
         "decision": decision,
+        "reasoning": reasoning,
         "commit": head,
     }
     entries.insert(0, entry)

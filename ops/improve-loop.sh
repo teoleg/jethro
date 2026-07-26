@@ -57,10 +57,12 @@ python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-
 # 9>&- closes the single-flight lock fd for Claude and everything it spawns — otherwise a persistent
 # child (notably the Gradle DAEMON that `./gradlew -Pci test` leaves running for hours) inherits the
 # lock and holds it long after the cycle ends, wedging every later cycle into "skipped".
+BRAIN_RAN=0
 if ! command -v claude >/dev/null 2>&1; then
   echo "ERROR: 'claude' not found on PATH — analysis/change step SKIPPED (report + score + heartbeat" \
        "still ran). Install Claude Code for the cron user, or add its dir to PATH. PATH=$PATH" >> "$LOG"
 else
+  BRAIN_RAN=1
   claude -p "$(cat ops/improve-prompt.md)" \
     --allowedTools "Bash Read Edit Grep Glob" \
     --permission-mode acceptEdits \
@@ -72,8 +74,8 @@ fi
 #     Runs EVERY cycle, including no-change ones, so the UI shows a line for each run. --changed = the
 #     agent recorded a NEW baseline this cycle; --scored = a prior change was scored at cycle start.
 CHANGED=0; [ -f reports/.pending-baseline.json ] && CHANGED=1
-python3 scripts/score-change.py status --scored "$HAD_PENDING" --changed "$CHANGED" >> "$LOG" 2>&1 \
-  || echo "status writer exited non-zero (see above)" >> "$LOG"
+python3 scripts/score-change.py status --scored "$HAD_PENDING" --changed "$CHANGED" --brain-ran "$BRAIN_RAN" \
+  >> "$LOG" 2>&1 || echo "status writer exited non-zero (see above)" >> "$LOG"
 
 AFTER=$(git rev-parse HEAD)
 if [ "$BEFORE" = "$AFTER" ]; then

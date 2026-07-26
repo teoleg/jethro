@@ -76,9 +76,13 @@ touch the ledger, the snapshots, or `reports/.pending-baseline.json` by hand.
    about the numbers — do not transcribe them anywhere.
 2. **Diagnose** like the expert you are: what is costing risk-adjusted PnL, and why — the *mechanism*,
    not the symptom? A WARN/ERROR/stack trace pointing at a real bug is a valid, high-value target.
-3. **Decide.** If nothing has a real, well-understood edge this run, write one line to
-   `logs/improve-YYYY-MM-DD.log` saying why and **stop with no code change** — common and correct. (The
-   wrapper has already updated the ledger; there is nothing else for you to commit.)
+3. **Always leave your reasoning where the owner can see it.** EVERY run — change or not — overwrite
+   `reports/last-analysis.md` with 2–5 sentences: what the telemetry showed, what you decided, and
+   **why**. Make the **first line** a plain one-liner (it becomes the visible "decision" on the Improve
+   page). This is the owner's window into your thinking — never leave it blank or boilerplate. If
+   nothing has a real, well-understood edge this run, say so concretely (what you checked, why it's not
+   actionable) and **stop with no code change** — common and correct. Committing `reports/last-analysis.md`
+   is fine (reports-only, no restart).
 4. If there is a clear improvement, make the **one coherent change** (config, code, new strategy/risk
    model — with a Proposed ADR in the same commit if it is architecturally significant).
 5. **Verify:** `./gradlew -Pci test` (or the narrowest relevant module). Not green → revert your edit
