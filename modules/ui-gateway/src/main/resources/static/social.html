@@ -77,7 +77,7 @@
   function stat(k, v) { return `<div class="stat"><div class="k">${k}</div><div class="v mono">${v}</div></div>`; }
 
   function render(v) {
-    document.getElementById("asof").textContent = v.lastRunMillis ? "· " + new Date(v.lastRunMillis).toLocaleTimeString() : "· measuring…";
+    document.getElementById("asof").textContent = v.lastRunMillis ? "· " + fmtTimeET(v.lastRunMillis) : "· measuring…";
     const c = v.counters || {};
     document.getElementById("stats").innerHTML =
       stat("ingested", c.ingested||0) + stat("kept", c.kept||0) +
@@ -104,7 +104,7 @@
     document.getElementById("posts").outerHTML = '<div id="posts">' + (posts.length ?
       "<table><tr><th>time</th><th>channel</th><th>tier</th><th>credible</th><th>text</th></tr>" +
       posts.slice(0,40).map(p => `<tr>
-        <td class="dim mono">${new Date(p.timestampMillis).toLocaleTimeString()}</td>
+        <td class="dim mono">${fmtTimeET(p.timestampMillis)}</td>
         <td class="mono">${esc(p.channel)}</td>
         <td><span class="tag ${esc(p.tier)}">${esc(p.tier)}</span></td>
         <td class="${p.credible?'up':'dim'}">${p.credible?'yes':'no'}</td>

@@ -41,6 +41,7 @@
   .st { font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-2); }
   .st.ok { color:var(--up); border-color:var(--up); } .st.err { color:var(--down); border-color:var(--down); }
 </style>
+  <script src="format.js"></script>
 </head>
 <body>
 <div class="topbar">
@@ -125,7 +126,7 @@
 
   function render(data) {
     const s = data.summary;
-    document.getElementById("asof").textContent = s.lastRunMillis ? "· last " + new Date(s.lastRunMillis).toLocaleTimeString() : "";
+    document.getElementById("asof").textContent = s.lastRunMillis ? "· last " + fmtTimeET(s.lastRunMillis) : "";
     document.getElementById("tiles").innerHTML = gridKV([
       kv("Model", esc(s.model || "—")),
       kv("Calls", s.total),
@@ -137,7 +138,7 @@
     const rows = data.runs;
     document.getElementById("runs").outerHTML = '<div id="runs" class="muted">' + (rows.length ?
       "<table><tr><th>time</th><th>status</th><th>latency</th><th>prompt tok</th><th>gen tok</th><th>tok/s</th><th>note</th></tr>" +
-      rows.map(r => `<tr><td class="muted mono">${new Date(r.timestampMillis).toLocaleTimeString()}</td>
+      rows.map(r => `<tr><td class="muted mono">${fmtTimeET(r.timestampMillis)}</td>
         <td><span class="st ${r.ok?'ok':'err'}">${r.ok?'ok':'fail'}</span></td>
         <td class="mono ${r.latencyMillis>20000?'warn':''}">${ms(r.latencyMillis)}</td>
         <td class="mono">${r.inputTokens||'—'}</td><td class="mono">${r.outputTokens||'—'}</td>

@@ -138,7 +138,7 @@
   function verdictClass(v) { if (!v) return ""; if (v.indexOf("GOOD") >= 0) return "good"; if (v.indexOf("BAD") >= 0) return "bad"; return "mixed"; }
   function actClass(a) { return (a || "").replace(/[^a-z]/g, ""); }  // "no-change" -> "nochange"
   function esc(s) { return (s === null || s === undefined ? "" : String(s)).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
-  function fmtTs(ts) { return ts ? String(ts).replace("T", " ").replace("Z", "") : "—"; }
+  function fmtTs(ts) { return ts ? fmtDateTimeET(ts) : "—"; }  // render the UTC ts in US Eastern (ET)
 
   function render(list) {
     var rows = document.getElementById("rows");

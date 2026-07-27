@@ -255,7 +255,7 @@
       if (!rows.length) { el.innerHTML = '<div class="empty">no changes recorded</div>'; return; }
       el.innerHTML = `<table><thead><tr><th>When</th><th>Dial</th><th class="num">From</th><th class="num">To</th><th>By</th><th>Note</th></tr></thead><tbody>`
         + rows.map(r => `<tr>
-            <td class="mono">${esc(new Date(r.atMillis).toLocaleString())}</td>
+            <td class="mono">${esc(fmtDateTimeET(r.atMillis))}</td>
             <td>${esc(r.param)}</td>
             <td class="num mono">${esc(r.oldValue == null ? "—" : r.oldValue)}</td>
             <td class="num mono">${esc(r.newValue == null ? "(reset)" : r.newValue)}</td>
@@ -308,7 +308,7 @@
           <ul>${d.edgeGated.map(g => `<li><b>${esc(g.instrumentId)}</b> — ${esc(g.note)}</li>`).join("")}</ul></details>`
       : "";
 
-    el.innerHTML = `<h2>Live activity <span class="stamp">· ${new Date(c.atMillis).toLocaleTimeString()}</span></h2>`
+    el.innerHTML = `<h2>Live activity <span class="stamp">· ${fmtTimeET(c.atMillis)}</span></h2>`
       + `<div class="chips">${chips.join("")}</div>${hint}${outcomes}${gated}`;
   }
   async function loadDiag() {

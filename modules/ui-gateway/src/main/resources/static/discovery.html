@@ -92,7 +92,7 @@
       const cls = n.healthy ? "ok" : (/no outlets|idle/i.test(n.detail) ? "idle" : "bad");
       const label = n.healthy ? "connected" : (/no outlets|idle/i.test(n.detail) ? "idle" : "unreachable");
       document.getElementById("news").innerHTML = `<span class="led ${cls}"></span><b>${esc(n.name)}</b> — ${label}`
-        + ` <span class="dim">· ${n.lastPollMillis ? new Date(n.lastPollMillis).toLocaleTimeString() : "—"} · ${n.lastCount} items · ${esc(n.detail)}</span>`;
+        + ` <span class="dim">· ${n.lastPollMillis ? fmtTimeET(n.lastPollMillis) : "—"} · ${n.lastCount} items · ${esc(n.detail)}</span>`;
     } else {
       document.getElementById("news").textContent = "discovery off (jethro.discovery.enabled=false)";
     }
@@ -106,7 +106,7 @@
         <td class="num mono">${x.mentions}</td>
         <td class="num mono" title="distinct calendar days mentioned — the ADR-0060 'sustained' signal">${x.distinctDays ?? "—"}</td>
         <td>${(x.sources||[]).map(s => `<span class="src">${esc(s)}</span>`).join("")}</td>
-        <td class="dim mono">${x.firstSeenMillis ? new Date(x.firstSeenMillis).toLocaleTimeString() : "—"}</td>
+        <td class="dim mono">${x.firstSeenMillis ? fmtTimeET(x.firstSeenMillis) : "—"}</td>
         <td class="dim" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.sample)}">${esc(x.sample)}</td>
       </tr>`).join("") + "</table>"
       : '<div class="empty">no candidates yet — untracked names that credible sources name will appear here (news names companies; social adds one when it\'s really cooking)</div>') + '</div>';
@@ -114,7 +114,7 @@
     const h = v.headlines || [];
     document.getElementById("heads").outerHTML = '<div id="heads">' + (h.length ?
       h.map(x => `<div class="head">
-          <span class="t">${x.atMillis ? new Date(x.atMillis).toLocaleTimeString() : "—"}</span>
+          <span class="t">${x.atMillis ? fmtTimeET(x.atMillis) : "—"}</span>
           <span class="o">${esc(x.outlet)}</span>
           <span class="ttl">${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>` : esc(x.title)}</span>
           ${(x.tickers||[]).map(t => `<span class="tag ${(x.untracked||[]).includes(t) ? "new" : ""}">${esc(t)}</span>`).join("")}
@@ -151,7 +151,7 @@
         <td class="num mono">${x.distinctDays ?? "—"}</td>
         <td class="num mono">${x.sources ?? "—"}</td>
         <td class="dim" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.reason)}">${esc(x.reason)}</td>
-        <td class="dim mono">${x.lastSeenMillis ? new Date(x.lastSeenMillis).toLocaleTimeString() : "—"}</td>
+        <td class="dim mono">${x.lastSeenMillis ? fmtTimeET(x.lastSeenMillis) : "—"}</td>
       </tr>`).join("") + "</table>"
       : '<div class="empty">no candidates to evaluate yet</div>') + '</div>';
 
@@ -159,7 +159,7 @@
     document.getElementById("audit").outerHTML = '<div id="audit">' + (a.length ?
       "<table><tr><th>time</th><th>action</th><th>instrument</th><th>outcome</th><th class='num'>score</th><th class='num'>days</th><th>reason</th><th>mode</th></tr>" +
       a.map(x => `<tr>
-        <td class="dim mono">${x.atMillis ? new Date(x.atMillis).toLocaleString() : "—"}</td>
+        <td class="dim mono">${x.atMillis ? fmtDateTimeET(x.atMillis) : "—"}</td>
         <td><span class="tag">${esc(x.action)}${x.dryRun ? " · dry" : ""}</span></td>
         <td class="mono">${esc(x.instrument)}</td>
         <td class="dim">${esc(OUTCOME_LABEL[x.outcome] || x.outcome)}</td>

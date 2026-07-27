@@ -342,7 +342,7 @@
   }
   async function loadEvents(){ try{ const s=await (await fetch("/api/sim/spikes")).json(); const el=document.getElementById("evlist"); if(!el)return;
     if(!s.length){el.className="muted";el.textContent="no spikes yet — nudge a market or fire ⚡";return;}
-    el.className=""; el.innerHTML=s.slice(0,20).map(e=>{const t=new Date(e.atMillis).toLocaleTimeString([],{hour12:false});
+    el.className=""; el.innerHTML=s.slice(0,20).map(e=>{const t=fmtTimeET(e.atMillis);
       return `<div class="ev"><span class="t">${t}</span><span class="pill ${e.type.toLowerCase()}">${esc(e.type)}</span><b>${esc(e.name||e.instrumentId)}</b><span class="muted">${esc(e.detail)}</span></div>`;}).join("");
   }catch(e){}}
 
