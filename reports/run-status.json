@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-27T01:47:40Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-623.62778621",
+    "gross": "13685.10538953",
+    "net": "-1450.03699953",
+    "fees": "216.339776",
+    "pnl_pct": 21.31,
+    "gross_pct": 134.97,
+    "pnl_growth_pct": 24.51,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": true,
+    "stale": false,
+    "underwater": true,
+    "action": "reverted",
+    "last_verdict": "\u274c BAD",
+    "decision": "backed off a70d880ac (\u274c BAD) \u2014 next run tries a different lever",
+    "reasoning": "Stopped the desk paying a round trip for a view it never held long enough to be graded on: the fused conviction is now averaged over the same measured horizon the position is held for (ADR-0088).\n\n## Situation (read from the live endpoints; every number below is quoted, none computed here)\n\n1. **Money.** Total PnL is **higher** than last run \u2014 `-792.34` against `-792.49`, `+0.15` \u2014 and `+33.72`\n   across the last three runs. `pnl_growth_pct 4.06` against a `1.0` target, so **on track** and not\n   bleeding. Still `underwater`.\n2. **Risk.** This is the problem. Gross exposure went `130.69 \u2192 21,142.84` in one window, net `-1,954.40`.\n   Historical VaR95 on it is `298.78`, the breaker is nowhere near, and parametric VaR reports its whole\n   covered exposure as skipped. So it is not a danger state by any limit \u2014 but PnL is flat while exposure\n   rose by two orders of magnitude, and that is the objective (PnL per unit of exposure) moving hard the\n   wrong way. Worse, it is not finished: MSFT's planned target is `220.73` shares against `21.0` held, and\n   the desk is grinding toward it at the derived rate.\n3. **Cause.** Last cycle's change (ADR-0087, removing the source-weight floor) scored **\u274c BAD** and was\n   auto-reverted. The verdict is right and the mechanism is the one I flagged when I shipped it: removing\n   the floor uncancelled `reversion` against `trend`, which raised forecast magnitude and therefore the\n   target book. The revert restores the floor, but it does **not** stop the ratchet \u2014 at the floored\n   weights MSFT still plans ~185 shares.\n4. **Danger.** Not by the breaker. But \"exposure rising into a losing position\" is the shape, and it is\n   what I acted on rather than shipping another signal.\n5. **Order post-mortem.** The window's tape is one name: **74 MSFT fills**, running BUY 8 \u2192 BUY 4 \u2192 BUY 5 \u2192\n   BUY 6 \u2192 BUY 2 \u2192 BUY 3 \u2192 BUY 1 \u2192 SELL 16 \u2192 SELL 6 \u2192 SELL 9 \u2192 SELL 2 \u2192 SELL 1 \u2192 BUY 16 \u2192 SELL 4, for a net\n   position change of 21 shares. A sign flip roughly every 3-5 minutes against a **900 s** selected rung.\n   MSFT is the only equity whose measured round trip clears the ADR-0075 cost test, and its realised PnL\n   over the window is negative on ~1.0 bp of fee per leg. The HEDGE book shorted ES against every swing,\n   which is why gross doubled: `MSFT 9,001` long, `ES -8,950` short.\n6. **Change vs market \u2014 attribution.** Clean and unflattering to me: every non-MSFT equity line is flat or\n   was only reduced, and the market contributed essentially nothing. The exposure move is **~100% the\n   direct effect of the reverted change plus the ratchet it accelerated**, not a market drift.\n\n## Diagnosis and what I changed\n\nADR-0080 reconciled the desk's holding period with the horizon its edge is measured over \u2014 for the\n**position**. It said nothing about the **signal**, and its asymmetry (reduce in full immediately, add\nslowly) is what turns that omission into churn: when the forecast flips sign, the gap is\n`|target| + |current|`, which clears the 50% no-trade band trivially, and the reducing leg fires at full\nspeed. A sinusoidal view becomes a sawtooth of trades. On this book both sensors are pinned at the \u00b120\n**cap** on MSFT \u2014 `reversion +20`, `trend \u221220` \u2014 so a flip swings the target between the two largest\npositions the sizer can express, with no magnitude information in between.\n\nSo the conviction is now averaged over the horizon it is graded on: one EWMA per name on the combined\nforecast at `\u03b1 = 1 \u2212 exp(\u2212\u0394t/h)`, which is literally `TargetPlanner.adjustmentRateFor` evaluated on the\nsignal instead of on the trade, with `h` the rung the evidence picked and `\u0394t` measured elapsed time. No\ndial and no money number. A constant forecast is its own average, so a real trend sizes exactly as before;\na \u00b120 square wave with a 4-minute half-period settles at `20\u00b7tanh(240/1800) = 2.65`, under the ADR-0059\nconviction floor of 5.0 that has never once bitten because a saturated forecast never falls below it.\n`|average| \u2264 max|forecast|`, so this can only ever ask for a smaller book. Every risk control is\ndownstream and untouched: the ADR-0086 cut can still set a target flat, the gate still clamps to\nreduce-only, the guardrail and breaker are the floor and I did not go near them. Worked example pinned as\nan exact test; two deferred-register rows filed \u2014 the telemetry still grades the raw sensor call, and the\nsensors' cap saturation is measured but not yet addressed.",
+    "commit": "c990998"
+  },
+  {
     "ts": "2026-07-27T01:18:43Z",
     "feedMode": "SIM",
     "available": true,
