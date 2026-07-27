@@ -22,10 +22,14 @@ public class ProvenanceConfig {
                 Long.toHexString(System.currentTimeMillis()) + "-" + UUID.randomUUID().toString().substring(0, 8));
     }
 
-    /** sim → SIM; a real provider → LIVE; the replay adapter → REPLAY. */
+    /** sim → SIM; a real provider → LIVE; the replay adapter → REPLAY.
+     * The LIVE set MUST stay in sync with the real adapters selected in {@link TradingCoreLifecycle}
+     * (yahoo/finnhub/alpaca). A real provider missing here silently mis-tags a LIVE feed as SIM —
+     * which is exactly how the Alpaca feed (ADR-0056) ran tagged SIM until this was fixed: events
+     * carried feedMode=SIM, so live PnL/positions were namespaced with the sim epoch (invariant 8). */
     static FeedMode feedModeFor(String provider) {
         return switch (provider == null ? "sim" : provider.trim().toLowerCase()) {
-            case "yahoo", "finnhub" -> FeedMode.LIVE;
+            case "yahoo", "finnhub", "alpaca" -> FeedMode.LIVE;
             case "replay" -> FeedMode.REPLAY;
             default -> FeedMode.SIM;
         };
