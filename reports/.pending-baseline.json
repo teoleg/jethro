@@ -1,0 +1,20 @@
+{
+  "commit": "9a7c32d6000574ab881cd76e8a4447efff753b18",
+  "fees": "481.442117",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "-3093.30503794",
+    "netExposure": "0.00000000",
+    "realizedPnl": "5654.22493394",
+    "strategyAlpha": "8747.52997188",
+    "totalFees": "481.442117",
+    "totalPnl": "5654.22493394",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "a signal source the desk has measured as significantly LOSING is stood down to zero combination weight instead of being held at the floor, so the conviction it was subtracting from every name it calls is returned to the sources that earned it (ADR-0111)",
+  "total_pnl": "5654.22493394",
+  "ts": "2026-07-27T20:22:15Z"
+}
