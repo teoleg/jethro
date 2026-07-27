@@ -121,7 +121,7 @@ public class FusionConfig {
                 "equal".equalsIgnoreCase(weightsMode)
                         ? FusionWeights::equal
                         : () -> {
-                            var selection = selectRung(telemetry, tca, gateParams);
+                            var selection = selectRung(telemetry, tca, tradingCore, refs, gateParams);
                             // ADR-0097: the SAME gateParams admit a source to the vote. A source that
                             // cannot show a directional edge at the desk's own hurdle is held at the MIN
                             // weight — Φ(t) saturates above the hurdle and cannot tell a source that
@@ -140,7 +140,7 @@ public class FusionConfig {
                     if (tca.getIfAvailable() == null) {
                         return null; // no measurement path — leave the pre-existing controls alone
                     }
-                    var selection = selectRung(telemetry, tca, gateParams);
+                    var selection = selectRung(telemetry, tca, tradingCore, refs, gateParams);
                     return selection == null ? null : selection.decision();
                 };
         // ADR-0079: the same EWMA daily-return covariance the parametric VaR and the ADR-0038 hedge
@@ -240,10 +240,17 @@ public class FusionConfig {
      * filled in this feed mode yet, the gate stays open on its own terms, and inventing a cost would be
      * a number without provenance. A failed read returns null and leaves the pre-existing controls
      * alone — telemetry must never stop the planning loop.
+     *
+     * <p>ADR-0099: a name the desk has never filled is charged its OWN quoted round trip rather than
+     * the blend of the names it already trades, but never less than that blend — see
+     * {@link QuotedSpreadCost}. With no quote source, no quote, or a rate-quoted name, the map is
+     * exactly the ADR-0075 one.
      */
     private static HorizonLadder.Selection selectRung(
             ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
             ObjectProvider<io.jethro.order.ExecutionQualityRepository> tca,
+            ObjectProvider<TradingCoreLifecycle> tradingCore,
+            io.jethro.trading.riskpnl.InstrumentRefSource refs,
             EdgeGate.Params gateParams) {
         var t = telemetry.getIfAvailable();
         if (t == null) {
@@ -254,10 +261,48 @@ public class FusionConfig {
             Double roundTripBps = q == null ? null
                     : q.averageSlippageBps().map(oneWay -> oneWay.doubleValue() * 2.0).orElse(null);
             var costs = q == null ? java.util.Map.<String, Double>of() : roundTripByInstrument(q);
+            if (roundTripBps != null) {
+                costs = QuotedSpreadCost.withQuotedFallback(costs, roundTripBps,
+                        quotedRoundTripByInstrument(tradingCore, refs));
+            }
             return HorizonLadder.select(t.statsByHorizon(), roundTripBps, costs, gateParams);
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * Each price-quoted name's round trip as its live two-sided quote states it (ADR-0099), for the
+     * names the desk currently has a mark for. Empty when the runtime is not up — with no quote there
+     * is nothing to charge and the ADR-0075 blend stands.
+     *
+     * <p>Rate-quoted names are excluded on the same rule the execution-cost model uses
+     * ({@code "SWAP".equals(assetClass)}, {@code OrderConfig}), because a basis point of a swap RATE is
+     * additive and not a fraction of notional — mixing the two into one map would be a unit error, and
+     * the TCA map excludes them for exactly that reason. A name absent from the instrument master has
+     * no class to classify by and is skipped rather than assumed.
+     */
+    private static java.util.Map<String, Double> quotedRoundTripByInstrument(
+            ObjectProvider<TradingCoreLifecycle> tradingCore, io.jethro.trading.riskpnl.InstrumentRefSource refs) {
+        TradingCoreLifecycle core = tradingCore == null ? null : tradingCore.getIfAvailable();
+        if (core == null || core.runtime() == null || refs == null) {
+            return java.util.Map.of();
+        }
+        var quotes = core.runtime().quoteCache();
+        var out = new java.util.LinkedHashMap<String, Double>();
+        for (var mark : core.runtime().markCache().snapshot()) {
+            String id = mark.instrumentId();
+            var ref = refs.find(id).orElse(null);
+            if (ref == null || "SWAP".equals(ref.assetClass())) {
+                continue;
+            }
+            var quote = quotes.get(id);
+            if (quote == null) {
+                continue;
+            }
+            QuotedSpreadCost.roundTripBps(quote.bid(), quote.ask()).ifPresent(bps -> out.put(id, bps));
+        }
+        return out;
     }
 
     /**

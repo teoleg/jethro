@@ -1,64 +1,69 @@
-The hedge is losing more than the whole desk makes — and it is losing directionally, on a beta-weighted net that is 0.5% of the book (ADR-0098).
+The desk's two worst names are its two most expensive to trade, and six more names quoting the same 20 bps touch are queued in the planned book — so a name now pays its own quoted round trip before its first fill, not the blend of the names the desk already trades (ADR-0099).
 
 ## Situation — every figure below is quoted from the live endpoints; none is computed here
 
-**1. Money.** Total PnL `$327.26` on `/api/risk` `.total`. The SITUATION header puts the window at
-`+88.17` and the last three runs at `+142.58`; `run-status.json` has `on_track` true with
+**1. Money.** Total PnL `$467.95` on `/api/risk` `.total`. The SITUATION header puts the window at
+`+133.49` and the last three runs at `+234.95`; `run-status.json` has `on_track` true with
 `pnl_growth_pct` far above the 1% target, `stale` and `underwater` both false. The book is **not
-bleeding**. But the composition is the story: `/api/attribution` splits it `ALPHA +458.94`,
-`MACRO +376.99`, `HEDGE −509.21`. The two strategy books make `+835.94`; the hedge hands back
-**61% of it**.
+bleeding**. `/api/attribution` splits it `ALPHA +641.96`, `MACRO +376.98`, `HEDGE −550.99` — MACRO is
+unchanged to the cent for a fourth cycle (frozen, position ~0), so the live desk is ALPHA plus the
+hedge overlay.
 
-**2. Risk.** Gross exposure `$37,162.38`, net `$6,366.73`. Gross moved `+718.89` on the window
-against `+36,404.57` last window — the six-run exposure ramp has **stopped**. VaR95 `$347.51`,
-ES95 `$474.70`, VaR99 `$550.54`; the firm drawdown breaker is `halted: false` and nowhere near
-Oleg's `max-firm-drawdown`. Not a danger state: PnL rising, gross flat, breaker far away.
+**2. Risk.** Gross exposure `$58,663.42`, net `−$1,087.77` — the firm is very nearly beta-flat and
+still making money, which is the structure working. Gross **fell** `−3,245.34` on the window, against
+`+44,191.91` over three runs. VaR95 `$594.96`, ES95 `$760.90`; the breaker reads `halted: false` and
+firm gross sits far under Oleg's `1,500,000` limit. Not a danger state on any of the four tests.
 
-**3. Cause — last cycle helped, and it is measurable.** `8cfad322b` (ADR-0097) scored ⚠️ MIXED with
-risk-adjusted PnL improving. `fusion_targets` now reads `reversion 2.091` with every other source
-pinned at the `0.25` MIN — exactly what the change was built to do — and the ramp it was aimed at is
-gone. Credit is real, and it is a change effect rather than the market: the flag it silenced had
-fired on six consecutive commits with different content, and it stopped on this one.
+**3. Cause.** Last cycle's ADR-0098 hedge-churn shrink scored ✅ **GOOD**. Live confirmation:
+`/api/hedging` now reads `status: ON-TARGET`, `held −0.070036 → target −0.085113 ES — largest delta
+under the 5785.79 no-trade band, holding`, with `churnSigmaUsd 3187.26` trimming a raw
+`−$26,330.51` target. The hedge has stopped churning, and gross fell on the window. It remains the
+worst book, but its window loss is a fraction of the desk's window gain.
 
-**4. Danger.** No. So the right move is the largest standing drag, not de-risking.
+**4. Danger.** No — not bleeding, exposure not rising, breaker far away. So this cycle is a
+risk-adjusted-return problem, not a de-risking one. And that is where the deterioration is: the
+ledger's own risk-adjusted column has gone `0.01627` at `$14,470` of gross to `0.00798` at `$58,663`
+over three runs. The desk is scaling gross faster than it scales PnL.
 
-**5. Order-level post-mortem.** `recent_orders` is ALPHA working AAPL/JPM/JNJ/GOOG/MSFT, plus **one
-HEDGE ES order every cooldown, alternating BUY and SELL**, `0.0009`–`0.011` contracts each. The
-hedge holds `−0.001148 ES` — about `$312` — and trades several times that every minute. Its target,
-per the `/api/hedging` rationale, is `Σβ·E = −$195.49`: against `$37,162` of firm gross the
-beta-weighted net is **0.5%**, i.e. the strategy book is already nearly beta-neutral and the hedge is
-chasing a number smaller than the amount that number moves between one hedge and the next.
+## Diagnosis — the mechanism, from the order-level post-mortem
 
-**6. The loss is not cost.** HEDGE fees are `$40.02`, and `tca` shows 355 ES fills at `0.204` bps —
-under `$50` all-in against `−$509.21`. The other `~$460` is **directional**. That also kills the
-lever the findings memory had queued (widen the ADR-0069 band): trading the same wrong position less
-often leaves most of the loss in place.
+The window's fills are almost entirely ALPHA in `AAPL/GOOG/JPM/MSFT/JNJ`, the profitable core. The
+losses are in two names the desk has since closed: `GOOGL −$161.84` and `SAP −$85.46` — together more
+than half of what the whole firm has made. They are also, by a wide margin, **the two most expensive
+names the desk has ever filled**: `/api/fusion/targets` `.edgeGate.roundTripBpsByInstrument` reads
+`GOOGL 20.11` and `SAP 8.16` bps against every other name at `0.41–2.09`, and the passing source's
+measured net edge is `+9.07` bps at `t = 9.32`. A 20 bps round trip against a 9 bps edge loses on
+every trip; no signal quality repairs that.
 
-**7. Why the direction is adverse, not unlucky — change vs market.** The target is minus the
-beta-weighted net of a book whose one gate-passing source is `reversion` (`+10.24` bps at the 3600s
-rung, hit rate `0.845`). A reversion book is short after a rally and long after a selloff, so
-`−Σβ·E` is **long the proxy after a rally and short after a selloff** — a momentum position on ES,
-taken on `trend`, the one view the desk measures as significantly negative at every rung
-(`−8.61`/`−6.51`/`−3.51` bps). Sized off a real exposure that is the price of risk control; sized
-off churn it is a losing bet controlling nothing. The HEDGE line has gone `−323.33 → −451.51 →
-−509.21` across the last three cycles — monotone, and independent of what changed above it — so this
-is a standing mechanism, not this window's market. Conversely the window's `+88.17` sits on ALPHA
-positions the ADR-0097 weight change directly re-signed, so that part is a change effect; the MACRO
-book is unchanged to the cent again and contributes nothing either way.
+The trigger is structural, not bad luck. ADR-0075 tests each name against **its own** measured round
+trip — but a name is only measured *after* it has traded, so an unfilled name is charged the desk
+**blend** (`1.48` bps). The desk therefore enters every new name believing it costs the average of the
+names it already trades, and pays for the correction out of PnL. The veto works; it arrives one
+discovery loss too late. And the same trigger is loaded again: six names the desk has **never** filled
+(`BRK.B`, `NFLX`, `ORCL`, `GS`, `TSLA`, `GOOGL`) all quote a `20.0` bps touch, and the current planned
+book wants roughly `$120k` of gross in them.
 
-## Change
+The missing input was never missing — the live `QuoteCache` has carried bid/ask per name since
+ADR-0025 and the cost model has simply never read it.
 
-**ADR-0098 (Proposed, same commit).** The hedge now neutralizes only the systematic exposure that
-stands clear of its own churn: `T' = sign(T)·max(0, |T| − k·σ)`, where `σ` is an EWMA(`λ=0.94`, the
-decay `CovMath` already uses) of the hedge target's **step between the moments the hedge can act**,
-sampled once per cooldown. Strictly one-way — the magnitude can only fall and the sign can never
-flip — so an over-estimated `σ` can never lever the book up. A real hedge is untouched (the ADR-0038
-`$456,000` example at `σ = $900` trims 0.2%); a target inside its own churn is set flat and the
-residual is unwound by the ordinary delta path. `σ` is measured from the stream, not dialled, so it
-carries to a live feed unchanged. Deliberately **not** the ρ² route (ADR-0095, already reverted) and
-not a hand-set dollar floor. Green on `./gradlew -Pci test`.
+## The change (ADR-0099, Proposed, same commit)
 
-**Expected next:** the HEDGE book's fee line and its directional bleed both fall, with firm gross
-slightly lower. If HEDGE is still materially negative next cycle, the remaining question is the one
-this ADR deferred — whether a mean-reversion book wants a beta overlay at all — and not another
-tweak to how the overlay is sized.
+A name with no measured round trip is charged the one its **own live quote** implies —
+`20000·(ask−bid)/(ask+bid)`, one full touch per round trip — floored at the blend it is charged today.
+Measured TCA always wins where it exists, so this is only a bootstrap. It is **strictly one-way**
+(`max(blend, quoted)`): no hurdle can fall, the gate's test is monotone in cost, so it can only ever
+remove a trade. The desk-wide verdict is provably untouched, since that verdict is taken at the
+cheapest cost in map-plus-blend and nothing added is below the blend. No new dial and no new number.
+
+Checked against the desk's own TCA the estimator lands at ratio `0.99` on GOOGL and `0.98` on SAP —
+exactly the wide names, where ADR-0084's passive limit is superseded and the desk crosses — and errs
+conservatively (`1.5–2.1×`) on the tight names, where it does not. Feed-agnostic by construction.
+
+## Attribution honesty
+
+The window's `+133.49` sits mostly on ALPHA positions held across several cycles in names this cycle's
+change does not touch; I cannot separate that from the market's own move on the numbers alone, and I
+am claiming none of it. What **is** attributable to last cycle's change is the hedge going quiet
+(`ON-TARGET`, delta inside its band) and gross falling on the window. The `$247.30` lost in GOOGL and
+SAP is not market noise — it is the measured cost of two round-trip-expensive names, and it is the
+thing this cycle removes going forward.

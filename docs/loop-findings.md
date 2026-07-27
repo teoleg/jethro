@@ -906,3 +906,42 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   a beta overlay at all, given ADR-0095's unwind-on-ρ² was already reverted for a different reason?
   After that: the frozen MACRO book, and the still-erroring `turnover_cost_by_name` in the report
   (the loop has been blind to per-name cost for several cycles now).
+
+## 2026-07-27 — the desk's two biggest losers are its two most expensive names to trade
+
+- **What the window did.** Total PnL `$467.95` (`+133.49` on the window, `+234.95` over three runs,
+  on track) with gross `$58,663.42`, **down** `−3,245.34` on the window after `+44,191.91` over three.
+  Net `−$1,087.77`: the firm is nearly beta-flat and still earning, so the structure works.
+  Attribution `ALPHA +641.96`, `MACRO +376.98` (frozen to the cent for a fourth cycle),
+  `HEDGE −550.99`. Last cycle's ADR-0098 scored ✅ GOOD and `/api/hedging` confirms it live —
+  `ON-TARGET`, delta inside the band, the hedge has stopped churning.
+- **Attribution honesty.** The window's gain sits on ALPHA positions held for several cycles in names
+  the last change never touched; market and change cannot be separated there from the numbers alone,
+  so the change is credited with none of it. What IS attributable: the hedge going quiet and gross
+  falling. Stated rather than guessed.
+- **The trigger.** `GOOGL −$161.84` and `SAP −$85.46` — together over half of what the whole firm has
+  made — are also the desk's two most expensive names ever filled (`20.11` and `8.16` bps measured
+  round trip, against every other name at `0.41–2.09`) versus a passing source measured at `+9.07` bps.
+  ADR-0075 tests each name against its own cost, but a name is only measured AFTER it trades, so an
+  unfilled name is charged the desk BLEND (`1.48` bps). The veto is correct and arrives one discovery
+  loss too late — every time, by construction.
+- **Rule 1: a gate keyed on a measurement that only exists after the fact is a gate that always pays
+  once.** When a control tests X per name and X is only observed by trading, look for an ex-ante
+  observable of X on the stream. Here it was sitting in the `QuoteCache` all along: the quoted touch
+  predicted the realised round trip at ratio `0.99` on GOOGL and `0.98` on SAP.
+- **Rule 2: check whether the loss that already happened is queued to happen again before choosing a
+  lever.** Six names the desk has NEVER filled (`BRK.B NFLX ORCL GS TSLA GOOGL`) quote the same `20.0`
+  bps touch with ~`$120k` of planned gross behind them. A repeat-in-waiting outranks a one-off.
+- **On the diminishing marginal return.** The ledger's risk-adjusted column went `0.01627` at `$14,470`
+  of gross to `0.00798` at `$58,663` in three runs — the book scales gross faster than PnL. Some of
+  that dilution is exactly this: cheap-looking names entering the planned book at full size.
+- **Expected next.** The wide names drop out of the increasable set, gross stops growing into them,
+  and the GOOGL/SAP bleed does not recur in their successors. **If this scores BAD, the cost side is
+  closed** — do not tune the cost model again. Next levers, in order: (a) the diminishing marginal
+  return itself — the planned book is `~$379k` gross against `$58.7k` held, so the desk is converging
+  on a book 6.5× its size with no book-level statement of how much risk it should carry (vol targeting
+  is the literature's answer and this codebase is Carver-shaped but has no volatility target); (b) the
+  ADR-0086 chandelier exit has fired **zero** times (`riskCuts: []`) — a risk-reactive exit that never
+  reacts is either mis-scaled or dead code; (c) `turnover_cost_by_name` in the report is STILL erroring
+  (several cycles now — the loop remains blind to per-name cost, and this cycle only worked around it
+  by reading TCA off the live endpoint instead).
