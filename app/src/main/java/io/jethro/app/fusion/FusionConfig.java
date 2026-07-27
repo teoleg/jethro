@@ -317,8 +317,8 @@ public class FusionConfig {
             ObjectProvider<TradingCoreLifecycle> tradingCore,
             ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
             @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
-            @Value("${jethro.fusion.reversion.range-span:240}") int rangeSpan,
-            @Value("${jethro.fusion.reversion.normalisation-span:480}") int normalisationSpan,
+            @Value("${jethro.fusion.reversion.range-span:120}") int rangeSpan,
+            @Value("${jethro.fusion.reversion.normalisation-span:240}") int normalisationSpan,
             ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
             @Value("${jethro.fusion.reversion.interval-seconds:10}") long intervalSeconds) {
         var forecaster = new io.jethro.trading.algo.strategy.RangeReversionForecaster(
