@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T09:00:19Z",
+    "fees": "414.839325",
+    "gross": "34515.16088692",
+    "net": "938.73156598",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "34515.16088692",
+      "hedgePnl": "-623.07748975",
+      "netExposure": "938.73156598",
+      "realizedPnl": "631.85979768",
+      "strategyAlpha": "1247.59332189",
+      "totalFees": "414.839325",
+      "totalPnl": "624.51583214",
+      "unrealizedPnl": "-7.34396554"
+    },
+    "total_pnl": "624.51583214"
+  },
+  "before": {
+    "at": "2026-07-27T08:43:56Z",
+    "gross": "63554.51024444",
+    "net": "-5089.08252072",
+    "total_pnl": "633.13646861"
+  },
+  "commit": "fb04436f15a5637bbb1f3a5ad6973293487d31f4",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-29039.34935752",
+    "net": "6027.81408670",
+    "total_pnl": "-8.62063647"
+  },
+  "note": "risk-adj (PnL/$1 gross) improved 0.00996\u21920.01809",
+  "revert": false,
+  "scoredAt": "2026-07-27T09:00:19Z",
+  "summary": "the hedge closes only the fraction of the gap to its target that the target's own directional efficiency has earned, and only when growing the overlay \u2014 reductions and unwinds still trade in one cycle (ADR-0100)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
