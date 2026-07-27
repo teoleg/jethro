@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T22:00:09Z",
+    "fees": "481.442117",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "-3093.30503794",
+      "netExposure": "0.00000000",
+      "realizedPnl": "5654.13092967",
+      "strategyAlpha": "8747.43596761",
+      "totalFees": "481.442117",
+      "totalPnl": "5654.13092967",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "5654.13092967"
+  },
+  "before": {
+    "at": "2026-07-27T21:20:27Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "5654.19929642"
+  },
+  "commit": "abb9d4732c1eabe6c15f66d420d2dfc0d4b2b602",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-0.06836675"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-27T22:00:09Z",
+  "summary": "a name the desk has neither filled nor quoted is charged the execution cost its own print series implies \u2014 Roll's effective spread \u2014 instead of the desk blend, which was dearer than the measured edge could afford and so held every unmeasured name reduce-only forever (ADR-0112)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
