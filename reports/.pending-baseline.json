@@ -1,0 +1,20 @@
+{
+  "commit": "e33e9479cfb0c6f9813e2898c5906d6867260922",
+  "fees": "316.423119",
+  "gross_exposure": "23039.67192537",
+  "net_exposure": "647.79154661",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "23039.67192537",
+    "hedgePnl": "-315.53571530",
+    "netExposure": "647.79154661",
+    "realizedPnl": "46.36456045",
+    "strategyAlpha": "358.94271890",
+    "totalFees": "316.423119",
+    "totalPnl": "43.40700360",
+    "unrealizedPnl": "-2.95755685"
+  },
+  "summary": "fusion source weight is the shrunk measured edge (leave-one-out prior, floored at zero) instead of Phi of the t-statistic, so four sources failing the desk's own significance test stop carrying most of the weight against the one that passes (ADR-0093)",
+  "total_pnl": "43.40700360",
+  "ts": "2026-07-27T04:21:45Z"
+}
