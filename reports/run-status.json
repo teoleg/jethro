@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-27T23:14:45Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "5654.20784226",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "fees": "481.442117",
+    "pnl_pct": 0.0,
+    "gross_pct": null,
+    "pnl_growth_pct": -0.0,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": false,
+    "stale": true,
+    "underwater": false,
+    "action": "changed",
+    "last_verdict": "\u26a0\ufe0f MIXED",
+    "decision": "made a change: the warm-start seed's lookback and hole tolerance are counted in the step at which the live sensor actually consumes a name \u2014 the slower of our poll cadence and that name's own median inter-print gap \u2014 so an instrument whose ordinary print interval exceeds our poll interval stops having every one of those intervals read as an outage, and can seed and warm at all (ADR-0114) \u00b7 prev \u26a0\ufe0f MIXED",
+    "reasoning": "ADR-0113 changed the unit the sensors count in \u2014 prints, not cycles \u2014 and the warm-start seed was left counting in the old one, so no name whose tape prints slower than we poll can ever warm; ADR-0114 re-denominates the seed into each name's own print cadence.\n\n*Every figure below is quoted from the live endpoints, `logs/report.md` or the ledger; none is authored\nhere (invariant 7 / ADR-0016 \u2014 the scorer owns every number that gates money).*\n\n## Situation, in plain numbers\n\n**Money.** Total PnL **$5,665.94**, up **$11.81** on the run and **$11.72** across the last three. Not\nbleeding \u2014 but the growth flag reads **stale**: \u22121.27% over three iterations against the +1% target, and\nit reads stale for the obvious reason that the desk is inert.\n\n**Risk.** Gross **$0.00**, net **$0.00**. Every position row is flat, unrealized is zero, the drawdown\nbreaker is nowhere in sight. Exposure is not rising. The problem this cycle is the opposite of danger.\n\n**Cause.** Last cycle's ADR-0113 scored **\u26a0\ufe0f MIXED** and did reach the JVM (boot 22:26Z against a 22:25Z\ncommit; `PrintClock` gating both sensors). It behaved exactly as predicted \u2014 it narrows the observed\nuniverse and lowers exposure by design. No culprit to name.\n\n**Danger.** No. Not bleeding, zero exposure. The live danger state does not apply.\n\n**Order-level post-mortem.** The last fill of any kind was 19:54Z, over three hours ago. Every ALPHA fill\nin the window was AAPL or JPM, each shadowed within 10\u201340 s by a HEDGE ES clip of 0.003\u20130.069 contracts.\nNo trigger to blame for a loss, because no trigger fired at all after the cash close.\n\n**Attribution, honestly.** The $11.81 is on a book holding nothing \u2014 neither market nor change. ADR-0113\nearns credit and blame for nothing this window.\n\n## Diagnosis\n\n`/api/fusion/targets` publishes `instruments: 0`. `reversion` carries fusion weight 2.90 and is the only\nsource with measured edge (t = 3.55); it publishes nothing, so the cross-section is empty. The WARN log\nnames the mechanism on every name: *\"reversion sensor still cold for ES after seeding 1 of 241 stored\nprices\"* \u2014 ES, GBPUSD, NQ, and every equity.\n\nReading `/api/history` per name gives the reason. The median inter-print gap is **19.9 s** on the Treasury\ncurve, **90 s** on NQ, **778 s** on GBPUSD and **1,199 s** on ES, against a 10 s reversion cadence. The\nADR-0071 seed derives two quantities from the *poll* cadence \u2014 how far back to read history\n(`interval \u00d7 samples \u00d7 2` = 80 min) and how large a break stops the walk (`interval \u00d7 30` = 300 s). Both\nassume the tape prints at least as often as we poll. That is exactly the assumption ADR-0113 removed from\nthe live path, and it was left standing in the seed. So for ES every **ordinary** 20-minute print interval\nexceeds the 300 s tolerance and reads as an outage: the walk breaks at the first one, seed = 1 of 241. The\nTreasury curve fails the other way \u2014 its gaps clear the tolerance, but 241 prints at ~20 s need 80 minutes\nof history against a lookback asking for exactly 80, hence the observed 147 of 241.\n\nBecause the live path now accumulates at that same print rate, none of these names can ever warm \u2014 the\nADR-0071 failure (\"a sensor whose warm-up exceeds the process lifetime never speaks at all\") re-entered\nthrough ADR-0113's own door.\n\n## What I changed\n\nADR-0114 (Proposed, same commit): the seed's lookback and hole tolerance are counted in the step at which\nthe **live sensor actually consumes that name** \u2014 `max(poll interval, that name's median inter-print\ngap)`, measured from its own stored series. The `\u00d72` and `\u00d730` constants are unchanged; only their unit\nmoves, so no dial is added and nothing is configured. This is deliberately **not** the alternative\nADR-0113 rejected (\"widen the tolerance so the seed bridges the halt\"): the tolerance is a multiple of the\nname's *own* typical interval, so a 12 s equity tape that stops for three hours at the cash close is still\na hole and still truncates \u2014 pinned as a test, alongside one proving a fast tape is sampled bit-for-bit as\nbefore.\n\nHonest cost: this **raises** exposure by admitting names the desk currently cannot see, so if the\nreversion edge does not survive contact with them the loss is larger, not smaller. Expect NQ and the rates\ncurve to reach a full seed and ES/GBPUSD/AUDUSD to seed from as much series as the 12 h retention holds.",
+    "commit": "3d8adf4"
+  },
+  {
     "ts": "2026-07-27T22:25:54Z",
     "feedMode": "SIM",
     "available": true,
