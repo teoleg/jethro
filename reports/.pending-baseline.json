@@ -1,0 +1,20 @@
+{
+  "commit": "8e80ceabc5108e216076aa98fac382fd7a5f918b",
+  "fees": "335.383012",
+  "gross_exposure": "20202.99155816",
+  "net_exposure": "-1944.16508336",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "20202.99155816",
+    "hedgePnl": "-382.47907539",
+    "netExposure": "-1944.16508336",
+    "realizedPnl": "152.12597417",
+    "strategyAlpha": "544.00835045",
+    "totalFees": "335.383012",
+    "totalPnl": "161.52927506",
+    "unrealizedPnl": "9.40330089"
+  },
+  "summary": "the reversion sensor's Donchian range window is doubled to 40 minutes (normalisation span with it, holding the 2x proportion that keeps E|score| ~ 1 and so the book size fixed), because the position path's ~20-25 minute full-amplitude sweep \u2014 and therefore the turnover the desk pays fee and spread on \u2014 is set by that window, while the horizon ladder measures this source's edge as largest at its long rungs",
+  "total_pnl": "161.52927506",
+  "ts": "2026-07-27T05:19:59Z"
+}
