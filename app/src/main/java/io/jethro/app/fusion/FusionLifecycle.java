@@ -38,10 +38,11 @@ public final class FusionLifecycle implements AutoCloseable {
                              double portfolioRiskMultiplier, int covarianceCoveredNames,
                              int volBudgetNames, double volBudgetDispersion, double volBudgetLeverCap,
                              List<TrailingRiskCut.Cut> riskCuts, int riskCutStoppedNames,
-                             int streamVolMeasuredNames, String covarianceBasis) {
+                             int streamVolMeasuredNames, String covarianceBasis,
+                             Map<String, ForecastScalars.Measurement> forecastScalars) {
         static TargetBook empty() {
             return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0, 0, 1.0, 1.0,
-                    List.of(), 0, 0, Basis.NONE_NAME);
+                    List.of(), 0, 0, Basis.NONE_NAME, Map.of());
         }
     }
 
@@ -253,7 +254,8 @@ public final class FusionLifecycle implements AutoCloseable {
                     normalised.multiplier(), normalised.coveredNames(),
                     budgeted.coveredNames(), budgeted.dispersion(), budgeted.leverCap(),
                     cut.cuts(), cut.stoppedNames(),
-                    streamVol == null ? 0 : streamVol.measuredNames(), basis.name());
+                    streamVol == null ? 0 : streamVol.measuredNames(), basis.name(),
+                    registry.scalarSnapshot());
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {

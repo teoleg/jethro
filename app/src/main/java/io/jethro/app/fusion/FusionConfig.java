@@ -32,9 +32,15 @@ public class FusionConfig {
             @Value("${jethro.fusion.hypothesis.conviction-step:5.0}") double convictionStep,
             @Value("${jethro.fusion.social.per-channel:4.0}") double socialPerChannel,
             @Value("${jethro.fusion.learned.scale:20.0}") double learnedScale,
+            @Value("${jethro.fusion.forecast-scalar.enabled:true}") boolean forecastScalarEnabled,
+            @Value("${jethro.fusion.forecast-scalar.min-sample:30}") int forecastScalarMinSample,
             @Value("${jethro.fusion.freshness-seconds:600}") long freshnessSeconds) {
         var params = new ForecastRegistry.Params(expectedAbsZ, convictionStep, socialPerChannel, learnedScale);
-        return new ForecastRegistry(params, freshnessSeconds * 1_000);
+        // ADR-0092: every continuous source's scaling constant above is a CLAIM about how big its
+        // readings are. This measures the claim on the running stream and scales the source back to
+        // TARGET_ABS when it over-delivers — one-way, so an estimate can only ever shrink the book.
+        var scalars = new ForecastScalars(forecastScalarEnabled, forecastScalarMinSample);
+        return new ForecastRegistry(params, freshnessSeconds * 1_000, scalars);
     }
 
     /** The sole-origin order path (ADR-0055 §5), present only when the order module is wired

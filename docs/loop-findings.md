@@ -742,3 +742,47 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   the cross-section carries little selection information and every name points the same way. Removing
   the weight floor (ADR-0087) was tried and reverted; the untried lever is re-scaling the reversion
   forecast so the cap stops binding.
+
+## 2026-07-27 — the forecast cap had become the forecast (ADR-0092)
+
+- Situation: third consecutive up run — PnL `-91.34` (`+41.42` window, `+294.75` over three), gross
+  `18,920.07` (`-36,084.08` window), net `2,354.41`, VaR95 `153.18`, breaker far. No danger state, so
+  the cycle went at a mechanism.
+- **Honest attribution on ADR-0091's ⚠️ MIXED.** The verdict is a deadband artefact, not a judgement:
+  gross fell by two-thirds and net by 95%, and PnL rose `+46.87` — three dollars under the `$50` band
+  that would have made it ✅ GOOD. What unwound is exactly the double leg the change stopped creating,
+  so the exposure half is the change's own doing and not the market. The PnL half is inside the noise
+  band and I claimed no credit for it.
+- **The finding.** All four phase-2 scaling constants are CLAIMS about how big a source's readings are,
+  and nothing had ever checked one. Measured on the live target book: trend `E|f| = 15.17` against a
+  promised 10, **median 18.86, 11 of 23 names pinned exactly at the ±20 cap**; reversion `14.68` with 6
+  of 23 pinned. Over a third of the cross-section clipped. Fixed by measuring each source's own scale on
+  the stream (expanding mean of |claim|, Carver's forecast scalar) and rescaling back to TARGET_ABS —
+  one-way, so it can only ever shrink the book.
+- **Rule: a cap that binds often is not a cap, it is the forecast.** Carver's ±20 is a defence against
+  rare extremes. At a 37% clip rate the source has degenerated into a sign function: every clipped name
+  reads the identical number, so the planner cannot tell a 1.8-sigma name from a 2.4-sigma one and the
+  cross-sectional selection that justifies 23 names instead of one is gone. **Check the clip RATE of
+  every bounded quantity in the system, not just its value** — the tell was sitting in `fusion_targets`
+  for six cycles as "every name points the same way", and one line of arithmetic over the payload
+  (`E|f|` and the at-cap count per source) named it.
+- **Rule 2: a number a component "promises" about itself is an assumption until something measures it.**
+  The sensors claim a self-normalised score with E|score| ≈ 1; the mapper multiplied by 10 on that
+  promise for six cycles. When a comment says a constant SHOULD be estimated from telemetry, that is a
+  live bug report, not a nice-to-have.
+- **Rule 3: read the cumulative fee number before blaming turnover.** `/api/attribution` `totalFees`
+  spans the whole feed-mode history — `297.01` against a `-91.34` PnL reads as "costs are 3× the loss"
+  and is nearly all yesterday's much larger book. The fills table for the live 25 minutes says `$10.40`
+  on `$93k` traded. Always re-derive the cost per window from `fills` before targeting cost.
+- Order post-mortem, worth keeping: within ALPHA the winners (`AAPL`, `MSFT`, `JPM`, `JNJ`) are exactly
+  the names with `0.59–0.72 bps` measured slippage and the losers (`GOOGL`, `GOOG`, `SAP`) the three
+  worst round trips (`10.05`, `2.07`, `4.08 bps`). **Cost, not view, sorted that book.** The ADR-0072/0075
+  per-name cost gate has since flattened GOOGL and SAP — that trigger is already fixed.
+- Expected next: gross falls as the planned book shrinks toward the size `unit-notional-usd` was set for,
+  and turnover falls with it. If gross does NOT fall, the suspect is not this change but the ADR-0089
+  stream covariance — the boot log still shows it cold, so the concentration multiplier and the
+  volatility budget are both silently no-op, and that is the next lever rather than a re-attempt here.
+- Still open: `MACRO -0.002530 ES` against `HEDGE +0.002526 ES` — two legs in one instrument cancelling
+  at the firm level for `$1,378` of gross and ~0 net. It nets `+92.22` and costs about a dollar a cycle,
+  so it was logged rather than chased; the fix when it is worth doing is netting the hedge target
+  against the proxy the firm holds ANYWHERE, not just in the hedge book.
