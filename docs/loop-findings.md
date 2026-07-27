@@ -1073,3 +1073,49 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   mean-reversion book (it cuts at maximum expected reversion); the honest version is a TIME stop at the
   measured horizon; (e) `turnover_cost_by_name` in the report is STILL erroring, third cycle running,
   and it is the aggregate that would grade exactly this decision.
+
+## 2026-07-27 (cycle 10:00Z) — a buffer measured against the wrong quantity froze the desk flat
+
+- **What the window's orders did.** Firm gross fell `$26,684.11 → $7.90` and PnL froze at `$787.04`
+  while fees kept accruing. Not de-risking — a **dead book**: 23 non-zero fusion targets, one position
+  held (9 JNJ), `insideBuffer` 17–21 of 23 on every plan across four minutes of 10 s polling. The
+  `+$14.14` on the window was market (realised P&L on positions the flattening closed) plus a `MACRO`
+  book that has not moved to the cent in eight cycles; the exposure collapse was 100% the change.
+- **The trigger.** ADR-0102's clamp sets the aim flat when it disagrees in sign with the target — and
+  `bufferedDelta` read a flat aim as an **EXIT** and dumped the whole position at market, unbuffered.
+  Live: GOOG sold 8 at forecast `−16.19` against a target of `−103.398`, all 8 bought back at `+2.00`
+  four minutes later. A round trip per sign flip, on a position that never reached 8% of its target.
+- **The mechanism underneath it.** ADR-0101 derives the band's width about the frictionless optimum
+  (`g = a − h`, `a = μ/λσ²`, i.e. the target); ADR-0094 was handing it `aim − held`, the ADR-0080 lag,
+  which at `a = 1 − e^(−30/900) = 0.0328` is ~3% of that. So from flat the aim had to accumulate a
+  whole band before the first order (~11 cycles) and the 900 s mean-reverting source changed side long
+  before that. Fixed by ADR-0103: the band tests the **target** gap, the aim supplies the step.
+
+- **Rule 1: a workaround outlives its reason, and then it is just a brake.** ADR-0094 moved the band off
+  the target because Carver's `0.10` could not bind there. ADR-0101 later *measured* the width at
+  `0.24–1.00` — which binds there fine — and nobody went back to undo the workaround. **When you replace
+  a number with a measured one, re-open every decision that was made because the old number was wrong.**
+- **Rule 2: check that a control is applied to the quantity its own derivation names.** The width's
+  derivation says `g = optimum − held` in as many words. The code passed `aim − held`. Both are "a gap",
+  both are decimal quantities, and the type system cannot tell them apart — only reading the derivation
+  next to the call site can. Do that for every threshold in the desk.
+- **Rule 3: a risk-adjusted ratio computed on a book that no longer exists is not evidence.** The ledger
+  scored ADR-0102 MIXED with "risk-adj improved 0.02876 → 99.59074" — the flattering artifact of
+  dividing by `$7.90` of gross. **Read the numerator and denominator separately; a collapsing
+  denominator is a failure, not an improvement.**
+- **Rule 4: a semantic overload is a bug waiting for its second caller.** `aim == 0` meant "exit, trade
+  in full" for as long as only a flat target could produce it. ADR-0102 added a second producer with
+  completely different intent, and the overload fired. ADR-0103 keys the exit on `target == 0` — the
+  condition every control that means *get out* actually sets.
+- **Expected next.** Exposure up off zero (~`$79k` at the live fixed point, rate-limited so it arrives
+  over ~10–20 minutes), PnL able to move again. **If this scores BAD**, the thing to doubt is the
+  *policy composition*, not the band location: drop the ADR-0080 partial adjustment entirely and trade
+  straight to the band edge (the pure Constantinides / Davis–Norman policy this desk's proportional
+  costs actually call for — same fixed point, no lag), rather than re-anchoring the band again. Other
+  open levers, unchanged from last cycle: (a) the overlay POSTURE question deferred by ADR-0098 and
+  ADR-0100 (`HEDGE −645.64` against no declared appetite, `equity-rebalance-floor-usd = 0`); (b) no
+  absolute book-level volatility target, so nothing anchors gross; (c) the frozen `MACRO` book around a
+  stranded `0.000029` ES; (d) the ADR-0086 chandelier still `riskCuts: []`, and a trailing stop is the
+  wrong shape for a mean-reversion book — the honest version is a TIME stop at the measured horizon;
+  (e) `turnover_cost_by_name` in the report is **still** erroring, fourth cycle running, and it is the
+  aggregate that would grade exactly this decision.
