@@ -40,10 +40,12 @@ public final class FusionLifecycle implements AutoCloseable {
                              List<TrailingRiskCut.Cut> riskCuts, int riskCutStoppedNames,
                              int streamVolMeasuredNames, String covarianceBasis,
                              Map<String, ForecastScalars.Measurement> forecastScalars,
-                             Map<String, BigDecimal> aims, int insideBuffer) {
+                             Map<String, BigDecimal> aims, int insideBuffer,
+                             double bookVolBrake, Double bookVolPlannedSigmaUsd,
+                             Double bookVolReferenceSigmaUsd, int bookVolSamples) {
         static TargetBook empty() {
             return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0, 0, 1.0, 1.0,
-                    List.of(), 0, 0, Basis.NONE_NAME, Map.of(), Map.of(), 0);
+                    List.of(), 0, 0, Basis.NONE_NAME, Map.of(), Map.of(), 0, 1.0, null, null, 0);
         }
     }
 
@@ -94,6 +96,9 @@ public final class FusionLifecycle implements AutoCloseable {
     private final java.util.Set<String> covSeeded = new java.util.HashSet<>();
     /** ADR-0094: the no-trade region around the aim — null ⇒ not wired, deltas are the ADR-0080 ones. */
     private final PositionBuffer positionBuffer;
+    /** ADR-0104: the absolute book-level risk anchor — null ⇒ not wired, the book keeps whatever
+     *  risk level the cross-section happened to plan. */
+    private final BookVolatilityBrake bookVolBrake;
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -156,6 +161,25 @@ public final class FusionLifecycle implements AutoCloseable {
                            double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
                            SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
                            StreamCovariance streamCov, PositionBuffer positionBuffer) {
+        this(registry, priceFor, multiplierFor, positionsSupplier, heldSupplier, weightsSupplier, params,
+                routeOrders, executor, scheduler, intervalSeconds, minForecastToRoute, edgeGate,
+                covariance, baseHorizonSeconds, volBudgetWinsorPct, streamVol, riskCut, markHistory,
+                markTimeFor, streamCov, positionBuffer, null);
+    }
+
+    public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
+                           Function<String, BigDecimal> multiplierFor,
+                           Supplier<Map<String, BigDecimal>> positionsSupplier,
+                           Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
+                           FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
+                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
+                           Supplier<EdgeGate.Decision> edgeGate,
+                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
+                           double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
+                           SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
+                           StreamCovariance streamCov, PositionBuffer positionBuffer,
+                           BookVolatilityBrake bookVolBrake) {
+        this.bookVolBrake = bookVolBrake;
         this.positionBuffer = positionBuffer;
         this.streamCov = streamCov;
         this.streamVol = streamVol;
@@ -257,6 +281,18 @@ public final class FusionLifecycle implements AutoCloseable {
             // desk actually intends to hold, and the operator's book shows the sizes that will route.
             var normalised = PortfolioRiskNormaliser.apply(targets, multiplierFor, cov, cycleParams);
             targets = normalised.targets();
+            // ADR-0104: both controls above are RELATIVE — they decide how the book's risk is shared out
+            // and how much of it is one bet, but nothing above states how much risk the book should
+            // carry. The level was falling out of how many names happened to pass the gate and how
+            // strong their forecasts happened to be, which is why planned gross swung several-fold
+            // between evaluations with the desk's appetite unchanged. Cap the book's measured ex-ante σ
+            // at the MEDIAN of its own planned-σ series — no chosen number, one-way, and applied here so
+            // the anchor is on the risk the desk actually intends, before the gate clamps it and before
+            // the exit gets its final word.
+            var braked = bookVolBrake == null
+                    ? new BookVolatilityBrake.Result(targets, 1.0, null, null, 0, 0)
+                    : bookVolBrake.apply(targets, multiplierFor, cov, cycleParams);
+            targets = braked.targets();
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
             // paying for are the ones that take risk OFF. ADR-0072 asks the same question per name, so
             // a name whose own round trip costs more than the passing source's measured edge is
@@ -285,7 +321,9 @@ public final class FusionLifecycle implements AutoCloseable {
                     budgeted.coveredNames(), budgeted.dispersion(), budgeted.leverCap(),
                     cut.cuts(), cut.stoppedNames(),
                     streamVol == null ? 0 : streamVol.measuredNames(), basis.name(),
-                    registry.scalarSnapshot(), buffered.aims(), buffered.insideBuffer());
+                    registry.scalarSnapshot(), buffered.aims(), buffered.insideBuffer(),
+                    braked.multiplier(), braked.plannedSigmaUsd(), braked.referenceSigmaUsd(),
+                    braked.samples());
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {

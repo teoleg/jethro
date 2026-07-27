@@ -95,6 +95,9 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.stream-covariance.span:120}") int streamCovSpan,
                                     @Value("${jethro.fusion.position-buffer.enabled:true}") boolean positionBufferEnabled,
                                     @Value("${jethro.fusion.position-buffer.fraction:0.10}") double positionBufferFraction,
+                                    @Value("${jethro.fusion.book-vol-brake.enabled:true}") boolean bookVolBrakeEnabled,
+                                    @Value("${jethro.fusion.book-vol-brake.span:120}") int bookVolBrakeSpan,
+                                    @Value("${jethro.fusion.book-vol-brake.min-sample:30}") int bookVolBrakeMinSample,
                                     @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
@@ -201,7 +204,17 @@ public class FusionConfig {
                 // position the partial-adjustment path converges to — at a fraction of the name's
                 // average position, and trade only to the buffer's edge. Disabled ⇒ null and the
                 // deltas are exactly the ADR-0080 ones.
-                positionBufferEnabled ? new PositionBuffer(positionBufferFraction) : null);
+                positionBufferEnabled ? new PositionBuffer(positionBufferFraction) : null,
+                // ADR-0104: the absolute risk anchor. ADR-0083 and ADR-0079 both decide the SHAPE of the
+                // book's risk; neither states its LEVEL, so the level was whatever the cross-section
+                // happened to plan that cycle. Cap the book's measured ex-ante σ at the median of its own
+                // planned-σ series — self-calibrating to the stream, introducing no money number, and
+                // one-way so an estimated covariance can only ever shrink the desk. Disabled ⇒ null and
+                // the book is byte-identical.
+                bookVolBrakeEnabled
+                        ? new BookVolatilityBrake(
+                                new BookVolatilityBrake.Params(bookVolBrakeSpan, bookVolBrakeMinSample))
+                        : null);
         lifecycle.start();
         return lifecycle;
     }

@@ -1,81 +1,75 @@
-The desk was intending positions its own forecast contradicts — the aim is now bounded by the target it is chasing (ADR-0102).
+Gave the desk the one thing it has never had — an absolute risk level: the book's measured ex-ante volatility is now capped at the median of its own planned volatility (ADR-0104).
 
-*Every figure below is quoted from the live endpoints and the report; none is computed here. The ledger's
-numbers are the scorer's.*
+*Every figure below is quoted from the live endpoints, the report or the ledger; none is computed here.
+The ledger's numbers are the scorer's.*
 
 ## Situation — answered before anything else
 
-**1. Money.** Total PnL `$747.98` on `/api/risk` `.total` at report time, `$760.78` when I re-read the
-endpoint mid-analysis. The SITUATION header puts the window at `+83.46` and the last three runs at
-`+242.33`; `run-status.json` reads `on_track` true, `stale` false, `underwater` false, `pnl_growth_pct`
-far above the 1% target. The book is **not bleeding** — PnL has gone from `−825.93` to `+747.98` on the
-day. Attribution splits it `ALPHA +996.84`, `MACRO +376.99` (unchanged to the cent for a **seventh**
-cycle, still the stranded `0.000029` ES), `HEDGE −625.85`.
+**1. Money.** Total PnL `$811.00` on `/api/risk` `.total` at report time, `$824.48` when I re-read the
+endpoint mid-analysis. The SITUATION header puts the window at `+9.68` and the last three runs at
+`+146.48`; `run-status.json` reads `pnl_growth_pct 28.31` against a `1.0` target, `on_track` true,
+`stale` false, `underwater` false. The book is **not** bleeding — PnL has run `−825.93 → +824.48` on the
+day. Attribution splits it `ALPHA +1,083.73`, `MACRO +376.99` (unchanged to the cent for a **ninth**
+cycle, still the stranded `0.000029` ES), `HEDGE −649.73`, fees `$437.66`.
 
-**2. Risk.** Gross exposure `$46,558.92` at report time, `$38,852.99` live — the report's
-`EXPOSURE RISING` flag (`+3,141.97` on the window, `+10,955.79` over three) had already reversed by the
-time I read the endpoint. VaR95 `$383.18`, ES95 `$537.02`, breaker `halted: false`, firm gross limit
-`1,500,000` — we are at ~3% of it, so nothing is near a declared limit. The real risk story is not the
-level but the **swing**: gross has gone `14,471 → 36,443 → 61,909 → 35,603 → 62,117 → 43,417 → 46,559`
-across recent runs. A denominator that moves 4× on its own is what makes risk-adjusted PnL unstable.
+**2. Risk.** Gross `$24,791.90` at report time, `$29,386.44` live; net `−$1,051.45` → `+$2,633.77`. The
+report flags **EXPOSURE RISING** and it is real, not a stale read. VaR95 `$317.88`, ES95 `$422.71`,
+breaker `halted: false`, firm gross limit `1,500,000` — about 2% of it, nowhere near a declared limit.
 
-**3. Cause.** Last cycle's change (ADR-0101, the measured buffer width) scored **⚠️ MIXED** with the
-risk-adjusted read improving `0.01502 → 0.01622`, and PnL has kept climbing since. It was not the
-culprit and is not reverted.
+**3. Cause — last cycle's change.** ADR-0103 scored **❌ BAD** and the scorer reverted it: gross
+`$819.54 → $27,640.96` against PnL `$801.62 → $814.36`, risk-adj `0.97813 → 0.02946`. It put $26.8k of
+gross back on and bought `+$12.74` — inside the noise deadband — with it. So the exposure rise in (2) is
+**100% attributable to last cycle's change**, order by order, and none of it to the market. The revert is
+committed but the running JVM predates it (`uptimeSeconds 544`, started before the scoring commit), which
+is why the live read still shows ADR-0103's book.
 
-**4. Danger.** No. Not bleeding, exposure falling on the live read, nowhere near the breaker. So this is
-not a de-risk cycle — it is a cycle to fix something that is quietly costing money.
+**4. Danger.** No — PnL rising, breaker clear, two orders of magnitude below the firm limit. Not a
+de-risk-or-die cycle. But it is the *third* consecutive cycle whose verdict turned on exposure moving
+several-fold for reasons unrelated to the desk's appetite, and that is the thing worth fixing.
 
-**5. Order-level post-mortem.** No trigger opened a loser: `GOOGL −161.84` and `SAP −85.46` are closed
-and flat, and every live position is a winner except the hedge. The window's orders are the same five
-names being worked over and over — JNJ bought 11/13/14/15/18, JPM sold 2/3/4/5/7, AAPL sold 5/6/8/10 —
-against `2,660` fills and `442` cancels.
+**5/6/7. Order-level post-mortem, memory, and change-vs-market.** No trigger opened a loser: all seven
+live ALPHA positions are winners and the window's orders are the same handful of names being worked
+toward a target — `JNJ` bought ten times, `AAPL` sold eleven, `GOOG` round-tripped, against 2,785 fills
+and 465 ADR-0084 re-plan cancels. `docs/loop-findings.md` has carried "**no absolute book-level
+volatility target — nothing anchors gross, which is why it swings 4×**" as open lever (b) for three
+cycles; three separate postmortems named it and none acted on it. This cycle I did. I claim **no PnL
+credit or blame** for the window: the `+9.68` is market on positions nothing of mine touched.
 
-**6/7. Change vs market — and what those orders were actually chasing.** The `+83.46` is on positions
-ADR-0101 never touched; the change is credited with the turnover falling and with none of the PnL. But
-reading `/api/fusion/targets` alongside those orders exposed the real problem, and it is not a market
-move at all:
+## Diagnosis — every size control on this desk is relative; none sets a level
 
-> The desk's **intent** was on the wrong side of its own forecast. JNJ carried an aim of `+8.043404`
-> against a target of `−219.420787` while the book held `+104` — the largest position in the firm, long,
-> in the name whose own forecast (`−12.64`) says short, with the aim path walking it *further* long.
-> EURUSD carried an aim of `−19268.293125` against a target of `−13006.790342`. AUDUSD (`−11494.13`
-> against `+17285.02`) and GBPUSD (`−2024.44` against `+19015.93`) were about to **open** positions the
-> wrong way round from flat.
+`ADR-0083` splits the per-name cash budget by measured σ and is *budget-neutral by construction*
+(`Σᵢkᵢ = |C|`). `ADR-0079` scales the book by how much of it is one bet, back to "the risk the per-name
+budget already implied" — its own words. `ADR-0086` cuts a position that has gone wrong. Not one of them
+states how much risk the **book** should carry, so the level is
+`unit-notional × (how many names happened to clear the gate) × (how strong their forecasts happened to
+be)`. Both middle factors are properties of the cross-section on the day. That is why measured firm gross
+has read `$14.5k → $62.1k → $43.4k → $46.6k → $7.9k → $27.6k` across consecutive evaluations with nothing
+about the desk's appetite changing — and why PnL-per-unit-of-exposure, the objective, has been measured
+against a denominator that moves several-fold on its own. Worse than unmeasurable: it means the desk
+carries its largest risk in whichever cycles the cross-section happened to shout.
 
-## Diagnosis — the mechanism
+The reason this stayed deferred for three cycles is the **number**. A conventional vol target ("12%
+annualised") is a money figure with no provenance here, and the firm's declared appetites
+(`max-firm-drawdown 50000`) sit two orders of magnitude above a `$25k` book, so a target derived from
+them could never bind.
 
-The aim recursion `aim ← aim + a(T − aim)` unrolls to an EWMA of the target sequence, so the aim is a
-convex combination of the targets the desk held in the **past** — which is not the hull of the target it
-holds **now**. Whenever the target moves faster than `1/a`, the intent can outgrow it or invert against
-it. The desk's only source that passes its own edge gate is a **mean-reverting** one measured at the
-900 s rung, which crosses zero repeatedly inside that window, so this is the steady state here, not a
-corner case. Gârleanu & Pedersen's aim is a weighted average of the *current and expected future*
-targets — every element a position the model wants; averaging over a realised past admits neither.
+## The change (ADR-0104, Proposed, same commit)
 
-The arithmetic says it is expensive: being the wrong side of the passing source swings `±8.53` bps per
-horizon against a measured `2 × 1.43` bps round trip — about 6:1 in favour of correcting it, the same
-comparison ADR-0101 used to set the buffer width.
+Cap the book's measured ex-ante σ — `√(eᵀΣe)` over the covered names, the same statistic and the same
+covariance ADR-0079 already prices concentration with — at the **median of its own planned-σ series**,
+scaling every covered target by `min(1, σ_ref/σ_planned)`. The reference is not a chosen volatility
+target: it is the desk's own typical planned risk, measured on whatever stream it trades, so the same
+code self-calibrates to a sim, live or replay feed and **no money/risk number is introduced**. Strictly
+one-way and asserted as tests — it can only shrink the book, never flip a name's side, never ratchet
+(the series samples the raw pre-brake σ), and never set a target flat, so the ADR-0086 cut, the ADR-0027
+breaker and the pre-trade guardrail keep their exact semantics. The empirical bet is the standard
+volatility-targeting result (Harvey et al., *JPM* 2018; Moreira & Muir, *JF* 2017): returns are not
+proportional to risk across risk states, so trimming the hot ones raises return per unit of risk.
+`./gradlew -Pci test` is green.
 
-## The change
-
-Clamp the aim into the closed interval between flat and this cycle's target (ADR-0102, Proposed, same
-commit). No new dial and no new number — the bound is the target the planner already computed. Two
-properties hold by construction and are asserted as tests: `|aim'| ≤ |aim|` and
-`sgn(aim') ∈ {0, sgn(T)}`, so it can only ever shrink intent or move it onto the side the forecast is
-on — it can never open, enlarge or side-flip a position. The flat-target branch returns before the
-clamp, so the ADR-0086 cut, the ADR-0065 unwind, the ADR-0027 breaker and the pre-trade guardrail keep
-their exact semantics. An inversion is cut once to flat and the position is then rebuilt through the
-buffer at the derived rate rather than round-tripped. `./gradlew -Pci test` is green.
-
-**Expected next.** Excess gross the planner never asked for comes off, wrong-side entries are not opened,
-and wrong-side holdings are cut — so this should read as exposure down with PnL flat-to-up. **If it
-scores BAD**, the thing to doubt is the assumption that the target is a clean statement of intent at the
-cycle cadence; do not retry the clamp — go instead to the levers still open: (a) the overlay POSTURE
-question ADR-0098 and ADR-0100 both deferred (HEDGE is `−625.85` and 15% of firm gross, and
-`equity-rebalance-floor-usd = 0` hedges from the first dollar with no declared appetite); (b) the absence
-of any absolute book-level volatility target, which is what leaves gross free to swing 4×; (c) the frozen
-MACRO book, seven cycles unchanged around a stranded `0.000029` ES; (d) the ADR-0086 chandelier exit,
-still `riskCuts: []` and zero fires — though note a trailing stop is the wrong shape for a mean-reversion
-book and a *time* stop at the measured horizon would be the honest version; (e) `turnover_cost_by_name`
-in the report is STILL erroring, and it is the aggregate that would grade exactly this decision.
+**Two honest caveats, stated up front.** (i) The next scored window contains **two** deployments — the
+scorer's revert of ADR-0103 *and* this brake — because the running JVM predates the revert. Gross will
+fall for both reasons and the split will not be cleanly attributable; do not read the whole move as this
+change. (ii) The brake is silent for its first 30 planning cycles (fifteen minutes at the 30s cadence)
+after each restart, so roughly half of a measurement window is unbraked. Both are in the deferred
+register rather than papered over.

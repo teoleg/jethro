@@ -1073,3 +1073,54 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   mean-reversion book (it cuts at maximum expected reversion); the honest version is a TIME stop at the
   measured horizon; (e) `turnover_cost_by_name` in the report is STILL erroring, third cycle running,
   and it is the aggregate that would grade exactly this decision.
+
+## 2026-07-27 — every size control on this desk is RELATIVE; nothing states how much risk the book should carry (ADR-0104)
+
+- **Situation.** Healthy, not a de-risk cycle: PnL `−825.93 → +824.48` on the day, `pnl_growth_pct 28.31`
+  against a `1.0` target, `on_track` true, breaker clear, firm gross ~2% of the declared `1,500,000`
+  limit. Attribution `ALPHA +1,083.73`, `MACRO +376.99` (frozen to the cent for a **ninth** cycle),
+  `HEDGE −649.73`, fees `$437.66`.
+- **Attribution honesty.** The window's `+9.68` is market on positions nothing of mine touched — no PnL
+  credit claimed. The `EXPOSURE RISING` flag is **100% last cycle's change**: ADR-0103 scored ❌ BAD and
+  was reverted (`gross 819.54 → 27,640.96` for `PnL +12.74`, inside the deadband). No trigger opened a
+  loser this window; all seven live ALPHA positions are winners.
+- **Rule 1: a lever named in three consecutive postmortems and acted on in none is the lever.** "No
+  absolute book-level volatility target — nothing anchors gross, which is why it swings 4×" sat as open
+  item (b) for three cycles. Each cycle preferred a smaller, better-understood control. When the SAME
+  finding survives three postmortems, stop deferring it — the reason it keeps getting deferred is usually
+  the reason it matters.
+- **Rule 2: budget-neutral and capped-at-1 are not risk LIMITS — they are shape controls.** ADR-0083 is
+  budget-neutral by construction (`Σᵢkᵢ = |C|`); ADR-0079 scales back to "the risk the per-name budget
+  already implied". Both read like risk management and neither sets a level. The book's risk was
+  `unit-notional × (names that happened to clear the gate) × (how loud their forecasts happened to be)`
+  — an accident of the cross-section. Audit every control that *looks* like a limit for whether it can
+  actually bind, not just whether it can shrink.
+- **Rule 3: when the appetite number would be yours, anchor to the system's own distribution instead.**
+  A "12% vol target" would have been the `$250k` hedge-cap mistake again. The median of the desk's OWN
+  planned-σ series asserts only "no more risk than you typically carry" — no invented figure, and it
+  self-calibrates to any feed (invariant 9). The general move: **replace a chosen constant with a
+  quantile of the quantity's own measured history.**
+- **Rule 4: sample the RAW input to a self-referential control, never its own output.** The σ series
+  records the pre-brake σ. Recording the braked σ would drag the median down every time the brake bound
+  and converge the book to zero — the failure mode is silent and terminal.
+- **Expected next.** Planned gross stops making several-fold excursions; the top half of the planned-risk
+  distribution is trimmed to the median, the quiet cycles untouched. So: exposure down or flat, never up,
+  with PnL down proportionally *only if* the trimmed cycles earned as much per unit of risk as the average
+  — which is exactly the volatility-targeting claim being tested.
+- **Attribution warning for the NEXT postmortem.** The coming window contains **two** deployments: the
+  scorer's ADR-0103 revert *and* this brake (the JVM that produced this window predates the revert). Gross
+  will fall for both reasons. Do **not** credit the whole move to ADR-0104 — check `bookVolBrake` on
+  `/api/fusion/targets` for whether the brake actually bound (multiplier < 1) and how many samples it had,
+  before attributing anything to it.
+- **If this scores BAD**, the thing to doubt is the median as the reference (too aggressive when the desk
+  legitimately wants to be large), not the existence of a level anchor — do not go back to no anchor.
+  Remaining levers, in order: (a) the overlay POSTURE question ADR-0098/0100 both deferred — `HEDGE`
+  is `−649.73`, 60% of ALPHA's gross P&L, and `equity-rebalance-floor-usd = 0` hedges from the first
+  dollar against no declared appetite; (b) the frozen MACRO book, nine cycles unchanged around a stranded
+  `0.000029` ES; (c) the ADR-0086 chandelier, still `riskCuts: []` with all 23 σ sensors warm
+  (`streamVolMeasuredNames: 23`) — so it is reachable and simply never fires, and a TIME stop at the
+  measured horizon remains the honest shape for a mean-reversion book; (d) parametric VaR reports
+  `coveredExposure 0.00` against `skippedExposure 24,792.33` — the firm's second risk sensor is blind for
+  exactly the reason ADR-0089 fixed for fusion, and the mark-stream covariance that covers 23/23 names was
+  never propagated to it; (e) `turnover_cost_by_name` in the report is STILL erroring, fourth cycle
+  running.
