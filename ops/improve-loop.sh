@@ -38,6 +38,28 @@ fi
 
 echo "==== $(date -Is) cycle start ====" >> "$LOG"
 
+# 0. Market-hours gate. On a LIVE feed outside the US session, the tape is frozen — there is nothing
+#    to analyse, so spending an Opus cycle on it is pure waste (and the frozen book reads as false
+#    "staleness"). Skip the whole cycle — no report, NO Claude/Opus call, no deploy — and write one
+#    distinct "market closed" heartbeat so the Improve page shows why. SIM/REPLAY never skip (their
+#    tape runs continuously). Cron still fires every time; this only gates the expensive work.
+#    Override with JETHRO_LOOP_IGNORE_MARKET_HOURS=1.
+if ! python3 scripts/market-open.py >> "$LOG" 2>&1; then
+  echo "market CLOSED — skipping report + analysis this cycle (no Claude call)" >> "$LOG"
+  git fetch origin >> "$LOG" 2>&1 || true
+  git checkout -B "$BRANCH" >> "$LOG" 2>&1
+  git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 || true
+  BEFORE=$(git rev-parse HEAD)
+  # Deterministic heartbeat only (reads live PnL for the page; no model call). --market-closed labels it.
+  python3 scripts/score-change.py status --market-closed 1 >> "$LOG" 2>&1 \
+    || echo "status writer exited non-zero (see above)" >> "$LOG"
+  if [ "$BEFORE" != "$(git rev-parse HEAD)" ]; then
+    for i in 1 2 3 4; do git push -u origin "$BRANCH" >> "$LOG" 2>&1 && break || { echo "push retry $i" >> "$LOG"; sleep $((2 ** i)); }; done
+  fi
+  echo "==== $(date -Is) cycle end (market closed) ====" >> "$LOG"
+  exit 0
+fi
+
 # 1. Snapshot the LIVE app (writes logs/report.md + jethro-report-*.zip). Do NOT restart first —
 #    the runtime telemetry is in-memory and a restart would wipe it.
 python3 scripts/system-report.py >> "$LOG" 2>&1 || {

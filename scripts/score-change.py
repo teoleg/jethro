@@ -340,7 +340,7 @@ def cmd_status(argv):
       --brain-ran 0|1  did the Claude analysis step actually run? (0 = it was skipped, e.g. claude
                        not found) — surfaced so a silent brain-down never masquerades as "no change"
     """
-    scored = changed = False
+    scored = changed = market_closed = False
     brain_ran = True  # default true for backward compat if the flag isn't passed
     it = iter(argv)
     for a in it:
@@ -350,6 +350,10 @@ def cmd_status(argv):
             changed = next(it, "0") == "1"
         elif a == "--brain-ran":
             brain_ran = next(it, "1") == "1"
+        elif a == "--market-closed":
+            market_closed = next(it, "0") == "1"
+    if market_closed:
+        brain_ran = False  # the market-closed cycle skips the analysis entirely — no model call
 
     available = True
     vec = raw = None
@@ -416,7 +420,8 @@ def cmd_status(argv):
     pnl_growth = growth_over(PNL_TARGET_WINDOW)
     on_track = pnl_growth is not None and Decimal(str(pnl_growth)) >= PNL_TARGET_PCT
     underwater = available and vec["pnl"] <= 0
-    stale = available and pnl_growth is not None and not on_track
+    # A closed-market cycle is expected to be flat — never flag it as a staleness FAILURE (ADR-0063).
+    stale = (not market_closed) and available and pnl_growth is not None and not on_track
 
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     head = git("rev-parse", "--short", "HEAD", check=False).stdout.strip()
@@ -435,12 +440,18 @@ def cmd_status(argv):
             reasoning = ""
     analysis_line = reasoning.splitlines()[0].strip() if reasoning else ""
 
-    if not brain_ran:
+    if market_closed:
+        action = "market-closed"
+    elif not brain_ran:
         action = "no-analysis"
     else:
         action = "reverted" if reverted else ("changed" if changed else "no-change")
 
-    if not brain_ran:
+    if market_closed:
+        decision = ("🌙 Market closed — analysis skipped this cycle (no Claude call). The US session is "
+                    "closed, so the tape is frozen and there is nothing to analyse; the loop resumes at "
+                    "the next open. Flat/unchanged here is expected, not a failure.")
+    elif not brain_ran:
         decision = ("⚠️ ANALYSIS STEP DID NOT RUN this cycle — `claude` was not invoked (not found on "
                     "PATH?). No diagnosis was made; the heartbeat/score still ran. Fix the loop's PATH.")
     elif not available:
