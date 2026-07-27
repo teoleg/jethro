@@ -28,6 +28,29 @@ unset ANTHROPIC_API_KEY || true   # bill to Max, never the API account
 mkdir -p logs
 LOG="logs/improve-$(date +%F).log"
 
+# Push that self-heals when a maintainer pushes to the same branch mid-cycle. A plain retry re-sends
+# the IDENTICAL rejected push and fails again; instead, on rejection we fetch and REBASE our local
+# commit on top of origin, then retry — so a concurrent maintainer push never wedges the loop into a
+# stuck, diverged state. The loop and the maintainer normally touch different areas (fusion/reports vs
+# ops/scripts), so the rebase is clean; a genuine content conflict aborts and stops (left for a human)
+# rather than resolving code blind.
+push_branch() {
+  local i
+  for i in 1 2 3 4; do
+    if git push -u origin "$BRANCH" >> "$LOG" 2>&1; then return 0; fi
+    echo "push rejected (origin moved?) — fetch + rebase onto origin/$BRANCH + retry ($i)" >> "$LOG"
+    git fetch origin "$BRANCH" >> "$LOG" 2>&1 || true
+    if ! git rebase "origin/$BRANCH" >> "$LOG" 2>&1; then
+      git rebase --abort >> "$LOG" 2>&1 || true
+      echo "rebase onto origin/$BRANCH CONFLICTED — not pushed; left for the maintainer" >> "$LOG"
+      return 1
+    fi
+    sleep $((2 ** i))
+  done
+  echo "push still failing after retries + rebase" >> "$LOG"
+  return 1
+}
+
 # Single-flight: with a short interval, a slow gradle test could still be running when the next cron
 # fires. Take a non-blocking lock and skip this fire rather than stacking overlapping cycles.
 exec 9>"$REPO/.improve-loop.lock"
@@ -54,7 +77,7 @@ if ! python3 scripts/market-open.py >> "$LOG" 2>&1; then
   python3 scripts/score-change.py status --market-closed 1 >> "$LOG" 2>&1 \
     || echo "status writer exited non-zero (see above)" >> "$LOG"
   if [ "$BEFORE" != "$(git rev-parse HEAD)" ]; then
-    for i in 1 2 3 4; do git push -u origin "$BRANCH" >> "$LOG" 2>&1 && break || { echo "push retry $i" >> "$LOG"; sleep $((2 ** i)); }; done
+    push_branch || true
   fi
   echo "==== $(date -Is) cycle end (market closed) ====" >> "$LOG"
   exit 0
@@ -130,9 +153,7 @@ fi
 # 4. Something was committed (ledger score and/or a code change; the prompt requires green
 #    `./gradlew -Pci test` before any code commit). Push so the ledger + any change persist.
 echo "commit(s) this cycle $BEFORE -> $AFTER — pushing" >> "$LOG"
-for i in 1 2 3 4; do
-  git push -u origin "$BRANCH" >> "$LOG" 2>&1 && break || { echo "push retry $i" >> "$LOG"; sleep $((2 ** i)); }
-done
+push_branch || true
 
 # 4b. Rebuild+restart ONLY if code outside reports/ changed. A ledger-only commit (scoring the
 #     previous change) must not bounce the app.
