@@ -1,0 +1,20 @@
+{
+  "commit": "b14caf54ab86cd1cf5662c36fc3c3b97287616ef",
+  "fees": "261.134411",
+  "gross_exposure": "30661.78855600",
+  "net_exposure": "11196.27621574",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "30661.78855600",
+    "hedgePnl": "-199.46407854",
+    "netExposure": "11196.27621574",
+    "realizedPnl": "-305.07760417",
+    "strategyAlpha": "-117.41787942",
+    "totalFees": "261.134411",
+    "totalPnl": "-316.88195796",
+    "unrealizedPnl": "-11.80435379"
+  },
+  "summary": "only a flat target is worked at full speed \u2014 a change of view is now a rebalance at the derived rate in both directions, so a mean-reverting forecast can no longer round-trip the whole book each time it crosses the position (ADR-0090)",
+  "total_pnl": "-316.88195796",
+  "ts": "2026-07-27T02:44:17Z"
+}
