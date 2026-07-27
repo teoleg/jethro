@@ -156,6 +156,83 @@ class SignalScoringTest {
         assertEquals(5.76840, s.stdErrorBps(), 1e-5);
     }
 
+    /**
+     * ADR-0108: grouping the observations in memory and receiving them already grouped must be the SAME
+     * estimator. Two implementations of "cohort" exist by necessity — one in {@link SignalScoring}, one
+     * in the store's SQL — and this pins them to the same {@link SignalScoring.Stats} on the same data.
+     */
+    @Test
+    void preGroupedCohortsGiveExactlyTheInMemoryEstimator() {
+        // Three bursts, each a 3-name cross-section, an hour apart. Returns in bps:
+        //   burst 1: +200, −40, +60   → mean  +73.333…      (2 wins, 1 loss)
+        //   burst 2: −120, +30,  +6   → mean  −28.0         (1 win,  1 loss, 1 flat: 6 bps < 10)
+        //   burst 3:  +90, +90, −300  → mean  −40.0         (2 wins, 1 loss)
+        double[][] burstsBps = {{200, -40, 60}, {-120, 30, 6}, {90, 90, -300}};
+        List<SignalScoring.Observation> flat = new java.util.ArrayList<>();
+        List<SignalScoring.Cohort> grouped = new java.util.ArrayList<>();
+        for (int b = 0; b < burstsBps.length; b++) {
+            long k = 0;
+            double s = 0;
+            double ss = 0;
+            long wins = 0;
+            long losses = 0;
+            for (double bps : burstsBps[b]) {
+                double r = bps / 1e4;
+                flat.add(obs(b * 3_600_000L + k++, r)); // ms apart ⇒ one cohort per burst
+                s += r;
+                ss += r * r;
+                if (bps > FLAT_BPS) {
+                    wins++;
+                } else if (bps < -FLAT_BPS) {
+                    losses++;
+                }
+            }
+            grouped.add(new SignalScoring.Cohort(burstsBps[b].length, s, ss, wins, losses));
+        }
+        SignalScoring.Stats inMemory = SignalScoring.aggregate("reversion", flat, COHORT_WINDOW_MS, FLAT_BPS, 4);
+        SignalScoring.Stats fromCohorts = SignalScoring.aggregate("reversion", grouped, 4);
+
+        assertEquals(3, fromCohorts.cohorts());
+        assertEquals(9, fromCohorts.resolved());
+        assertEquals(5, fromCohorts.wins());
+        assertEquals(3, fromCohorts.losses());
+        assertEquals(1, fromCohorts.flats());
+        assertEquals(4, fromCohorts.open());
+        // mean of cohort means = (73.333… − 28 − 40)/3 = 1.777… bps — NOT the pooled mean of the nine.
+        assertEquals(1.77778, fromCohorts.avgReturnBps(), 1e-5);
+        assertEquals(inMemory.avgReturnBps(), fromCohorts.avgReturnBps(), 1e-9);
+        assertEquals(inMemory.stdCohortMeanBps(), fromCohorts.stdCohortMeanBps(), 1e-9);
+        assertEquals(inMemory.stdErrorBps(), fromCohorts.stdErrorBps(), 1e-9);
+        // Pooled from (n, Σx, Σx²) rather than two-pass: the same quantity, to rounding.
+        assertEquals(inMemory.stdReturnBps(), fromCohorts.stdReturnBps(), 1e-6);
+        assertEquals(inMemory.hitRate(), fromCohorts.hitRate(), 1e-12);
+        assertEquals(inMemory.resolved(), fromCohorts.resolved());
+    }
+
+    /** A cohort of nothing is not a draw of the market: it is dropped, never divided by. */
+    @Test
+    void emptyCohortsAreDroppedRatherThanCounted() {
+        SignalScoring.Stats s = SignalScoring.aggregate("social", java.util.Arrays.asList(
+                new SignalScoring.Cohort(2, 0.004, 0.0000104, 2, 0), // means +20 bps
+                null,
+                new SignalScoring.Cohort(0, 0, 0, 0, 0),
+                new SignalScoring.Cohort(1, -0.002, 0.000004, 0, 1)), 0);
+        assertEquals(2, s.cohorts());
+        assertEquals(3, s.resolved());
+        assertEquals(0.0, s.avgReturnBps(), 1e-9); // (+20 − 20)/2
+        assertEquals(2.0 / 3.0, s.hitRate(), 1e-12);
+    }
+
+    /** With no cohorts at all there is no evidence — and, crucially, no standard error to divide by. */
+    @Test
+    void noCohortsIsNoEvidence() {
+        SignalScoring.Stats s = SignalScoring.aggregate("trend", List.<SignalScoring.Cohort>of(), 7);
+        assertEquals(0, s.cohorts());
+        assertEquals(0, s.resolved());
+        assertEquals(0.0, s.stdErrorBps(), 1e-12);
+        assertEquals(7, s.open());
+    }
+
     private static BigDecimal bd(double v) {
         return BigDecimal.valueOf(v);
     }

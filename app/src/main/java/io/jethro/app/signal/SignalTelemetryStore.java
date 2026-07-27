@@ -94,34 +94,71 @@ public final class SignalTelemetryStore {
     }
 
     /**
-     * A resolved observation: WHEN its call was recorded, and the realised directional return of
-     * following it. The entry instant is carried because sources emit their whole cross-section in one
-     * burst, and simultaneous calls are one draw of the market rather than many independent ones —
-     * {@link SignalScoring} groups on it to get an honest standard error (ADR-0077).
-     */
-    public record Resolved(Instant entryAt, double directionalReturn) {
-    }
-
-    /**
-     * Resolved observations for one source <b>at one horizon</b> since {@code since} (this mode),
-     * newest first.
+     * The most recent {@code cohortLimit} emission cohorts for one source at one horizon (this mode),
+     * each already reduced to the sufficient statistics {@link SignalScoring} needs (ADR-0108).
      *
-     * <p>The limit is applied PER HORIZON deliberately (ADR-0082). A short rung resolves many times
+     * <p><b>Why the bound counts cohorts.</b> Since ADR-0077 the expectancy's standard error is
+     * estimated ACROSS emission cohorts, so cohorts — not rows — are the estimator's sample. Bounding
+     * the read at a row count therefore bounded the statistics in the wrong unit: a source that emits
+     * its whole cross-section at once spends the budget at its own width, so a 23-name source was
+     * pinned at ~22 independent draws forever while a one-name-at-a-time source got the full count.
+     * The edge gate's power was capped by cross-section width instead of by accumulated evidence, and
+     * no amount of running could lift it. Counting the bound in cohorts fixes that and — because each
+     * cohort comes back as one row rather than its whole cross-section — reads LESS from the database
+     * than the row-bounded query it replaces.
+     *
+     * <p>The bound is applied PER HORIZON deliberately (ADR-0082). A short rung resolves many times
      * more often than a long one — sixteen times, at a 4× ladder ratio two steps down — so a single
      * newest-first window across all rungs would fill with the fastest rung and silently starve the
      * slowest of the very history the desk has waited hours to accumulate.
+     *
+     * <p>Cohorts are cut by the same rule {@link SignalScoring} applies in memory: observations ordered
+     * by entry instant, and a new cohort wherever the gap to the previous one exceeds
+     * {@code cohortWindowMillis}. Doing it in SQL is what keeps the transfer constant; the definition
+     * is unchanged, and {@code SignalScoringTest} pins the two groupings to the same answer.
+     *
+     * <p>{@code flatThresholdBps} classifies each observation WIN/LOSS/FLAT exactly as
+     * {@link SignalScoring#outcome(double, double)} does — a move counts only if it clears the
+     * threshold — so the hit-rate is the same statistic wherever it is computed.
      */
-    public List<Resolved> resolvedObservations(String source, int horizonSeconds, Instant since, int limit) {
+    public List<SignalScoring.Cohort> resolvedCohorts(String source, int horizonSeconds, Instant since,
+                                                      long cohortWindowMillis, double flatThresholdBps,
+                                                      int cohortLimit) {
+        BigDecimal threshold = BigDecimal.valueOf(Math.abs(flatThresholdBps) / 1e4);
         try {
             return jdbc.query("""
-                    select entry_at, realized_return from signal_observations
-                    where source = ? and horizon_seconds = ? and resolved = true
-                      and feed_mode = ? and resolved_at >= ?
-                    order by resolved_at desc limit ?
-                    """, (rs, i) -> new Resolved(rs.getTimestamp("entry_at").toInstant(),
-                            rs.getBigDecimal("realized_return").doubleValue()),
-                    source, horizonSeconds, mode(), Timestamp.from(since), limit);
+                    with resolved_obs as (
+                        select entry_at, realized_return,
+                               case when extract(epoch from
+                                        entry_at - lag(entry_at) over (order by entry_at)) * 1000 > ?
+                                    then 1 else 0 end as cohort_break
+                        from signal_observations
+                        where source = ? and horizon_seconds = ? and resolved = true
+                          and feed_mode = ? and resolved_at >= ? and realized_return is not null
+                    ), cohorted as (
+                        select realized_return, entry_at,
+                               sum(cohort_break) over (order by entry_at) as cohort_id
+                        from resolved_obs
+                    )
+                    select count(*) as n,
+                           sum(realized_return) as sum_return,
+                           sum(realized_return * realized_return) as sum_squared_return,
+                           count(*) filter (where realized_return > ?) as wins,
+                           count(*) filter (where realized_return < ?) as losses
+                    from cohorted
+                    group by cohort_id
+                    order by max(entry_at) desc
+                    limit ?
+                    """, (rs, i) -> new SignalScoring.Cohort(
+                            rs.getLong("n"),
+                            rs.getBigDecimal("sum_return").doubleValue(),
+                            rs.getBigDecimal("sum_squared_return").doubleValue(),
+                            rs.getLong("wins"),
+                            rs.getLong("losses")),
+                    cohortWindowMillis, source, horizonSeconds, mode(), Timestamp.from(since),
+                    threshold, threshold.negate(), cohortLimit);
         } catch (Exception e) {
+            log.debug("cohort read failed for {}@{}s: {}", source, horizonSeconds, e.toString());
             return List.of();
         }
     }

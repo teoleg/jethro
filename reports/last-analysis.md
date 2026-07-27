@@ -1,80 +1,69 @@
-Stopped the desk liquidating a whole position every time its mean-reverting forecast crossed it: an exit is what a risk control ORDERED, not what the intent arithmetic happens to read (ADR-0107).
+The desk has been reduce-only its whole life on this feed because the edge gate's evidence budget was counted in ROWS, and a source that calls its whole cross-section at once spends that budget at its own width (ADR-0108).
 
-*Every figure below is quoted from the live endpoints, the report or the ledger; none is computed here.
-The ledger's numbers are the scorer's.*
+*Every figure below is quoted from the live endpoints, the report or the ledger, or computed by a script
+against the live database; none is authored here. The ledger's numbers are the scorer's.*
 
 ## Situation — answered before anything else
 
-**1. Money.** The report's SITUATION header reads total PnL `$922.59`, the window at `+25.40` and the
-last three runs at `+67.26`; `run-status.json` reads `pnl_growth_pct 11.96` against a `1.0` target, with
-`on_track` true, `stale` false, `underwater` false. Live `/api/risk` `.total` has since read
-`923.08648774`. The book is **not** bleeding and is well ahead of the owner target. `/api/attribution`
-splits it `ALPHA +1,255.29`, `MACRO +376.996` (unchanged to the cent for a **twelfth** cycle),
-`HEDGE −709.20`, fees `$465.78`.
+**1. Money.** The report's SITUATION header reads total PnL `$5725.54`, with the last three runs at
+`+4834.17`. `run-status.json`'s last measured entry read `pnl_growth_pct 11.96` against a `1.0` target,
+`on_track` true, `stale` false, `underwater` false. The book is **not** bleeding and is far ahead of the
+owner target. `/api/attribution` splits it `ALPHA +8,419.40`, `MACRO +376.996` (unchanged to the cent for
+a **thirteenth** cycle), `HEDGE −3,070.86`, fees `$471.21`.
 
-**2. Risk.** The report shows gross `$0.00` / net `$0.00` — the book was completely flat when the report
-was cut, six minutes after a restart. Live gross has since read `$2,677.67` against net `−$2,631.36`.
-Breaker `halted: false`; VaR reads `"note": "no positions"`. Exposure is falling, not rising: the header
-records `−9,680.61` on the window and `−19,777.96` over three runs.
+**2. Risk.** Gross `$0.00`, net `$0.00` — every position reads `quantity 0`. VaR/ES `0.00` with the note
+"no positions"; the breaker is clear; the hedge axis reads `status FLAT`. There is no danger state, and
+none is possible: the book carries no risk at all.
 
-**3. Cause.** Last cycle's change (ADR-0106, `0f7d25a17`) scored **⚠️ MIXED** — `$899.05 → $922.59` for
-gross `$12,139.06 → $0.00`. It was strictly one-way by construction and cannot have added exposure, so
-the PnL rise is a genuine improvement and the collapse to flat is the book unwinding, not the change
-adding risk. No culprit.
+**3. Cause.** Last cycle's `cdef5f160` (ADR-0107) scored **✅ GOOD**. Its own finding predicted "average
+gross exposure UP, because positions now persist through crossings" — the opposite happened, and the
+whole `+4,798.49` is realised, with `unrealizedPnl 0.00000000` on every book. So this is a book that
+**unwound to flat and booked what it had**, not a change that earned. I do not claim the move for
+ADR-0107: the window contains a restart (the JVM now logging booted at 09:29 EDT, after the window's
+orders), and a realised-only jump across an unwind cannot be separated from the market on the numbers
+alone. Reported as unattributable rather than credited.
 
-**4. Danger — none, and I checked rather than assumed.** Not bleeding, exposure falling, breaker clear,
-firm gross a fraction of a percent of the declared limit. De-risking would be the wrong move this cycle.
+**4. Danger.** None — and that *is* the problem. `/api/fusion/targets` reads `edgeGate.mayIncrease:
+false` with `deltaQty: 0` on all nine planned names against `grossExposure $0.00`. Zero exposure earns
+zero going forward, so the PnL growth that is on-track today goes stale by construction. This is the
+binding constraint, and everything else on the desk is downstream of it.
 
-## The real problem: the desk holds almost none of the book it plans
+**5. Order-level post-mortem.** The window's tape is dominated by two non-trades. `ALPHA JPM SELL 23`
+was REJECTED **45 times in a row**, every ~30 s for twenty minutes, `no market data for JPM` — the order
+module's own `LastPriceCache` is fed off `md.marks`, which `MarkPublisher` skips for a stale mark, while
+`/api/marks` shows JPM live from alpaca. And `ALPHA MSFT BUY` was CANCELLED on every cycle, `fusion
+re-plan — passive order superseded by a fresh target (ADR-0084)`. Both are real; neither is why the book
+is flat, because the gate refuses to plan a delta at all. Logged for a later cycle.
 
-This is where I spent the cycle, because the flags are green and the money is not moving much.
-`/api/fusion/targets` plans 23 names — `SAP 245`, `GOOGL −469`, `BRK.B 366`, `ORCL 457`,
-`EURUSD −66,100` and so on, hundreds of thousands of dollars of intended notional — and reports
-`deltaQty` of **exactly zero on every equity name**, against a live gross of `$2,677.67`. The desk is
-carrying a rounding error of its own plan while filling `3,004` orders and paying `$403.17` of ALPHA
-fees against `$1,255.29` of ALPHA P&L. A quarter of what the strategy book makes is going to the cost of
-getting there, and it never reaches the size at which its edge could pay for that.
+## What I checked before choosing, and what it said
 
-`signals_telemetry` says the edge is real and not a blip: `reversion` measures `+8.58` bps at the 900 s
-rung on `500` resolved observations over `81` cohorts (hit rate `0.855`), and `+9.48` / `+6.42` at the
-other two rungs — the same sign, the same order of magnitude, three horizons, thousands of observations.
-Every other source measures significantly negative and sits pinned at the ADR-0097 `MIN` weight of
-`0.25` against reversion's `2.19`. The desk has one good, well-evidenced, mean-reverting source and is
-failing to hold it.
+`/api/fusion/targets` shows every one of the nine target names with `sources: 1` — the fused book is
+**entirely `trend`**, at weight 1.23, on a 3 600 s reading of `+72` bps whose t-stat is 0.88. Nothing
+clears. I pulled `signal_observations` and re-ran the gate's own arithmetic (α = Φ̄(2.0)/3 = 0.007583
+after the ADR-0082 haircut, Student's t on cohorts−1 df, net of the cheapest measured round trip) under
+one change only: the sample bound.
 
-**5. Order-level post-mortem — the mechanism.** The tape is the giveaway. AAPL is bought `1, 3, 3, 4, 5,
-7, 8` in small rated steps and then sold `22` and `13`; JNJ is bought `19, 9, 28, 6` and then sold `14`,
-`14`, `34`; JPM the same shape. Small accumulations, one large reversal. Reading the code: ADR-0090
-established that a change of view is a rebalance and only a **flat target** is an exit, but ADR-0094
-moved order derivation into `PositionBuffer.bufferedDelta`, which keys the full-speed unbuffered branch
-on `aim.signum() == 0`. That was faithful until ADR-0102 began clamping an inverted intent to flat in
-one step — which, with a mean-reverting source, is the steady state. So every crossing of the forecast
-over the held position is read as a cut and dumps the whole position in one MARKET order. ADR-0102's own
-worked example records the dump (`gap = 0 − 104 ⇒ delta = −104.000000`) as intended behaviour. The clamp
-is right; calling its output an exit is not.
+`SignalTelemetryStore` capped the read at `sample-limit = 500` **rows**. That bound predates ADR-0077,
+which moved the standard error onto **cohorts**. So the budget is spent at cross-section width: a source
+calling ~23 names per burst is pinned at ~58 independent draws **forever** — it cannot accumulate a 59th
+however long the desk runs — while `momentum`, at 234 rows, gets 186. The gate's power was capped by
+breadth rather than by evidence, which is precisely the thing it exists to reward. Measured on the live
+table: `reversion` @ 225 s goes from 58 cohorts, t = 0.99, p = 0.16237 (shut) to 250 cohorts, t = 2.50,
+p = 0.00653 (**open**) — with the point estimate *falling*, 10.35 → 6.27 bps, because the standard error
+falls faster. Not a bigger edge; a better-measured one.
 
-It is worse than a wash because of ADR-0084's asymmetry: an entry POSTS and pays no spread, the
-crossing-liquidation CROSSES and pays the full spread on everything it built for free.
+I also tested and **rejected** cross-sectional demeaning before writing any code: it moves `reversion`
+@ 3 600 s only from t = 1.04 to 1.14, because mean and standard error shrink together (222 → 26 bps),
+and it collapses any one-name cohort to identically zero. Recorded in the ADR so it is not re-attempted.
 
-**6. Memory.** `docs/loop-findings.md` says the hedge has been intervened on four times in five cycles
-(two BAD) — I left it alone. It also says not to re-attempt ADR-0087's removal of the source-weight MIN
-floor; I did not, although the four measured-negative sources holding `1.00` of weight against
-reversion's `2.19` remains the obvious next lever.
+## The change
 
-**7. Change vs market.** Cleanly separable this cycle: ADR-0106 could not add exposure by construction,
-and the exposure move is the book unwinding to flat across a restart. The `+25.40` is realised P&L on
-positions the change did not open. I credit ADR-0106 with the hurdle correction, not with the P&L.
-
-## What I changed
-
-`PositionBuffer.bufferedDelta` now keys the unbuffered branch on the **target** being flat — how every
-risk control actually orders an exit — and works the part of a gap that crossed flat in one step at the
-ADR-0080 derived rate. Strictly one-way, asserted over every held/aim/target sign combination: it can
-never open or enlarge a position, never slow a cut a control ordered (a flat target still returns
-unbuffered and unrated, so the ADR-0086 stop, the ADR-0065 unwind, the ADR-0027 breaker and the
-guardrail are untouched), and never slow a same-side de-risk. No dial and no number introduced.
-
-**The honest trade-off, stated up front:** positions will persist longer, so average gross exposure
-should rise. The claim under test is that the turnover saved plus the edge captured over the horizon the
-gate priced exceed the carry. If exposure grows and P&L does not, the scorer will mark this ❌ BAD and
-revert it, and that is the correct outcome.
+`jethro.signals.sample-limit` (rows) becomes `jethro.signals.cohort-limit` (cohorts), the ADR-0077
+gap-cut grouping moves into SQL where the rows live, and each cohort comes back as its sufficient
+statistics — so this reads *less* from the database while covering an order of magnitude more history.
+No arithmetic changed; a test pins the in-memory and SQL groupings to the same `Stats`. Expected: the
+gate opens at the 225 s rung on `reversion`, permission arrives name by name under the ADR-0075 per-name
+cost test (only `ES` clears today; `AAPL` reads p = 0.011), and `trend` — which carries the whole book —
+is demoted to ADR-0097's minimum weight because at that rung it measures **significantly negative**,
+t = −2.47. Gross exposure will rise from `$0.00`, which a book at zero cannot avoid; if the desk does
+not earn on it, ❌ BAD and the revert are the correct answer, and the scorer settles it.

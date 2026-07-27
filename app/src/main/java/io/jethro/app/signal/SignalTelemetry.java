@@ -39,26 +39,26 @@ public final class SignalTelemetry {
     private final List<Integer> horizons;
     private final double flatThresholdBps;
     private final int rollingDays;
-    private final int sampleLimit;
+    private final int cohortLimit;
     private final long cohortWindowMillis;
 
     public SignalTelemetry(SignalTelemetryStore store, MarkSource marks, List<Integer> horizons,
-                           double flatThresholdBps, int rollingDays, int sampleLimit,
+                           double flatThresholdBps, int rollingDays, int cohortLimit,
                            int cohortWindowSeconds) {
         this.store = store;
         this.marks = marks;
         this.horizons = normaliseLadder(horizons);
         this.flatThresholdBps = flatThresholdBps;
         this.rollingDays = Math.max(1, rollingDays);
-        this.sampleLimit = Math.max(1, sampleLimit);
+        this.cohortLimit = Math.max(2, cohortLimit); // a standard error needs two independent draws
         this.cohortWindowMillis = Math.max(0, cohortWindowSeconds) * 1000L;
     }
 
     /** Single-horizon telemetry — the pre-ADR-0082 shape, kept for callers with one horizon to measure. */
     public SignalTelemetry(SignalTelemetryStore store, MarkSource marks, int horizonSeconds,
-                           double flatThresholdBps, int rollingDays, int sampleLimit,
+                           double flatThresholdBps, int rollingDays, int cohortLimit,
                            int cohortWindowSeconds) {
-        this(store, marks, List.of(horizonSeconds), flatThresholdBps, rollingDays, sampleLimit,
+        this(store, marks, List.of(horizonSeconds), flatThresholdBps, rollingDays, cohortLimit,
                 cohortWindowSeconds);
     }
 
@@ -158,14 +158,13 @@ public final class SignalTelemetry {
         for (int horizon : horizons) {
             List<SignalScoring.Stats> perSource = new ArrayList<>(sources.size());
             for (String source : sources) {
-                List<SignalScoring.Observation> observations = new ArrayList<>();
-                for (SignalTelemetryStore.Resolved r
-                        : store.resolvedObservations(source, horizon, since, sampleLimit)) {
-                    observations.add(new SignalScoring.Observation(
-                            r.entryAt().toEpochMilli(), r.directionalReturn()));
-                }
-                perSource.add(SignalScoring.aggregate(source, observations, cohortWindowMillis,
-                        flatThresholdBps, store.openCount(source, horizon)).atHorizon(horizon));
+                // ADR-0108: the sample is bounded in COHORTS — the unit the ADR-0077 standard error is
+                // estimated in — and grouped where the rows live, so a wide cross-section no longer
+                // spends the budget faster than a narrow one and the gate's power tracks evidence.
+                List<SignalScoring.Cohort> cohorts = store.resolvedCohorts(
+                        source, horizon, since, cohortWindowMillis, flatThresholdBps, cohortLimit);
+                perSource.add(SignalScoring.aggregate(source, cohorts,
+                        store.openCount(source, horizon)).atHorizon(horizon));
             }
             out.put(horizon, List.copyOf(perSource));
         }

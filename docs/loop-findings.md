@@ -1218,3 +1218,50 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   GOOGL (10.05 bps measured slippage, width capped at 1.0) and SAP are structurally frozen; check
   whether that duplicates the edge gate's own per-name veto. (c) `turnover_cost_by_name` in the report
   has now errored **six** cycles running. (d) The frozen MACRO book, twelve cycles unchanged to the cent.
+
+## 2026-07-27 — the gate was starved by a ROW cap, so the desk could never learn its way to a trade (ADR-0108)
+
+- **What the window did.** Report SITUATION: total PnL `$5725.54`, three runs `+4834.17`, gross and net
+  both `$0.00`, no flags. Last cycle's ADR-0107 scored ✅ GOOD, but its own prediction was "average gross
+  exposure UP" and exposure went to zero instead; every book reads `unrealizedPnl 0.00000000`, so the
+  whole `+4,798.49` is a book that **unwound and booked what it had** across a restart. **Claimed for the
+  change: nothing.** A realised-only jump across an unwind cannot be split from the market on the numbers
+  alone, and saying so is more useful than inventing a cause.
+- **The finding I shipped.** `edgeGate.mayIncrease: false` with `deltaQty: 0` on all nine planned names
+  against `$0.00` gross — the desk has been reduce-only its whole life on this feed. The cause is a unit
+  mismatch two ADRs old: ADR-0077 moved the standard error onto **cohorts**, but the read stayed bounded
+  at `sample-limit = 500` **rows**, a bound written in ADR-0055 phase 1 when an observation *was* a draw.
+  So the evidence budget is spent at **cross-section width**: `reversion`@225s and `trend`@225s both hit
+  the 500 rows at **58 cohorts** and can never accumulate a 59th, however long the desk runs, while
+  `momentum`@225s at 234 rows gets **186**. Uncapping to cohorts: `reversion`@225s → 250 cohorts,
+  t = 0.99 → **2.50**, p = 0.16237 → **0.00653** against α = 0.007583. The gate opens.
+- **Rule 7: when an ADR changes the UNIT a statistic is computed in, audit every bound expressed in the
+  old unit.** ADR-0077 changed the denominator from observations to cohorts and left a row cap in place
+  upstream. The cap stayed literally correct ("500 rows") while becoming a cap on *statistical power set
+  by breadth*. Same shape as Rule 6, one layer further out: not a branch keyed on a stale symptom, but a
+  **budget denominated in a retired unit**.
+- **Rule 8: a control that cannot be improved by gathering evidence is broken, whatever its verdict
+  says.** The honest test of any gate is "what would make it open?" If the answer is "nothing the desk can
+  do", it is not measuring — it is refusing. Ask that question of every hurdle on the desk.
+- **Rule 9 (confirms the last cycle's Rule 4): check the story against the table BEFORE writing code.** I
+  nearly shipped cross-sectional demeaning — "the sources' expectancy is mostly the market beta the hedge
+  pays to remove", which is *true* (222 → 26 bps at 3600s). It moves the t-stat from 1.04 to **1.14**,
+  because mean and standard error shrink together, and it zeroes any one-name cohort outright. A correct
+  diagnosis is not automatically a lever. Both halves are in ADR-0108 so neither is re-attempted.
+- **Expected next.** Gross exposure **rises from `$0.00`** — unavoidable for a book at zero, and stated up
+  front as the trade-off. Permission is deliberately narrow: the ADR-0075 per-name test clears only `ES`
+  (0.4214 bps) today, `AAPL` reads p = 0.011, and it widens only as √B accrues. The selected rung moves
+  3600s → 225s, so the ADR-0080 holding rate becomes `a = 1 − e^(−30/225) = 0.1248` and the ADR-0097
+  weights are re-estimated where **`trend` measures significantly negative (t = −2.47)** — the source that
+  currently carries the entire book at weight 1.23 gets demoted to the minimum. If exposure rises and PnL
+  does not, ❌ BAD is the right verdict and the revert is right.
+- **Two live bugs found and NOT shipped (one change per run) — take these next.** (a) `ALPHA JPM SELL 23`
+  REJECTED **45 consecutive times**, `no market data for JPM`, while `/api/marks` shows JPM live from
+  alpaca at 171 ms: the order module's `LastPriceCache` is fed from `md.marks`, and `MarkPublisher` skips
+  any mark the cache calls stale — so a name whose feed goes quiet can be neither entered **nor exited**,
+  which is a risk control that fails in the dangerous direction. (b) `ALPHA MSFT BUY` CANCELLED every
+  cycle by ADR-0084 re-plan: passive entries are posted at the arrival mark and retired ~30 s later, while
+  exits cross at MARKET — a systematic entry/exit asymmetry that decays any book toward flat.
+- **Remaining levers, in order.** (a) and (b) above. (c) The TCA shortfall is measured against the ARRIVAL
+  mark so the whole cost series is biased low (deferred register). (d) `turnover_cost_by_name` in the
+  report has now errored **seven** cycles running. (e) The frozen MACRO book, thirteen cycles unchanged.

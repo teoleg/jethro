@@ -101,6 +101,66 @@ public final class SignalScoring {
     }
 
     /**
+     * One emission cohort already reduced to its sufficient statistics (ADR-0108) — the shape a store
+     * returns when the grouping was done where the rows live, rather than by shipping every observation
+     * to be grouped in memory.
+     *
+     * <p>These are exactly the quantities {@link #aggregate(String, List, long, double, long)} derives
+     * from a cohort's observations, so the two paths are the same estimator: {@code sumReturn / n} is
+     * the cohort mean the Fama–MacBeth statistics run over, and {@code n}, {@code sumReturn},
+     * {@code sumSquaredReturn}, {@code wins} and {@code losses} accumulate across cohorts into the
+     * pooled per-observation dispersion and the hit-rate. A cohort with {@code n < 1} is not a cohort
+     * and is dropped rather than divided by.
+     */
+    public record Cohort(long n, double sumReturn, double sumSquaredReturn, long wins, long losses) {
+
+        /** The one number this cohort contributes to the expectancy — its mean directional return. */
+        public double meanReturn() {
+            return n > 0 ? sumReturn / n : 0.0;
+        }
+    }
+
+    /**
+     * Aggregates one source's resolved history from PRE-GROUPED cohorts (ADR-0108). Identical
+     * arithmetic to {@link #aggregate(String, List, long, double, long)} — every cohort contributes one
+     * observation of the source's expectancy, and the statistics are taken over cohorts — but the
+     * grouping arrived already done, so the sample the estimator sees is bounded in the unit its
+     * standard error is computed in (cohorts) instead of in rows.
+     *
+     * <p><b>Why that distinction is not cosmetic.</b> A bound expressed in observations is spent at a
+     * rate set by how WIDE a source's cross-section happens to be: a source calling 23 names per burst
+     * exhausts a 500-row budget in ~22 independent draws and can never accumulate a 23rd, however long
+     * the desk runs, while a source calling one name at a time gets 500. The gate's power was therefore
+     * capped by cross-section width rather than by evidence — see ADR-0108.
+     */
+    public static Stats aggregate(String source, List<Cohort> cohorts, long open) {
+        List<Double> cohortMeans = new ArrayList<>(cohorts.size());
+        long n = 0;
+        long wins = 0;
+        long losses = 0;
+        double sum = 0;
+        double sumSquared = 0;
+        for (Cohort c : cohorts) {
+            if (c == null || c.n() < 1) {
+                continue; // not a draw of anything — never a divisor
+            }
+            cohortMeans.add(c.meanReturn());
+            n += c.n();
+            wins += c.wins();
+            losses += c.losses();
+            sum += c.sumReturn();
+            sumSquared += c.sumSquaredReturn();
+        }
+        double decisive = wins + losses;
+        double hitRate = decisive > 0 ? wins / decisive : 0.0; // FLATs excluded — they were no bet
+        double meanBps = mean(cohortMeans) * 1e4;
+        double stdCohortMeanBps = sampleStdDev(cohortMeans, mean(cohortMeans)) * 1e4;
+        double stdBps = pooledStdDev(n, sum, sumSquared) * 1e4;
+        return new Stats(source, n, wins, losses, n - wins - losses, open, hitRate, meanBps, stdBps,
+                cohortMeans.size(), stdCohortMeanBps);
+    }
+
+    /**
      * Aggregates one source's resolved directional returns, treating every observation as an
      * independent draw. Correct only for a source that emits one call at a time; prefer
      * {@link #aggregate(String, List, long, double, long)} where emission times are known.
@@ -203,6 +263,20 @@ public final class SignalScoring {
             sum += v;
         }
         return sum / values.size();
+    }
+
+    /**
+     * Bessel-corrected sample standard deviation from the sufficient statistics {@code n}, Σx and Σx²
+     * — the same quantity {@link #sampleStdDev(List, double)} returns for the observations behind them.
+     * Clamped at zero: the sum-of-squares form can produce a tiny negative variance by cancellation,
+     * which is a rounding artefact and never a real dispersion.
+     */
+    private static double pooledStdDev(long n, double sum, double sumSquared) {
+        if (n < 2) {
+            return 0.0;
+        }
+        double variance = (sumSquared - sum * sum / n) / (n - 1);
+        return variance > 0 ? Math.sqrt(variance) : 0.0;
     }
 
     /** Bessel-corrected sample standard deviation; 0 when the sample cannot support one. */
