@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-27T00:22:42Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-826.05938139",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "fees": "158.453066",
+    "pnl_pct": 0.0,
+    "gross_pct": null,
+    "pnl_growth_pct": 0.0,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": false,
+    "stale": true,
+    "underwater": true,
+    "action": "changed",
+    "last_verdict": "\u26a0\ufe0f MIXED",
+    "decision": "made a change: the OOS backtest gate sizes each instrument in its own contract terms and charges it its own per-fill cost, so futures \u2014 including ES, the only name whose measured round trip clears the edge gate \u2014 can earn a verdict at all instead of being vetoed for a silence that was arithmetic (ADR-0085) \u00b7 prev \u26a0\ufe0f MIXED",
+    "reasoning": "The desk's edge gate has been saying \"ES is the only name worth paying to trade\" for fourteen cycles while the OOS selector said \"I have no opinion on ES\" \u2014 because the backtest could not size a futures contract at all. Fixed the measurement (ADR-0085).\n\n## Situation (read from the live endpoints, not computed here)\n\n1. **Money.** Total PnL is unchanged run-over-run and unchanged across the last three runs \u2014 frozen at\n   the same figure for a fourteenth consecutive cycle. Not bleeding; *stuck*, and a hard miss on the\n   +1%/3-iteration target. `underwater` and `stale` both set.\n2. **Risk.** Gross and net exposure are both exactly zero, as they have been all fourteen cycles.\n   Nothing held, nothing at risk, nowhere near the drawdown breaker. There is no exposure to cut.\n3. **Cause.** Last cycle's change (ADR-0084, passive entries) scored \u26a0\ufe0f MIXED on a zero move \u2014 like\n   the five before it, **unmeasured, not refuted**: an execution-style change cannot show up in a book\n   that never places an order. It was also correct, and it was not the binding constraint.\n4. **Danger.** No. Flat book, no drawdown, no breaker proximity \u2014 this is a stuck-desk failure, not a\n   risk event, so the right move is to restore a route to a fill, not to de-risk.\n5. **Order-level post-mortem.** No orders in the window at all \u2014 the last fill was hours ago. Zero\n   triggers to attribute, no losing trade to fix.\n6. **Change vs market.** Both are exactly zero and separable without ambiguity: with no position and\n   no order, **0% of the move is market and 0% is my change** \u2014 there was no move.\n\n## Diagnosis \u2014 the mechanism, at last\n\nThe thing shutting the desk is *not* the statistics of the edge gate (five earlier cycles re-specified\nthose, and every one worked on the term that was not binding). Reading the live gate: `reversion`\nclears decisively at the evidence-selected 225 s rung, and the gate then tests each name against its\n**own** measured round trip. Only **ES** clears \u2014 it is the cheapest name in the book by an order of\nmagnitude \u2014 and the planner duly produces a non-zero ES delta every single cycle. That delta is then\nthrown away by the ADR-0049 backtest-support veto, because the OOS selector has **no verdict** for ES.\n\nIt has no verdict because the harness cannot measure a futures contract. `BacktestEngine` sized every\nname in whole units, so ES's correct 0.091743-contract position rounded to zero, at which point the\ncode read \"one contract exceeds the order cap\" and declared the name unsizeable. **No future has ever\nbeen measured** \u2014 17 of 19 price-quoted names, all equity/FX. Compounding it, the harness charged\nevery instrument the *equity* per-fill cost, 8.1\u00d7 what the live executor actually charges ES. So the\ndesk's own edge gate and its own backtest gate had reached opposite conclusions about the same name,\nand the disagreement was an artefact of arithmetic, not of evidence.\n\n## Change\n\nADR-0085: the OOS backtest sizes each name in its own contract terms (ADR-0078's rule, applied to the\nmeasurement path) and charges each name its own per-fill cost \u2014 half its refdata spread plus its class\nfee, the same derivation `OrderConfig` hands the live `SimulatedExecutor`, and the one the harness's\nown javadoc already claimed. No gate loosened, no hurdle moved, no number invented: multiplier and\n`spread_bps` are reference data, the fees are the ADR-0025 config. Replaying the selector's harness,\nES goes from 0 trades / no verdict to 8 trades with a positive momentum median; NQ trades but medians\nto zero and stays vetoed, so the fail-closed veto still bites \u2014 it just finally has evidence to bite on.\n\nIf ES's edge turns out to be a property of the backtest tape rather than of the live stream, that\nshows up next cycle as PnL flat with exposure up, is scored \u274c BAD and reverted. What would be refuted\nthen is ES's edge, not the measurement fix.",
+    "commit": "0f0a1e6"
+  },
+  {
     "ts": "2026-07-26T23:50:02Z",
     "feedMode": "SIM",
     "available": true,
