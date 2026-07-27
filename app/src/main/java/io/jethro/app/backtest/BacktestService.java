@@ -32,8 +32,6 @@ public final class BacktestService {
     private final StrategyProperties strategy;
     private final InstrumentRefSource refs;
     private final BigDecimal defaultCostBps;
-    /** ADR-0085: the live execution-cost config, so each name is charged its OWN cost; null = none wired. */
-    private final io.jethro.app.order.ExecutionProperties execution;
 
     public BacktestService(BacktestEngine engine, TradingCoreProperties sim,
                            StrategyProperties strategy, InstrumentRefSource refs) {
@@ -44,25 +42,11 @@ public final class BacktestService {
      *                        half-spread + fee), so backtest and sim P&L measure the same economics. */
     public BacktestService(BacktestEngine engine, TradingCoreProperties sim,
                            StrategyProperties strategy, InstrumentRefSource refs, BigDecimal defaultCostBps) {
-        this(engine, sim, strategy, refs, defaultCostBps, null);
-    }
-
-    /**
-     * @param execution the live ADR-0025 execution-cost config. When present, every instrument is
-     *                  charged its OWN per-fill cost (half its refdata spread + its class fee) rather
-     *                  than one blended figure — ADR-0085. {@code defaultCostBps} remains the charge
-     *                  for a name the config cannot price and the value a caller's explicit cost
-     *                  override replaces everything with.
-     */
-    public BacktestService(BacktestEngine engine, TradingCoreProperties sim,
-                           StrategyProperties strategy, InstrumentRefSource refs, BigDecimal defaultCostBps,
-                           io.jethro.app.order.ExecutionProperties execution) {
         this.engine = engine;
         this.sim = sim;
         this.strategy = strategy;
         this.refs = refs;
         this.defaultCostBps = defaultCostBps;
-        this.execution = execution;
     }
 
     /** Runs a backtest of the live config; nulls fall back to the live/default values. */
@@ -82,9 +66,7 @@ public final class BacktestService {
                 strategy.maxPositionNotionalOrDefault(), strategy.allowShortOrDefault(),
                 strategy.regimeVolatileScaleOrDefault(),
                 costBps != null ? costBps : defaultCostBps,
-                // An explicit cost from the caller is a deliberate what-if ("price this book at 2 bps"),
-                // so it replaces the per-name economics rather than sitting behind them.
-                universe(costBps == null),
+                universe(),
                 algo != null && !algo.isBlank() ? algo.trim().toLowerCase() : strategy.algoOrDefault());
         return engine.run(cfg);
     }
@@ -180,13 +162,13 @@ public final class BacktestService {
         return Math.max(1, (int) (strategy.intervalSeconds() * 1000 / tickMillis));
     }
 
-    private List<BacktestConfig.Instrument> universe(boolean perNameCosts) {
+    private List<BacktestConfig.Instrument> universe() {
         List<BacktestConfig.Instrument> out = new ArrayList<>();
         java.util.Set<String> seen = new java.util.LinkedHashSet<>();
         // Core universe first, in config order, so existing per-instrument OOS paths are byte-for-byte
         // unchanged. (The list name is legacy; the universe itself is really the reference-data master.)
         for (String id : sim.simInstruments()) {
-            if (addTradable(out, seen, id, perNameCosts)) {
+            if (addTradable(out, seen, id)) {
                 seen.add(id);
             }
         }
@@ -196,7 +178,7 @@ public final class BacktestService {
         List<String> extra = new ArrayList<>(refs.instrumentIds());
         java.util.Collections.sort(extra);
         for (String id : extra) {
-            if (!seen.contains(id) && addTradable(out, seen, id, perNameCosts)) {
+            if (!seen.contains(id) && addTradable(out, seen, id)) {
                 seen.add(id);
             }
         }
@@ -204,8 +186,7 @@ public final class BacktestService {
     }
 
     /** Append {@code id} to the backtest universe if it is a tradable (EQUITY/FUTURE/FX) refdata name. */
-    private boolean addTradable(List<BacktestConfig.Instrument> out, java.util.Set<String> seen, String id,
-                                boolean perNameCosts) {
+    private boolean addTradable(List<BacktestConfig.Instrument> out, java.util.Set<String> seen, String id) {
         Optional<InstrumentRef> ref = refs.find(id);
         if (ref.isEmpty()) {
             return false;
@@ -213,29 +194,9 @@ public final class BacktestService {
         String assetClass = ref.get().assetClass();
         if ("EQUITY".equals(assetClass) || "FUTURE".equals(assetClass) || "FX".equals(assetClass)) {
             out.add(new BacktestConfig.Instrument(id, sim.startPriceFor(id),
-                    sim.annualVolFor(id), ref.get().multiplier(),
-                    perNameCosts ? perFillCostBps(ref.get()) : null));
+                    sim.annualVolFor(id), ref.get().multiplier()));
             return true;
         }
         return false;
-    }
-
-    /**
-     * This name's own per-fill transaction cost in bps of traded notional (ADR-0085) — the SAME
-     * derivation {@code OrderConfig} hands the live {@code SimulatedExecutor}: half the instrument's
-     * own full bid/ask spread from refdata (the class-level configured spread when refdata states
-     * none), plus its asset class's fee. Nothing is invented here; the numbers are the ADR-0025
-     * execution-cost config and the refdata {@code spread_bps} column, read at their source.
-     *
-     * <p>Null when no execution config is wired — a standalone construction — in which case the
-     * config-wide {@code defaultCostBps} still applies to every name, exactly as before.
-     */
-    private BigDecimal perFillCostBps(InstrumentRef ref) {
-        if (execution == null) {
-            return null;
-        }
-        BigDecimal spread = ref.spreadBps() != null ? ref.spreadBps() : execution.spreadFor(ref.assetClass());
-        // Exact by construction: a decimal halved is a decimal, so no rounding decision is taken here.
-        return spread.divide(BigDecimal.TWO).add(execution.feeFor(ref.assetClass()));
     }
 }
