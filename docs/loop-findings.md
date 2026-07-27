@@ -658,3 +658,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   saturation is the cause and is the next lever. Note that removing the weight floor (ADR-0087) was
   already tried and reverted — the lever to try is re-scaling the reversion forecast so the cap stops
   binding, not re-weighting the sources.
+
+## 2026-07-27 — a change of view was being executed as a danger cut (ADR-0090)
+
+- Situation: the opposite of last cycle. PnL up on the window and up over three runs, gross collapsed,
+  net near flat, VaR and the breaker nowhere near binding. No danger state — so the cycle went at the
+  structural cost problem instead of de-risking.
+- **Honest attribution on last cycle's ✅ GOOD.** The exposure collapse was mechanism, but not the
+  mechanism ADR-0089 claimed: the book was unwound at the process restart, when every sensor was cold
+  and the held names had no view, down the ADR-0065 orphan path. The PnL rise was mostly market on
+  positions the loop never touched. The ledger verdict answers "did the vector improve", not "did this
+  code cause it" — and this is the second consecutive cycle where those two answers differ. **Rule:
+  when a change lands together with a restart, assume the restart until the orders say otherwise.**
+- Order post-mortem, and it is one shape on every name: AAPL bought in 3-share steps every 30s for
+  seven minutes, then sold 101 shares in ONE order, then immediately rebuilt the other way. JPM and JNJ
+  identical. Against the attribution, fees are the large majority of the firm's total loss and the desk
+  is close to flat gross-of-fees. **The desk was not losing on its views; it was paying them away.**
+- **The finding.** ADR-0080 set the entry rate so exposure e-folds toward target in one measurement
+  horizon, but rated only the risk-INCREASING half of the gap and traded every reduction in full.
+  `orderDelta` cannot see WHY the target moved, so a mere change of view was executed as a danger cut —
+  and the dominant source is mean-reverting, so it crosses the held position many times inside one
+  horizon. τ_in = h, τ_out = 0: the desk paid the full cost of a round trip while never reaching the
+  size at which a single-digit-bps expectancy could pay for it. Change: only a FLAT target exits at
+  full speed; everything else is worked at the same rate in both directions.
+- **Rule: an asymmetry justified by risk must be conditioned on a risk SIGNAL, not inferred from the
+  arithmetic.** "Reducing" is a property of the delta's sign, not evidence that anything is wrong. Every
+  control here that genuinely means "get out" sets the target FLAT — so flatness, not direction, is the
+  test. When you next find a control that behaves differently for cuts, check what it is actually
+  reading to decide something is a cut.
+- **Rule 2: cost and edge do not scale together.** Turnover cost scales with notional traded; edge
+  scales with position SIZE. Any policy that trades fast but sizes slowly loses by construction,
+  whatever the signal is worth. Compare the fee bill to gross exposure — 100× the book in a window is
+  the tell, and it was visible for several cycles before this one named it.
+- Note for next cycle: this is the first change in a while that could plausibly RAISE gross (positions
+  now persist instead of being zeroed each flip). Expected effect is the opposite — an oscillating aim
+  smooths to a small position — but if gross rises with PnL flat, the scorer will call it ❌ BAD and the
+  right follow-up is the no-trade band (`buffer-fraction = 0.5` is measured against the GAP, so it
+  never binds while the desk is far from target), not a re-attempt of this lever.

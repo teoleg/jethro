@@ -20,8 +20,8 @@ import java.math.RoundingMode;
  *       noise. Because there is ONE combined target per instrument, the delta is inherently netted
  *       across every sleeve — no two subsystems trade the same name against each other. The rate is
  *       <em>derived</em> from the horizon the desk's edge is measured over — see
- *       {@link #adjustmentRateFor} — and it applies only to the risk-INCREASING part of a delta
- *       (ADR-0080).</li>
+ *       {@link #adjustmentRateFor} — and it applies to the whole gap whenever the desk still holds a
+ *       view, a FLAT target alone being worked in full as an exit (ADR-0090, narrowing ADR-0080).</li>
  * </ol>
  */
 public final class TargetPlanner {
@@ -107,29 +107,38 @@ public final class TargetPlanner {
     /**
      * The Gârleanu-Pedersen order delta: signed quantity to trade THIS cycle toward {@code target}.
      * Zero inside the no-trade band (|target − current| ≤ |target| × {@code bufferFraction}); otherwise
-     * the gap is split and the two halves are treated differently (ADR-0080):
+     * the whole gap is worked at {@code adjustmentRate} — <b>unless the target is FLAT</b>, in which
+     * case the gap trades in full, this cycle (ADR-0090, narrowing ADR-0080):
      *
-     * <ul>
-     *   <li>the part that <b>reduces</b> |position| — the walk from {@code current} to flat, when the
-     *       gap opposes the position — trades <b>in full, this cycle</b>;</li>
-     *   <li>the part that <b>increases</b> |position| — building toward a target, or the far side of a
-     *       sign flip — trades at {@code adjustmentRate} of itself.</li>
-     * </ul>
+     * <pre>
+     *   gap  = target − current
+     *   band = |target| × bufferFraction
+     *   |gap| ≤ band   → 0            inside the no-trade band
+     *   target = 0     → gap          an EXIT: trade it all, now
+     *   otherwise      → a × gap      a REBALANCE: one rate, both directions
+     * </pre>
      *
-     * <p><b>Why the asymmetry.</b> Smoothing exists to stop the desk paying spread to chase a noisy
-     * forecast <em>into</em> risk; it has nothing to say about taking risk <em>off</em>. Applying it to
-     * exits does not make the desk safer, it makes it slower to cut — and "cut when risk enters the
-     * danger zone" is the whole asymmetry a trend book earns its living from (let winners run, cut
-     * losers fast). A symmetric rate of {@code a} would stretch a full exit over {@code −1/ln(1−a)}
-     * cycles; at the derived rate that is an hour to close a position the desk has decided it does not
-     * want, which is a worse risk than the churn the smoothing prevents. It cannot create churn either:
-     * a reduction is bounded by the position, so "always reduce fully" strictly lowers turnover versus
-     * grinding the same exit out over many cycles. The same asymmetry the ADR-0065 gates already use
-     * ({@link #isRiskReducing}), applied to the sizing step.
+     * <p><b>Why a flat target is the dividing line.</b> ADR-0080 traded every reduction in full,
+     * because "a cut that waits for a better price is not a cut". The motive is right and this method
+     * cannot test for it: it never sees <em>why</em> the target moved, so it read a mere change of view
+     * as a danger cut. With a mean-reverting source in the mix the combined forecast crosses the held
+     * position many times inside one measurement horizon, and each crossing liquidated the whole
+     * accumulated position and started rebuilding the other way — the desk entered at the rate the
+     * evidence justified and exited at infinite rate on a wobble, so it paid the full cost of a round
+     * trip while never reaching the size at which the measured edge could pay for it.
      *
-     * <p>Exiting toward a zero target always trades — the band collapses to 0 and the whole gap is a
-     * reduction. Exact decimal throughout; only the increasing part is multiplied by the dimensionless
-     * rate, with an explicit scale and rounding.
+     * <p>Every control that actually means "get out" says so by setting the target FLAT, so the
+     * {@code target = 0} branch keeps all of them exactly as they were: the ADR-0086 chandelier stop
+     * ({@code TrailingRiskCut.flatten} plans against a literal zero), the ADR-0065 orphan unwind (a
+     * held name whose sources went silent is planned flat), and the ADR-0027 breaker / pre-trade
+     * guardrail, which sit below this code entirely. What is left — the target moved but the desk still
+     * has a view — is a rebalance, and rating it makes the policy the exponential smoother the ADR-0080
+     * identity actually describes: {@code posₜ₊₁ = (1−a)·posₜ + a·aimₜ}, e-folding toward the aim in
+     * exactly one horizon <em>in both directions</em>. It can never lever the book up — {@code a ≤ 1},
+     * so no step exceeds the gap.
+     *
+     * <p>Exact decimal throughout; the dimensionless rate is applied with an explicit scale and
+     * rounding, and the gap is still split at flat so the two halves round the same way they always did.
      */
     public static BigDecimal orderDelta(BigDecimal target, BigDecimal current,
                                         double bufferFraction, double adjustmentRate) {
@@ -146,7 +155,10 @@ public final class TargetPlanner {
         BigDecimal reducing = reduceOnly(gap, cur);
         BigDecimal increasing = gap.subtract(reducing);
         double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
-        return reducing.add(increasing.multiply(BigDecimal.valueOf(rate)))
+        BigDecimal rated = BigDecimal.valueOf(rate);
+        // ADR-0090: an exit (flat target) is worked in full; a rebalance is rated on both halves.
+        BigDecimal workedReduction = tgt.signum() == 0 ? reducing : reducing.multiply(rated);
+        return workedReduction.add(increasing.multiply(rated))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
     }
 

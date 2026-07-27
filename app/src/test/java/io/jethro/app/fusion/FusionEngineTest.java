@@ -193,26 +193,58 @@ class FusionEngineTest {
     }
 
     /**
-     * ADR-0080: cut in full, add at the derived rate. The gap is split at flat and only the part that
-     * grows |position| is rated; exact decimal on every leg.
+     * ADR-0090 (narrowing ADR-0080): a FLAT target is an exit and trades in full; every other move of
+     * the target is a rebalance and is rated on the whole gap, in whichever direction it lies. Exact
+     * decimal on every leg.
      */
     @Test
-    void onlyTheRiskIncreasingPartOfADeltaIsRated() {
+    void onlyAFlatTargetIsWorkedInFull() {
         double rate = 0.01; // a clean rate so the arithmetic is checkable by hand
         // flat → long 150: nothing to reduce, so the whole gap is rated: 0.01·150 = 1.5.
         assertEquals(0, new BigDecimal("1.500000").compareTo(
                 TargetPlanner.orderDelta(bd(150), BigDecimal.ZERO, 0.5, rate)));
-        // long 100 → target 10: gap −90 runs against the position and is inside it, so it is ALL a
-        // reduction → trade −90 in full (band = 10·0.5 = 5, cleared).
-        assertEquals(0, new BigDecimal("-90.000000").compareTo(
+        // long 100 → target 10 (band = 10·0.5 = 5, cleared): the desk still holds a view, so this is a
+        // TRIM, not a cut — 0.01·(−90) = −0.9, where ADR-0080 dumped the whole −90.
+        assertEquals(0, new BigDecimal("-0.900000").compareTo(
                 TargetPlanner.orderDelta(bd(10), bd(100), 0.5, rate)));
-        // long 100 → short 200: gap −300 = −100 to flat (full) + −200 of new short (rated):
-        // −100 + 0.01·(−200) = −102.
-        assertEquals(0, new BigDecimal("-102.000000").compareTo(
+        // long 100 → short 200 (band = 200·0.5 = 100, cleared by |−300|): the view REVERSED, which is a
+        // change of mind and not a danger cut — 0.01·(−300) = −3, where ADR-0080 round-tripped −102.
+        assertEquals(0, new BigDecimal("-3.000000").compareTo(
                 TargetPlanner.orderDelta(bd(-200), bd(100), 0.5, rate)));
         // short 100 → target −150: the gap −50 grows the short, so it is rated: 0.01·(−50) = −0.5.
         assertEquals(0, new BigDecimal("-0.500000").compareTo(
                 TargetPlanner.orderDelta(bd(-150), bd(-100), 0.2, rate)));
+        // ...and the exit is untouched: target 0 collapses the band and trades the whole gap, so the
+        // ADR-0086 risk cut and the ADR-0065 orphan unwind still leave in one cycle.
+        assertEquals(0, new BigDecimal("-100.000000").compareTo(
+                TargetPlanner.orderDelta(BigDecimal.ZERO, bd(100), 0.5, rate)));
+        assertEquals(0, new BigDecimal("100.000000").compareTo(
+                TargetPlanner.orderDelta(BigDecimal.ZERO, bd(-100), 0.5, rate)));
+    }
+
+    /**
+     * ADR-0090: with the rate on both halves, the position is the exponential smoother the ADR-0080
+     * identity describes — {@code posₜ₊₁ = (1−a)·posₜ + a·aim} — so it e-folds toward a STANDING aim in
+     * exactly one horizon whether it is walking up to it or down to it. The asymmetric policy could
+     * only ever satisfy that on the way up.
+     */
+    @Test
+    void exposureEFoldsTowardTheAimInOneHorizonInBothDirections() {
+        double a = TargetPlanner.adjustmentRateFor(30, 3600); // 120 cycles to one horizon
+        for (BigDecimal[] leg : new BigDecimal[][] {
+                {bd(1000), BigDecimal.ZERO},   // walking UP to the aim
+                {bd(100), bd(1000)},           // walking DOWN to a smaller, same-signed aim
+                {bd(-500), bd(500)}}) {        // walking THROUGH flat to a reversed aim
+            BigDecimal aim = leg[0];
+            BigDecimal pos = leg[1];
+            BigDecimal gap0 = aim.subtract(pos);
+            for (int cycle = 0; cycle < 120; cycle++) {
+                // no band, so the walk is never truncated and the decay is the rate's alone
+                pos = pos.add(TargetPlanner.orderDelta(aim, pos, 0.0, a));
+            }
+            double remaining = aim.subtract(pos).abs().doubleValue() / gap0.abs().doubleValue();
+            assertEquals(Math.exp(-1), remaining, 1e-4, "one horizon leaves 1/e of the gap: " + aim);
+        }
     }
 
     /**
