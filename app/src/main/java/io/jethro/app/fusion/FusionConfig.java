@@ -124,7 +124,8 @@ public class FusionConfig {
                 "equal".equalsIgnoreCase(weightsMode)
                         ? FusionWeights::equal
                         : () -> {
-                            var selection = selectRung(telemetry, tca, tradingCore, refs, gateParams);
+                            var selection = selectRung(telemetry, tca, tradingCore, refs, markHistory,
+                                    intervalSeconds, gateParams);
                             // ADR-0097: the SAME gateParams admit a source to the vote. A source that
                             // cannot show a directional edge at the desk's own hurdle is held at the MIN
                             // weight — Φ(t) saturates above the hurdle and cannot tell a source that
@@ -143,7 +144,8 @@ public class FusionConfig {
                     if (tca.getIfAvailable() == null) {
                         return null; // no measurement path — leave the pre-existing controls alone
                     }
-                    var selection = selectRung(telemetry, tca, tradingCore, refs, gateParams);
+                    var selection = selectRung(telemetry, tca, tradingCore, refs, markHistory,
+                            intervalSeconds, gateParams);
                     return selection == null ? null : selection.decision();
                 };
         // ADR-0079: the same EWMA daily-return covariance the parametric VaR and the ADR-0038 hedge
@@ -254,16 +256,28 @@ public class FusionConfig {
      * a number without provenance. A failed read returns null and leaves the pre-existing controls
      * alone — telemetry must never stop the planning loop.
      *
-     * <p>ADR-0099: a name the desk has never filled is charged its OWN quoted round trip rather than
-     * the blend of the names it already trades, but never less than that blend — see
-     * {@link QuotedSpreadCost}. With no quote source, no quote, or a rate-quoted name, the map is
-     * exactly the ADR-0075 one.
+     * <p>The per-name cost is read off a LADDER of three measurements of the same quantity, each one
+     * displacing the next only where it exists — so a name is charged the most direct evidence
+     * available about itself, and the desk blend is what is left when there is none:
+     * <ol>
+     *   <li><b>its own fills</b> — realised one-way shortfall doubled (ADR-0075/0072);</li>
+     *   <li><b>its own live quote</b> — the quoted touch, never below the blend (ADR-0099);</li>
+     *   <li><b>its own prints</b> — the Roll (1984) effective spread, never below the cheapest round
+     *       trip the desk has actually paid (ADR-0112). This is the rung that fires on a feed with no
+     *       book at all, where rung 2 cannot: without it an unmeasured name is charged the blend, and
+     *       when the blend does not clear the hurdle it is held reduce-only forever, so it never fills
+     *       and never becomes measured.</li>
+     * </ol>
+     * Rung 3 is floored at exactly the minimum {@link EdgeGate} takes its desk-wide verdict at, so it
+     * can move a per-name hurdle and provably cannot move that verdict.
      */
     private static HorizonLadder.Selection selectRung(
             ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
             ObjectProvider<io.jethro.order.ExecutionQualityRepository> tca,
             ObjectProvider<TradingCoreLifecycle> tradingCore,
             io.jethro.trading.riskpnl.InstrumentRefSource refs,
+            ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
+            long intervalSeconds,
             EdgeGate.Params gateParams) {
         var t = telemetry.getIfAvailable();
         if (t == null) {
@@ -277,11 +291,76 @@ public class FusionConfig {
             if (roundTripBps != null) {
                 costs = QuotedSpreadCost.withQuotedFallback(costs, roundTripBps,
                         quotedRoundTripByInstrument(tradingCore, refs));
+                costs = EffectiveSpreadCost.withEffectiveSpreadFallback(costs,
+                        EffectiveSpreadCost.cheapestMeasured(roundTripBps, costs),
+                        rollRoundTripByInstrument(tradingCore, refs, markHistory, intervalSeconds,
+                                costs.keySet()));
             }
             return HorizonLadder.select(t.statsByHorizon(), roundTripBps, costs, gateParams);
         } catch (RuntimeException e) {
             return null;
         }
+    }
+
+    /**
+     * How far back to read prints for the ADR-0112 Roll estimate, expressed in the planning cadence so
+     * it scales with whatever interval is configured rather than pinning a wall-clock span. A window
+     * length, not a money, risk or exposure dial.
+     */
+    private static final int ROLL_LOOKBACK_INTERVALS = 20;
+
+    /**
+     * Each still-unpriced price-quoted name's round trip as its own recent PRINTS imply it (ADR-0112),
+     * for the names the desk currently has a mark for. Empty when the runtime or the durable mark
+     * history is not up — with no prints there is nothing to estimate and the ADR-0075 blend stands.
+     *
+     * <p>Names already carrying a cost are skipped outright: a fill or a live quote always wins, so
+     * estimating them would be work whose result is discarded. Rate-quoted names are excluded on the
+     * same unit rule the other two rungs apply — a basis point of a swap RATE is additive, not a
+     * fraction of notional.
+     *
+     * <p>The lookback is anchored on each mark's own PROVIDER timestamp, because that is the clock the
+     * store is keyed by; anchoring on wall clock empties the read by exactly the feed's delay, which is
+     * the mistake {@link SensorWarmup} documents having already paid for once.
+     */
+    private static java.util.Map<String, Double> rollRoundTripByInstrument(
+            ObjectProvider<TradingCoreLifecycle> tradingCore, io.jethro.trading.riskpnl.InstrumentRefSource refs,
+            ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory, long intervalSeconds,
+            java.util.Set<String> alreadyPriced) {
+        TradingCoreLifecycle core = tradingCore == null ? null : tradingCore.getIfAvailable();
+        SensorWarmup.History history = storedPrices(markHistory);
+        if (core == null || core.runtime() == null || refs == null || history == null) {
+            return java.util.Map.of();
+        }
+        long lookbackMillis = Math.max(1, intervalSeconds) * 1_000L * ROLL_LOOKBACK_INTERVALS;
+        var out = new java.util.LinkedHashMap<String, Double>();
+        for (var mark : core.runtime().markCache().snapshot()) {
+            String id = mark.instrumentId();
+            if (id == null || alreadyPriced.contains(id)) {
+                continue;
+            }
+            var ref = refs.find(id).orElse(null);
+            if (ref == null || "SWAP".equals(ref.assetClass())) {
+                continue;
+            }
+            long anchor = mark.providerTimestamp() != null
+                    ? mark.providerTimestamp().toEpochMilli() : System.currentTimeMillis();
+            java.util.List<SensorWarmup.Point> points;
+            try {
+                points = history.since(id, anchor - lookbackMillis);
+            } catch (RuntimeException e) {
+                continue; // a history read must never stop the gate from deciding
+            }
+            if (points == null || points.isEmpty()) {
+                continue;
+            }
+            var prices = new java.util.ArrayList<BigDecimal>(points.size());
+            for (var p : points) {
+                prices.add(p == null ? null : p.price());
+            }
+            EffectiveSpreadCost.roundTripBps(prices).ifPresent(bps -> out.put(id, bps));
+        }
+        return out;
     }
 
     /**

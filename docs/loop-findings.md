@@ -1437,3 +1437,42 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **tenth** consecutive cycle, and 553 orders died on ADR-0084 re-plan churn.
 - **Rule 17 fired again, unchanged:** `6578cf49f` is `docs/`+`ops/`+`reports/` only and was still scored
   (⚠️ MIXED, −$72.74 / −$10,401.12). The numbers are the scorer's and sound; the *attribution* is void.
+
+## 2026-07-27 21:00Z — the blend is a closed loop: a name that has never filled can never fill
+
+- **The finding.** `mayIncrease: true` and every single `aim` reading exactly `0.0` — the desk-wide gate
+  open and every name reduce-only. The arithmetic is mechanical and has nothing to do with any signal:
+  `reversion` clears the ADR-0082 225 s rung at `avgReturnBps 1.913961` / `stdErrorBps 0.403198`, so the
+  most a name may cost and still clear `t ≥ 2` is **1.107565 bps** — while the blend an *unmeasured*
+  name is charged is **1.326575 bps**, *dearer than the hurdle*. Of 27 names with a live mark, 8 carry a
+  measured round trip and only ES (0.430), AAPL (0.897) and JPM (1.075) sit under it. Shipped ADR-0112:
+  a third cost rung, Roll (1984) effective spread from the name's own prints, floored at the cheapest
+  round trip the desk has actually paid.
+- **Rule 22: a cost fallback that fails the hurdle is a CLOSED LOOP, not a conservative default.** A name
+  is measured only after it fills → an unmeasured name is charged the blend → the blend fails → it is
+  held reduce-only → it never fills → it is never measured. The tradable universe then freezes to
+  whichever names happened to have filled before the hurdle last tightened, and no edge anywhere can
+  unfreeze it. The tell is arithmetic, not telemetry: compare the fallback cost against
+  `avgReturnBps − tHurdle·stdErrorBps` every time either moves.
+- **Rule 23: check that a fallback's INPUT exists on this feed before trusting the fallback.** ADR-0099
+  exists to break exactly this loop and is **inert here** — all 27 marks carry `bid: null, ask: null`, so
+  `quotedRoundTripByInstrument` returns empty on every cycle. A rung that never fires reads identically
+  to a rung that fires and finds nothing. One `python3 -c` over `### marks` separated the two.
+- **Rule 24: prefer a floor that is also a PROOF.** `max(cheapestMeasured, estimate)` was chosen not for
+  caution but because `EdgeGate` takes the desk-wide verdict at the cheapest entry in the map — so
+  flooring at exactly that minimum makes the desk-wide verdict, every `netEdgeBps` and the ADR-0101
+  buffer's reference cost provably unchanged, and confines the change to per-name hurdles. When a control
+  is one-way, find the invariant that makes it one-way and assert it as a test.
+- **Attribution, honestly.** The −$0.03 this window is **neither market nor change** — it is dust on a
+  book holding nothing (all ten position rows `quantity: 0`, zero unrealized). ADR-0111 *did* reach the
+  JVM (boot 20:22:58Z vs commit 20:22:10Z; weights now read `trend: 0.0, momentum: 0.0`) and earns credit
+  and blame for nothing. The −$83.16 over three runs is the 19:00–20:00 flattening crystallising, not code.
+- **Predicted next, so it can be checked rather than re-derived.** Gross should rise from `$0.00` as names
+  outside the 8-name measured set are priced from their own tape. ADR-0112 raises exposure **by design**;
+  if the reversion edge does not survive the newly-admitted names the loss is larger, not smaller. Cross
+  `recent_orders` against the scored diff before crediting or blaming it for any market move.
+- **Still open, now three cycles running:** `turnover_cost_by_name` has errored for an **eleventh**
+  consecutive cycle — the one aggregate that would show cost per name, on the cycle where cost was the
+  lever. And the HEDGE book still holds `−$3,093.31` realised on `$0.00` gross, trading ES in 0.003–0.069
+  contract clips: 35% of ALPHA's `+$8,370.51` handed to an overlay that was flat when the book was 100%
+  one-way. That remains the next lever after this one is scored.
