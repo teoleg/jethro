@@ -103,6 +103,17 @@ CHANGED=0; [ -f reports/.pending-baseline.json ] && CHANGED=1
 python3 scripts/score-change.py status --scored "$HAD_PENDING" --changed "$CHANGED" --brain-ran "$BRAIN_RAN" \
   >> "$LOG" 2>&1 || echo "status writer exited non-zero (see above)" >> "$LOG"
 
+# 3c. Snapshot the FULL live report onto the branch, so the exact report the analysis saw is visible
+#     without SSHing to the box — the owner (and any other session) reads `reports/latest-report.md`
+#     instead of pasting a zip. `logs/` is git-ignored (transient), so the report is copied into the
+#     tracked `reports/` and committed. Overwritten each cycle (one file, not history bloat beyond the
+#     diff); reports-only, so it never triggers a rebuild (the CODE_CHANGED filter excludes reports/).
+if [ -f logs/report.md ]; then
+  cp logs/report.md reports/latest-report.md 2>/dev/null || true
+  git add reports/latest-report.md 2>/dev/null || true
+  git commit -q -m "chore(loop): snapshot latest live report to the branch" -- reports/latest-report.md 2>/dev/null || true
+fi
+
 AFTER=$(git rev-parse HEAD)
 if [ "$BEFORE" = "$AFTER" ]; then
   echo "nothing committed this cycle (even the heartbeat write?) — app left running as-is" >> "$LOG"
