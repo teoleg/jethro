@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T07:00:11Z",
+    "fees": "369.403820",
+    "gross": "37163.41992657",
+    "net": "6363.29819537",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "37163.41992657",
+      "hedgePnl": "-509.25471344",
+      "netExposure": "6363.29819537",
+      "realizedPnl": "273.59973839",
+      "strategyAlpha": "833.08345026",
+      "totalFees": "369.403820",
+      "totalPnl": "323.82873682",
+      "unrealizedPnl": "50.22899843"
+    },
+    "total_pnl": "323.82873682"
+  },
+  "before": {
+    "at": "2026-07-27T06:49:47Z",
+    "gross": "35494.11611106",
+    "net": "2656.81866456",
+    "total_pnl": "242.49246488"
+  },
+  "commit": "8cfad322b13032fa02564b2058e516bd501b9737",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "1669.30381551",
+    "net": "3706.47953081",
+    "total_pnl": "81.33627194"
+  },
+  "note": "risk-adj (PnL/$1 gross) improved 0.00683\u21920.00871",
+  "revert": false,
+  "scoredAt": "2026-07-27T07:00:11Z",
+  "summary": "a source that fails the desk's own significance test is held at the MIN combination weight, so it can no longer out-vote the only source with a demonstrated edge (ADR-0097)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
