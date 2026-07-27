@@ -1,0 +1,20 @@
+{
+  "commit": "2c6d4f0f77c57f7fe1820f7ecaa8eaabac869a73",
+  "fees": "451.233724",
+  "gross_exposure": "22062.26490465",
+  "net_exposure": "2400.73632335",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "22062.26490465",
+    "hedgePnl": "-689.79344096",
+    "netExposure": "2400.73632335",
+    "realizedPnl": "851.50698977",
+    "strategyAlpha": "1547.32892831",
+    "totalFees": "451.233724",
+    "totalPnl": "857.53548735",
+    "unrealizedPnl": "6.02849758"
+  },
+  "summary": "the fused book's measured ex-ante volatility is capped at the median of its own planned volatility, so the desk's risk level is a decision rather than an accident of the cross-section (ADR-0104)",
+  "total_pnl": "857.53548735",
+  "ts": "2026-07-27T10:47:32Z"
+}
