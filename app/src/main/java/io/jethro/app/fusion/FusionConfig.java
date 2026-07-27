@@ -80,6 +80,10 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.edge-gate.min-sample:30}") int edgeGateMinSample,
                                     @Value("${jethro.fusion.edge-gate.t-hurdle:2.0}") double edgeGateTHurdle,
                                     @Value("${jethro.fusion.vol-budget.winsor-pct:10.0}") double volBudgetWinsorPct,
+                                    ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
+                                    @Value("${jethro.fusion.risk-cut.enabled:true}") boolean riskCutEnabled,
+                                    @Value("${jethro.fusion.risk-cut.sigma-multiple:3.0}") double riskCutSigmaMultiple,
+                                    @Value("${jethro.fusion.risk-cut.vol-span:120}") int riskCutVolSpan,
                                     @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
@@ -150,9 +154,31 @@ public class FusionConfig {
                 () -> heldInRoutedBooks(risk, hedgeBook),
                 weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
                 minForecastToRoute, gateSupplier, covarianceSupplier, evidenceHorizonSeconds,
-                volBudgetWinsorPct);
+                volBudgetWinsorPct,
+                // ADR-0086: the desk's risk-reactive exit. σ is measured from the MARK STREAM rather
+                // than from daily closes because the daily estimate covers a handful of names and none
+                // of the ones the desk holds, so a control keyed on it would be silent exactly where it
+                // is needed. Disabled ⇒ both are null and the book is byte-identical to before.
+                riskCutEnabled ? new StreamVolatility(new StreamVolatility.Params(riskCutVolSpan)) : null,
+                riskCutEnabled ? new TrailingRiskCut(new TrailingRiskCut.Params(riskCutSigmaMultiple)) : null,
+                storedPrices(markHistory),
+                instrument -> markTimeFor(tradingCore, instrument));
         lifecycle.start();
         return lifecycle;
+    }
+
+    /**
+     * The PROVIDER timestamp of a name's current mark — the seed anchor for the ADR-0086 σ sensor. The
+     * store is keyed by provider time, so anchoring the seed on wall clock silently empties it on any
+     * delayed, replayed or simulated feed (the ADR-0071 correction; one clock only).
+     */
+    private static Long markTimeFor(ObjectProvider<TradingCoreLifecycle> tradingCore, String instrument) {
+        TradingCoreLifecycle core = tradingCore.getIfAvailable();
+        if (core == null || core.runtime() == null) {
+            return null;
+        }
+        var holder = core.runtime().markCache().get(instrument);
+        return holder == null ? null : holder.providerTimestampMillis();
     }
 
     /**

@@ -1,57 +1,46 @@
-The desk holds a strong signal it cannot afford to trade — so I made it stop paying the spread to enter: entries now POST, exits still CROSS (ADR-0084).
+Gave the fusion desk the one risk response its whole thesis rests on and has never had: a position is now cut when it gives back more than its own measured volatility says a live view should (ADR-0086).
 
-## Situation (read from the live endpoints, not computed here)
+## Situation (read from the live endpoints; every number below is quoted, none computed here)
 
-1. **Money.** Total PnL is unchanged run-over-run and unchanged across the last three runs — it has
-   been frozen at the same figure for thirteen consecutive cycles. Not bleeding; *stuck*, and off the
-   +1% / 3-iteration target. `underwater` and `stale` are both set.
-2. **Risk.** Gross and net exposure are both exactly zero and have been all thirteen cycles. Nothing
-   held, nothing at risk, nowhere near the drawdown breaker. There is no exposure to cut.
-3. **Cause.** Last cycle's change (ADR-0083, the volatility-split per-name budget) scored ⚠️ MIXED on
-   a zero move — like the four before it, it is **unmeasured, not refuted**, because a sizing change
-   cannot show up in a book that never trades. The culprit is not any one of those changes; it is
-   that the desk has had **no route to a fill** since 20:21.
-4. **Danger.** No — this is the opposite of a danger state. Zero exposure, zero orders. The failure
-   mode here is inaction, not risk.
-5. **Order-level post-mortem.** The window's orders end at 20:21 with the MSFT churn (BUY 4 / SELL 49
-   / BUY 77 within minutes) and its ES hedge legs; nothing since. Every fusion target now shows
-   `deltaQty: 0` against `currentQty: 0` — the planner wants a book (SAP, BRK.B, JPM, …) and routes
-   none of it.
-6. **Change vs market.** Attribution is exact and empty: **0% market, 0% change**. No position was
-   opened, closed or resized, so nothing this cycle can be credited or blamed for anything.
+1. **Money.** Total PnL is **higher** than last run — `-823.80` against `-826.06`, a move of **+$2.26**,
+   and the same **+$2.26** across the last three runs. It is the first non-zero move in fifteen cycles.
+   Not bleeding. Still `underwater` and still a hard miss on the +1%/3-iteration target.
+2. **Risk.** Gross exposure went from exactly zero to **$956.98**, net **−$956.98** — one small ES short
+   in MACRO, the only open position on the book; all seven equity lines are flat. `EXPOSURE RISING` is
+   set, but from nothing, and historical VaR95 on it is **$11.04**. The breaker is not halted and is
+   nowhere near. This is not a danger state.
+3. **Cause.** Last cycle's change (ADR-0085, futures sizing in the OOS backtest) scored **❌ BAD** and
+   was auto-reverted. The live numbers say it **worked**: it is the only change in fifteen cycles that
+   produced a trade at all, and the book it opened is **+$2.32** on **$0.136** of fees over three fills
+   (two passive entries at 0.30 and 0.00 bps, one market exit at 0.23 bps). The ❌ is deadband
+   arithmetic, not a loss — off a flat book the exposure deadband is 1% of zero, so any position reads
+   as "exposure up", and a $2.45 profit sits inside the $50 PnL deadband, so it reads as "PnL not up".
+   Any change that ends a flat book is scored BAD unless it earns >$50 in one 30-minute window. **I have
+   not touched the scorer or the ledger — flagging the measurement for Oleg, not adjusting my own grade.**
+4. **Danger.** No. PnL up, one small position, unrealised **−$0.19**, breaker far away.
+5. **Order post-mortem.** The window's only orders are the three MACRO/ES fusion fills. All winners; no
+   losing trigger fired. The `-$895.94` in ALPHA is legacy-path churn from before 20:21 and did not move.
+6. **Attribution — change vs market.** Unusually clean: every equity line is flat with zero unrealised,
+   so the market contributed ~nothing to the firm total this window. **~100% of the move is the direct
+   effect of last cycle's change**, ~0% market. Nothing here is overfitting to a market drift.
 
-## Diagnosis — the mechanism
+## Diagnosis and what I changed
 
-The edge gate is **open**, not shut: `reversion` clears at the 225 s rung the ADR-0082 ladder
-selected, on 391 observations across 17 cohorts, p = 0.0006. ADR-0082 is visibly working. The block
-is one layer down, in **ADR-0075's per-name cost test**. Reversion's measured expectancy divided by
-its Fama-MacBeth standard error can survive a round trip of at most ~1.95 bps at the shipped
-confidence. Every name's *measured* round trip is its full bid/ask spread, because the desk submits
-MARKET orders and crosses on both legs: MSFT 2.87, JNJ 3.88, JPM 4.18, AAPL 4.21, GOOG 5.95, SAP
-8.16, GOOGL 20.11, unfilled names 6.34. Exactly one name clears — ES at 0.35 bps — and ES is the one
-name the ADR-0049 OOS selector never evaluates (its universe is the 17 equity/FX names), so the
-executor vetoes it for having no verdict. Every path to a fill is closed, and the last five changes
-all worked the *statistics* side of a comparison whose *cost* side was the binding one.
+The desk's real problem is no longer evidence — `reversion` clears the gate at the 900s rung (+8.09 bps,
+184 resolved calls, 8 cohorts, p = 0.0025) — it is that the only place that edge can be expressed is a
+book with **no per-name risk control whatsoever**. Every fusion control asks whether risk may be put ON;
+nothing asks whether a position already held has gone wrong. The legacy path has had a stop since
+ADR-0019; the fusion path, the sole order origin, has none, and the firm breaker is a whole-book halt,
+not a per-name exit. That gap is worst for a mean-reversion view, whose payoff is short optionality — a
+long run of small gains ended by one large loss.
 
-## Decision
-
-Change the execution style, not the evidence bar. A risk-**increasing** fusion delta is now posted as
-a DAY LIMIT at the instrument's own arrival mark; a risk-**reducing** delta still crosses as MARKET,
-because a cut that waits for a better price is not a cut — the same asymmetry ADR-0065 and ADR-0080
-already apply to the gates and the adjustment rate. The layer retires its own working orders at the
-top of each planning tick so a fresh plan is never stacked on stale intent. The limit **is** the mark
-(no dial, no offset, no invented number), and it is also the right style for the source that is
-actually earning: reversion profits by supplying liquidity into an over-extension, and crossing to
-enter was paying away its own premium.
-
-The hurdle, the α, the Bonferroni haircut and the degrees of freedom are all untouched — I did not
-loosen a single control. What falls is the measured cost the same unchanged test reads. On the
-current numbers, the identical test that rejects every tradable name at a crossing cost accepts them
-at a passive one. And even if the gate stays shut a while longer, a cheaper entry is more PnL for the
-same exposure on every trade the desk ever does, which is the objective exactly.
-
-**The honest caveat, stated up front:** a posted entry may not fill, and a passive fill's cost
-migrates from the price (visible in TCA) into adverse selection (visible only in realised PnL). For a
-mean-reversion signal that "adverse" move strengthens the forecast, which is why this is sound for
-*this* source — but the ledger's realised-PnL verdict is what keeps it honest, and both gaps are
-written into the deferred register rather than glossed.
+So this cycle the desk gets a volatility-scaled trailing exit (chandelier): a name is worked flat once
+its mark retraces from the best level seen since the position opened by more than `k ×` its own σ over
+the desk's own derived holding horizon, then stands aside for one horizon. σ had to be measured from the
+**mark stream**, not from daily closes: the daily estimate every other risk control uses covers 3 of 23
+planned names and **none of the names actually held** — the parametric VaR currently reports its entire
+covered exposure as skipped, so a control keyed on it would be silent exactly where risk sits. The rule
+can only ever set a target flat and clamp a delta to a reduction, so it cannot lever the book up, and a
+name with no measured σ is left exactly as planned. One dial, `sigma-multiple = 3.0`, marked PLACEHOLDER
+— the conservative end of the 2.5–3× ATR convention, deliberately reluctant to cut. Deterministic floor
+untouched; worked example pinned as an exact-decimal test; three deferred-register rows filed.

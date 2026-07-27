@@ -36,9 +36,12 @@ public final class FusionLifecycle implements AutoCloseable {
                              Map<String, Double> weights, List<FusionPlanner.Target> targets,
                              EdgeGate.Decision edgeGate,
                              double portfolioRiskMultiplier, int covarianceCoveredNames,
-                             int volBudgetNames, double volBudgetDispersion, double volBudgetLeverCap) {
+                             int volBudgetNames, double volBudgetDispersion, double volBudgetLeverCap,
+                             List<TrailingRiskCut.Cut> riskCuts, int riskCutStoppedNames,
+                             int streamVolMeasuredNames) {
         static TargetBook empty() {
-            return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0, 0, 1.0, 1.0);
+            return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0, 0, 1.0, 1.0,
+                    List.of(), 0, 0);
         }
     }
 
@@ -62,6 +65,16 @@ public final class FusionLifecycle implements AutoCloseable {
     private final long baseHorizonSeconds;
     /** ADR-0083: the percentile each tail of the measured σ cross-section is winsorised at. */
     private final double volBudgetWinsorPct;
+    /** ADR-0086: per-name σ measured from the mark stream — null ⇒ the risk cut is not wired. */
+    private final StreamVolatility streamVol;
+    /** ADR-0086: the volatility-scaled trailing exit — null ⇒ disabled, book untouched. */
+    private final TrailingRiskCut riskCut;
+    /** ADR-0071: durable mark history, so the σ sensor is not permanently cold on a redeployed desk. */
+    private final SensorWarmup.History markHistory;
+    /** Provider timestamp of a name's current mark — the σ sensor's seed anchor (ADR-0071 correction). */
+    private final Function<String, Long> markTimeFor;
+    /** Instruments already seeded into the σ sensor — touched only from the scheduled tick thread. */
+    private final java.util.Set<String> volSeeded = new java.util.HashSet<>();
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -75,6 +88,25 @@ public final class FusionLifecycle implements AutoCloseable {
                            Supplier<EdgeGate.Decision> edgeGate,
                            Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
                            double volBudgetWinsorPct) {
+        this(registry, priceFor, multiplierFor, positionsSupplier, heldSupplier, weightsSupplier, params,
+                routeOrders, executor, scheduler, intervalSeconds, minForecastToRoute, edgeGate,
+                covariance, baseHorizonSeconds, volBudgetWinsorPct, null, null, null, null);
+    }
+
+    public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
+                           Function<String, BigDecimal> multiplierFor,
+                           Supplier<Map<String, BigDecimal>> positionsSupplier,
+                           Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
+                           FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
+                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
+                           Supplier<EdgeGate.Decision> edgeGate,
+                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
+                           double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
+                           SensorWarmup.History markHistory, Function<String, Long> markTimeFor) {
+        this.streamVol = streamVol;
+        this.riskCut = riskCut;
+        this.markHistory = markHistory;
+        this.markTimeFor = markTimeFor;
         this.volBudgetWinsorPct = volBudgetWinsorPct;
         this.baseHorizonSeconds = Math.max(1, baseHorizonSeconds);
         this.edgeGate = edgeGate;
@@ -172,9 +204,17 @@ public final class FusionLifecycle implements AutoCloseable {
             if (gate != null) {
                 targets = reduceOnlyWhere(targets, gate);
             }
+            // ADR-0086: the risk-reactive exit runs LAST, so a cut is the desk's final word on a name.
+            // Everything above decides how much risk the desk WANTS; this is the only step that asks
+            // whether a position it already holds has gone wrong. It can only ever set a target flat.
+            long horizon = gate != null && gate.horizonSeconds() > 0 ? gate.horizonSeconds() : baseHorizonSeconds;
+            var cut = applyRiskCut(targets, now, horizon, cycleParams);
+            targets = cut.targets();
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
                     normalised.multiplier(), normalised.coveredNames(),
-                    budgeted.coveredNames(), budgeted.dispersion(), budgeted.leverCap());
+                    budgeted.coveredNames(), budgeted.dispersion(), budgeted.leverCap(),
+                    cut.cuts(), cut.stoppedNames(),
+                    streamVol == null ? 0 : streamVol.measuredNames());
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {
@@ -198,6 +238,62 @@ public final class FusionLifecycle implements AutoCloseable {
             }
         } catch (Exception e) {
             log.debug("fusion tick failed: {}", e.toString());
+        }
+    }
+
+    /**
+     * Feeds this cycle's marks to the σ sensor and applies the ADR-0086 trailing exit to the book.
+     * Unwired (no sensor or no cut) leaves the book byte-identical, which is exactly the behaviour
+     * before this control existed.
+     *
+     * <p>The sensor is sampled from the SAME prices the plan was made from — one read of the mark, so
+     * the volatility that decides a cut and the price the excursion is measured against cannot come
+     * from two different instants. On first sight of a name it is seeded from the durable mark history
+     * at this loop's own cadence (ADR-0071), anchored on that mark's PROVIDER timestamp: its warm-up is
+     * an hour of samples and the process lifetime is a fraction of that, so without the seed the sensor
+     * would never speak and this control would be dead code.
+     */
+    private TrailingRiskCut.Result applyRiskCut(List<FusionPlanner.Target> targets, long now,
+                                                long horizonSeconds, FusionPlanner.Params cycleParams) {
+        if (riskCut == null || streamVol == null) {
+            return new TrailingRiskCut.Result(targets, List.of(), 0, 0);
+        }
+        for (FusionPlanner.Target t : targets) {
+            if (t.price() == null || t.price().signum() <= 0) {
+                continue;
+            }
+            seedVolatility(t.instrument());
+            streamVol.update(t.instrument(), t.price());
+        }
+        var result = riskCut.apply(targets, now, horizonSeconds, intervalSeconds, streamVol, cycleParams);
+        for (TrailingRiskCut.Cut c : result.cuts()) {
+            log.warn("fusion risk cut: {} {} — gave back {}% from its peak against a {}% trigger "
+                            + "({}σ over {}s); target flat, reduce-only until re-arm (ADR-0086)",
+                    c.instrument(), c.side() > 0 ? "long" : "short",
+                    String.format("%.4f", c.excursion() * 100.0),
+                    String.format("%.4f", c.threshold() * 100.0),
+                    String.format("%.4f", c.sigmaOverHorizon() * 100.0), c.horizonSeconds());
+        }
+        return result;
+    }
+
+    /** Replays this name's stored recent prices into the σ sensor the first time it is planned. */
+    private void seedVolatility(String instrument) {
+        if (markHistory == null || !volSeeded.add(instrument)) {
+            return;
+        }
+        Long providerMillis = markTimeFor == null ? null : markTimeFor.apply(instrument);
+        long anchor = providerMillis != null && providerMillis > 0 ? providerMillis : System.currentTimeMillis();
+        int n = SensorWarmup.warm(markHistory, instrument, anchor, intervalSeconds * 1_000L,
+                streamVol.warmupSamples(), price -> streamVol.update(instrument, price));
+        if (streamVol.sigmaPerSample(instrument).isEmpty()) {
+            // WARN, not INFO: an unmeasured name is one the risk cut can never protect, and that has
+            // to be loud enough to reach the report (the ADR-0071 correction's lesson).
+            log.warn("risk-cut σ sensor still cold for {} after seeding {} of {} stored prices — this "
+                    + "name cannot be stopped out until its mark history has accumulated", instrument, n,
+                    streamVol.warmupSamples());
+        } else {
+            log.info("risk-cut σ sensor warmed {} from {} stored prices (ADR-0086)", instrument, n);
         }
     }
 

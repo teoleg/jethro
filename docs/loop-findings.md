@@ -578,3 +578,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `trend` and `reversion` sit at the ±20 cap on ~a quarter of names each and with opposite signs, so
   20 of 23 combined forecasts point the same way and the cross-section carries almost no selection
   information. Still unmeasurable until the desk actually trades.
+
+### 2026-07-27T00:45Z — ADR-0086 (the fusion desk cuts on its own volatility)
+- Situation: the book **traded and made money** for the first time in fifteen cycles — three MACRO/ES
+  fusion fills, `+$2.32` on `$0.136` of fees, gross `$0 → $956.98`, firm PnL `-826.06 → -823.80`. Every
+  equity line flat with zero unrealised, so attribution is unusually clean: **~100% change, ~0% market**.
+  Not a danger state (one small short, VaR95 `$11.04`, breaker far away).
+- **The scoreboard has a structural trap, and it fired.** ADR-0085 — the change that produced those
+  fills — was scored ❌ BAD and auto-reverted. Not for losing money: off a flat book the exposure
+  deadband is 1% of **zero**, so any position reads "exposure up", and `+$2.45` sits inside the `$50`
+  PnL deadband, so it reads "PnL not up". **Any** change that ends a flat book is mechanically BAD
+  unless it earns >$50 in one 30-minute window. Logged for Oleg; the scorer and ledger are off-limits
+  to me and I did not touch them. Rule: when a verdict disagrees with the fills, read the fills — but
+  fix the trade, never the scoreboard.
+- Change: the fusion path had **no per-name risk control at all**. Every control on it asks whether risk
+  may be put ON (edge gate, conviction floor, budget split, adjustment rate); nothing asks whether a
+  held position has gone wrong. The legacy path has had a stop since ADR-0019; the firm breaker is a
+  whole-book halt, not an exit. Added a chandelier exit: cut to flat when the mark retraces from the
+  position's peak by more than `3σ` over the desk's **derived** holding horizon, then stand aside one
+  horizon. It can only ever set a target flat — it cannot lever the book up.
+- Lesson / rule: **σ has to cover the names you actually hold.** Every risk number the desk prices with
+  comes from `daily_close`, which covers 3 of 23 planned names and **none** of the held ones — the
+  parametric VaR reports its whole covered exposure as *skipped*. A risk sensor silent exactly where
+  risk sits is not a risk sensor. Before keying a control on a measurement, check its **coverage on the
+  live book**, not its correctness.
+- Rule 2: **a mean-reversion book without a stop is an unhedged short option.** Reversion is the only
+  source clearing the gate, and its payoff shape is many small wins ended by one large loss. Fifteen
+  cycles of work went into deciding *whether to enter*; none into *when to leave*. When a desk's
+  measured edge changes character, re-ask which controls that character needs.
+- Honest limitation: at `3σ` over a 900s horizon the trigger is wide, so it may not fire inside a
+  measurement window — an unmeasured cycle is possible and is not evidence against it. If cuts do fire
+  and PnL worsens, the first suspect is cutting winners (raise `sigma-multiple`), not the sensor.
+- Still open (fourth cycle running, still unmeasurable): **forecast saturation** — `trend` and
+  `reversion` sit at the ±20 cap with opposite signs on many names, and `trend` is measured
+  significantly NEGATIVE at every rung (t ≈ −2.2 to −3.6 on 184–500 obs) yet is pinned at the `0.25`
+  weight FLOOR, above its own shrunk value of ~0.13. The floor's stated justification — preserving the
+  source count for the diversification multiplier — was invalidated by ADR-0076. That is the next lever;
+  it was not taken this cycle because removing the floor **raises** forecast magnitude and so exposure,
+  which is the wrong trade to make in the same window as a new risk control.
