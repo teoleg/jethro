@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T19:00:12Z",
+    "fees": "473.959740",
+    "gross": "10408.40500000",
+    "net": "10408.40500000",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "10408.40500000",
+      "hedgePnl": "-3071.54975283",
+      "netExposure": "10408.40500000",
+      "realizedPnl": "5713.98690157",
+      "strategyAlpha": "8805.80179708",
+      "totalFees": "473.959740",
+      "totalPnl": "5734.25204425",
+      "unrealizedPnl": "20.26514268"
+    },
+    "total_pnl": "5734.25204425"
+  },
+  "before": {
+    "at": "2026-07-27T18:14:00Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "5737.35590536"
+  },
+  "commit": "668a95704b3e13025d03a6095442438348458c74",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "10408.40500000",
+    "net": "10408.40500000",
+    "total_pnl": "-3.10386111"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj n/a (zero gross)",
+  "revert": true,
+  "scoredAt": "2026-07-27T19:00:12Z",
+  "summary": "the improvement loop verifies its own deploy against the running process \u2014 a change that did not reach the JVM is no longer treated as deployed, and the repo's own restart is the default and the fallback (ADR-0110)",
+  "verdict": "\u274c BAD"
+}
