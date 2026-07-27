@@ -1124,3 +1124,52 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   exactly the reason ADR-0089 fixed for fusion, and the mark-stream covariance that covers 23/23 names was
   never propagated to it; (e) `turnover_cost_by_name` in the report is STILL erroring, fourth cycle
   running.
+
+## 2026-07-27 — the overlay hedged to the CENTRE from a floor of zero, so it paid a round trip on every oscillation of an exposure the desk always carries (ADR-0105)
+
+- **Situation.** Healthy, not a de-risk cycle: PnL `$866.30`, window `+10.97`, three-run `+93.40`,
+  `pnl_growth_pct 28.71` against a `1.0` target, `on_track` true, gross **falling** (`−13,757` on the
+  window), breaker clear, VaR95 `$113.73`. Attribution `ALPHA +1,179.74`, `MACRO +376.996` (frozen to
+  the cent for a **tenth** cycle), `HEDGE −690.44`, fees `$453.90`.
+- **Attribution honesty.** The window's `+10.97` is market on positions nothing of mine touched — no
+  PnL credit claimed. The gross fall belongs to TWO deployments (the ADR-0103 revert and the ADR-0104
+  brake, which scored ⚠️ MIXED with risk-adj `0.03887 → 0.09041`); I claimed no share for either.
+- **The order-level tell.** The HEDGE book sent nine ES orders in twenty minutes — alternating SELL
+  `0.0092` / BUY `0.0283` / SELL `0.0210` / BUY `0.0422` — to end up holding essentially nothing, on
+  an axis whose own panel read `status: FLAT`, `held 0 → target 0`. A book that trades all cycle and
+  holds nothing is not hedging; it is oscillating. **Rule: when the panel says FLAT and the order log
+  says busy, believe the order log — the target is crossing zero between the panel's reads.**
+- **Rule 1 (acted on, at last): a lever named in consecutive postmortems and acted on in none is the
+  lever.** The overlay POSTURE question was open item (a) for two straight cycles and was deferred
+  *explicitly* by both ADR-0098 and ADR-0100 — each preferred a smaller, better-understood control on
+  the same object. Six consecutive scored windows of HEDGE loss (`−598.79 → −690.53`) against strategy
+  books going `+1,171.14 → +1,555.99` is not a window; it is the position.
+- **Rule 2: a dial of `0` is not a conservative default — it can be the ABSENCE of a decision.**
+  `equity-rebalance-floor-usd=0` reads like caution ("hedge everything") and is in fact the single
+  most expensive policy available: with no band, every breach is met by hedging back to the CENTRE, so
+  the desk pays the round trip on every oscillation of an exposure it carries continuously. **Audit
+  every zero-valued risk dial for whether zero states a policy or hides the lack of one.**
+- **Rule 3: level vs rate vs BAND are three different defects — fixing two does not fix the third.**
+  ADR-0098 fixed the target's level, ADR-0100 its rate; the overlay still bled, because neither says
+  where the target should be *zero*. The transaction-cost literature has had the answer since Leland
+  (1985): a no-hedge band, and a breach traded back to the **edge**, never the centre.
+- **Rule 4: `H` is a quantile of the quantity's OWN history — the ADR-0104 convention, reused not
+  reinvented.** A declared "$X of tolerated net equity" would have been the `$250k` mistake again. And
+  the series sampled is the axis's net exposure, which the overlay never touches (it trades a proxy
+  that is not a member of the axis) — so ADR-0104's rule 4 (never sample a self-referential control's
+  own output) holds here by construction rather than by care.
+- **Expected next.** Firm **gross** flat-to-down (the ES overlay is itself gross exposure), firm
+  **|net|** larger by construction up to `H` — that is the declared posture, not a regression — and
+  the HEDGE line's monotone bleed slowing or stopping. Check `habitualNetUsd` / `excessFraction` on
+  `/api/hedging` for whether the band warmed (30 samples ≈ half an hour) and whether it bound BEFORE
+  attributing anything to it.
+- **If this scores BAD**, doubt the median as the band *width*, not the existence of a band — and do
+  not go back to hedging from the first dollar. Remaining levers, in order: (a) the frozen MACRO book,
+  ten cycles unchanged around a stranded `0.000029` ES; (b) the ADR-0086 chandelier, still
+  `riskCuts: []` — a TRAILING stop is the wrong shape for a mean-reversion book (it cuts at maximum
+  expected reversion) and a TIME stop at the measured horizon remains the honest version; (c)
+  parametric VaR reports `coveredExposure 0.00` against `skippedExposure 6,019.93` — the firm's second
+  risk sensor is blind for exactly the reason ADR-0089 fixed for fusion, and the mark-stream
+  covariance that covers 23/23 names was never propagated to it; (d) `turnover_cost_by_name` in the
+  report is STILL erroring (`column "qty" does not exist`, visible in the Postgres log), **fifth**
+  cycle running, and it is the aggregate that would grade every turnover decision this loop makes.

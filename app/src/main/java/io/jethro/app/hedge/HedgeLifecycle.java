@@ -38,6 +38,7 @@ public final class HedgeLifecycle {
 
     private final HedgeAdvisor advisor;
     private final HedgeTargetChurn churn;
+    private final HedgeExposureLevel exposureLevel;
     private final ObjectProvider<VarService> varService;
     private final ObjectProvider<InstrumentRefSource> refs;
     private final ObjectProvider<LastPriceCache> prices;
@@ -52,6 +53,7 @@ public final class HedgeLifecycle {
     private volatile ScheduledExecutorService scheduler;
 
     public HedgeLifecycle(HedgeAdvisor advisor, HedgeTargetChurn churn,
+                          HedgeExposureLevel exposureLevel,
                           ObjectProvider<VarService> varService,
                           ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                           ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
@@ -60,6 +62,7 @@ public final class HedgeLifecycle {
                           String hedgeBook, long cooldownSeconds, long intervalSeconds) {
         this.advisor = advisor;
         this.churn = churn;
+        this.exposureLevel = exposureLevel;
         this.varService = varService;
         this.refs = refs;
         this.prices = prices;
@@ -125,7 +128,8 @@ public final class HedgeLifecycle {
 
             HedgeAdvisor.Snapshot snap = advisor.evaluate(
                     vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf,
-                    held, tradable, churn::sigmaUsd, churn::efficiencyRatio);
+                    held, tradable, churn::sigmaUsd, churn::efficiencyRatio,
+                    exposureLevel::habitualUsd);
             long now = System.currentTimeMillis();
             // ADR-0098: this executing loop is the ONLY writer of the churn series, so the step is
             // sampled on the hedge's own clock — a REST poll of /api/hedging must never shorten it.
@@ -133,6 +137,11 @@ public final class HedgeLifecycle {
             // reset the memory or file the same series under two instruments.
             for (HedgeAdvisor.Axis axis : snap.axes()) {
                 churn.observe(axis.axis(), axis.rawTargetNotionalUsd(), now);
+                // ADR-0105: the band's series is the axis's NET EXPOSURE — an input this control
+                // never touches (the overlay trades a proxy, which is not a member of the axis), so
+                // the level cannot be ratcheted down by its own effect. Same single-writer rule as
+                // the churn series above: a REST poll of /api/hedging must never sample it.
+                exposureLevel.observe(axis.axis(), axis.netExposureUsd(), now);
             }
             for (HedgeAdvisor.Axis axis : snap.axes()) {
                 if (!axis.hedging() || !axis.hedgeRecommended() || axis.hedgeQuantity() == null

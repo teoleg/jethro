@@ -31,6 +31,7 @@ public final class HedgeController {
 
     private final HedgeAdvisor advisor;
     private final HedgeTargetChurn churn;
+    private final HedgeExposureLevel exposureLevel;
     private final ObjectProvider<VarService> varService;
     private final ObjectProvider<InstrumentRefSource> refs;
     private final ObjectProvider<LastPriceCache> prices;
@@ -38,6 +39,7 @@ public final class HedgeController {
     private final String hedgeBook;
 
     public HedgeController(HedgeAdvisor advisor, HedgeTargetChurn churn,
+                           HedgeExposureLevel exposureLevel,
                            ObjectProvider<VarService> varService,
                            ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                            ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
@@ -45,6 +47,7 @@ public final class HedgeController {
                            String hedgeBook) {
         this.advisor = advisor;
         this.churn = churn;
+        this.exposureLevel = exposureLevel;
         this.varService = varService;
         this.refs = refs;
         this.prices = prices;
@@ -84,9 +87,9 @@ public final class HedgeController {
         // The panel is read-only, so the price gate suffices here; the executing lifecycle also
         // applies the quarantine gate (ADR-0042). The ADR-0098 churn σ and the ADR-0100 efficiency
         // are READ here and never sampled — polling this endpoint must not shorten the step the
-        // estimator measures.
+        // estimator measures. The ADR-0105 habitual-net band is read on the same terms.
         return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf, held, id -> true,
-                churn::sigmaUsd, churn::efficiencyRatio);
+                churn::sigmaUsd, churn::efficiencyRatio, exposureLevel::habitualUsd);
     }
 
     public record ModeRequest(String mode) {
