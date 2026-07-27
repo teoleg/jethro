@@ -55,24 +55,11 @@ public class HedgeConfig {
         return new HedgeTargetChurn(cooldownSeconds * 1_000);
     }
 
-    /** ADR-0105: the level of net exposure this desk habitually carries on an axis — the band the
-     *  overlay hedges back to instead of hedging to flat. Sampled on the same hedge COOLDOWN clock
-     *  as the ADR-0098 churn series, and read as the median of that series, so the band is the
-     *  desk's own measured behaviour rather than a risk-appetite figure nobody declared. */
-    @Bean
-    HedgeExposureLevel hedgeExposureLevel(
-            @Value("${jethro.hedge.cooldown-seconds:60}") long cooldownSeconds,
-            @Value("${jethro.hedge.habitual-net.span:120}") int span,
-            @Value("${jethro.hedge.habitual-net.min-sample:30}") int minSample) {
-        return new HedgeExposureLevel(cooldownSeconds * 1_000, span, minSample);
-    }
-
     /** AUTO-hedge executor (ADR-0039): submits the hedge DELTA in AUTO mode, sim-gated. The hedge
      *  trades in its own dedicated book (default HEDGE) so its position is unambiguous feedback
      *  for the advisor and never collides with the strategy's own futures (which route to MACRO). */
     @Bean(destroyMethod = "stop")
     HedgeLifecycle hedgeLifecycle(HedgeAdvisor advisor, HedgeTargetChurn churn,
-                                  HedgeExposureLevel exposureLevel,
                                   ObjectProvider<VarService> varService,
                                   ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                                   ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
@@ -81,9 +68,8 @@ public class HedgeConfig {
                                   @Value("${jethro.hedge.book:HEDGE}") String hedgeBook,
                                   @Value("${jethro.hedge.cooldown-seconds:60}") long cooldownSeconds,
                                   @Value("${jethro.hedge.interval-seconds:5}") long intervalSeconds) {
-        var lifecycle = new HedgeLifecycle(advisor, churn, exposureLevel, varService, refs, prices,
-                orderService, haltSwitch, projection, tradingCore, hedgeBook, cooldownSeconds,
-                intervalSeconds);
+        var lifecycle = new HedgeLifecycle(advisor, churn, varService, refs, prices, orderService,
+                haltSwitch, projection, tradingCore, hedgeBook, cooldownSeconds, intervalSeconds);
         lifecycle.start();
         return lifecycle;
     }

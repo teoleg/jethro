@@ -62,10 +62,7 @@ public final class HedgeAdvisor {
      *  series {@link HedgeTargetChurn} samples — and {@code churnSigmaUsd} is the σ that was
      *  subtracted (null while warming). {@code trackingRate} is the ADR-0100 directional efficiency
      *  of that same series, the fraction of the remaining gap the hedge closes when it is GROWING
-     *  the overlay (null while warming = closes it in full, the pre-ADR-0100 behaviour).
-     *  {@code habitualNetUsd} is the ADR-0105 band — the median |net exposure| of this axis's own
-     *  sampled history (null while warming) — and {@code excessFraction} the share of the current
-     *  net standing above it, which is the fraction of the sized hedge actually worn. */
+     *  the overlay (null while warming = closes it in full, the pre-ADR-0100 behaviour). */
     public record Axis(String axis, String proxyId, BigDecimal netExposureUsd, BigDecimal floorUsd,
                        double utilization, boolean hedging, boolean hedgeRecommended,
                        String hedgeSide, BigDecimal hedgeQuantity, BigDecimal hedgeNotionalUsd,
@@ -73,8 +70,7 @@ public final class HedgeAdvisor {
                        BigDecimal heldProxyQty, BigDecimal targetProxyQty,
                        String status, String tier, String rationale,
                        BigDecimal rawTargetNotionalUsd, BigDecimal churnSigmaUsd,
-                       BigDecimal trackingRate, BigDecimal habitualNetUsd,
-                       BigDecimal excessFraction) {
+                       BigDecimal trackingRate) {
     }
 
     public record Snapshot(String mode, boolean covarianceReady, List<Axis> axes, String note) {
@@ -209,22 +205,6 @@ public final class HedgeAdvisor {
     }
 
     /**
-     * @param efficiencyOf directional efficiency of the raw hedge target's own path (ADR-0100)
-     */
-    public Snapshot evaluate(Optional<CovMath.Covariance> covariance,
-                             Map<String, BigDecimal> exposuresUsd,
-                             Predicate<String> isEquity,
-                             Function<String, Optional<BigDecimal>> priceOf,
-                             Function<String, Optional<BigDecimal>> betaOf,
-                             Map<String, BigDecimal> heldByProxy,
-                             Predicate<String> tradable,
-                             Function<String, Optional<BigDecimal>> churnSigmaOf,
-                             Function<String, Optional<BigDecimal>> efficiencyOf) {
-        return evaluate(covariance, exposuresUsd, isEquity, priceOf, betaOf, heldByProxy, tradable,
-                churnSigmaOf, efficiencyOf, id -> Optional.empty());
-    }
-
-    /**
      * @param efficiencyOf directional efficiency of the raw hedge target's own path on the axis
      *                     ({@link HedgeTargetChurn#efficiencyRatio}), empty while warming. The
      *                     hedge closes this fraction of the gap to its target per evaluation when
@@ -240,8 +220,7 @@ public final class HedgeAdvisor {
                              Map<String, BigDecimal> heldByProxy,
                              Predicate<String> tradable,
                              Function<String, Optional<BigDecimal>> churnSigmaOf,
-                             Function<String, Optional<BigDecimal>> efficiencyOf,
-                             Function<String, Optional<BigDecimal>> habitualNetOf) {
+                             Function<String, Optional<BigDecimal>> efficiencyOf) {
         Map<String, BigDecimal> equityExposures = exposuresUsd.entrySet().stream()
                 .filter(e -> isEquity.test(e.getKey()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
@@ -252,7 +231,7 @@ public final class HedgeAdvisor {
         Axis axis = mode == Mode.OFF
                 ? idle(net, held, "OFF", "hedging OFF for this axis")
                 : act(net, held, equityExposures, covariance, priceOf, betaOf, tradable, churnSigmaOf,
-                        efficiencyOf, habitualNetOf);
+                        efficiencyOf);
         String note = mode == Mode.AUTO
                 ? "AUTO — the book is held target-flat: the hedge DELTA (target − held) auto-submits (sim-gated, ADR-0019)"
                 : "ADVISE — the sized hedge-to-flat surfaces here; execute from the ticket";
@@ -264,8 +243,7 @@ public final class HedgeAdvisor {
                      Function<String, Optional<BigDecimal>> priceOf,
                      Function<String, Optional<BigDecimal>> betaOf, Predicate<String> tradable,
                      Function<String, Optional<BigDecimal>> churnSigmaOf,
-                     Function<String, Optional<BigDecimal>> efficiencyOf,
-                     Function<String, Optional<BigDecimal>> habitualNetOf) {
+                     Function<String, Optional<BigDecimal>> efficiencyOf) {
         List<Candidate> candidates = candidates(priceOf, tradable);
         boolean flatTarget = net.abs().compareTo(rebalanceFloorUsd) <= 0;
         Target target;
@@ -293,12 +271,6 @@ public final class HedgeAdvisor {
                 .setScale(2, RoundingMode.HALF_UP);
         BigDecimal churnSigma = churnSigmaOf.apply(EQUITY_AXIS).orElse(null);
         target = shrinkToChurnBoundary(target, targetContractUsd, rawTargetNotional, churnSigma);
-
-        // ADR-0105: wear only the part of the hedge that covers exposure above the level this desk
-        // habitually carries — hedge back to the edge of its own band, not to the centre.
-        BigDecimal habitualNet = habitualNetOf.apply(EQUITY_AXIS).orElse(null);
-        BigDecimal excessFraction = excessFraction(net, habitualNet);
-        target = hedgeOnlyTheExcess(target, net, habitualNet, excessFraction);
 
         // ADR-0100: approach that target at the rate its own path earns — full speed when the
         // target is going somewhere, barely at all when it is only churning. Growing the overlay
@@ -355,7 +327,7 @@ public final class HedgeAdvisor {
                     plain(heldSelected), plain(target.signedQty()), status, target.tier(),
                     heldVsTarget + " — largest delta under the " + money(band)
                             + " no-trade band, holding",
-                    rawTargetNotional, churnSigma, trackingRate, habitualNet, excessFraction);
+                    rawTargetNotional, churnSigma, trackingRate);
         }
         boolean unwindingOther = !bestProxy.equals(target.proxy().id());
         String side = bestDelta.signum() < 0 ? "SELL" : "BUY";
@@ -370,73 +342,7 @@ public final class HedgeAdvisor {
                 target.effectiveness(), target.grossSigmaUsd(), target.residualSigmaUsd(),
                 plain(held.getOrDefault(bestProxy, BigDecimal.ZERO)),
                 plain(targets.get(bestProxy)), status, target.tier(), story,
-                rawTargetNotional, churnSigma, trackingRate, habitualNet, excessFraction);
-    }
-
-    /**
-     * ADR-0105 — the share of the axis's current net exposure that stands above the level the desk
-     * habitually carries: {@code f = max(0, |N| − H) / |N|}, where {@code H} is the median of this
-     * axis's own |net| history ({@link HedgeExposureLevel}).
-     *
-     * <p>Null while the level is warming (the caller then hedges exactly as it did before), and
-     * {@code f ∈ [0,1]} by construction: the numerator is clamped at zero and never exceeds
-     * {@code |N|}. Exact decimal at 8dp — the quotient of two USD figures, rounded once, HALF_EVEN.
-     */
-    private static BigDecimal excessFraction(BigDecimal net, BigDecimal habitualNet) {
-        if (habitualNet == null || habitualNet.signum() < 0) {
-            return null;
-        }
-        BigDecimal absNet = net.abs();
-        if (absNet.signum() == 0) {
-            return BigDecimal.ZERO; // nothing to hedge either way
-        }
-        BigDecimal excess = absNet.subtract(habitualNet).max(BigDecimal.ZERO);
-        return excess.divide(absNet, 8, RoundingMode.HALF_EVEN).min(BigDecimal.ONE);
-    }
-
-    /**
-     * ADR-0105 — hedge back to the edge of the desk's own band rather than to flat: scale the sized
-     * target by {@link #excessFraction}, so the overlay neutralizes {@code |N| − H} of exposure and
-     * leaves exactly {@code H} — the exposure the book habitually runs — standing.
-     *
-     * <p>The sized hedge is homogeneous of degree 1 in the exposure it covers (it is a beta- or
-     * ρ-weighted proportional hedge), so {@code q' = f·q} neutralizes the fraction {@code f} of the
-     * net and leaves {@code (1−f)·|N| = H} unhedged, in the same beta-adjusted sense as the full
-     * hedge it scales. This is the standard transaction-cost result — Leland (<i>JF</i> 1985),
-     * Whalley &amp; Wilmott (<i>Math. Finance</i> 1997), Zakamouline (<i>JBF</i> 2006): with costs,
-     * the optimal policy is a no-hedge band around the target, and a breach trades back to the band
-     * edge, never to the centre. Hedging to the centre from a floor of zero — the desk's behaviour
-     * until now — is the one policy that pays the round trip on every oscillation of an exposure it
-     * always carries.
-     *
-     * <p><b>Strictly one-way.</b> {@code f ∈ [0,1]} and the multiplier is positive, so
-     * {@code |q'| ≤ |q|} and {@code sign(q') ∈ {sign(q), 0}}: an estimated band can only ever leave
-     * the overlay smaller, never larger and never on the other side. {@code f = 1} (net far above
-     * the band) reproduces the previous behaviour exactly; a null band leaves the target untouched.
-     */
-    private Target hedgeOnlyTheExcess(Target t, BigDecimal net, BigDecimal habitualNet,
-                                      BigDecimal fraction) {
-        if (fraction == null || t.signedQty() == null || t.signedQty().signum() == 0
-                || fraction.compareTo(BigDecimal.ONE) == 0) {
-            return t;
-        }
-        BigDecimal q = t.signedQty();
-        BigDecimal worn = q.multiply(fraction).setScale(6, RoundingMode.HALF_EVEN);
-        if (worn.abs().compareTo(q.abs()) > 0) {
-            worn = q; // belt and braces: rounding may never carry the hedge past its own target
-        }
-        if (worn.compareTo(q) == 0) {
-            return t;
-        }
-        String note = worn.signum() == 0
-                ? " · inside the desk's own band (ADR-0105): |" + money(net) + "| net ≤ "
-                        + money(habitualNet) + " habitual — no overlay worn"
-                : " · banded at the desk's habitual net (ADR-0105): (|" + money(net) + "| − "
-                        + money(habitualNet) + ")/|" + money(net) + "| = "
-                        + fraction.stripTrailingZeros().toPlainString() + " of " + plain(q) + " → "
-                        + plain(worn) + " " + t.proxy().id();
-        return new Target(t.proxy(), worn, t.tier(), t.effectiveness(), t.grossSigmaUsd(),
-                t.residualSigmaUsd(), t.rationale() + note);
+                rawTargetNotional, churnSigma, trackingRate);
     }
 
     /**
@@ -676,7 +582,7 @@ public final class HedgeAdvisor {
         BigDecimal heldQty = incumbent == null ? BigDecimal.ZERO : held.get(incumbent);
         return new Axis("EQUITY", incumbent != null ? incumbent : structuralProxyId, money(net),
                 rebalanceFloorUsd, 0.0, false, false, null, null, null, null, null, null,
-                plain(heldQty), null, status, "—", rationale, null, null, null, null, null);
+                plain(heldQty), null, status, "—", rationale, null, null, null);
     }
 
     private static double eff(Target t) {
