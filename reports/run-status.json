@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-27T08:44:12Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "624.50035727",
+    "gross": "62116.61373435",
+    "net": "-4977.83185507",
+    "fees": "410.985194",
+    "pnl_pct": 23.5,
+    "gross_pct": 74.47,
+    "pnl_growth_pct": 161.2,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": true,
+    "stale": false,
+    "underwater": false,
+    "action": "changed",
+    "last_verdict": "\u2705 GOOD",
+    "decision": "made a change: the hedge closes only the fraction of the gap to its target that the target's own directional efficiency has earned, and only when growing the overlay \u2014 reductions and unwinds still trade in one cycle (ADR-0100) \u00b7 prev \u2705 GOOD",
+    "reasoning": "The hedge hands back half of what the desk makes by chasing a target that wanders across zero \u2014 so it now closes only the fraction of the gap that its target's own path has earned (ADR-0100).\n\n## Situation \u2014 every figure below is quoted from the live endpoints; none is computed here\n\n**1. Money.** Total PnL `$572.09` on `/api/risk` `.total`. The SITUATION header puts the window at\n`+66.45` and the last three runs at `+333.01`, with no danger flags; `run-status.json` has `on_track`\ntrue, `pnl_growth_pct` far above the 1% target, `stale` and `underwater` both false. The book is\n**not bleeding**. `/api/attribution` splits it `ALPHA +794.32`, `MACRO +376.99` (unchanged to the\ncent for a fifth cycle \u2014 frozen, position `0.000029` ES), `HEDGE \u2212599.22`.\n\n**2. Risk.** Gross exposure `$19,422.48`, net `$7,678.23`. Gross **fell** `\u221216,180.65` on the window\nagainst `\u221217,021.00` over three runs \u2014 last cycle's cost gate took the planned book down hard. VaR95\n`$158.32`, ES95 `$260.78` on `$19,405.91` of covered exposure; the breaker reads `halted: false`.\nNowhere near the danger zone.\n\n**3. Cause.** Last cycle's ADR-0099 (a name pays its own quoted round trip before its first fill)\nscored \u2705 **GOOD** \u2014 PnL up, gross down by two-fifths, risk-adjusted `0.01446 \u2192 0.02948`. Live\n`fusion_targets` confirms the mechanism: the wide-quoted names (`GS`, `BRK.B`, `NFLX`, `ORCL`,\n`TSLA`) still carry large planned targets but `deltaQty` is `0` \u2014 planned, not entered. No culprit,\nno danger state, so nothing de-risking is owed this cycle.\n\n**4. Order-level post-mortem.** The window's `recent_orders` are ALPHA reversion trades in\n`MSFT/JPM/GOOG/JNJ/AAPL` \u2014 all winners or near-flat per name \u2014 plus **one HEDGE ES order per\ncooldown**, and those are the problem. Eleven consecutive cooldowns read BUY `0.0068`, BUY `0.0097`,\nBUY `0.0022`, BUY `0.0060`, BUY `0.0037`, SELL `0.0046`, SELL `0.0050`, SELL `0.0008`, SELL `0.0064`,\nSELL `0.0036`, BUY `0.0058` \u2014 `0.0545` contracts traded to finish holding `\u22120.00494`. Runs of buys\nthen runs of sells: the target is not noise, it **wanders across zero**.\n\n**5. Change vs market.** The window's gain sits on ALPHA names last cycle's change never opened or\nresized (it only removed names from the increasable set), so market and change cannot be separated\nthere from the numbers alone and the change is credited with none of it. What IS attributable to it\nis the gross collapse and the wide names staying unentered. The HEDGE line is attributable to\nneither: it has gone `\u2212323.33 \u2192 \u2212451.51 \u2192 \u2212509.21 \u2192 \u2212550.99 \u2192 \u2212599.22` across five scored cycles\nregardless of what changed above it.\n\n## Diagnosis and change\n\nThe overlay is the one thing on the board that is monotonically wrong, and it is **not** execution\ncost \u2014 `$42.75` of fees at a measured `0.204` bps ES round trip is cents against `$599`. ADR-0098\nalready fixed the *level* of the target (subtract one \u03c3 of its own step) and scored GOOD, but the\nlive numbers show which half is left: the raw target is `\u2212$6,039.12` against `\u03c3_step = $958.51`, i.e.\n**6.3 \u03c3**, so that shrink removes only 16% and the overlay is free to chase every excursion of a\nlarge target that keeps crossing zero. That is a defect of *rate*, and ADR-0080 already established\nthe house identity for it on the strategy side \u2014 approach your target at the rate it survives, and\nslow only the risk-increasing leg. The hedge path never got it.\n\nSo the hedge now closes only `E` of the gap when it is **growing** the overlay, where `E` is that\ntarget's own directional efficiency \u2014 Kaufman's efficiency ratio in exponential form,\n`|EWMA(step)| / EWMA(|step|)`, on the series `HedgeTargetChurn` already samples once per cooldown, at\nthe same `\u03bb = 0.94`. No dial and no invented number: a target going somewhere reads `E \u2192 1` and is\nhedged in full; one that returns to where it came from reads `(1\u2212\u03bb)/(1+\u03bb)` and is barely tracked.\nStrictly one-way (`|q| \u2264 |d|` in every branch; `E = 1` is the old behaviour exactly), and reductions \u2014\nincluding a full unwind \u2014 still trade in one cycle, so ADR-0069's promise survives verbatim. Proposed\nADR-0100 ships in the same commit; the deterministic floor is untouched.",
+    "commit": "a886dfa"
+  },
+  {
     "ts": "2026-07-27T08:19:39Z",
     "feedMode": "SIM",
     "available": true,
