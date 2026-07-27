@@ -149,6 +149,70 @@ class SensorWarmupTest {
     }
 
     /**
+     * ADR-0114 — the defect. A contract whose own tape prints every 20 minutes (ES at 23:00Z, measured)
+     * against a 10 s sensor cadence has every one of its NORMAL print intervals read as an outage,
+     * because the hole test is denominated in our poll cadence rather than in the series being walked.
+     * The walk breaks at the first of them and the seed is one sample against a warm-up of 241 — and
+     * after ADR-0113 the live path accumulates at that same print rate, so the sensor never warms at all.
+     */
+    @Test
+    void seedsAnInstrumentWhoseOwnTapePrintsSlowerThanTheSensorPolls() {
+        int samples = 60;
+        long interval = 10_000L;      // the reversion sensor's cadence
+        long printGap = 1_200_000L;   // 20 minutes — ES's measured median inter-print gap overnight
+        List<SensorWarmup.Point> points = new ArrayList<>();
+        for (int i = samples - 1; i >= 0; i--) {
+            points.add(new SensorWarmup.Point(NOW - i * printGap, BigDecimal.valueOf(7000 + (samples - 1 - i))));
+        }
+        SensorWarmup.History history = (instrumentId, since) ->
+                points.stream().filter(p -> p.timestampMillis() >= since).toList();
+
+        List<BigDecimal> seed = SensorWarmup.seedPrices(history, "ES", NOW, interval, samples);
+
+        assertThat(seed).hasSize(samples);                        // the whole series, not one point
+        assertThat(seed.get(samples - 1)).isEqualByComparingTo("7059"); // ending at the newest print
+    }
+
+    /**
+     * ADR-0114 must NOT become the alternative ADR-0113 considered and rejected — "widen the gap
+     * tolerance so the seed bridges the halt". It does not, because the tolerance is a multiple of the
+     * name's OWN typical print interval: a 12 s equity tape that then stops for three hours (the cash
+     * close) is a genuine cessation and still truncates the seed at the contiguous tail.
+     */
+    @Test
+    void stillTruncatesAtACashCloseHaltOnAFastTape() {
+        long interval = 10_000L;
+        List<SensorWarmup.Point> points = new ArrayList<>();
+        for (int i = 0; i < 300; i++) { // yesterday's session: a 12 s tape
+            points.add(new SensorWarmup.Point(NOW - 10_800_000L - (299 - i) * 12_000L, BigDecimal.valueOf(300 + i)));
+        }
+        for (int i = 0; i < 4; i++) {   // this morning's first prints, after a three-hour halt
+            points.add(new SensorWarmup.Point(NOW - (3 - i) * 12_000L, BigDecimal.valueOf(700 + i)));
+        }
+        SensorWarmup.History history = (instrumentId, since) ->
+                points.stream().filter(p -> p.timestampMillis() >= since).toList();
+
+        List<BigDecimal> seed = SensorWarmup.seedPrices(history, "AAPL", NOW, interval, 200);
+
+        assertThat(seed).containsExactly(new BigDecimal("700"), new BigDecimal("701"),
+                new BigDecimal("702"), new BigDecimal("703"));
+    }
+
+    /**
+     * The step is the SLOWER of the two clocks, so a fast tape is unaffected: a 1 Hz series under a 10 s
+     * sensor is thinned and bounded exactly as it was before ADR-0114 — this change may only ever help a
+     * name whose tape is slower than the poll.
+     */
+    @Test
+    void aTapeFasterThanThePollIsSampledExactlyAsBefore() {
+        List<BigDecimal> seed = SensorWarmup.seedPrices(oneHertz(600), "AAPL", NOW, 10_000L, 5);
+
+        assertThat(seed).containsExactly(
+                new BigDecimal("659"), new BigDecimal("669"), new BigDecimal("679"),
+                new BigDecimal("689"), new BigDecimal("699"));
+    }
+
+    /**
      * ADR-0089: a covariance seed must be SYNCHRONISED. Two names whose stored series print on
      * different sub-second offsets must land in the same bucket of the store's own clock, so the
      * returns replayed into the estimator are contemporaneous rather than merely adjacent.

@@ -31,13 +31,17 @@ import java.util.List;
  * sensor's arithmetic is untouched: it sees exactly the sequence it would have seen had the process
  * been running, so a warm sensor is warm for the same reason it always was.
  *
- * <p><b>Sampled at the sensor's own cadence, not the tape's.</b> Marks arrive at roughly 1 Hz; a sensor
- * evaluates every {@code intervalSeconds}. Replaying every mark would define its windows over a
- * different horizon than live operation does — the same span count over a much shorter period — so the
- * seed is thinned to one price per evaluation interval. The walk runs newest-first so the seed always
- * ends at the present, and it stops at a gap wider than {@link #GAP_TOLERANCE_SAMPLES} intervals: a
- * redeploy blip is bridged, a genuine outage (or a feed-mode change, which necessarily involves one)
- * truncates the seed rather than fabricating a jump across it.
+ * <p><b>Sampled at the cadence the sensor consumes, which is the slower of our clock and the tape's.</b>
+ * On a fast tape marks arrive far quicker than the sensor evaluates, so replaying every mark would define
+ * its windows over a different horizon than live operation does — the same span count over a much shorter
+ * period — and the seed is thinned to one price per evaluation interval. On a slow tape the binding
+ * constraint is the other one: since ADR-0113 the live sensor advances only when the tape prints, so it
+ * consumes a name at {@code max(poll interval, print interval)}. That step, measured from the name's own
+ * stored series ({@link #consumptionStepMillis}), is the unit BOTH derived quantities are counted in
+ * (ADR-0114) — how far back to read, and how large a break stops the walk. The walk runs newest-first so
+ * the seed always ends at the present, and it stops at a gap wider than {@link #GAP_TOLERANCE_SAMPLES}
+ * of those steps: a redeploy blip is bridged, a genuine outage (or a feed-mode change, which necessarily
+ * involves one) truncates the seed rather than fabricating a jump across it.
  *
  * <p><b>One clock only — the feed's.</b> The seed window is expressed in the <em>same</em> clock the
  * store is keyed by: provider time. Callers pass the anchor from the mark they are processing, never
@@ -59,16 +63,17 @@ import java.util.List;
 public final class SensorWarmup {
 
     /**
-     * How many missed evaluation intervals still count as "the same stream". Past this the walk stops
-     * and the sensor warms from the contiguous tail only. This is mine and arbitrary — a data-hygiene
-     * threshold, not a money, risk or exposure dial: it is expressed in the sensor's own cadence so it
-     * scales with whatever interval is configured, and it is set well above a redeploy gap (seconds)
-     * and well below an outage (many minutes).
+     * How many missed <em>consumption steps</em> still count as "the same stream". Past this the walk
+     * stops and the sensor warms from the contiguous tail only. This is mine and arbitrary — a
+     * data-hygiene threshold, not a money, risk or exposure dial: it is expressed in the step the sensor
+     * actually consumes this name at (see {@link #consumptionStepMillis}) so it scales with both the
+     * configured cadence and the name's own tape, and it is set well above a redeploy gap and well below
+     * an outage.
      */
     static final int GAP_TOLERANCE_SAMPLES = 30;
 
     /**
-     * How much wider than the needed span to read history, so that thinning to the evaluation cadence
+     * How much wider than the needed span to read history, so that thinning to the consumption step
      * still finds enough samples when the stored series is sparse or has been stride-downsampled by the
      * store's read cap. A shape dial: reading more can only improve the seed, never size anything.
      */
@@ -103,17 +108,22 @@ public final class SensorWarmup {
         if (history == null || instrumentId == null || samples <= 0 || intervalMillis <= 0) {
             return List.of();
         }
-        long lookback = intervalMillis * (long) samples * LOOKBACK_MULTIPLE;
-        List<Point> points;
-        try {
-            points = history.since(instrumentId, anchorMillis - lookback);
-        } catch (RuntimeException e) {
-            return List.of(); // a history read must never stop a sensor from starting
-        }
-        if (points == null || points.isEmpty()) {
+        List<Point> points = read(history, instrumentId, anchorMillis, intervalMillis, samples);
+        if (points.isEmpty()) {
             return List.of();
         }
-        long gapTolerance = intervalMillis * GAP_TOLERANCE_SAMPLES;
+        // ADR-0114: the span the seed covers and what counts as a hole in it are properties of the
+        // series being walked, so both are measured in the step the sensor actually consumes this name
+        // at — not in our poll cadence, which says nothing about how often this tape prints.
+        long step = consumptionStepMillis(intervalMillis, points);
+        if (step > intervalMillis) {
+            List<Point> wider = read(history, instrumentId, anchorMillis, step, samples);
+            if (wider.size() > points.size()) {
+                points = wider;
+                step = consumptionStepMillis(intervalMillis, points);
+            }
+        }
+        long gapTolerance = step * GAP_TOLERANCE_SAMPLES;
         Deque<BigDecimal> out = new ArrayDeque<>();
         long previousAccepted = Long.MIN_VALUE; // timestamp of the last point taken (walking backwards)
         for (int i = points.size() - 1; i >= 0 && out.size() < samples; i--) {
@@ -134,6 +144,67 @@ public final class SensorWarmup {
             previousAccepted = p.timestampMillis();
         }
         return new ArrayList<>(out);
+    }
+
+    /**
+     * The interval at which the live sensor actually consumes this name: it takes at most one mark per
+     * evaluation cycle, and — since ADR-0113 — at most one per print, so the cadence it advances at is
+     * the SLOWER of the two. Hence {@code max(pollInterval, typical print interval)}.
+     *
+     * <p><b>Why this is the right unit</b> (ADR-0114). The seed's lookback and its hole test are both
+     * counts of consumption steps: "read twice the span I need" and "a break of thirty steps is not the
+     * same stream". Denominating them in the poll cadence alone assumes the tape prints at least that
+     * often, which is exactly the assumption ADR-0113 removed from the live path — and on this desk it is
+     * false for most of the day: measured live at 23:00Z the median inter-print gap is 20 s on the
+     * Treasury curve, 90 s on NQ, 13 min on GBPUSD and 20 min on ES, against a 10 s reversion cadence.
+     * A name printing slower than we poll then has every one of its normal print intervals read as an
+     * outage, the walk breaks at the first of them, and the seed is one sample against a warm-up of
+     * hundreds — permanently, because after ADR-0113 the live path accumulates at that same print rate.
+     *
+     * <p>This does NOT bridge a halt, which is what ADR-0113 considered and rejected: the tolerance is a
+     * multiple of the name's OWN typical interval, so a genuine cessation of printing — the equity cash
+     * close, hours against a 12 s tape — still reads as a hole and still truncates the seed. What changes
+     * is only that a 20-minute gap on a contract that prints every 20 minutes stops being called one.
+     *
+     * <p>The median, not the mean: print gaps are heavy-tailed (one overnight break would drag a mean
+     * across every other reading), and a median needs no outlier rule to choose. Nothing here is
+     * configured and nothing is fitted — the statistic is re-read from the running stream every time a
+     * sensor first sees a name, so a live feed, a delayed feed, a replay and a simulated clock are all
+     * read on their own terms with no edit (invariant 9).
+     */
+    private static long consumptionStepMillis(long intervalMillis, List<Point> points) {
+        if (points == null || points.size() < 2) {
+            return intervalMillis; // no gap to measure — the poll cadence is all we know
+        }
+        long[] gaps = new long[points.size() - 1];
+        int n = 0;
+        for (int i = 1; i < points.size(); i++) {
+            long gap = points.get(i).timestampMillis() - points.get(i - 1).timestampMillis();
+            if (gap > 0) {
+                gaps[n++] = gap;
+            }
+        }
+        if (n == 0) {
+            return intervalMillis;
+        }
+        long[] sorted = java.util.Arrays.copyOf(gaps, n);
+        java.util.Arrays.sort(sorted);
+        return Math.max(intervalMillis, sorted[n / 2]);
+    }
+
+    /** One history read of {@code LOOKBACK_MULTIPLE × samples} steps back from the anchor, in the
+     *  store's own clock. Never throws and never reads before the epoch — a history read must not stop
+     *  a sensor from starting. */
+    private static List<Point> read(History history, String instrumentId, long anchorMillis,
+                                    long stepMillis, int samples) {
+        long lookback = stepMillis * (long) samples * LOOKBACK_MULTIPLE;
+        long since = lookback < 0 || anchorMillis - lookback < 0 ? 0L : anchorMillis - lookback;
+        try {
+            List<Point> points = history.since(instrumentId, since);
+            return points == null ? List.of() : points;
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
     /**

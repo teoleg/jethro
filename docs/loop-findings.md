@@ -1519,3 +1519,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Still open, unchanged:** `turnover_cost_by_name` has errored for a **twelfth** consecutive cycle. And
   the HEDGE book still holds `−$3,093.31` realised on `$0.00` gross against ALPHA's `+$8,370.51`, trading
   ES in 0.003–0.069 contract clips. That remains the next lever once the desk can form a view again.
+
+## 2026-07-27 23:00Z — the seed still counted in cycles after ADR-0113 moved the sensors onto prints
+
+- **The finding.** `instruments: 0` again, and the WARN log is unchanged: *"reversion sensor still cold for
+  ES after seeding 1 of 241 stored prices"*. `/api/history` per name gives the median inter-print gap:
+  **19.9 s** on the Treasury curve, **90 s** on NQ, **778 s** on GBPUSD, **1,199 s** on ES — against a 10 s
+  reversion cadence. `SensorWarmup.seedPrices` derives its lookback (`interval × samples × 2` = 80 min) and
+  its hole tolerance (`interval × 30` = 300 s) from the POLL cadence, so for ES every *ordinary* 20-minute
+  print interval read as an outage and the walk broke at the first one. Shipped ADR-0114: both quantities
+  are now counted in `max(poll interval, that name's median inter-print gap)`.
+- **Rule 28: when an ADR changes the UNIT a quantity accumulates in, every quantity derived from the old
+  unit is now wrong — go find them in the same breath.** ADR-0113 made a warm-up of 241 samples mean 241
+  *prints*. Two derived numbers in the seed still meant 241 *cycles*, and neither is in the file ADR-0113
+  touched. The bug was not in the change; it was in everything the change silently re-based. The check to
+  run is not "does the new code work" but "what else was denominated in the thing I just redefined".
+- **Rule 29: a fix and a rejected alternative can look identical from the outside — carry the distinction
+  into a test, not just the prose.** ADR-0113 explicitly rejected "widen `SensorWarmup`'s gap tolerance so
+  the seed bridges the halt", and this change makes gaps up to 10 h admissible on ES. It is not that
+  alternative, because the tolerance is a multiple of the *name's own* interval: AAPL's 3-hour cash-close
+  hole against its 12 s tape still truncates. That is `stillTruncatesAtACashCloseHaltOnAFastTape`, and it
+  exists so a future cycle can tell the two apart without re-deriving the argument.
+- **Rule 30: "no view" and "cannot form a view" produce the same telemetry and want opposite responses.**
+  `instruments: 0` looked like ADR-0113 correctly standing the desk down over a closed tape — and for the
+  seven equities it was. But ES, NQ and the FX pairs were *printing* the whole time, 7–19 minutes apart,
+  and were silent for a plumbing reason. Before concluding the market gave the desk nothing, check whether
+  the desk could have *heard* anything: the answer was in the per-name print cadence, not in the P&L.
+- **Attribution, honestly.** +$11.81 on a book holding literally nothing — every position row flat, zero
+  unrealized, last fill 19:54Z. Neither market nor change. ADR-0113 reached the JVM (boot 22:26Z against a
+  22:25Z commit) and earns credit and blame for nothing.
+- **Predicted next, so it can be checked rather than re-derived.** NQ and the rates curve should reach a
+  full seed; ES/GBPUSD/AUDUSD seed from whatever the 12 h retention holds (~36 points for ES — better than
+  1, still short of 241). Gross likely stays `$0.00` overnight since the ADR-0113 registry freshness window
+  (600 s) still expires an ES view between its 20-minute prints, so a MIXED verdict is the expected and
+  correct outcome. The thing to check is the **seed counts in the WARN log**, not the P&L.
+- **Still open, unchanged:** `turnover_cost_by_name` has errored for a **thirteenth** consecutive cycle. And
+  the HEDGE book still holds `−$3,093.31` realised against ALPHA's `+$8,382.25` — note its fees are only
+  `$49.79`, so that drag is **directional, not churn**: the overlay was short ES into a rising tape doing
+  its job. Judging whether it is worth its cost needs the desk forming views again first.

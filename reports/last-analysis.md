@@ -1,73 +1,62 @@
-Every equity's tape stopped at the cash close two hours ago, and the sensors never noticed — the "skip a stale mark" guard is a warm-load flag that is false forever after the first tick, so they have been eating the same closing print several hundred times per name as if each were an observation.
+ADR-0113 changed the unit the sensors count in — prints, not cycles — and the warm-start seed was left counting in the old one, so no name whose tape prints slower than we poll can ever warm; ADR-0114 re-denominates the seed into each name's own print cadence.
 
 *Every figure below is quoted from the live endpoints, `logs/report.md` or the ledger; none is authored
 here (invariant 7 / ADR-0016 — the scorer owns every number that gates money).*
 
-## Situation (live endpoints, read at the top of this cycle)
+## Situation, in plain numbers
 
-**Money — flat, and the "bleeding" flag is dust.** The SITUATION header reads total PnL $5,654.13, down
-$0.07 since last run and $72.84 over three. But the book holds nothing: gross exposure $0.00, net $0.00,
-every position row zero, no order since 19:54Z. A $0.07 move on a book with no positions is neither a
-market move nor a consequence of any code — the $72.84 over three runs is the 19:00–20:00 flattening
-crystallising, already scored. PnL growth is off the ≥1%/3-iteration target and the run-status flags say
-stale, which is correct: the desk is not losing money, it is not doing anything.
+**Money.** Total PnL **$5,665.94**, up **$11.81** on the run and **$11.72** across the last three. Not
+bleeding — but the growth flag reads **stale**: −1.27% over three iterations against the +1% target, and
+it reads stale for the obvious reason that the desk is inert.
 
-**Risk — nothing on.** Gross and net both $0.00, VaR/ES `no positions`, breaker not tripped and nowhere
-near. There is no danger state to override this cycle.
+**Risk.** Gross **$0.00**, net **$0.00**. Every position row is flat, unrealized is zero, the drawdown
+breaker is nowhere in sight. Exposure is not rising. The problem this cycle is the opposite of danger.
 
-**Cause — last cycle's change deployed and is downstream of the real problem.** ADR-0112 (Roll effective
-spread for unpriced names) reached the JVM: the per-name cost map has grown from 8 entries to 12, with
-ZB/ZF/ES now at the floor and NVDA/AMZN/SAP newly priced. The scorer marked it ⚠️ MIXED, no material
-change. That verdict is right and the reason is not the cost ladder: `/api/fusion/targets` reports
-`instruments: 0` and `targets: []`. Last cycle there were eleven targets blocked by cost; this cycle there
-are **no targets at all**. Nothing reached the cost gate, so nothing ADR-0112 did could show up.
+**Cause.** Last cycle's ADR-0113 scored **⚠️ MIXED** and did reach the JVM (boot 22:26Z against a 22:25Z
+commit; `PrintClock` gating both sensors). It behaved exactly as predicted — it narrows the observed
+universe and lowers exposure by design. No culprit to name.
 
-**Danger — no,** so this cycle is free to fix a cause.
+**Danger.** No. Not bleeding, zero exposure. The live danger state does not apply.
 
-## What I found, and it is not the cost ladder
+**Order-level post-mortem.** The last fill of any kind was 19:54Z, over three hours ago. Every ALPHA fill
+in the window was AAPL or JPM, each shadowed within 10–40 s by a HEDGE ES clip of 0.003–0.069 contracts.
+No trigger to blame for a loss, because no trigger fired at all after the cash close.
 
-The desk publishes no forecasts because the only source it trusts publishes nothing. `reversion` carries
-weight 2.90 and the only significant measured edge (`avgReturnBps 1.856`, `t = 3.55`); ADR-0111 correctly
-stood `trend` and `momentum` down to 0.0 on their measured losses. So `reversion` cold ⇒ the cross-section
-is empty. And the WARN log says why, on every tradable name: *"reversion sensor still cold for AAPL after
-seeding 1 of 241 stored prices"* — one sample out of 241, while the rates names seed 132.
+**Attribution, honestly.** The $11.81 is on a book holding nothing — neither market nor change. ADR-0113
+earns credit and blame for nothing this window.
 
-I pulled the stored series to separate a rung that never fires from one that fires and finds nothing.
-AAPL's history is 1,926 points at a 12 s median cadence, and then a single **59.7-minute hole** immediately
-before the newest point; JPM 56 minutes, ES 57.7. The seed walks newest-first and stops at a hole wider
-than 30 intervals, so it truncates after one point — mechanically, on every equity. Then `/api/marks`
-explained the hole: the seven Alpaca equities carry **provider clocks 122.8 minutes old** (the 20:00Z
-cash close), ES/NQ 62.8 minutes — against **ingest ages of 180–558 ms**. The tape has stopped; the cache
-is republishing the close.
+## Diagnosis
 
-The defect is what happens next. Both sensors carry the comment *"never advance the sensor's windows on a
-repeated stale price"*, guarded by `MarkSnapshot.stale()` — and that flag is a **warm-load marker**:
-`MarkCache.loadStale` sets it at boot, the first live tick clears it, permanently. It reports `false` for
-all seven frozen names. The guard is inert in precisely the situation it was written for — the same shape
-as last cycle's Rule 23. So the 10 s reversion sensor and the 5 s trend sensor have been fed the same
-dead price hundreds of times per name, and that is not silence, it is corruption in the two places that
-matter: it decays the scale estimator both sensors divide by toward zero (so the first real move at the
-reopen is divided by a near-zero denominator and reports an extreme conviction — the ADR-0066 pin reached
-from the other side, at the open, on the dominant-weight source), and it books a telemetry call every
-cycle off a price that never moved, each resolving at exactly zero, feeding structural zeros into the
-cohort standard error that the ADR-0075 edge gate uses to decide whether the desk may put risk on.
+`/api/fusion/targets` publishes `instruments: 0`. `reversion` carries fusion weight 2.90 and is the only
+source with measured edge (t = 3.55); it publishes nothing, so the cross-section is empty. The WARN log
+names the mechanism on every name: *"reversion sensor still cold for ES after seeding 1 of 241 stored
+prices"* — ES, GBPUSD, NQ, and every equity.
 
-## The change
+Reading `/api/history` per name gives the reason. The median inter-print gap is **19.9 s** on the Treasury
+curve, **90 s** on NQ, **778 s** on GBPUSD and **1,199 s** on ES, against a 10 s reversion cadence. The
+ADR-0071 seed derives two quantities from the *poll* cadence — how far back to read history
+(`interval × samples × 2` = 80 min) and how large a break stops the walk (`interval × 30` = 300 s). Both
+assume the tape prints at least as often as we poll. That is exactly the assumption ADR-0113 removed from
+the live path, and it was left standing in the seed. So for ES every **ordinary** 20-minute print interval
+exceeds the 300 s tolerance and reads as an outage: the walk breaks at the first one, seed = 1 of 241. The
+Treasury curve fails the other way — its gaps clear the tolerance, but 241 prints at ~20 s need 80 minutes
+of history against a lookback asking for exactly 80, hence the observed 147 of 241.
 
-ADR-0113: a continuous sensor advances on **prints, not on cycles**. A new `PrintClock` admits a mark only
-when its provider timestamp is strictly newer than the last one that sensor consumed for the name. No dial
-— it is not an age threshold, so there is no number to choose and none to give provenance to; it is the
-parameter-free question "did the tape print since I last looked?", which reads a live feed, a delayed
-feed, a replay and a sim clock identically. It also makes ADR-0071's stated invariant true: the seed walks
-a provider-keyed series with one point per print, so seed and live path are finally the same series.
-Asserted against a counterfactual sensor whose session never halted — a gated sensor reads the reopen
-bit-for-bit identically to one that never saw the halt, while the ungated one un-warms itself flat and
-peaks several times higher on the same resumed prints. 545 app tests green.
+Because the live path now accumulates at that same print rate, none of these names can ever warm — the
+ADR-0071 failure ("a sensor whose warm-up exceeds the process lifetime never speaks at all") re-entered
+through ADR-0113's own door.
 
-**Honest expectation.** This will very likely score MIXED: the book is flat, the equity tape is shut for
-the night, and the change *narrows* what the desk will look at rather than widening it — it lowers
-exposure, it does not raise it. I am shipping it anyway because the loss it prevents is specific and
-imminent rather than hypothetical: the reversion sensor's warm-up is 40 minutes of cycles and the JVM has
-been up 42, so it is about to finish warming on ~250 identical prints and start publishing a calibrated-
-looking view, at weight 2.90 with `mayIncrease: true`, on names whose last real trade was at the close.
-Attribution for this window is neither market nor change — there were no positions to move either one.
+## What I changed
+
+ADR-0114 (Proposed, same commit): the seed's lookback and hole tolerance are counted in the step at which
+the **live sensor actually consumes that name** — `max(poll interval, that name's median inter-print
+gap)`, measured from its own stored series. The `×2` and `×30` constants are unchanged; only their unit
+moves, so no dial is added and nothing is configured. This is deliberately **not** the alternative
+ADR-0113 rejected ("widen the tolerance so the seed bridges the halt"): the tolerance is a multiple of the
+name's *own* typical interval, so a 12 s equity tape that stops for three hours at the cash close is still
+a hole and still truncates — pinned as a test, alongside one proving a fast tape is sampled bit-for-bit as
+before.
+
+Honest cost: this **raises** exposure by admitting names the desk currently cannot see, so if the
+reversion edge does not survive contact with them the loss is larger, not smaller. Expect NQ and the rates
+curve to reach a full seed and ES/GBPUSD/AUDUSD to seed from as much series as the 12 h retention holds.
