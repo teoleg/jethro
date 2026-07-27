@@ -1,0 +1,20 @@
+{
+  "commit": "d4089a23bf3406f121c2f641e9e3ea166e506169",
+  "fees": "162.298778",
+  "gross_exposure": "6495.70557686",
+  "net_exposure": "372.33205514",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "6495.70557686",
+    "hedgePnl": "68.31545573",
+    "netExposure": "372.33205514",
+    "realizedPnl": "-790.35609552",
+    "strategyAlpha": "-856.74729886",
+    "totalFees": "162.298778",
+    "totalPnl": "-788.43184313",
+    "unrealizedPnl": "1.92425239"
+  },
+  "summary": "the fusion desk cuts a position to flat once its mark retraces from the best level seen since that position was opened by more than three times the name's own measured volatility over the desk's own derived holding horizon \u2014 a chandelier exit keyed on a mark-stream sigma, because the daily-close sigma every other risk control uses covers none of the names actually held; it can only ever set a target flat, never raise one (ADR-0086)",
+  "total_pnl": "-788.43184313",
+  "ts": "2026-07-27T00:52:56Z"
+}
