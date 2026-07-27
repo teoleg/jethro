@@ -1,0 +1,20 @@
+{
+  "commit": "2bee6b87386d910c2c74a64e6af31499cfd5e8a6",
+  "fees": "215.912938",
+  "gross_exposure": "10686.59624810",
+  "net_exposure": "-1481.17560010",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "10686.59624810",
+    "hedgePnl": "-166.23705460",
+    "netExposure": "-1481.17560010",
+    "realizedPnl": "-620.41684268",
+    "strategyAlpha": "-456.22321320",
+    "totalFees": "215.912938",
+    "totalPnl": "-622.46026780",
+    "unrealizedPnl": "-2.04342512"
+  },
+  "summary": "the fused conviction each name is sized on is averaged over the same measured horizon the position is held for \u2014 one EWMA per instrument at alpha = 1 - exp(-dt/h), the ADR-0080 identity applied to the signal instead of the trade, so a view that reverses faster than the desk can be graded on it is averaged down instead of dragging the book through full-speed round trips; a constant forecast is its own average and sizes exactly as before, an oscillating one falls under the never-triggered conviction floor, and the average can never exceed the peak reading (ADR-0088)",
+  "total_pnl": "-622.46026780",
+  "ts": "2026-07-27T01:47:26Z"
+}
