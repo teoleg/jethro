@@ -51,16 +51,23 @@ public final class HedgeAdvisor {
 
     public enum Mode { OFF, ADVISE, AUTO }
 
+    /** The one axis this advisor sizes today, and the key its ADR-0098 churn series is filed under. */
+    private static final String EQUITY_AXIS = "EQUITY";
+
     /** One hedge axis: the pure exposure, held/target hedge, and (when acting) the sized DELTA on
      *  {@code proxyId} (the instrument being traded this cycle — selected, or an old proxy being
      *  unwound). {@code tier} is STATISTICAL (measured ρ²), STRUCTURAL (assigned beta,
-     *  {@code effectiveness} null — asserted, never a fake ρ²), or "—" when not sizing. */
+     *  {@code effectiveness} null — asserted, never a fake ρ²), or "—" when not sizing.
+     *  {@code rawTargetNotionalUsd} is the tier's target BEFORE the ADR-0098 churn shrinkage — the
+     *  series {@link HedgeTargetChurn} samples — and {@code churnSigmaUsd} is the σ that was
+     *  subtracted (null while warming). */
     public record Axis(String axis, String proxyId, BigDecimal netExposureUsd, BigDecimal floorUsd,
                        double utilization, boolean hedging, boolean hedgeRecommended,
                        String hedgeSide, BigDecimal hedgeQuantity, BigDecimal hedgeNotionalUsd,
                        Double effectiveness, BigDecimal grossSigmaUsd, BigDecimal residualSigmaUsd,
                        BigDecimal heldProxyQty, BigDecimal targetProxyQty,
-                       String status, String tier, String rationale) {
+                       String status, String tier, String rationale,
+                       BigDecimal rawTargetNotionalUsd, BigDecimal churnSigmaUsd) {
     }
 
     public record Snapshot(String mode, boolean covarianceReady, List<Axis> axes, String note) {
@@ -76,6 +83,7 @@ public final class HedgeAdvisor {
     private final double proxySwitchMargin;
     private final String structuralProxyId;
     private final Function<String, Optional<BigDecimal>> multiplierOf;
+    private final BigDecimal churnSigmaMultiple;
 
     /**
      * @param minTradeNotionalUsd  absolute churn guard on the hedge delta (ADR-0039 Decision 2)
@@ -93,6 +101,24 @@ public final class HedgeAdvisor {
                         double effectivenessFloor, int minCovarianceDays,
                         List<String> proxyCandidates, double proxySwitchMargin,
                         String structuralProxyId, Function<String, Optional<BigDecimal>> multiplierOf) {
+        this(mode, rebalanceFloorUsd, minTradeNotionalUsd, noTradeBandFraction, effectivenessFloor,
+                minCovarianceDays, proxyCandidates, proxySwitchMargin, structuralProxyId,
+                multiplierOf, BigDecimal.ONE);
+    }
+
+    /**
+     * @param churnSigmaMultiple how many σ of the target's own step between hedge evaluations is
+     *                           subtracted from the target before it is traded (ADR-0098) — clamped
+     *                           at ≥ 0; 0 restores the pre-ADR-0098 hedge-to-exactly-flat behaviour
+     */
+    public HedgeAdvisor(Mode mode, BigDecimal rebalanceFloorUsd, BigDecimal minTradeNotionalUsd,
+                        BigDecimal noTradeBandFraction,
+                        double effectivenessFloor, int minCovarianceDays,
+                        List<String> proxyCandidates, double proxySwitchMargin,
+                        String structuralProxyId, Function<String, Optional<BigDecimal>> multiplierOf,
+                        BigDecimal churnSigmaMultiple) {
+        this.churnSigmaMultiple = churnSigmaMultiple == null ? BigDecimal.ONE
+                : churnSigmaMultiple.max(BigDecimal.ZERO);
         this.mode = mode;
         this.rebalanceFloorUsd = rebalanceFloorUsd == null ? BigDecimal.ZERO : rebalanceFloorUsd.abs();
         this.minTradeNotionalUsd = minTradeNotionalUsd == null ? BigDecimal.ZERO : minTradeNotionalUsd.abs();
@@ -152,6 +178,25 @@ public final class HedgeAdvisor {
                              Function<String, Optional<BigDecimal>> betaOf,
                              Map<String, BigDecimal> heldByProxy,
                              Predicate<String> tradable) {
+        return evaluate(covariance, exposuresUsd, isEquity, priceOf, betaOf, heldByProxy, tradable,
+                id -> Optional.empty());
+    }
+
+    /**
+     * @param churnSigmaOf σ of the raw hedge target's own step between hedge evaluations on the axis
+     *                     ({@link HedgeTargetChurn}), empty while warming. The target is shrunk
+     *                     toward flat by {@code churnSigmaMultiple × σ} before it is traded
+     *                     (ADR-0098) — strictly one-way: the magnitude can only fall and the sign
+     *                     can never flip, so an estimated σ can never lever the hedge up.
+     */
+    public Snapshot evaluate(Optional<CovMath.Covariance> covariance,
+                             Map<String, BigDecimal> exposuresUsd,
+                             Predicate<String> isEquity,
+                             Function<String, Optional<BigDecimal>> priceOf,
+                             Function<String, Optional<BigDecimal>> betaOf,
+                             Map<String, BigDecimal> heldByProxy,
+                             Predicate<String> tradable,
+                             Function<String, Optional<BigDecimal>> churnSigmaOf) {
         Map<String, BigDecimal> equityExposures = exposuresUsd.entrySet().stream()
                 .filter(e -> isEquity.test(e.getKey()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
@@ -161,7 +206,7 @@ public final class HedgeAdvisor {
 
         Axis axis = mode == Mode.OFF
                 ? idle(net, held, "OFF", "hedging OFF for this axis")
-                : act(net, held, equityExposures, covariance, priceOf, betaOf, tradable);
+                : act(net, held, equityExposures, covariance, priceOf, betaOf, tradable, churnSigmaOf);
         String note = mode == Mode.AUTO
                 ? "AUTO — the book is held target-flat: the hedge DELTA (target − held) auto-submits (sim-gated, ADR-0019)"
                 : "ADVISE — the sized hedge-to-flat surfaces here; execute from the ticket";
@@ -171,7 +216,8 @@ public final class HedgeAdvisor {
     private Axis act(BigDecimal net, Map<String, BigDecimal> held,
                      Map<String, BigDecimal> equityExposures, Optional<CovMath.Covariance> covariance,
                      Function<String, Optional<BigDecimal>> priceOf,
-                     Function<String, Optional<BigDecimal>> betaOf, Predicate<String> tradable) {
+                     Function<String, Optional<BigDecimal>> betaOf, Predicate<String> tradable,
+                     Function<String, Optional<BigDecimal>> churnSigmaOf) {
         List<Candidate> candidates = candidates(priceOf, tradable);
         boolean flatTarget = net.abs().compareTo(rebalanceFloorUsd) <= 0;
         Target target;
@@ -192,6 +238,13 @@ public final class HedgeAdvisor {
         if (target.signedQty() == null) {
             return idle(net, held, "REDUCE", target.rationale());
         }
+
+        // ADR-0098: neutralize only the systematic exposure that stands clear of its own churn.
+        BigDecimal targetContractUsd = target.proxy().price().multiply(target.proxy().multiplier());
+        BigDecimal rawTargetNotional = target.signedQty().multiply(targetContractUsd)
+                .setScale(2, RoundingMode.HALF_UP);
+        BigDecimal churnSigma = churnSigmaOf.apply(EQUITY_AXIS).orElse(null);
+        target = shrinkToChurnBoundary(target, targetContractUsd, rawTargetNotional, churnSigma);
 
         // Per-proxy targets: the chosen proxy gets the sized target; every other held proxy
         // targets zero. Execute the largest delta above the min-trade notional (one order per
@@ -240,7 +293,8 @@ public final class HedgeAdvisor {
                     target.effectiveness(), target.grossSigmaUsd(), target.residualSigmaUsd(),
                     plain(heldSelected), plain(target.signedQty()), status, target.tier(),
                     heldVsTarget + " — largest delta under the " + money(band)
-                            + " no-trade band, holding");
+                            + " no-trade band, holding",
+                    rawTargetNotional, churnSigma);
         }
         boolean unwindingOther = !bestProxy.equals(target.proxy().id());
         String side = bestDelta.signum() < 0 ? "SELL" : "BUY";
@@ -254,7 +308,40 @@ public final class HedgeAdvisor {
                 bestNotional.setScale(2, RoundingMode.HALF_UP),
                 target.effectiveness(), target.grossSigmaUsd(), target.residualSigmaUsd(),
                 plain(held.getOrDefault(bestProxy, BigDecimal.ZERO)),
-                plain(targets.get(bestProxy)), status, target.tier(), story);
+                plain(targets.get(bestProxy)), status, target.tier(), story,
+                rawTargetNotional, churnSigma);
+    }
+
+    /**
+     * ADR-0098 — shrink the sized target toward flat by {@code churnSigmaMultiple × σ} of the
+     * target's own step between hedge evaluations:
+     * {@code T' = sign(T) · max(0, |T| − k·σ)}, in USD of proxy notional, then re-divided by the
+     * contract's money value to a quantity.
+     *
+     * <p>Strictly one-way: {@code |T'| ≤ |T|} and {@code sign(T') ∈ {sign(T), 0}} by construction,
+     * so an estimated σ can only ever make the hedge smaller. A target that is large relative to
+     * its own churn (a real, persistent systematic exposure) is essentially untouched; a target
+     * inside its own churn is set flat and the residual hedge is unwound by the ordinary
+     * per-proxy delta path.
+     */
+    private Target shrinkToChurnBoundary(Target t, BigDecimal contractUsd, BigDecimal rawNotional,
+                                         BigDecimal churnSigma) {
+        if (churnSigmaMultiple.signum() <= 0 || churnSigma == null || churnSigma.signum() <= 0
+                || rawNotional.signum() == 0 || contractUsd.signum() <= 0) {
+            return t;
+        }
+        BigDecimal boundary = churnSigma.multiply(churnSigmaMultiple);
+        BigDecimal keep = rawNotional.abs().subtract(boundary).max(BigDecimal.ZERO);
+        if (keep.compareTo(rawNotional.abs()) == 0) {
+            return t;
+        }
+        BigDecimal shrunk = rawNotional.signum() < 0 ? keep.negate() : keep;
+        BigDecimal qty = shrunk.divide(contractUsd, 6, RoundingMode.HALF_EVEN);
+        String note = " · churn-shrunk (ADR-0098): |" + money(rawNotional) + "| − "
+                + money(boundary) + " σ-step → " + money(shrunk) + " → "
+                + plain(qty) + " " + t.proxy().id();
+        return new Target(t.proxy(), qty, t.tier(), t.effectiveness(), t.grossSigmaUsd(),
+                t.residualSigmaUsd(), t.rationale() + note);
     }
 
     /**
@@ -408,7 +495,7 @@ public final class HedgeAdvisor {
         BigDecimal heldQty = incumbent == null ? BigDecimal.ZERO : held.get(incumbent);
         return new Axis("EQUITY", incumbent != null ? incumbent : structuralProxyId, money(net),
                 rebalanceFloorUsd, 0.0, false, false, null, null, null, null, null, null,
-                plain(heldQty), null, status, "—", rationale);
+                plain(heldQty), null, status, "—", rationale, null, null);
     }
 
     private static double eff(Target t) {

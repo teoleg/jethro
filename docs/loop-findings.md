@@ -866,3 +866,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Standing observation, not yet acted on.** `turnover_cost_by_name` in the report has been erroring
   (`| error |`) for several cycles — the loop is blind to per-name cost. Worth a report-only fix on a
   cycle where no trading lever is clearly better.
+
+## 2026-07-27 — the hedge's loss is directional, not execution cost, and the target was noise
+
+- **What the window did.** Total PnL `$327.26` (`+88.17` on the window, `+142.58` over three runs,
+  on track) with gross `$37,162.38` — up only `+718.89` against `+36,404.57` the window before, so
+  **ADR-0097 stopped the six-run exposure ramp**. `fusion_targets` confirms it: `reversion 2.091`,
+  every other source pinned at the `0.25` MIN. Attribution `ALPHA +458.94`, `MACRO +376.99`,
+  `HEDGE −509.21`: the strategy books make `+835.94` and the hedge hands back 61% of it.
+- **Attribution honesty.** The window's PnL sits on ALPHA positions last cycle's weight change
+  directly re-signed, so that is a change effect. The HEDGE line is not: it has gone
+  `−323.33 → −451.51 → −509.21` over three cycles regardless of what changed above it. MACRO is
+  unchanged to the cent for a third cycle — still frozen, still not trading.
+- **Rule 1: separate cost from direction BEFORE choosing a lever.** The findings memory had queued
+  "come at the hedge's cost/chase side". The numbers refuse it: HEDGE fees `$40.02` plus 355 ES fills
+  at a measured `0.204` bps is under `$50` of the `$509.21` loss. The rest is **directional**. A
+  wider no-trade band trades the same wrong position less often and leaves the loss in place. Always
+  divide a losing book's PnL into `fees + slippage` vs `the rest` before picking the fix — a
+  turnover remedy is only correct when turnover is where the money went.
+- **The trigger.** ADR-0039 holds the book target-flat with `equity-rebalance-floor-usd = 0`, so the
+  target is `−Σβ·E` at every evaluation however small that is. Live: `Σβ·E = −$195.49` against
+  `$37,162` of gross — **0.5%**, i.e. the book is already nearly beta-neutral — while the desk sent
+  one ES order per cooldown, alternating BUY/SELL at `$250`–`$3,000`, on a held position of `$312`.
+  It was taking a signed proxy bet on a number smaller than that number's own step.
+- **Rule 2: a hedge target built from a book's net inherits that book's signal, inverted.** `−Σβ·E`
+  on a mean-reversion book is long the proxy after a rally and short after a selloff — a **momentum
+  position on ES**, i.e. the desk's worst-measured view (`trend`, `−8.61`/`−6.51`/`−3.51` bps across
+  the ladder). Whenever an overlay is sized off a book with a measured edge, check what view the
+  overlay is implicitly expressing; if it is the negation of the edge, the overlay must be small or
+  it eats the alpha.
+- **Rule 3: a band measured against a quantity that moves with the thing it bounds bounds nothing.**
+  ADR-0069's band is `25%` of `max(|target|,|held|)`, so a hedge oscillating around zero has a band
+  near zero and trades every cycle — the same defect ADR-0094 fixed on the fusion side. The fix is
+  the target's own churn: `T' = sign(T)·max(0, |T| − k·σ)`, `σ` an EWMA of the target's step between
+  the moments the hedge can act. One-way by construction, so σ can only shrink the hedge.
+- **Expected next.** The HEDGE fee line and its directional bleed both fall; firm gross a little
+  lower. **If this scores BAD, the sizing side of the hedge is closed** — do not tune the overlay
+  again. The next lever is the question ADR-0098 explicitly deferred: does a mean-reversion book want
+  a beta overlay at all, given ADR-0095's unwind-on-ρ² was already reverted for a different reason?
+  After that: the frozen MACRO book, and the still-erroring `turnover_cost_by_name` in the report
+  (the loop has been blind to per-name cost for several cycles now).

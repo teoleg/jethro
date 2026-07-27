@@ -37,6 +37,7 @@ public final class HedgeLifecycle {
     private static final Logger log = LoggerFactory.getLogger(HedgeLifecycle.class);
 
     private final HedgeAdvisor advisor;
+    private final HedgeTargetChurn churn;
     private final ObjectProvider<VarService> varService;
     private final ObjectProvider<InstrumentRefSource> refs;
     private final ObjectProvider<LastPriceCache> prices;
@@ -50,13 +51,15 @@ public final class HedgeLifecycle {
     private final Map<String, Long> lastHedge = new ConcurrentHashMap<>();
     private volatile ScheduledExecutorService scheduler;
 
-    public HedgeLifecycle(HedgeAdvisor advisor, ObjectProvider<VarService> varService,
+    public HedgeLifecycle(HedgeAdvisor advisor, HedgeTargetChurn churn,
+                          ObjectProvider<VarService> varService,
                           ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                           ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
                           ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
                           ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore,
                           String hedgeBook, long cooldownSeconds, long intervalSeconds) {
         this.advisor = advisor;
+        this.churn = churn;
         this.varService = varService;
         this.refs = refs;
         this.prices = prices;
@@ -122,8 +125,15 @@ public final class HedgeLifecycle {
 
             HedgeAdvisor.Snapshot snap = advisor.evaluate(
                     vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf,
-                    held, tradable);
+                    held, tradable, churn::sigmaUsd);
             long now = System.currentTimeMillis();
+            // ADR-0098: this executing loop is the ONLY writer of the churn series, so the step is
+            // sampled on the hedge's own clock — a REST poll of /api/hedging must never shorten it.
+            // Keyed by AXIS, not proxy: the notional is USD, and a proxy switch (ADR-0042) must not
+            // reset the memory or file the same series under two instruments.
+            for (HedgeAdvisor.Axis axis : snap.axes()) {
+                churn.observe(axis.axis(), axis.rawTargetNotionalUsd(), now);
+            }
             for (HedgeAdvisor.Axis axis : snap.axes()) {
                 if (!axis.hedging() || !axis.hedgeRecommended() || axis.hedgeQuantity() == null
                         || axis.hedgeQuantity().signum() <= 0) {
