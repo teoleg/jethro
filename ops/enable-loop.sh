@@ -11,12 +11,10 @@
 #   ops/enable-loop.sh --yes                                                # no confirmation prompt
 #
 # Env:
-#   JETHRO_DEPLOY_CMD   how YOU rebuild + restart Jethro after a verified commit. UNSET = the repo's
-#                       own 'scripts/svc.sh restart app', which is right for a box that runs the app
-#                       from run-local.sh. Set it only if you deploy some other way (systemd unit,
-#                       container); the loop verifies the app actually restarted either way and falls
-#                       back to the repo command if it didn't (ADR-0110). JETHRO_DEPLOY_CMD=none keeps
-#                       changes committed+pushed but never restarts (review-before-live mode).
+#   JETHRO_DEPLOY_CMD   how YOU rebuild + restart Jethro after a verified commit. If empty, changes
+#                       still commit+push but the app won't restart (review-before-live mode).
+#                       Use: 'scripts/svc.sh deploy app' (stops the JVM, THEN rebuilds + starts — never
+#                       rebuilds under a live app, which corrupts its classloader).
 #   JETHRO_URL          where the live app answers (default http://localhost:8080). The scorer + report
 #                       read /api/attribution and /api/risk here.
 set -euo pipefail
@@ -89,15 +87,10 @@ check_endpoint /api/risk
 
 # Deploy command sanity.
 if [ -z "${JETHRO_DEPLOY_CMD:-}" ]; then
-  ok "deploy: repo default (scripts/svc.sh restart app)"
-elif [ "${JETHRO_DEPLOY_CMD}" = "none" ]; then
-  warn "JETHRO_DEPLOY_CMD=none — verified changes will commit+push but the app WON'T rebuild/restart"
-  warn "  (review-before-live mode). Unset it to run fully hands-off."
+  warn "JETHRO_DEPLOY_CMD is empty — verified changes will commit+push but the app WON'T rebuild/restart"
+  warn "  (review-before-live mode). Set it to your build+restart to run fully hands-off."
 else
   ok "deploy command set: $JETHRO_DEPLOY_CMD"
-  warn "  the loop verifies the app actually restarts and falls back to the repo command if it doesn't,"
-  warn "  but test this command yourself — a silent deploy failure gets a change scored against a"
-  warn "  binary that never ran it (ADR-0110)."
 fi
 
 # --- 3. Dry run one cycle (optional) ---

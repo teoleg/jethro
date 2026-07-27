@@ -5,11 +5,8 @@
 #   ops/loop-control.sh off      # disable — removes the line, nothing runs on its own
 #   ops/loop-control.sh status   # ON / OFF
 #
-# The deploy (how a committed change reaches the running app) defaults to the repo's own
-# `scripts/svc.sh restart app`. Set JETHRO_DEPLOY_CMD only if you deploy some other way — and test it
-# first: improve-loop.sh verifies the app actually restarted and falls back to the repo command if it
-# didn't, but an unverified deploy command is how a change gets scored against a binary that never ran
-# it (ADR-0110). JETHRO_DEPLOY_CMD=none = commit+push, never restart (review-before-live).
+# Set JETHRO_DEPLOY_CMD before enabling so a committed change actually rebuilds + restarts the app:
+#   JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' ops/loop-control.sh on
 #
 # Change the interval with JETHRO_LOOP_CRON (a 5-field cron expression). Default is every 30 minutes.
 #   JETHRO_LOOP_CRON='0 */2 * * *' ops/loop-control.sh on      # every 2 hours (slower)
@@ -26,13 +23,8 @@ SCHED="${JETHRO_LOOP_CRON:-*/30 * * * *}"
 # Bake the current (interactive) PATH into the cron line so `claude`, gradle, docker, psql etc. are
 # found — cron's default PATH is bare and would otherwise drop them. improve-loop.sh also re-adds the
 # usual dirs as a fallback.
-# Only carry JETHRO_DEPLOY_CMD when it is actually set: baking an EMPTY one into the cron line would
-# override improve-loop.sh's default (the repo's own restart) with "deploy nothing".
-# (`if` rather than `[ … ] && …`: under `set -e` a false test at the end of an AND-list aborts the
-# script, so the cron line would never be installed.)
-ENVP="PATH='$PATH' JETHRO_REPO=$REPO"
-if [ -n "$DEPLOY" ];              then ENVP="$ENVP JETHRO_DEPLOY_CMD='$DEPLOY'"; fi
-if [ -n "${JETHRO_URL:-}" ];      then ENVP="$ENVP JETHRO_URL=$JETHRO_URL"; fi
+ENVP="PATH='$PATH' JETHRO_REPO=$REPO JETHRO_DEPLOY_CMD='$DEPLOY'"
+[ -n "${JETHRO_URL:-}" ] && ENVP="$ENVP JETHRO_URL=$JETHRO_URL"
 LINE="$SCHED cd $REPO && $ENVP ops/improve-loop.sh $TAG"
 
 cmd="${1:-status}"
@@ -43,7 +35,7 @@ case "$cmd" in
     # Replace any existing loop line, then append the current one (picks up JETHRO_DEPLOY_CMD).
     { printf '%s\n' "$current" | grep -vF "$TAG"; printf '%s\n' "$LINE"; } | grep -v '^$' | crontab -
     echo "improvement loop ON — schedule: $SCHED"
-    echo "deploy: ${DEPLOY:-scripts/svc.sh restart app (repo default)}"
+    [ -z "$DEPLOY" ] && echo "NOTE: JETHRO_DEPLOY_CMD is empty — changes will commit+push but the app won't restart. Re-run with it set."
     ;;
   off)
     printf '%s\n' "$current" | grep -vF "$TAG" | grep -v '^$' | crontab - || true
