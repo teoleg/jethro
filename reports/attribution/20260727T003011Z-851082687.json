@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T00:30:11Z",
+    "fees": "158.589416",
+    "gross": "956.79193737",
+    "net": "-956.79193737",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "956.79193737",
+      "hedgePnl": "69.88228362",
+      "netExposure": "-956.79193737",
+      "realizedPnl": "-823.60846251",
+      "strategyAlpha": "-893.49469913",
+      "totalFees": "158.589416",
+      "totalPnl": "-823.61241551",
+      "unrealizedPnl": "-0.00395300"
+    },
+    "total_pnl": "-823.61241551"
+  },
+  "before": {
+    "at": "2026-07-27T00:22:28Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-826.05938139"
+  },
+  "commit": "851082687a2fb25754ae09c28b0c5f0833041cfb",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "956.79193737",
+    "net": "-956.79193737",
+    "total_pnl": "2.44696588"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj n/a (zero gross)",
+  "revert": true,
+  "scoredAt": "2026-07-27T00:30:11Z",
+  "summary": "the OOS backtest gate sizes each instrument in its own contract terms and charges it its own per-fill cost, so futures \u2014 including ES, the only name whose measured round trip clears the edge gate \u2014 can earn a verdict at all instead of being vetoed for a silence that was arithmetic (ADR-0085)",
+  "verdict": "\u274c BAD"
+}
