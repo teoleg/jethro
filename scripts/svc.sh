@@ -43,6 +43,15 @@ case "$ACTION:$TARGET" in
   start:app)     app_start ;;
   restart:app)   app_stop; app_start ;;                         # DB stays up; no dump needed
 
+  # THE loop's deploy command (JETHRO_DEPLOY_CMD). Rebuild + restart SAFELY, in the only correct order:
+  # STOP the running JVM first, THEN rebuild the jar (run-local.sh builds it), THEN start.
+  # NEVER `gradlew :app:bootJar` against a live app: run-local runs the jar straight out of
+  # app/build/libs and the Spring Boot loader loads classes LAZILY from it, so overwriting the jar
+  # under the running JVM corrupts its classloader — every not-yet-loaded class then throws
+  # ClassNotFoundException (the UI dies while trading-core limps on). app_stop kills the old JVM before
+  # app_start (run-local) rebuilds, so the jar is never swapped under a live process.
+  deploy:app)    app_stop; app_start ;;
+
   stop:infra)    ./scripts/backup-db.sh || true; docker compose stop $INFRA ;;
   start:infra)   docker compose up -d $INFRA ;;
   restart:infra) docker compose restart $INFRA ;;
@@ -56,6 +65,6 @@ case "$ACTION:$TARGET" in
   start:ollama|start:postgres|start:redpanda)       docker compose up -d "$TARGET" ;;
   restart:ollama|restart:postgres|restart:redpanda) docker compose restart "$TARGET" ;;
 
-  *) echo "usage: scripts/svc.sh <start|stop|restart|status> [app|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
+  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|status> [app|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
 esac
 echo "==> done."

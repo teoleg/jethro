@@ -6,7 +6,7 @@
 #   ops/loop-control.sh status   # ON / OFF
 #
 # Set JETHRO_DEPLOY_CMD before enabling so a committed change actually rebuilds + restarts the app:
-#   JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' ops/loop-control.sh on
+#   JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' ops/loop-control.sh on
 #
 # Change the interval with JETHRO_LOOP_CRON (a 5-field cron expression). Default is every 30 minutes.
 #   JETHRO_LOOP_CRON='0 */2 * * *' ops/loop-control.sh on      # every 2 hours (slower)

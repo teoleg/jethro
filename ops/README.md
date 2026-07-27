@@ -41,7 +41,7 @@ answer), then asks before installing the cron. It finds the repo from its own lo
 wherever you cloned it.
 ```sh
 # Set your build+restart, then run. It confirms before enabling.
-JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' \
+JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' \
   ops/enable-loop.sh
 
 ops/enable-loop.sh --dry-run    # run ONE cycle now and STOP (don't install the cron) — great first test
@@ -51,8 +51,10 @@ ops/enable-loop.sh --yes        # skip the confirmation prompt
 
 ## Or the low-level switch directly
 ```sh
-# Tell it how to rebuild + restart YOUR app, then enable. Example (adjust to how you run Jethro):
-JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' \
+# Tell it how to rebuild + restart YOUR app, then enable. `svc.sh deploy app` does it the safe way
+# (stop the JVM -> rebuild the jar -> start; never rebuild under a live app, which corrupts its
+# classloader). If you run Jethro some other way, use a command that STOPS before it rebuilds.
+JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' \
   ops/loop-control.sh on
 
 ops/loop-control.sh status     # ON / OFF

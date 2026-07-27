@@ -123,8 +123,11 @@ fi
 echo "code changed:" >> "$LOG"; printf '%s\n' "$CODE_CHANGED" >> "$LOG"
 
 # 5. Rebuild the binary + restart the app. This is YOUR command (how you build/run Jethro) — set
-#    JETHRO_DEPLOY_CMD in the crontab or environment, e.g.
-#      JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro'
+#    JETHRO_DEPLOY_CMD in the crontab or environment. Use `scripts/svc.sh deploy app`, which STOPS the
+#    running JVM before it rebuilds the jar. Do NOT run `gradlew :app:bootJar` against a live app: the
+#    Spring Boot loader reads classes lazily from app/build/libs, so rebuilding under the running
+#    process corrupts its classloader (ClassNotFoundException; the UI dies, trading-core limps on).
+#      JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app'
 if [ -n "${JETHRO_DEPLOY_CMD:-}" ]; then
   echo "deploy: $JETHRO_DEPLOY_CMD" >> "$LOG"
   # 9>&- as above: the deploy starts the long-lived app (and may spawn Gradle); neither must inherit

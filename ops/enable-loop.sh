@@ -13,7 +13,8 @@
 # Env:
 #   JETHRO_DEPLOY_CMD   how YOU rebuild + restart Jethro after a verified commit. If empty, changes
 #                       still commit+push but the app won't restart (review-before-live mode).
-#                       Example: './gradlew :app:bootJar -x test && sudo systemctl restart jethro'
+#                       Use: 'scripts/svc.sh deploy app' (stops the JVM, THEN rebuilds + starts — never
+#                       rebuilds under a live app, which corrupts its classloader).
 #   JETHRO_URL          where the live app answers (default http://localhost:8080). The scorer + report
 #                       read /api/attribution and /api/risk here.
 set -euo pipefail
