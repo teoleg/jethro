@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T04:00:12Z",
+    "fees": "307.607886",
+    "gross": "22268.70070249",
+    "net": "4113.91224351",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "22268.70070249",
+      "hedgePnl": "-297.51284511",
+      "netExposure": "4113.91224351",
+      "realizedPnl": "-29.58469793",
+      "strategyAlpha": "311.84140091",
+      "totalFees": "307.607886",
+      "totalPnl": "14.32855580",
+      "unrealizedPnl": "43.91325373"
+    },
+    "total_pnl": "14.32855580"
+  },
+  "before": {
+    "at": "2026-07-27T03:50:48Z",
+    "gross": "32405.96928264",
+    "net": "2388.94391736",
+    "total_pnl": "-54.80730945"
+  },
+  "commit": "e49586f9225cbcb787cf8183a0e22e3f646a63e5",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-10137.26858015",
+    "net": "1724.96832615",
+    "total_pnl": "69.13586525"
+  },
+  "note": "PnL up, exposure not up; risk-adj (PnL/$1 gross) improved -0.00169\u21920.00064",
+  "revert": false,
+  "scoredAt": "2026-07-27T04:00:12Z",
+  "summary": "each continuous forecast source is rescaled to the scale its own readings are measured to have, so the \u00b120 cap stops standing in for the forecast on a third of the cross-section (ADR-0092)",
+  "verdict": "\u2705 GOOD"
+}
