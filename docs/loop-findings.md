@@ -786,3 +786,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   at the firm level for `$1,378` of gross and ~0 net. It nets `+92.22` and costs about a dollar a cycle,
   so it was logged rather than chased; the fix when it is worth doing is netting the hedge target
   against the proxy the firm holds ANYWHERE, not just in the hedge book.
+
+## 2026-07-27 — the no-trade band could never bind (ADR-0094)
+
+- Situation: fourth consecutive up run — PnL `67.76` (`+26.67` window, `+200.52` over three), gross
+  `26,197.73` (`+3,162.22` window, `-28,806.42` over three), net `3,527.47`, VaR95 `216.31`, breaker far.
+  The single EXPOSURE RISING flag is ADR-0093's, which scored ❌ BAD and was auto-reverted — so the
+  culprit was already gone and no de-risk override applied. **Attribution: I claimed credit for none of
+  the window's PnL.** ADR-0093 re-weighted every source, so every name was touched and there is no
+  untouched control group to read the market off; the `+26.67` cannot be split from the numbers alone and
+  I said so rather than guess. Only the exposure half is separable, and it is the change's.
+- **The finding.** The ADR-0055 no-trade band is `|target| × bufferFraction` compared against the gap TO
+  the target — and ADR-0080 partial adjustment deliberately never takes the desk to its target, so the
+  gap is ~0.9 of the target every cycle and the comparison has exactly one answer. **It has never
+  suppressed one order.** The tell was one line of arithmetic over `fusion_targets`: `deltaQty / (target −
+  current) = 0.032784` on ALL thirteen planned names — the derived rate to seven digits — while the desk
+  held 5–30% of its own target (AAPL −7 against −142, JNJ 47 against 260, GOOG 38 against 131).
+- **Rule: a control is dead until you have seen it FIRE.** Check the bind RATE of every gate, band and
+  veto, not just its configured value — the sibling of ADR-0092's "check the clip rate of every bounded
+  quantity". `buffer-fraction=0.5` reads like a deliberately wide low-churn band and was cited as the
+  reason the policy is cost-aware; it was inert for every cycle this desk has ever run.
+- **Rule 2: match the policy to the COST STRUCTURE you actually pay.** The fee here is a fixed fraction of
+  notional and slippage is quoted in bps, so total cost is a function of QUANTITY traded, not order count
+  — suppressing small orders saves nothing, only suppressing the target's oscillation does. Under
+  proportional costs the optimal policy is a no-trade REGION traded at its boundary (Constantinides 1986;
+  Davis–Norman 1990); Gârleanu–Pedersen's smooth partial adjustment, which this desk implements, is the
+  QUADRATIC-cost solution. The desk had the wrong prescription for its own cost.
+- **Rule 3: when a book holds a small lagging fraction of its own target, the cost is 100% and the edge is
+  that fraction.** `ALPHA` paid `268.61` of fees against `~283` of gross alpha — 95% of the gross — while
+  never reaching the risk it decided to take. Before blaming the signal, check `currentQty/targetQty`.
+  `HEDGE -323.33` and `MACRO +376.99` are both realised history and both flat now; only ALPHA trades.
+- Expected next: turnover and the ALPHA fee line fall materially with gross roughly unchanged (the aim
+  path IS the position the old policy converged to, so exposure is unchanged by construction). If gross
+  falls and PnL does not improve, the buffer is too WIDE and the next lever is its width. If turnover does
+  NOT fall, the suspect is the target's own oscillation — the reversion sensor's span — not the execution
+  policy, and that is the next lever rather than a re-attempt here.
+- Do NOT re-attempt: source-weighting (ADR-0087 weight floor, ADR-0093 measured-edge weights) — reverted
+  twice now. Trend and momentum still measure significantly NEGATIVE (`-9.69`/`-4.69` bps at 3600s, hit
+  rates 0.23/0.31 on n=299/69) at the 0.25 weight floor against reversion's `+12.42` bps at weight 3.0;
+  that asymmetry is real but the weight lever is burned, so any future attempt must come at it from a
+  different direction (e.g. horizon selection or dropping a source outright, not re-weighting it).

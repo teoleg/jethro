@@ -93,6 +93,8 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.risk-cut.vol-span:120}") int riskCutVolSpan,
                                     @Value("${jethro.fusion.stream-covariance.enabled:true}") boolean streamCovEnabled,
                                     @Value("${jethro.fusion.stream-covariance.span:120}") int streamCovSpan,
+                                    @Value("${jethro.fusion.position-buffer.enabled:true}") boolean positionBufferEnabled,
+                                    @Value("${jethro.fusion.position-buffer.fraction:0.10}") double positionBufferFraction,
                                     @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
@@ -185,7 +187,15 @@ public class FusionConfig {
                 // carries one per-name budget for every name of what may be a single bet. Measured
                 // here on the mark stream instead, the same series ADR-0086's σ already had to fall
                 // back to for the same reason. Disabled ⇒ null and the book is byte-identical.
-                streamCovEnabled ? new StreamCovariance(new StreamCovariance.Params(streamCovSpan)) : null);
+                streamCovEnabled ? new StreamCovariance(new StreamCovariance.Params(streamCovSpan)) : null,
+                // ADR-0094: the no-trade region the ADR-0055 band was meant to be. That band is a
+                // fraction of the TARGET compared against the gap to the target, and under ADR-0080
+                // partial adjustment the desk never approaches its target, so the comparison has one
+                // answer and every name traded every cycle. Buffer the AIM instead — the intended
+                // position the partial-adjustment path converges to — at a fraction of the name's
+                // average position, and trade only to the buffer's edge. Disabled ⇒ null and the
+                // deltas are exactly the ADR-0080 ones.
+                positionBufferEnabled ? new PositionBuffer(positionBufferFraction) : null);
         lifecycle.start();
         return lifecycle;
     }

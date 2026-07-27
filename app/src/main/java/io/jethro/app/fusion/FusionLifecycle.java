@@ -39,10 +39,11 @@ public final class FusionLifecycle implements AutoCloseable {
                              int volBudgetNames, double volBudgetDispersion, double volBudgetLeverCap,
                              List<TrailingRiskCut.Cut> riskCuts, int riskCutStoppedNames,
                              int streamVolMeasuredNames, String covarianceBasis,
-                             Map<String, ForecastScalars.Measurement> forecastScalars) {
+                             Map<String, ForecastScalars.Measurement> forecastScalars,
+                             Map<String, BigDecimal> aims, int insideBuffer) {
         static TargetBook empty() {
             return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0, 0, 1.0, 1.0,
-                    List.of(), 0, 0, Basis.NONE_NAME, Map.of());
+                    List.of(), 0, 0, Basis.NONE_NAME, Map.of(), Map.of(), 0);
         }
     }
 
@@ -91,6 +92,8 @@ public final class FusionLifecycle implements AutoCloseable {
     private final StreamCovariance streamCov;
     /** Instruments already in the ADR-0089 joint seed — touched only from the scheduled tick thread. */
     private final java.util.Set<String> covSeeded = new java.util.HashSet<>();
+    /** ADR-0094: the no-trade region around the aim — null ⇒ not wired, deltas are the ADR-0080 ones. */
+    private final PositionBuffer positionBuffer;
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -136,6 +139,24 @@ public final class FusionLifecycle implements AutoCloseable {
                            double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
                            SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
                            StreamCovariance streamCov) {
+        this(registry, priceFor, multiplierFor, positionsSupplier, heldSupplier, weightsSupplier, params,
+                routeOrders, executor, scheduler, intervalSeconds, minForecastToRoute, edgeGate,
+                covariance, baseHorizonSeconds, volBudgetWinsorPct, streamVol, riskCut, markHistory,
+                markTimeFor, streamCov, null);
+    }
+
+    public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
+                           Function<String, BigDecimal> multiplierFor,
+                           Supplier<Map<String, BigDecimal>> positionsSupplier,
+                           Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
+                           FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
+                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
+                           Supplier<EdgeGate.Decision> edgeGate,
+                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
+                           double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
+                           SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
+                           StreamCovariance streamCov, PositionBuffer positionBuffer) {
+        this.positionBuffer = positionBuffer;
         this.streamCov = streamCov;
         this.streamVol = streamVol;
         this.riskCut = riskCut;
@@ -250,12 +271,21 @@ public final class FusionLifecycle implements AutoCloseable {
             long horizon = gate != null && gate.horizonSeconds() > 0 ? gate.horizonSeconds() : baseHorizonSeconds;
             var cut = applyRiskCut(targets, now, horizon, cycleParams);
             targets = cut.targets();
+            // ADR-0094: the no-trade region, applied LAST and against the AIM rather than the target.
+            // Everything above decides where the desk means to be; this decides whether the difference
+            // between that and where it is is worth paying spread for. It runs after the risk cut so a
+            // flat target reaches it as a flat AIM and is still worked in full, and it re-applies the
+            // ADR-0064 gate itself because it re-derives the delta rather than clamping the old one.
+            var buffered = positionBuffer == null
+                    ? new PositionBuffer.Result(targets, Map.of(), 0, targets.size())
+                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate());
+            targets = buffered.targets();
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
                     normalised.multiplier(), normalised.coveredNames(),
                     budgeted.coveredNames(), budgeted.dispersion(), budgeted.leverCap(),
                     cut.cuts(), cut.stoppedNames(),
                     streamVol == null ? 0 : streamVol.measuredNames(), basis.name(),
-                    registry.scalarSnapshot());
+                    registry.scalarSnapshot(), buffered.aims(), buffered.insideBuffer());
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {
