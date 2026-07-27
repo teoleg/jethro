@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T10:30:12Z",
+    "fees": "437.715279",
+    "gross": "27640.95601793",
+    "net": "1804.34702393",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "27640.95601793",
+      "hedgePnl": "-650.16270732",
+      "netExposure": "1804.34702393",
+      "realizedPnl": "809.28548243",
+      "strategyAlpha": "1464.52320056",
+      "totalFees": "437.715279",
+      "totalPnl": "814.36049324",
+      "unrealizedPnl": "5.07501081"
+    },
+    "total_pnl": "814.36049324"
+  },
+  "before": {
+    "at": "2026-07-27T10:19:41Z",
+    "gross": "819.54318000",
+    "net": "819.54318000",
+    "total_pnl": "801.61985288"
+  },
+  "commit": "db65e8adb15dcfa0b915dbd76b72fb8bbd80d3ef",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "26821.41283793",
+    "net": "984.80384393",
+    "total_pnl": "12.74064036"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj (PnL/$1 gross) worsened 0.97813\u21920.02946",
+  "revert": true,
+  "scoredAt": "2026-07-27T10:30:12Z",
+  "summary": "the no-trade region is tested against the gap to the target \u2014 the position its own width derivation is about \u2014 instead of against the ADR-0080 lag, so the desk can accumulate toward a view again and a sign flip is no longer an unbuffered market dump (ADR-0103)",
+  "verdict": "\u274c BAD"
+}
