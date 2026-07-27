@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T18:00:07Z",
+    "fees": "471.206907",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "-3070.85707499",
+      "netExposure": "0.00000000",
+      "realizedPnl": "5725.57973408",
+      "strategyAlpha": "8796.43680907",
+      "totalFees": "471.206907",
+      "totalPnl": "5725.57973408",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "5725.57973408"
+  },
+  "before": {
+    "at": "2026-07-27T16:19:03Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "5725.57973408"
+  },
+  "commit": "905b34324bf47a9d7fa5e47b76f274213c4038d8",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-27T18:00:07Z",
+  "summary": "an observation whose realised move reaches the desk's own corporate-action/bad-print threshold for that instrument's asset class is no longer counted as evidence of a source's expectancy, so one impossible price can no longer set the standard error that gates the whole book (ADR-0109)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
