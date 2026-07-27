@@ -1,0 +1,20 @@
+{
+  "commit": "cdef5f16099302830592f418207a6a33cfc4b02f",
+  "fees": "469.038362",
+  "gross_exposure": "15545.04759420",
+  "net_exposure": "3137.22169180",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "15545.04759420",
+    "hedgePnl": "-717.38097569",
+    "netExposure": "3137.22169180",
+    "realizedPnl": "932.76620133",
+    "strategyAlpha": "1644.42564428",
+    "totalFees": "469.038362",
+    "totalPnl": "927.04466859",
+    "unrealizedPnl": "-5.72153274"
+  },
+  "summary": "the desk's full-speed unbuffered exit is keyed on the planner's target being flat \u2014 how a risk control actually orders an exit \u2014 instead of on the aim reading zero, and the part of a gap that crossed flat in one step is worked at the derived partial-adjustment rate, so a mean-reverting forecast crossing the held position is a rebalance again rather than a market liquidation of the whole book (ADR-0107)",
+  "total_pnl": "927.04466859",
+  "ts": "2026-07-27T12:18:37Z"
+}
