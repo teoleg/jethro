@@ -61,6 +61,7 @@ EMBED_MODEL="${EMBED_MODEL:-nomic-embed-text}" # RAG embeddings (~275MB); the ch
 export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-5m}"
 AUTOEXEC="${AUTOEXEC:-on}"   # on = strategy auto-submits SIMULATED orders (ADR-0019)
 AUTONOMY="${AUTONOMY:-on}"   # on = LLM hypotheses auto-execute within the risk envelope (ADR-0022)
+FACTOR_TREND="${FACTOR_TREND:-off}"  # on = factor-level vol-gated trend follower is THE live strategy (ADR-0070)
 PROVIDER="${PROVIDER:-yahoo}"  # sim | yahoo (delayed, ADR-0023) | finnhub (real-time WS, ADR-0024)
 FINNHUB="${FINNHUB:-}"         # Finnhub API token (free at finnhub.io); needed for PROVIDER=finnhub
 
@@ -128,6 +129,10 @@ fi
 if [ "$AUTONOMY" = "on" ]; then
   echo "==> BOUNDED AUTONOMY ON: LLM hypotheses inside the risk envelope auto-execute as SIMULATED orders (ADR-0022)"
   EXTRA_ARGS+=(--jethro.hypothesis.autonomy.enabled=true)
+fi
+if [ "$FACTOR_TREND" = "on" ]; then
+  echo "==> FACTOR-TREND ON (ADR-0070): the factor-level vol-gated trend follower is THE live strategy"
+  EXTRA_ARGS+=(--jethro.strategy.factor-trend.enabled=true)
 fi
 EXTRA_ARGS+=(--jethro.trading.provider="$PROVIDER")
 # Sim time compression: wall-seconds per simulated trading day. Unset = app default (23400 =
