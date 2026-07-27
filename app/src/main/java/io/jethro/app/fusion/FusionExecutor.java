@@ -112,7 +112,7 @@ public final class FusionExecutor {
             if (qty.signum() == 0) {
                 return Result.vetoed(instrument, "sub-unit delta — nothing to trade");
             }
-            if (!riskReducing && !mayOpen(instrument)) {
+            if (!riskReducing && !backtestSupported(instrument)) {
                 return Result.vetoed(instrument, "not backtest-supported (ADR-0049) — no tradable OOS algo");
             }
             String book = props.bookFor(ref.assetClass());
@@ -209,17 +209,8 @@ public final class FusionExecutor {
      * name, or a NO_TRADE verdict (traded in the backtest and lost on both algos) all VETO — fusion must
      * not churn an unvalidated or explicitly-rejected name. (The direct strategy path stays fail-open;
      * fusion is higher-stakes.) No selector wired (persistence off) → the sim-gate + guardrail still protect.
-     *
-     * <p><b>Public because the planner asks the same question (ADR-0096).</b> This is the desk's
-     * ACTIONABILITY predicate: whether risk may be put ON this name at all. The book-level risk controls
-     * — the ADR-0083 volatility budget and the ADR-0079 diversification multiplier — must measure the
-     * book that can actually exist, so the planning loop drops a name that is neither openable nor held
-     * before they ever see it. It calls THIS method rather than restating the rule, because a scope two
-     * code paths decide separately is a scope they will eventually disagree about (the ADR-0091 lesson).
-     * Applying it earlier can never let anything trade that could not trade before: this veto still runs
-     * here, unchanged, on every order.
      */
-    public boolean mayOpen(String instrument) {
+    private boolean backtestSupported(String instrument) {
         StrategySelector s = selector.getIfAvailable();
         if (s == null) {
             return true;

@@ -233,9 +233,6 @@ public final class FusionLifecycle implements AutoCloseable {
             // ADR-0065: plan over the names we HOLD as well as the names we have a view on, so a
             // position never falls out of the target book when its sources go quiet.
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
-            // ADR-0096: plan only the ACTIONABLE book — the names the desk may actually put risk on
-            // (the executor's own ADR-0049 predicate) plus the names it already holds. See #actionable.
-            forecasts = actionable(forecasts, held);
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
                     multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), cycleParams);
             ReturnCovarianceSource dailyCov = covariance == null ? ReturnCovarianceSource.NONE : covariance.get();
@@ -313,63 +310,6 @@ public final class FusionLifecycle implements AutoCloseable {
         } catch (Exception e) {
             log.debug("fusion tick failed: {}", e.toString());
         }
-    }
-
-    /**
-     * The ACTIONABLE forecast set (ADR-0096): the names the desk may actually put risk on, plus the
-     * names it already holds. Everything else is dropped before a target is sized for it.
-     *
-     * <h4>Why the book-level controls need this</h4>
-     * The ADR-0049 selector veto is a HARD, fail-closed gate, but it was asked only at the very last
-     * step — per order, inside {@link FusionExecutor#route} — so every step above it planned, sized and
-     * measured names that could never be entered. That is invisible where it costs nothing (a vetoed
-     * order is never sent) and expensive in the two places that look at the book AS A WHOLE:
-     * <ul>
-     *   <li><b>ADR-0079 diversification multiplier.</b> {@code PDM = min(1, σ_indep/σ_actual)} over the
-     *       planned book, applied uniformly to every covered name. A name that will never be held still
-     *       contributes its {@code eᵢ²Σᵢᵢ} to σ_indep and its cross-terms to σ_actual — so a phantom
-     *       sleeve in a weakly-correlated asset class raises the measured diversification and the names
-     *       that DO trade are scaled up on the strength of risk the desk was never going to take.</li>
-     *   <li><b>ADR-0083 volatility budget.</b> Its reference σ is the harmonic mean over the covered
-     *       names; phantom names move that reference and therefore every real name's share of the
-     *       per-name budget.</li>
-     * </ul>
-     * Both controls exist precisely to stop the name COUNT — which nobody set as a dial — from levering
-     * the owner's per-name {@code unit-notional-usd}. Feeding them a book that is mostly unreachable is
-     * what let that happen anyway. Restricting the set is not a new control and asserts no money number
-     * (invariant 7 / ADR-0016): the same statistics are computed by the same code, over the book that
-     * can actually exist.
-     *
-     * <h4>What it cannot do</h4>
-     * It can never let a name trade that could not trade before — the executor's veto still runs on
-     * every order, unchanged; this only stops the desk from sizing against names that veto will reject.
-     * A HELD name is always kept, whatever the selector says, so ADR-0065's orphan unwind, ADR-0086's
-     * trailing cut and the ADR-0027 breaker all still see (and can still work down) every position the
-     * desk carries — and a held name keeps its own forecast, so nothing about how an existing position
-     * is planned changes. With no order path or no selector wired the predicate is fail-open and the
-     * book is byte-identical to before.
-     */
-    private Map<String, List<Forecast>> actionable(Map<String, List<Forecast>> forecasts,
-                                                   java.util.Set<String> held) {
-        // No order path ⇒ there is no veto to anticipate, so the book is left exactly as planned. The
-        // predicate is the executor's OWN method, never a restatement of its rule.
-        return executor == null ? forecasts : actionable(forecasts, held, executor::mayOpen);
-    }
-
-    /** The arithmetic of the above over a predicate the caller supplies. Order-preserving. */
-    static Map<String, List<Forecast>> actionable(Map<String, List<Forecast>> forecasts,
-                                                  java.util.Set<String> held,
-                                                  java.util.function.Predicate<String> mayOpen) {
-        if (forecasts == null || forecasts.isEmpty() || mayOpen == null) {
-            return forecasts;
-        }
-        Map<String, List<Forecast>> out = new java.util.LinkedHashMap<>(forecasts.size());
-        for (var e : forecasts.entrySet()) {
-            if ((held != null && held.contains(e.getKey())) || mayOpen.test(e.getKey())) {
-                out.put(e.getKey(), e.getValue());
-            }
-        }
-        return out;
     }
 
     /**

@@ -1,76 +1,62 @@
-The desk plans 23 names but only 7 can ever be entered — so the two controls that decide how big the book gets have been measuring a book that is three-quarters fiction, and the real names are sized up on a diversification they will never have (ADR-0096).
+The desk's "no-trade band" has never suppressed a single order and structurally cannot — so the book is re-traded every cycle on every name and pays 95% of its gross alpha in fees; the band now sits around the AIM at a fraction of the average position, where it can actually bind (ADR-0094).
 
 ## Situation — read off the live endpoints; every figure below is quoted, none computed here
 
-**1. Money.** Total PnL `$216.91` on `/api/risk` `.total`. The report's SITUATION header puts the
-window at `+32.13` and the last three runs at `+100.81`; `run-status.json` has `on_track` true,
-`pnl_growth_pct` far ahead of the 1% target, `underwater` and `stale` both false. The book is **not
-bleeding** and the numerator is doing fine.
+**1. Money.** Total PnL is **up**, three runs running: `$67.76` now, `+$26.67` on the window and
+`+$200.52` across the last three. `pnl_growth_pct` is far ahead of the 1% target and `on_track` is true.
+The book is **not bleeding**.
 
-**2. Risk — this is the problem.** Gross exposure `$29,590.68` against net `$307.81` on the first read
-of this cycle and `$40,891.67` against `−$1,577.16` on a read eight minutes later; `run-status` had
-`19,038.18` at 05:50. The header flags **EXPOSURE RISING** at `+11,094.71` on the window. VaR95
-`$290.71` / ES95 `$415.54`; the firm drawdown breaker is `halted: false` and nowhere near tripping.
-So: PnL rising, exposure rising much faster. Not a danger state — but the ratio the owner is measured
-on is deteriorating every run, and the ramp is structural rather than a market move.
+**2. Risk.** Gross exposure `$26,197.73` against net `$3,527.47` — **up `+$3,162.22` this window**, but
+**down `-$28,806.42` over three**. VaR95 `$216.31` / ES95 `$279.14` on `$26,183.41` covered; the firm
+drawdown breaker is not tripped and is nowhere near it. Regime `CALM`, trend `CHOP`.
 
-**3. Cause.** Last cycle's change (`8aea7d1b4`, the hedge measuring its own effectiveness, ADR-0095)
-scored **❌ BAD** and the scorer auto-reverted it before I started, so no de-risk override applies and
-I have not re-attempted that lever.
+**3. Cause — the culprit is named and already gone.** Last cycle's change (`e33e9479c`, fusion weight =
+shrunk measured edge, ADR-0093) scored **❌ BAD** and the scorer auto-reverted it (`f73e297`). Its
+scored row is exactly the exposure rise the situation header flags: gross `$23,039.67 → $26,198.44` and
+net `$647.79 → $3,525.84` for a PnL move of `+$22.73`. So the one danger flag this cycle is that change's
+doing and is already backed out; I have not re-attempted that lever and will not.
 
-**4. Danger?** No. PnL is up, the breaker is far, VaR is a small fraction of gross. The cycle was free
-to go at a mechanism — and the mechanism is the denominator.
+**4. Danger state?** No. PnL rising, breaker far, VaR a fraction of gross, and the exposure rise is
+attributable to a change that has been reverted. No de-risk override — this cycle was free to go at a
+mechanism.
 
-**5. Order post-mortem.** `/api/orders/day`: 100 orders over 24 minutes, 86 FILLED, 14 CANCELLED (all
-of them the ADR-0084 re-plan sweep, which is working as designed). Every ALPHA order is one of **five**
-names — AAPL, GOOG, JNJ, JPM, MSFT — plus the hedge's ES/NQ. Meanwhile `/api/fusion/targets` publishes
-`instruments: 23`. **Eighteen planned names have never produced an order.** Not one.
+**7. Change vs market, honestly.** I claim credit for nothing this window. ADR-0093 re-weighted every
+source, so it touched every name in the book — there is no untouched control group to read the market off,
+and the `+$26.67` cannot be split from the numbers alone. I say that rather than guess a cause. The
+exposure half *is* separable and *is* the change's: it moved net five-fold on a re-weighting that
+re-pointed the cross-section, and that is what the ❌ verdict priced.
 
-**7. Change vs market, honestly.** I claim and blame nothing for the PnL move. ADR-0095 touched only
-the hedge, yet the scored exposure rise shows up in ALPHA as well, whose ramp predates it and continued
-after the revert — so the exposure leg cannot be attributed to that change alone from these numbers,
-and I am not going to guess a split. The ramp I am acting on is visible independently of it, in the
-target book itself.
+## Diagnosis — the mechanism, from the order flow
 
-## Diagnosis — the mechanism
+`/api/attribution` is unambiguous about where the money goes: `ALPHA` shows `$268.61` of fees against a
+total of `$14.10`, so gross alpha before cost was ~`$283` and **the fee line is 95% of it**. The firm
+total is what survives. `HEDGE`'s `-$323.33` is realised history from cycles already fixed by ADR-0091 —
+it is holding on target now — and `MACRO`'s `+$376.99` is realised and flat. The only thing trading is
+`ALPHA`, on five equities, to a wash.
 
-`/api/ops/jvm` says `selector: measured 17, tradable 7`. The ADR-0049 OOS selector permits risk on
-seven names; the planner plans twenty-three. The sixteen it cannot enter — AMZN, NVDA, TSLA, GS, BRK.B,
-ORCL, NFLX, the three FX crosses and the ZB/ZN/ZT/ZF/ES/NQ sleeve — get a target and a delta every
-thirty seconds and get vetoed every thirty seconds, because that veto is asked **per order, at the last
-step, inside `FusionExecutor.route`**. Costless in fees, and therefore invisible for nine cycles.
-
-It is not costless in **sizing**, because two controls aggregate over exactly that set. ADR-0079's
-`PDM = min(1, σ_indep/σ_actual)` is computed over the planned book and applied **uniformly to every
-covered name** — a phantom name still contributes `eᵢ²Σᵢᵢ` to `σ_indep` while contributing little to
-`σ_actual`, so a phantom sleeve in a weakly correlated asset class *raises* the measured
-diversification and the names that do trade are scaled up on risk the desk was never going to take.
-Live: `portfolioRiskMultiplier: 0.487` over `covarianceCoveredNames: 23`, with FX and futures carrying
-roughly half the planned notional. ADR-0083's volatility budget has the same scope error in its
-harmonic-mean reference σ (`volBudgetNames: 23`). Both controls exist for one purpose — to stop the
-**name count**, which nobody set as a dial, from levering Oleg's per-name `unit-notional-usd` — and both
-have been fed a book that is three-quarters unreachable.
-
-The confirming tell costs nothing and is sitting in the payload: the ADR-0094 aims have wound up on the
-unreachable names until they sit on the **opposite side of zero from their own target** — `GS +103.02`
-against a target of `−87.51`, `BRK.B +49.57` against `−150.05`. Integral windup on names that can never
-fill.
+Why: the ADR-0055 no-trade band is `|target| × 0.5` compared against the gap **to the target**, and
+ADR-0080 partial adjustment deliberately never takes the desk to its target. So the gap is ~0.9 of the
+target every cycle and the band has one answer. `fusion_targets` proves it — **all thirteen** planned
+names with a non-zero gap traded at exactly the derived rate `0.032784`, not one suppressed, while the
+desk held **5–30%** of its own target (AAPL −7 against −142, JNJ 47 against 260, GOOG 38 against 131).
+`recent_orders` is the same fact in the time domain: AAPL bought for three cycles then sold for twelve
+straight, JNJ round-tripped BUY→SELL→BUY inside eight minutes. The desk pays a continuous proportional
+cost to hold a small, lagging fraction of the risk it decided to take.
 
 ## Change
 
-`FusionLifecycle.actionable` (ADR-0096, Proposed, same commit): filter the fresh forecast set through
-`FusionExecutor.mayOpen` — the executor's **own** ADR-0049 predicate, called as a method reference and
-never restated, because the ADR-0091 defect was two code paths deciding one scope separately — unioned
-with the held set, before `FusionPlanner.plan` and therefore before either book-level control measures
-anything. It can never let a name trade that could not trade before: the executor's veto still runs
-unchanged on every order. A held name is always kept whatever the selector says and keeps its own
-forecast, so the orphan unwind, the trailing cut and the breaker still see every position. No new dial,
-no new formula, no money number — the same statistics over a truthful set of names. Worked example
-pinned as a test: two perfectly correlated tradable names plus one uncorrelated phantom move PDM from
-`1/√2` to `√0.6`, sizing the names that carry all the risk 9.54% larger. `./gradlew -Pci test` green.
+`PositionBuffer` (ADR-0094, Proposed, same commit): trade toward the **aim** — the ADR-0080 exponential
+path itself — and only when the held position has drifted more than a buffer away from it, then only back
+to the buffer's near edge. Exposure is unchanged by construction (the aim path *is* the position the old
+policy converged to); what stops is buying and selling the last stretch every thirty seconds. Buffer width
+is Carver's published 10% of the average position, and the average position is derived per name from the
+cycle's own arithmetic — no money number authored, and Oleg's `buffer-fraction=0.5` left exactly as set.
+A flat target is never buffered, so every "get out" control (ADR-0086 cut, ADR-0065 unwind, the breaker)
+works in full as before; a shut edge gate clamps reduce-only and re-seeds the aim so intent cannot pile up
+behind it. `./gradlew -Pci test` green.
 
-**What I expect next run:** gross stops ramping and falls, with PnL roughly on its trend. The two
-effects do **not** point the same way — removing the low-σ futures raises ADR-0083's harmonic reference
-and nudges the equity budgets up, partly offsetting the PDM reduction — so this is an expectation, not
-an identity. If gross rises anyway, this is the wrong lever and should be reverted rather than tuned,
-and the next suspect is the per-name budget itself rather than the set it is measured over.
+**What I expect to see next run:** turnover and the fee line fall materially on `ALPHA` with gross
+exposure roughly where it is. If gross falls *and* PnL does not improve, the buffer is too wide and the
+next lever is its width, not another mechanism. If turnover does **not** fall, my reading of the aim path
+is wrong and the suspect becomes the target's own oscillation — the reversion sensor's span — rather than
+the execution policy.
