@@ -58,6 +58,12 @@ import java.util.Map;
  * guarantee: a measured width is used only where it is WIDER than the convention, so it can only ever
  * remove turnover, never add it.
  *
+ * <p><b>And the intent is bounded by the current target (ADR-0102).</b> The aim path is an EWMA of the
+ * target sequence, so it is a convex combination of targets the desk held in the PAST — which lets it
+ * outgrow, or end up on the opposite side of, the target it holds NOW. See {@link #withinTarget}: the
+ * aim is clamped into the closed interval between flat and this cycle's target, which can only ever
+ * shrink intent or put it back on the side the forecast is on.
+ *
  * <p><b>What it can never do.</b> It never widens a trade the desk was not already going to make in the
  * same direction on the same aim path, it never moves the aim past the target, and it never buffers an
  * exit: a flat target (the ADR-0086 chandelier cut, the ADR-0065 orphan unwind, the ADR-0027 breaker
@@ -159,8 +165,62 @@ public final class PositionBuffer {
         }
         BigDecimal previous = aims.get(instrument);
         BigDecimal from = previous == null ? held : previous;
-        return from.add(target.subtract(from).multiply(BigDecimal.valueOf(rate)))
+        BigDecimal stepped = from.add(target.subtract(from).multiply(BigDecimal.valueOf(rate)))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+        return withinTarget(stepped, target);
+    }
+
+    /**
+     * ADR-0102 — the intent, held to the positions this cycle's own target can justify: the closed
+     * interval between FLAT and the target.
+     *
+     * <pre>
+     *   aim' = min(max(aim, min(0, target)), max(0, target))
+     * </pre>
+     *
+     * <h3>Why the path needs it</h3>
+     * {@link #nextAim} is an exponential moving average of the target sequence: unrolling it gives
+     * {@code aimₜ = a·Σₖ (1−a)ᵏ·Tₜ₋ₖ} (plus the decaying seed), whose weights are non-negative and sum
+     * to one. So the aim is a convex combination of PAST targets — it lies in the hull of the targets
+     * the desk has HELD, which is not the hull of the target it holds NOW. Two things follow whenever
+     * the target moves faster than {@code 1/a}, and this desk's only measured source is a
+     * mean-reverting one that does exactly that:
+     * <ul>
+     *   <li><b>Overshoot.</b> When the target shrinks, the aim is left larger than it — the desk
+     *       intends, and trades toward, more risk in the name than its current evidence asks for.</li>
+     *   <li><b>Inversion.</b> When the target changes SIDE, the aim spends the whole decay on the old
+     *       side — the desk intends, and trades toward, a position its current evidence says is the
+     *       wrong way round, and pays spread to get there.</li>
+     * </ul>
+     * Neither is what partial adjustment means. Gârleanu &amp; Pedersen's optimal policy trades a
+     * fraction of the way to an aim that is itself a weighted average of the CURRENT and EXPECTED
+     * FUTURE targets (<i>JF</i> 68(6), 2013, §III) — every element of which is a position the model
+     * wants now or expects to want. Averaging over a realised past instead admits neither. The
+     * clamp restores the property the policy assumes without touching the rate: approach the target
+     * slowly, but never intend past it and never intend against it.
+     *
+     * <h3>What it can never do</h3>
+     * {@code |aim'| ≤ |aim|} and {@code sgn(aim') ∈ {0, sgn(target)}}, both by construction — so this
+     * can only ever shrink the desk's intent or move it onto the side its own forecast is on. It is
+     * strictly one-way: it never opens a position, never enlarges one, never flips one onto a side the
+     * target does not name, and never widens or narrows a band. A flat target is untouched (that branch
+     * returns before this one), so the ADR-0086 cut, the ADR-0065 unwind and the deterministic floor
+     * above them keep their exact semantics. And when the aim already lies between flat and the target
+     * — the ordinary case, every cycle the target is stable — the path is byte-identical to ADR-0094's.
+     *
+     * <p>No number is introduced: the bound is the target the planner already computed. Exact decimal
+     * throughout (invariant 1); nothing here prices or sizes anything (invariant 7 / ADR-0016).
+     */
+    static BigDecimal withinTarget(BigDecimal aim, BigDecimal target) {
+        if (aim.signum() == 0 || target.signum() == 0) {
+            return aim;
+        }
+        if (aim.signum() != target.signum()) {
+            return BigDecimal.ZERO.setScale(QTY_SCALE); // intent never opposes the current view
+        }
+        return aim.abs().compareTo(target.abs()) > 0
+                ? target.setScale(QTY_SCALE, RoundingMode.HALF_EVEN) // never intend past the target
+                : aim;
     }
 
     /**

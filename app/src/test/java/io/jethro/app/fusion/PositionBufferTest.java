@@ -125,9 +125,90 @@ class PositionBufferTest {
         // reduces |position|, so the closed gate must let it through rather than trap the desk short.
         buffer.apply(List.of(target("AAPL", -1.0, "-14.766000", "-20")), closed, RATE);
         var result = buffer.apply(List.of(target("AAPL", -1.0, "-14.766000", "-120")), closed, RATE);
-        // aim −20.000000, gap +100.171591, band 14.766000 ⇒ +85.405591, and reduce-only leaves it whole
-        // because it never crosses through flat.
-        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("85.405591"));
+        // The EWMA step is −20 + a(−14.766000 + 20) = −19.828409, which overshoots the target it is
+        // decaying toward; ADR-0102 holds the intent at −14.766000. gap = −14.766000 + 120 =
+        // +105.234000, band 14.766000 ⇒ +90.468000, and reduce-only leaves it whole because it never
+        // crosses through flat. The clamp BUYS BACK more of the short, never less: strictly one-way.
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("90.468000"));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0102 — the aim is a convex combination of PAST targets, so it can outgrow or invert the
+    // CURRENT one. Clamp it into the closed interval between flat and this cycle's target.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    void anIntentThatOutgrewItsTargetIsHeldAtTheTarget() {
+        // The live EURUSD plan this was diagnosed from: aim −19268.293125 against a target that had
+        // shrunk to −13006.790342. The desk intended 6261.502783 units more short than its own
+        // forecast asked for — at a 1.084448 mark, $6,789.15 of notional nothing had planned.
+        assertThat(PositionBuffer.withinTarget(new BigDecimal("-19268.293125"),
+                new BigDecimal("-13006.790342")))
+                .isEqualByComparingTo(new BigDecimal("-13006.790342"));
+        // Under the target it is the desk's own path and is untouched.
+        assertThat(PositionBuffer.withinTarget(new BigDecimal("-31.328741"),
+                new BigDecimal("-104.157858")))
+                .isEqualByComparingTo(new BigDecimal("-31.328741"));
+        // At the target exactly, likewise — the bound is closed.
+        assertThat(PositionBuffer.withinTarget(new BigDecimal("200.000000"), new BigDecimal("200")))
+                .isEqualByComparingTo(new BigDecimal("200.000000"));
+    }
+
+    @Test
+    void anIntentOnTheWrongSideOfTheViewIsHeldAtFlat() {
+        // The live JNJ plan: intent +8.043404 while the forecast (−12.64) targeted −219.420787. The
+        // desk was buying toward a long in the name its own evidence said to be short.
+        assertThat(PositionBuffer.withinTarget(new BigDecimal("8.043404"),
+                new BigDecimal("-219.420787")))
+                .isEqualByComparingTo("0");
+        // And the mirror case.
+        assertThat(PositionBuffer.withinTarget(new BigDecimal("-11494.134880"),
+                new BigDecimal("17285.020487")))
+                .isEqualByComparingTo("0");
+    }
+
+    @Test
+    void theClampIsStrictlyOneWayOnEveryBranch() {
+        // |aim'| <= |aim| and sgn(aim') in {0, sgn(target)} — the two properties that make this
+        // incapable of opening, enlarging or side-flipping a position.
+        for (String a : List.of("-19268.293125", "-31.328741", "8.043404", "0", "200.000000")) {
+            for (String t : List.of("-219.420787", "17285.020487", "0", "-13006.790342")) {
+                BigDecimal aim = new BigDecimal(a);
+                BigDecimal tgt = new BigDecimal(t);
+                BigDecimal out = PositionBuffer.withinTarget(aim, tgt);
+                assertThat(out.abs()).isLessThanOrEqualTo(aim.abs());
+                if (out.signum() != 0 && tgt.signum() != 0) {
+                    assertThat(out.signum()).isEqualTo(tgt.signum());
+                }
+            }
+        }
+    }
+
+    @Test
+    void aFlatTargetKeepsItsExitSemanticsExactly() {
+        // The flat-target branch returns before the clamp, so the ADR-0086 cut / ADR-0065 unwind and
+        // the deterministic floor above them are untouched: a flat target still snaps intent to zero.
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        var exit = buffer.apply(List.of(target("AAPL", 0.0, "0", "-47")), null, RATE);
+        assertThat(exit.aims().get("AAPL")).isEqualByComparingTo("0");
+        assertThat(exit.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("47.000000"));
+    }
+
+    @Test
+    void anInvertedIntentIsCutOnceAndThenRebuildsThroughTheBuffer() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        // Long 104 while the target is −219.420787: the first cycle clamps intent to flat and sells
+        // the whole holding (an aim of zero is not buffered), which is the risk-REDUCING half of the
+        // move — it stops at flat and does not build the short at full speed.
+        var cut = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "104")), null, RATE);
+        assertThat(cut.aims().get("JNJ")).isEqualByComparingTo("0");
+        assertThat(cut.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-104.000000"));
+        // Next cycle the path restarts from flat: aim = 0 + a(−219.420787) = −7.193469, against a band
+        // of 219.420787 x 10 / 12.64 x 0.10 = 17.359240 — inside it, so nothing is traded and the
+        // short is rebuilt at the derived rate, not round-tripped.
+        var rebuild = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "0")), null, RATE);
+        assertThat(rebuild.aims().get("JNJ")).isEqualByComparingTo(new BigDecimal("-7.193469"));
+        assertThat(rebuild.targets().get(0).deltaQty()).isEqualByComparingTo("0");
     }
 
     @Test

@@ -1032,3 +1032,44 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   positions living minutes, a 3σ-over-the-holding-horizon stop may be structurally unreachable; (e)
   `turnover_cost_by_name` in the report is STILL erroring, and it is now the aggregate that would grade
   this very decision.
+
+## 2026-07-27 — the aim is an average of PAST targets, so it can invert against the CURRENT one (ADR-0102)
+
+- **Situation.** Healthy, not a de-risk cycle: PnL `−825.93 → +747.98` on the day, `on_track` true,
+  breaker clear, firm gross ~3% of the declared `1,500,000` limit. Last cycle's ADR-0101 scored
+  ⚠️ MIXED with risk-adj `0.01502 → 0.01622` and was not the culprit for anything.
+- **Attribution honesty.** The window's `+83.46` is on positions ADR-0101 never touched — it earns the
+  turnover reduction and none of the PnL. The report's `EXPOSURE RISING` flag had already reversed by
+  the time I read `/api/risk` live (`46,558.92 → 38,852.99`), which is itself the finding below: gross
+  swings `14k → 62k → 39k` run to run with nothing anchoring it.
+- **The trigger, found by reading `/api/fusion/targets` NEXT TO `recent_orders`.** The orders were not
+  chasing a wrong signal — they were chasing a wrong *intent*. JNJ: aim `+8.043404`, target
+  `−219.420787`, held `+104`. The firm's largest position was long in the name its own strongest
+  forecast said to be short, and the aim path was walking it further long. EURUSD: aim `−19268.293125`
+  against a target of `−13006.790342`. AUDUSD and GBPUSD were about to *open* inverted from flat.
+- **Rule 1: a recursion's fixed point is not its invariant — unroll it before you trust it.**
+  `aim ← aim + a(T − aim)` unrolls to `a·Σₖ(1−a)ᵏ·Tₜ₋ₖ`: a convex combination of the targets the desk
+  held in the PAST, which is not the hull of the target it holds NOW. Gârleanu & Pedersen's aim is an
+  average of the current and expected FUTURE targets — every element a position the model wants. Ours
+  averaged a realised past, so intent could exceed the target or oppose it. Nobody had checked, because
+  the recursion looks obviously bounded.
+- **Rule 2: when the signal is mean-reverting, every EWMA over it is a lagged inversion machine.** The
+  only source passing the gate is reversion at the 900s rung; it crosses zero repeatedly inside `1/a`.
+  Any control that smooths over that horizon spends much of its time on the wrong side. Check every
+  remaining smoother in the desk against this.
+- **Rule 3: the cheapest good change is one whose one-way property is a theorem, not a hope.**
+  `|aim'| ≤ |aim|` and `sgn(aim') ∈ {0, sgn(T)}` both hold by construction and are asserted as tests, so
+  the clamp cannot open, enlarge or side-flip a position. Contrast ADR-0093/0087/0088/0096, all reverted
+  ❌ BAD because they were *expected* to shrink the book and instead levered it.
+- **Rule 4: bound a quantity by one the system already computed, and you introduce no number.** The
+  clamp's bound is this cycle's own target. No dial, no convention, no `PLACEHOLDER`.
+- **Expected next.** Exposure down, PnL flat-to-up. **If this scores BAD**, doubt the premise that the
+  target is a clean statement of intent at the cycle cadence — do NOT retry the clamp. Open levers, in
+  order: (a) the overlay POSTURE question deferred by both ADR-0098 and ADR-0100 (`HEDGE −625.85`, 15%
+  of firm gross, `equity-rebalance-floor-usd = 0` hedges from the first dollar against no declared
+  appetite); (b) no absolute book-level volatility target — nothing anchors gross, which is why it
+  swings 4×; (c) the frozen MACRO book, seven cycles unchanged around a stranded `0.000029` ES; (d) the
+  ADR-0086 chandelier still shows `riskCuts: []` — and note a TRAILING stop is the wrong shape for a
+  mean-reversion book (it cuts at maximum expected reversion); the honest version is a TIME stop at the
+  measured horizon; (e) `turnover_cost_by_name` in the report is STILL erroring, third cycle running,
+  and it is the aggregate that would grade exactly this decision.
