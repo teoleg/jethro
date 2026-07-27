@@ -1,46 +1,51 @@
-Gave the fusion desk the one risk response its whole thesis rests on and has never had: a position is now cut when it gives back more than its own measured volatility says a live view should (ADR-0086).
+Stopped the desk paying a round trip for a view it never held long enough to be graded on: the fused conviction is now averaged over the same measured horizon the position is held for (ADR-0088).
 
 ## Situation (read from the live endpoints; every number below is quoted, none computed here)
 
-1. **Money.** Total PnL is **higher** than last run — `-823.80` against `-826.06`, a move of **+$2.26**,
-   and the same **+$2.26** across the last three runs. It is the first non-zero move in fifteen cycles.
-   Not bleeding. Still `underwater` and still a hard miss on the +1%/3-iteration target.
-2. **Risk.** Gross exposure went from exactly zero to **$956.98**, net **−$956.98** — one small ES short
-   in MACRO, the only open position on the book; all seven equity lines are flat. `EXPOSURE RISING` is
-   set, but from nothing, and historical VaR95 on it is **$11.04**. The breaker is not halted and is
-   nowhere near. This is not a danger state.
-3. **Cause.** Last cycle's change (ADR-0085, futures sizing in the OOS backtest) scored **❌ BAD** and
-   was auto-reverted. The live numbers say it **worked**: it is the only change in fifteen cycles that
-   produced a trade at all, and the book it opened is **+$2.32** on **$0.136** of fees over three fills
-   (two passive entries at 0.30 and 0.00 bps, one market exit at 0.23 bps). The ❌ is deadband
-   arithmetic, not a loss — off a flat book the exposure deadband is 1% of zero, so any position reads
-   as "exposure up", and a $2.45 profit sits inside the $50 PnL deadband, so it reads as "PnL not up".
-   Any change that ends a flat book is scored BAD unless it earns >$50 in one 30-minute window. **I have
-   not touched the scorer or the ledger — flagging the measurement for Oleg, not adjusting my own grade.**
-4. **Danger.** No. PnL up, one small position, unrealised **−$0.19**, breaker far away.
-5. **Order post-mortem.** The window's only orders are the three MACRO/ES fusion fills. All winners; no
-   losing trigger fired. The `-$895.94` in ALPHA is legacy-path churn from before 20:21 and did not move.
-6. **Attribution — change vs market.** Unusually clean: every equity line is flat with zero unrealised,
-   so the market contributed ~nothing to the firm total this window. **~100% of the move is the direct
-   effect of last cycle's change**, ~0% market. Nothing here is overfitting to a market drift.
+1. **Money.** Total PnL is **higher** than last run — `-792.34` against `-792.49`, `+0.15` — and `+33.72`
+   across the last three runs. `pnl_growth_pct 4.06` against a `1.0` target, so **on track** and not
+   bleeding. Still `underwater`.
+2. **Risk.** This is the problem. Gross exposure went `130.69 → 21,142.84` in one window, net `-1,954.40`.
+   Historical VaR95 on it is `298.78`, the breaker is nowhere near, and parametric VaR reports its whole
+   covered exposure as skipped. So it is not a danger state by any limit — but PnL is flat while exposure
+   rose by two orders of magnitude, and that is the objective (PnL per unit of exposure) moving hard the
+   wrong way. Worse, it is not finished: MSFT's planned target is `220.73` shares against `21.0` held, and
+   the desk is grinding toward it at the derived rate.
+3. **Cause.** Last cycle's change (ADR-0087, removing the source-weight floor) scored **❌ BAD** and was
+   auto-reverted. The verdict is right and the mechanism is the one I flagged when I shipped it: removing
+   the floor uncancelled `reversion` against `trend`, which raised forecast magnitude and therefore the
+   target book. The revert restores the floor, but it does **not** stop the ratchet — at the floored
+   weights MSFT still plans ~185 shares.
+4. **Danger.** Not by the breaker. But "exposure rising into a losing position" is the shape, and it is
+   what I acted on rather than shipping another signal.
+5. **Order post-mortem.** The window's tape is one name: **74 MSFT fills**, running BUY 8 → BUY 4 → BUY 5 →
+   BUY 6 → BUY 2 → BUY 3 → BUY 1 → SELL 16 → SELL 6 → SELL 9 → SELL 2 → SELL 1 → BUY 16 → SELL 4, for a net
+   position change of 21 shares. A sign flip roughly every 3-5 minutes against a **900 s** selected rung.
+   MSFT is the only equity whose measured round trip clears the ADR-0075 cost test, and its realised PnL
+   over the window is negative on ~1.0 bp of fee per leg. The HEDGE book shorted ES against every swing,
+   which is why gross doubled: `MSFT 9,001` long, `ES -8,950` short.
+6. **Change vs market — attribution.** Clean and unflattering to me: every non-MSFT equity line is flat or
+   was only reduced, and the market contributed essentially nothing. The exposure move is **~100% the
+   direct effect of the reverted change plus the ratchet it accelerated**, not a market drift.
 
 ## Diagnosis and what I changed
 
-The desk's real problem is no longer evidence — `reversion` clears the gate at the 900s rung (+8.09 bps,
-184 resolved calls, 8 cohorts, p = 0.0025) — it is that the only place that edge can be expressed is a
-book with **no per-name risk control whatsoever**. Every fusion control asks whether risk may be put ON;
-nothing asks whether a position already held has gone wrong. The legacy path has had a stop since
-ADR-0019; the fusion path, the sole order origin, has none, and the firm breaker is a whole-book halt,
-not a per-name exit. That gap is worst for a mean-reversion view, whose payoff is short optionality — a
-long run of small gains ended by one large loss.
+ADR-0080 reconciled the desk's holding period with the horizon its edge is measured over — for the
+**position**. It said nothing about the **signal**, and its asymmetry (reduce in full immediately, add
+slowly) is what turns that omission into churn: when the forecast flips sign, the gap is
+`|target| + |current|`, which clears the 50% no-trade band trivially, and the reducing leg fires at full
+speed. A sinusoidal view becomes a sawtooth of trades. On this book both sensors are pinned at the ±20
+**cap** on MSFT — `reversion +20`, `trend −20` — so a flip swings the target between the two largest
+positions the sizer can express, with no magnitude information in between.
 
-So this cycle the desk gets a volatility-scaled trailing exit (chandelier): a name is worked flat once
-its mark retraces from the best level seen since the position opened by more than `k ×` its own σ over
-the desk's own derived holding horizon, then stands aside for one horizon. σ had to be measured from the
-**mark stream**, not from daily closes: the daily estimate every other risk control uses covers 3 of 23
-planned names and **none of the names actually held** — the parametric VaR currently reports its entire
-covered exposure as skipped, so a control keyed on it would be silent exactly where risk sits. The rule
-can only ever set a target flat and clamp a delta to a reduction, so it cannot lever the book up, and a
-name with no measured σ is left exactly as planned. One dial, `sigma-multiple = 3.0`, marked PLACEHOLDER
-— the conservative end of the 2.5–3× ATR convention, deliberately reluctant to cut. Deterministic floor
-untouched; worked example pinned as an exact-decimal test; three deferred-register rows filed.
+So the conviction is now averaged over the horizon it is graded on: one EWMA per name on the combined
+forecast at `α = 1 − exp(−Δt/h)`, which is literally `TargetPlanner.adjustmentRateFor` evaluated on the
+signal instead of on the trade, with `h` the rung the evidence picked and `Δt` measured elapsed time. No
+dial and no money number. A constant forecast is its own average, so a real trend sizes exactly as before;
+a ±20 square wave with a 4-minute half-period settles at `20·tanh(240/1800) = 2.65`, under the ADR-0059
+conviction floor of 5.0 that has never once bitten because a saturated forecast never falls below it.
+`|average| ≤ max|forecast|`, so this can only ever ask for a smaller book. Every risk control is
+downstream and untouched: the ADR-0086 cut can still set a target flat, the gate still clamps to
+reduce-only, the guardrail and breaker are the floor and I did not go near them. Worked example pinned as
+an exact test; two deferred-register rows filed — the telemetry still grades the raw sensor call, and the
+sensors' cap saturation is measured but not yet addressed.

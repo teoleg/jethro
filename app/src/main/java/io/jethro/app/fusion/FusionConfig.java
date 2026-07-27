@@ -84,6 +84,7 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.risk-cut.enabled:true}") boolean riskCutEnabled,
                                     @Value("${jethro.fusion.risk-cut.sigma-multiple:3.0}") double riskCutSigmaMultiple,
                                     @Value("${jethro.fusion.risk-cut.vol-span:120}") int riskCutVolSpan,
+                                    @Value("${jethro.fusion.forecast-smoothing.enabled:true}") boolean forecastSmoothing,
                                     @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
@@ -162,7 +163,13 @@ public class FusionConfig {
                 riskCutEnabled ? new StreamVolatility(new StreamVolatility.Params(riskCutVolSpan)) : null,
                 riskCutEnabled ? new TrailingRiskCut(new TrailingRiskCut.Params(riskCutSigmaMultiple)) : null,
                 storedPrices(markHistory),
-                instrument -> markTimeFor(tradingCore, instrument));
+                instrument -> markTimeFor(tradingCore, instrument),
+                // ADR-0088: the signal half of the ADR-0080 identity — the conviction the desk sizes on
+                // is averaged over the SAME measured horizon its position is held for, so a view that
+                // reverses faster than it can be graded cannot drag the book through round trips. No
+                // dial: the time constant is the rung the evidence picked. Disabled ⇒ null and the
+                // planned book is byte-identical to before.
+                forecastSmoothing ? new ForecastSmoother() : null);
         lifecycle.start();
         return lifecycle;
     }
