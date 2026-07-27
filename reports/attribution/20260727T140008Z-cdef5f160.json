@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T14:00:08Z",
+    "fees": "471.206907",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "-3070.85707499",
+      "netExposure": "0.00000000",
+      "realizedPnl": "5725.53700486",
+      "strategyAlpha": "8796.39407985",
+      "totalFees": "471.206907",
+      "totalPnl": "5725.53700486",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "5725.53700486"
+  },
+  "before": {
+    "at": "2026-07-27T12:18:37Z",
+    "gross": "15545.04759420",
+    "net": "3137.22169180",
+    "total_pnl": "927.04466859"
+  },
+  "commit": "cdef5f16099302830592f418207a6a33cfc4b02f",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-15545.04759420",
+    "net": "-3137.22169180",
+    "total_pnl": "4798.49233627"
+  },
+  "note": "PnL up, exposure not up; risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-27T14:00:08Z",
+  "summary": "the desk's full-speed unbuffered exit is keyed on the planner's target being flat \u2014 how a risk control actually orders an exit \u2014 instead of on the aim reading zero, and the part of a gap that crossed flat in one step is worked at the derived partial-adjustment rate, so a mean-reverting forecast crossing the held position is a rebalance again rather than a market liquidation of the whole book (ADR-0107)",
+  "verdict": "\u2705 GOOD"
+}
