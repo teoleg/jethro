@@ -47,6 +47,7 @@ public final class HedgeLifecycle {
     private final String hedgeBook;
     private final long cooldownMillis;
     private final long intervalSeconds;
+    private final HedgeStreamCovariance streamCovariance;
     private final Map<String, Long> lastHedge = new ConcurrentHashMap<>();
     private volatile ScheduledExecutorService scheduler;
 
@@ -56,6 +57,20 @@ public final class HedgeLifecycle {
                           ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
                           ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore,
                           String hedgeBook, long cooldownSeconds, long intervalSeconds) {
+        this(advisor, varService, refs, prices, orderService, haltSwitch, projection, tradingCore,
+                hedgeBook, cooldownSeconds, intervalSeconds, null);
+    }
+
+    /** @param streamCovariance the ADR-0095 mark-stream covariance basis; null = the statistical
+     *                          tier reads only the daily-close series, exactly as before. */
+    public HedgeLifecycle(HedgeAdvisor advisor, ObjectProvider<VarService> varService,
+                          ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
+                          ObjectProvider<OrderService> orderService, ObjectProvider<TradingHaltSwitch> haltSwitch,
+                          ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
+                          ObjectProvider<io.jethro.app.trading.TradingCoreLifecycle> tradingCore,
+                          String hedgeBook, long cooldownSeconds, long intervalSeconds,
+                          HedgeStreamCovariance streamCovariance) {
+        this.streamCovariance = streamCovariance;
         this.advisor = advisor;
         this.varService = varService;
         this.refs = refs;
@@ -120,9 +135,11 @@ public final class HedgeLifecycle {
             java.util.Set<String> quarantined = quarantined();
             Predicate<String> tradable = id -> !quarantined.contains(id);
 
+            Map<String, BigDecimal> exposures = vs.exposuresUsd();
+            observeStream(exposures, isEquity, priceOf);
             HedgeAdvisor.Snapshot snap = advisor.evaluate(
-                    vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf,
-                    held, tradable);
+                    vs.covarianceSnapshot(), streamCovarianceSnapshot(), exposures, isEquity,
+                    priceOf, betaOf, held, tradable);
             long now = System.currentTimeMillis();
             for (HedgeAdvisor.Axis axis : snap.axes()) {
                 if (!axis.hedging() || !axis.hedgeRecommended() || axis.hedgeQuantity() == null
@@ -145,6 +162,35 @@ public final class HedgeLifecycle {
         } catch (Exception e) {
             log.warn("auto-hedge cycle failed: {}", e.getMessage());
         }
+    }
+
+    /**
+     * The ADR-0095 mark-stream covariance as last published — the second statistical basis for the
+     * hedge, and what the read-only panel renders so the UI and the executing cycle can never
+     * disagree about the evidence a proposal was sized on.
+     */
+    public Optional<io.jethro.trading.riskpnl.CovMath.Covariance> streamCovarianceSnapshot() {
+        return streamCovariance == null ? Optional.empty() : streamCovariance.snapshot();
+    }
+
+    /**
+     * Feed one SYNCHRONISED mark snapshot to the stream covariance (ADR-0095). The axis members are
+     * the equity names actually carrying exposure — the ones {@code Var(P&L)} sums over — plus every
+     * proxy candidate, because without the proxy in the same sample there is no {@code Σ[i,F]} to
+     * hedge with. Confined to this scheduler's single thread.
+     */
+    private void observeStream(Map<String, BigDecimal> exposures, Predicate<String> isEquity,
+                               Function<String, Optional<BigDecimal>> priceOf) {
+        if (streamCovariance == null) {
+            return;
+        }
+        java.util.Set<String> universe = new java.util.LinkedHashSet<>(advisor.proxyUniverse());
+        for (var e : exposures.entrySet()) {
+            if (e.getValue() != null && e.getValue().signum() != 0 && isEquity.test(e.getKey())) {
+                universe.add(e.getKey());
+            }
+        }
+        streamCovariance.observe(universe, priceOf);
     }
 
     /** Instruments currently mark-quarantined (possible corporate action / bad print) — never

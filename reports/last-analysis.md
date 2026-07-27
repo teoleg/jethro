@@ -1,62 +1,77 @@
-The desk's "no-trade band" has never suppressed a single order and structurally cannot — so the book is re-traded every cycle on every name and pays 95% of its gross alpha in fees; the band now sits around the AIM at a fraction of the average position, where it can actually bind (ADR-0094).
+The hedge has never once measured whether it hedges anything — it sizes itself from assigned betas, its ρ² reads null, and it is the only book losing money; it now measures its own effectiveness on the mark stream and unwinds when that measurement says no.
 
 ## Situation — read off the live endpoints; every figure below is quoted, none computed here
 
-**1. Money.** Total PnL is **up**, three runs running: `$67.76` now, `+$26.67` on the window and
-`+$200.52` across the last three. `pnl_growth_pct` is far ahead of the 1% target and `on_track` is true.
-The book is **not bleeding**.
+**1. Money.** Total PnL `$187.36`. The report's SITUATION header puts the window at `+26.02` and the
+last three runs at `+146.27`. `run-status.json` reports `on_track` true with `pnl_growth_pct` far ahead
+of the 1% target, and `underwater` / `stale` both false. **The book is not bleeding.**
 
-**2. Risk.** Gross exposure `$26,197.73` against net `$3,527.47` — **up `+$3,162.22` this window**, but
-**down `-$28,806.42` over three**. VaR95 `$216.31` / ES95 `$279.14` on `$26,183.41` covered; the firm
-drawdown breaker is not tripped and is nowhere near it. Regime `CALM`, trend `CHOP`.
+**2. Risk.** Gross exposure `$24,662.35` against net `$4,586.05` — the header flags **EXPOSURE RISING**
+at `+4,030.30` on the window and `+1,626.84` over three. VaR95 `$240.67` / ES95 `$322.81` on
+`$24,648.21` covered; the firm drawdown breaker is `halted: false` and nowhere near tripping. Regime
+`CALM`, trend `CHOP`. Rising exposure against rising PnL is the ⚠️ MIXED shape, not a danger state.
 
-**3. Cause — the culprit is named and already gone.** Last cycle's change (`e33e9479c`, fusion weight =
-shrunk measured edge, ADR-0093) scored **❌ BAD** and the scorer auto-reverted it (`f73e297`). Its
-scored row is exactly the exposure rise the situation header flags: gross `$23,039.67 → $26,198.44` and
-net `$647.79 → $3,525.84` for a PnL move of `+$22.73`. So the one danger flag this cycle is that change's
-doing and is already backed out; I have not re-attempted that lever and will not.
+**3. Cause.** Last cycle's change (the reversion sensor's Donchian window doubled) scored **❌ BAD** and
+the scorer already reverted it — the culprit behind the exposure leg was gone before I started, so no
+de-risk override applies. **4. Danger.** No: PnL is rising, the breaker is far, and the one flag is
+attached to an already-reverted commit.
 
-**4. Danger state?** No. PnL rising, breaker far, VaR a fraction of gross, and the exposure rise is
-attributable to a change that has been reverted. No de-risk override — this cycle was free to go at a
-mechanism.
+**Change vs market — what I can and cannot attribute.** The window's `+26.02` is not separable into
+market and change from these numbers: the reverted commit had re-scaled every planned name, so there is
+no untouched control group to read the market off, and I claim credit for none of it. What *is*
+separable is the hedge, because it is its own book with its own order flow: `HEDGE` sits at
+**`-$382.08`** (`realizedPnl -378.27`, `feesPaid 36.89`) against `ALPHA +$192.45` and `MACRO +$376.99`.
+No loop change has ever touched the hedge advisor, so that line is neither credit nor blame for any
+change scored so far — it is a standing structural drag, and it is roughly the size of both strategy
+books' gains put together.
 
-**7. Change vs market, honestly.** I claim credit for nothing this window. ADR-0093 re-weighted every
-source, so it touched every name in the book — there is no untouched control group to read the market off,
-and the `+$26.67` cannot be split from the numbers alone. I say that rather than guess a cause. The
-exposure half *is* separable and *is* the change's: it moved net five-fold on a re-weighting that
-re-pointed the cross-section, and that is what the ❌ verdict priced.
+## Diagnosis — the mechanism, not the symptom
 
-## Diagnosis — the mechanism, from the order flow
+`/api/hedging` is the tell, and it has been saying the same thing every cycle: `"effectiveness": null`,
+`"grossSigmaUsd": null`, `"tier": "STRUCTURAL"`, rationale `"(assigned betas, no covariance)"`. The
+advisor's statistical tier (ADR-0038) computes the Ederington minimum-variance ratio *and* the measured
+ρ² it refuses to hedge below; the structural tier (ADR-0040) is the history-free floor beneath it,
+`Σβᵢ·Eᵢ` from assigned fundamental betas with effectiveness **asserted**. Two things pin the desk on
+that floor forever:
 
-`/api/attribution` is unambiguous about where the money goes: `ALPHA` shows `$268.61` of fees against a
-total of `$14.10`, so gross alpha before cost was ~`$283` and **the fee line is 95% of it**. The firm
-total is what survives. `HEDGE`'s `-$323.33` is realised history from cycles already fixed by ADR-0091 —
-it is holding on target now — and `MACRO`'s `+$376.99` is realised and flat. The only thing trading is
-`ALPHA`, on five equities, to a wash.
+1. **Coverage.** The statistical tier reads the `daily_close` covariance, which ADR-0073 scopes by feed
+   mode — and it covers nothing this desk holds. The parametric VaR built on the identical matrix says
+   so out loud: `coveredExposure 0.00`, `skippedExposure 24,648.21`. So `HedgeMath.betaHedge` returns
+   empty for every candidate, ρ² is never computed, and ADR-0042 proxy selection never runs. Same gap
+   ADR-0089 found and fixed for the fusion sizing controls — the hedge is the consumer it missed.
+2. **Precedence.** Even when the measurement *does* exist and fails the ρ² floor, `sizeTarget` falls
+   through to assigned betas and hedges anyway. "Measured not to hedge this book" is answered with
+   "assumed to hedge it". `effectiveness-floor=0.25` is not mistuned — it is **unreachable by
+   construction**, which is exactly the ADR-0094 lesson (*a control is dead until you have seen it
+   fire*) applied to the one gate that governs whether the hedge should exist at all.
 
-Why: the ADR-0055 no-trade band is `|target| × 0.5` compared against the gap **to the target**, and
-ADR-0080 partial adjustment deliberately never takes the desk to its target. So the gap is ~0.9 of the
-target every cycle and the band has one answer. `fusion_targets` proves it — **all thirteen** planned
-names with a non-zero gap traded at exactly the derived rate `0.032784`, not one suppressed, while the
-desk held **5–30%** of its own target (AAPL −7 against −142, JNJ 47 against 260, GOOG 38 against 131).
-`recent_orders` is the same fact in the time domain: AAPL bought for three cycles then sold for twelve
-straight, JNJ round-tripped BUY→SELL→BUY inside eight minutes. The desk pays a continuous proportional
-cost to hold a small, lagging fraction of the risk it decided to take.
+Meanwhile that unmeasured hedge carries `$2,794.84` of the firm's `$24,662.35` gross and churns: 310 ES
+fills, with the recent order flow alternating BUY/SELL on the same tiny clip every couple of minutes. It
+is charging real exposure and real spread for a variance reduction nobody has ever checked.
 
-## Change
+## The change — ADR-0095 (Proposed, same commit)
 
-`PositionBuffer` (ADR-0094, Proposed, same commit): trade toward the **aim** — the ADR-0080 exponential
-path itself — and only when the held position has drifted more than a buffer away from it, then only back
-to the buffer's near edge. Exposure is unchanged by construction (the aim path *is* the position the old
-policy converged to); what stops is buying and selling the last stretch every thirty seconds. Buffer width
-is Carver's published 10% of the average position, and the average position is derived per name from the
-cycle's own arithmetic — no money number authored, and Oleg's `buffer-fraction=0.5` left exactly as set.
-A flat target is never buffered, so every "get out" control (ADR-0086 cut, ADR-0065 unwind, the breaker)
-works in full as before; a shut edge gate clamps reduce-only and re-seeds the aim so intent cannot pile up
-behind it. `./gradlew -Pci test` green.
+`HedgeStreamCovariance` reuses ADR-0089's `StreamCovariance` to measure the hedge axis on the stream it
+actually trades — one synchronised snapshot per hedge cycle of every equity name carrying exposure plus
+every proxy candidate, seeded on first sight from the durable mark history on a shared bucket grid
+anchored on the feed's provider clock. `sizeTarget` becomes three tiers of evidence, strongest first:
+daily-close → mark-stream (consulted only when the daily estimate cannot measure the book at all) →
+assigned betas. And **a measurement that says no is an answer**: below the floor the target is flat and
+the residual hedge unwinds through the ordinary delta path, instead of being carried on assumption.
 
-**What I expect to see next run:** turnover and the fee line fall materially on `ALPHA` with gross
-exposure roughly where it is. If gross falls *and* PnL does not improve, the buffer is too wide and the
-next lever is its width, not another mechanism. If turnover does **not** fall, my reading of the aim path
-is wrong and the suspect becomes the target's own oscillation — the reversion sensor's span — rather than
-the execution policy.
+Interval-return units are admissible here because both quantities the advisor takes from Σ —
+`E_F* = −(ΣᵢEᵢΣ[i,F])/Σ[F,F]` and `ρ² = (ΣᵢEᵢΣ[i,F])²/((ΣᵢΣⱼEᵢEⱼΣ[i,j])·Σ[F,F])` — are homogeneous of
+degree **zero** in Σ, pinned as a test on a worked example. The two figures that are *not* scale-free,
+`grossSigmaUsd` and `residualSigmaUsd`, are withheld from a stream-sourced proposal rather than
+labelled as a daily σ.
+
+No money number is authored: the floor value, the no-trade band, the churn guard, the switch hysteresis
+and the order path are untouched, and `jethro.hedge.stream-covariance.enabled=false` restores today's
+behaviour exactly. The pre-trade guardrail and the firm drawdown breaker are untouched.
+
+**Expected next.** Either the proxy explains the book — the hedge stays, sized on a measured β rather
+than an assigned one, and `/api/hedging` finally reports a real ρ² — or it does not, the hedge unwinds,
+firm gross falls by roughly the ES leg, and the `HEDGE` P&L line stops deepening. Both directions move
+total PnL per unit of total gross the right way. If gross falls and PnL does *not* improve, the ES short
+was doing real work and the next lever is the floor's discreteness (deferred-register row), not a
+re-attempt here.

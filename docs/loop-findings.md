@@ -826,3 +826,45 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   rates 0.23/0.31 on n=299/69) at the 0.25 weight floor against reversion's `+12.42` bps at weight 3.0;
   that asymmetry is real but the weight lever is burned, so any future attempt must come at it from a
   different direction (e.g. horizon selection or dropping a source outright, not re-weighting it).
+
+## 2026-07-27 — the hedge never measured whether it hedges anything (ADR-0095)
+
+- Situation: total PnL `187.36` (`+26.02` window, `+146.27` over three), gross `24,662.35`
+  (`+4,030.30` window), net `4,586.05`, VaR95 `240.67`, breaker far, `on_track` true. The single
+  EXPOSURE RISING flag belongs to the reversion-window change, which scored ❌ BAD and was
+  auto-reverted before I started — culprit already gone, no de-risk override. **Attribution: I claimed
+  credit for none of the window's PnL** (the reverted change had re-scaled every planned name, so there
+  is no untouched control group to read the market off). The one thing that IS separable is the hedge:
+  it is its own book with its own orders, and no loop change has ever touched the hedge advisor.
+- **The finding.** `HEDGE` sits at `-382.08` against `ALPHA +192.45` and `MACRO +376.99` — the only
+  losing book, roughly the size of both strategy books' gains combined, and it carries `2,794.84` of the
+  firm's `24,662.35` gross plus 310 ES fills of churn. The tell was three null fields on `/api/hedging`:
+  `effectiveness: null`, `tier: STRUCTURAL`, `"(assigned betas, no covariance)"`. The statistical tier
+  reads the ADR-0073 feed-mode-scoped `daily_close` covariance, which covers **nothing** the desk holds
+  — the parametric VaR on the identical matrix reports `coveredExposure 0.00 / skippedExposure
+  24,648.21` — so `betaHedge` returns empty, ρ² is never computed, ADR-0042 proxy selection never runs,
+  and the hedge sizes itself from static refdata betas forever. Worse, when a measurement DOES exist and
+  fails the ρ² floor, `sizeTarget` falls through to those same assigned betas: "measured not to hedge
+  this book" answered with "assumed to hedge it".
+- **Rule: check the bind rate of a gate, and check the COVERAGE of the measurement it reads.** ADR-0094
+  taught the first half (a control is dead until you have seen it fire); this is the second half — a
+  gate can be perfectly reachable in code and still be inert because the estimator behind it covers none
+  of the live book. `effectiveness-floor=0.25` was never mistuned; it was unreachable by construction.
+  ADR-0089 already paid for this exact lesson on the fusion sizing controls and the hedge was the
+  consumer it did not reach — **when a coverage fix lands, enumerate every consumer of the same
+  estimator, not just the one that prompted it.**
+- **Rule 2: a fallback must never override a measurement, only an absent one.** A "history-free floor"
+  tier (ADR-0040) is the right answer to *no evidence* and the wrong answer to *evidence that says no* —
+  the second usage silently makes the floor above it unreachable. Whenever there is a tiered
+  measured/asserted design, check which tier wins when the measured one says "don't".
+- **Rule 3: a scale-free statistic may be measured on any sampling period; an absolute one may not.**
+  β and ρ² are homogeneous of degree 0 in Σ, so the mark-stream covariance sizes exactly the hedge the
+  daily one would; `√Var(P&L)` is not, so it is withheld rather than relabelled. Before substituting an
+  estimator measured on a different clock, check the homogeneity of every quantity read off it.
+- Expected next: `/api/hedging` reports a real ρ² for the first time. Either the hedge stays and is
+  sized on a measured β, or ρ² is under the floor and it unwinds — gross falls by roughly the ES leg and
+  the HEDGE P&L stops deepening. If gross falls and PnL does NOT improve, the ES short was doing real
+  work and the next lever is the floor's discreteness (deferred-register row), not a re-attempt here.
+- Do NOT re-attempt: source-weighting (ADR-0087 weight floor, ADR-0093 measured-edge weights, reverted
+  twice) and the reversion sensor's range window (ADR-0086-era Donchian doubling, ❌ BAD 2026-07-27) —
+  the turnover lever must next come at the target's oscillation from a different direction than its span.

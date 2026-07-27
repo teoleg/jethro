@@ -53,8 +53,10 @@ public final class HedgeAdvisor {
 
     /** One hedge axis: the pure exposure, held/target hedge, and (when acting) the sized DELTA on
      *  {@code proxyId} (the instrument being traded this cycle — selected, or an old proxy being
-     *  unwound). {@code tier} is STATISTICAL (measured ρ²), STRUCTURAL (assigned beta,
-     *  {@code effectiveness} null — asserted, never a fake ρ²), or "—" when not sizing. */
+     *  unwound). {@code tier} is STATISTICAL (measured ρ² on the daily-close series),
+     *  STATISTICAL-STREAM (measured ρ² on the mark stream, ADR-0095 — σ figures absent because their
+     *  unit is one sampling interval), STRUCTURAL (assigned beta, {@code effectiveness} null —
+     *  asserted, never a fake ρ²), or "—" when not sizing. */
     public record Axis(String axis, String proxyId, BigDecimal netExposureUsd, BigDecimal floorUsd,
                        double utilization, boolean hedging, boolean hedgeRecommended,
                        String hedgeSide, BigDecimal hedgeQuantity, BigDecimal hedgeNotionalUsd,
@@ -136,7 +138,7 @@ public final class HedgeAdvisor {
     /**
      * Evaluate the equity hedge axis from live inputs.
      *
-     * @param covariance  the EWMA return covariance (empty during warm-up)
+     * @param covariance  the daily-close EWMA return covariance (empty during warm-up)
      * @param exposuresUsd USD exposure per instrument (firm)
      * @param isEquity    true for single-name equities (the axis members; NOT index proxies)
      * @param priceOf     current price of an instrument
@@ -152,6 +154,29 @@ public final class HedgeAdvisor {
                              Function<String, Optional<BigDecimal>> betaOf,
                              Map<String, BigDecimal> heldByProxy,
                              Predicate<String> tradable) {
+        return evaluate(covariance, Optional.empty(), exposuresUsd, isEquity, priceOf, betaOf,
+                heldByProxy, tradable);
+    }
+
+    /**
+     * Evaluate the equity hedge axis, with the ADR-0095 mark-stream covariance as the second
+     * statistical basis.
+     *
+     * @param streamCovariance the covariance measured on the mark stream ({@link
+     *                         HedgeStreamCovariance}) — consulted only when the daily-close estimate
+     *                         cannot measure this book at all, warm-gated by its own estimator (so
+     *                         the ADR-0041 day gate, whose unit is sessions, does not apply to it),
+     *                         and reported without absolute σ because its unit is one sampling
+     *                         interval rather than a day
+     */
+    public Snapshot evaluate(Optional<CovMath.Covariance> covariance,
+                             Optional<CovMath.Covariance> streamCovariance,
+                             Map<String, BigDecimal> exposuresUsd,
+                             Predicate<String> isEquity,
+                             Function<String, Optional<BigDecimal>> priceOf,
+                             Function<String, Optional<BigDecimal>> betaOf,
+                             Map<String, BigDecimal> heldByProxy,
+                             Predicate<String> tradable) {
         Map<String, BigDecimal> equityExposures = exposuresUsd.entrySet().stream()
                 .filter(e -> isEquity.test(e.getKey()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
@@ -161,15 +186,17 @@ public final class HedgeAdvisor {
 
         Axis axis = mode == Mode.OFF
                 ? idle(net, held, "OFF", "hedging OFF for this axis")
-                : act(net, held, equityExposures, covariance, priceOf, betaOf, tradable);
+                : act(net, held, equityExposures, covariance, streamCovariance, priceOf, betaOf, tradable);
         String note = mode == Mode.AUTO
                 ? "AUTO — the book is held target-flat: the hedge DELTA (target − held) auto-submits (sim-gated, ADR-0019)"
                 : "ADVISE — the sized hedge-to-flat surfaces here; execute from the ticket";
-        return new Snapshot(mode.name(), covariance.isPresent(), List.of(axis), note);
+        return new Snapshot(mode.name(), covariance.isPresent() || streamCovariance.isPresent(),
+                List.of(axis), note);
     }
 
     private Axis act(BigDecimal net, Map<String, BigDecimal> held,
                      Map<String, BigDecimal> equityExposures, Optional<CovMath.Covariance> covariance,
+                     Optional<CovMath.Covariance> streamCovariance,
                      Function<String, Optional<BigDecimal>> priceOf,
                      Function<String, Optional<BigDecimal>> betaOf, Predicate<String> tradable) {
         List<Candidate> candidates = candidates(priceOf, tradable);
@@ -182,7 +209,8 @@ public final class HedgeAdvisor {
                             "net equity |" + money(net) + "| ≤ " + money(rebalanceFloorUsd)
                                     + " floor — target hedge is zero");
         } else {
-            target = sizeTarget(equityExposures, covariance, candidates, priceOf, betaOf, held);
+            target = sizeTarget(equityExposures, covariance, streamCovariance, candidates, priceOf,
+                    betaOf, held);
         }
         if (target == null) {
             return idle(net, held, "WARMING", "net equity " + money(net) + " to hedge, but no "
@@ -277,56 +305,69 @@ public final class HedgeAdvisor {
         return minTradeNotionalUsd.min(scaleNotional.multiply(noTradeBandFraction));
     }
 
+    /** What one covariance estimate had to say: the sized target when a candidate cleared the ρ²
+     *  floor, and — separately — the best proposal it could measure at all, so "no measurement" and
+     *  "measured, and it says this proxy does not hedge you" stay distinguishable. */
+    private record Reading(Target passing, HedgeMath.HedgeProposal belowFloor, String tier,
+                           boolean sigmaIsDaily) {
+        static final Reading NONE = new Reading(null, null, null, false);
+
+        boolean measured() {
+            return passing != null || belowFloor != null;
+        }
+    }
+
     /**
-     * ADR-0042 selection: statistical per-candidate (highest ρ² clearing the floor + the
-     * ADR-0041 covariance gate), with switch hysteresis versus the currently-held proxy;
-     * structural fallback on the configured proxy. Null = cannot size at all; Target with null
-     * quantity = sized but below the ρ² floor with no structural fallback (REDUCE).
+     * ADR-0042 selection over three tiers of evidence, strongest first:
+     * <ol>
+     *   <li><b>STATISTICAL</b> — the daily-close covariance, past the ADR-0041 session gate;</li>
+     *   <li><b>STATISTICAL-STREAM</b> — the ADR-0095 mark-stream covariance, consulted only when the
+     *       daily estimate could not measure this book at all (it warm-gates itself, so the session
+     *       gate — whose unit is sessions — does not apply, and its absolute σ is withheld because
+     *       its unit is one sampling interval);</li>
+     *   <li><b>STRUCTURAL</b> — assigned fundamental betas (ADR-0040), the history-free floor.</li>
+     * </ol>
+     *
+     * <p><b>A measurement that says no is an answer, not a gap (ADR-0095).</b> When an estimate can
+     * measure this book and no candidate clears the ρ² floor, the target is <b>flat</b> — the residual
+     * hedge unwinds through the ordinary delta path — rather than falling through to assigned betas.
+     * Falling through answers "measured not to hedge this book" with "assumed to hedge it", which
+     * makes the effectiveness floor unreachable by construction and leaves the firm carrying proxy
+     * exposure that is, on its own evidence, not a hedge. The structural tier stays exactly what
+     * ADR-0040 built it for: the answer when there is <em>no</em> measurement.
+     *
+     * @return null = cannot size at all (WARMING).
      */
     private Target sizeTarget(Map<String, BigDecimal> equityExposures,
-                              Optional<CovMath.Covariance> covariance, List<Candidate> candidates,
+                              Optional<CovMath.Covariance> covariance,
+                              Optional<CovMath.Covariance> streamCovariance, List<Candidate> candidates,
                               Function<String, Optional<BigDecimal>> priceOf,
                               Function<String, Optional<BigDecimal>> betaOf,
                               Map<String, BigDecimal> held) {
-        Map<String, HedgeMath.HedgeProposal> passing = new LinkedHashMap<>();
-        Optional<HedgeMath.HedgeProposal> anyStatistical = Optional.empty();
-        if (covariance.isPresent() && covariance.get().observations() >= minCovarianceDays) {
-            for (Candidate c : candidates) {
-                Optional<HedgeMath.HedgeProposal> p = HedgeMath.betaHedge(covariance.get(),
-                        equityExposures, c.id(), c.price(), c.multiplier(), effectivenessFloor);
-                if (p.isPresent()) {
-                    anyStatistical = p;
-                    if (p.get().recommended()) {
-                        passing.put(c.id(), p.get());
-                    }
-                }
-            }
+        Reading daily = read(covariance, true, "STATISTICAL", true, equityExposures, candidates, held);
+        if (daily.passing() != null) {
+            return daily.passing();
         }
-        if (!passing.isEmpty()) {
-            String bestId = passing.entrySet().stream()
-                    .max(Map.Entry.comparingByValue(
-                            java.util.Comparator.comparingDouble(HedgeMath.HedgeProposal::effectiveness)))
-                    .orElseThrow().getKey();
-            // Switch hysteresis: keep a held proxy unless the challenger's ρ² beats it by the margin.
-            String incumbent = incumbentId(held);
-            String chosen = bestId;
-            if (incumbent != null && !incumbent.equals(bestId) && passing.containsKey(incumbent)
-                    && passing.get(bestId).effectiveness()
-                            - passing.get(incumbent).effectiveness() < proxySwitchMargin) {
-                chosen = incumbent;
-            }
-            HedgeMath.HedgeProposal p = passing.get(chosen);
+        Reading stream = daily.measured() ? Reading.NONE
+                : read(streamCovariance, false, "STATISTICAL-STREAM", false, equityExposures,
+                        candidates, held);
+        if (stream.passing() != null) {
+            return stream.passing();
+        }
+        Reading refused = daily.measured() ? daily : stream;
+        if (refused.belowFloor() != null) {
+            HedgeMath.HedgeProposal p = refused.belowFloor();
             Candidate c = candidates.stream().filter(x -> x.id().equals(p.proxyInstrumentId()))
-                    .findFirst().orElseThrow();
-            String comparison = passing.size() > 1
-                    ? passing.entrySet().stream()
-                            .map(e -> e.getKey() + " ρ²=" + String.format("%.2f", e.getValue().effectiveness()))
-                            .collect(Collectors.joining(" vs ")) + " → " + chosen + " · "
-                    : "";
-            return new Target(c, p.signedQuantity(), "STATISTICAL", p.effectiveness(),
-                    p.grossSigmaUsd(), p.residualSigmaUsd(), comparison + p.rationale());
+                    .findFirst().orElse(null);
+            if (c != null) {
+                return new Target(c, BigDecimal.ZERO, refused.tier(), p.effectiveness(),
+                        refused.sigmaIsDaily() ? p.grossSigmaUsd() : null,
+                        refused.sigmaIsDaily() ? p.residualSigmaUsd() : null,
+                        p.rationale() + " — target flat, the hedge is not carried on assumption");
+            }
         }
-        // Structural fallback on the configured proxy (assigned betas are quoted against it).
+        // Structural fallback on the configured proxy (assigned betas are quoted against it) — only
+        // reached when NOTHING could measure this book.
         Candidate structural = candidates.stream()
                 .filter(c -> c.id().equals(structuralProxyId)).findFirst()
                 .orElse(candidate(structuralProxyId, priceOf));
@@ -342,16 +383,69 @@ public final class HedgeAdvisor {
                         s.get().rationale());
             }
         }
-        if (anyStatistical.isPresent()) {
-            var p = anyStatistical.get();
-            Candidate c = candidates.stream().filter(x -> x.id().equals(p.proxyInstrumentId()))
-                    .findFirst().orElse(null);
-            if (c != null) {
-                return new Target(c, null, "STATISTICAL", p.effectiveness(),
-                        p.grossSigmaUsd(), p.residualSigmaUsd(), p.rationale());
+        return null;
+    }
+
+    /**
+     * One covariance estimate's verdict on every tradable candidate: the best proposal clearing the
+     * ρ² floor (with ADR-0042 switch hysteresis versus the held proxy), plus whatever it could
+     * measure at all.
+     *
+     * @param applyDaysGate the ADR-0041 min-sessions gate — for the daily-close series only; the
+     *                      stream estimator counts sampling intervals, not sessions, and enforces its
+     *                      own warm-up before it reports a pair at all
+     * @param sigmaIsDaily  false when the estimate's absolute σ is per sampling interval and must
+     *                      therefore not be surfaced as a daily σ (ADR-0095); ρ² and the hedge ratio
+     *                      are homogeneous of degree zero in Σ and carry across unchanged
+     */
+    private Reading read(Optional<CovMath.Covariance> covariance, boolean applyDaysGate, String tier,
+                         boolean sigmaIsDaily, Map<String, BigDecimal> equityExposures,
+                         List<Candidate> candidates, Map<String, BigDecimal> held) {
+        if (covariance.isEmpty()
+                || (applyDaysGate && covariance.get().observations() < minCovarianceDays)) {
+            return Reading.NONE;
+        }
+        Map<String, HedgeMath.HedgeProposal> passing = new LinkedHashMap<>();
+        HedgeMath.HedgeProposal anyMeasured = null;
+        for (Candidate c : candidates) {
+            Optional<HedgeMath.HedgeProposal> p = HedgeMath.betaHedge(covariance.get(),
+                    equityExposures, c.id(), c.price(), c.multiplier(), effectivenessFloor);
+            if (p.isPresent()) {
+                if (anyMeasured == null || p.get().effectiveness() > anyMeasured.effectiveness()) {
+                    anyMeasured = p.get(); // the best-fitting proxy this estimate could measure
+                }
+                if (p.get().recommended()) {
+                    passing.put(c.id(), p.get());
+                }
             }
         }
-        return null;
+        if (passing.isEmpty()) {
+            return new Reading(null, anyMeasured, tier, sigmaIsDaily);
+        }
+        String bestId = passing.entrySet().stream()
+                .max(Map.Entry.comparingByValue(
+                        java.util.Comparator.comparingDouble(HedgeMath.HedgeProposal::effectiveness)))
+                .orElseThrow().getKey();
+        // Switch hysteresis: keep a held proxy unless the challenger's ρ² beats it by the margin.
+        String incumbent = incumbentId(held);
+        String chosen = bestId;
+        if (incumbent != null && !incumbent.equals(bestId) && passing.containsKey(incumbent)
+                && passing.get(bestId).effectiveness()
+                        - passing.get(incumbent).effectiveness() < proxySwitchMargin) {
+            chosen = incumbent;
+        }
+        HedgeMath.HedgeProposal p = passing.get(chosen);
+        Candidate c = candidates.stream().filter(x -> x.id().equals(p.proxyInstrumentId()))
+                .findFirst().orElseThrow();
+        String comparison = passing.size() > 1
+                ? passing.entrySet().stream()
+                        .map(e -> e.getKey() + " ρ²=" + String.format("%.2f", e.getValue().effectiveness()))
+                        .collect(Collectors.joining(" vs ")) + " → " + chosen + " · "
+                : "";
+        Target target = new Target(c, p.signedQuantity(), tier, p.effectiveness(),
+                sigmaIsDaily ? p.grossSigmaUsd() : null, sigmaIsDaily ? p.residualSigmaUsd() : null,
+                comparison + p.rationale());
+        return new Reading(target, anyMeasured, tier, sigmaIsDaily);
     }
 
     /** Tradable candidates with a live price and a known multiplier, in configured order. */
