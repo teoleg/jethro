@@ -27,8 +27,11 @@ import java.util.concurrent.TimeUnit;
  * its fusion weight and whether the edge gate lets it put risk on. A new source arrives with no
  * evidence and earns its allocation, or doesn't.
  *
- * <p>Stale marks are skipped — a repeated stale price would feed the sensor a fabricated zero-return
- * step. The forecaster is confined to this single scheduled thread (it is not thread-safe).
+ * <p>The sensor advances on PRINTS, not on cycles ({@link PrintClock}, ADR-0113): a mark whose provider
+ * timestamp has not moved since the last one consumed is skipped, because the mark cache republishes a
+ * last-value price whether or not the tape printed and a repeated price is a fabricated zero-return step
+ * that decays the EWMAC scale estimator toward zero. The forecaster is confined to this single scheduled
+ * thread (it is not thread-safe).
  *
  * <p>On first sight of an instrument the sensor is warmed from the durable recent mark history
  * ({@link SensorWarmup}, ADR-0071) so it boots calibrated instead of spending its whole warm-up silent
@@ -51,6 +54,8 @@ public final class TrendForecastLifecycle implements AutoCloseable {
     private final long intervalSeconds;
     /** Instruments already warmed from history — touched only from the scheduled tick thread. */
     private final java.util.Set<String> seeded = new java.util.HashSet<>();
+    /** ADR-0113: admits a mark only when the market's own clock advanced — same thread as {@link #seeded}. */
+    private final PrintClock printClock = new PrintClock();
 
     private Future<?> task;
 
@@ -86,9 +91,17 @@ public final class TrendForecastLifecycle implements AutoCloseable {
             }
             for (var mark : runtime.markCache().snapshot()) {
                 if (mark.stale()) {
-                    continue; // never advance the sensor's windows on a repeated stale price
+                    continue; // warm-loaded, not yet refreshed by the live feed (invariant 4)
                 }
                 warmIfFirstSight(mark.instrumentId(), mark.providerTimestamp());
+                if (!printClock.advanced(mark.instrumentId(), mark.providerTimestamp())) {
+                    // The tape has not printed since we last looked: the mark cache is republishing the
+                    // same last-value price. Advancing here would feed a fabricated zero-return step,
+                    // decaying the scale estimator toward zero and booking a telemetry call that resolves
+                    // at exactly zero. ADR-0113 — the `stale` flag cannot answer this (it is a warm-load
+                    // marker, false forever after the first live tick).
+                    continue;
+                }
                 var reading = forecaster.update(mark.instrumentId(), mark.price());
                 registry.submitTrend(mark.instrumentId(), reading.score());
                 if (telemetry != null && reading.score() != 0.0) {

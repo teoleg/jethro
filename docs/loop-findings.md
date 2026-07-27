@@ -1476,3 +1476,46 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   lever. And the HEDGE book still holds `−$3,093.31` realised on `$0.00` gross, trading ES in 0.003–0.069
   contract clips: 35% of ALPHA's `+$8,370.51` handed to an overlay that was flat when the book was 100%
   one-way. That remains the next lever after this one is scored.
+
+## 2026-07-27 22:00Z — the tape stopped two hours ago and every sensor kept "observing" it
+
+- **The finding.** `instruments: 0`, `targets: []` — not eleven blocked targets like last cycle, **none at
+  all**. `reversion` (weight 2.90, the only significant edge at `t = 3.55`) publishes nothing, and with
+  ADR-0111 correctly holding `trend`/`momentum` at 0.0 the cross-section is empty. The WARN log names the
+  cause on every equity: *"reversion sensor still cold for AAPL after seeding 1 of 241 stored prices"*.
+  `/api/history` shows why — AAPL's series is 1,926 points at a 12 s cadence and then a single
+  **59.7-minute hole** immediately before the newest point (JPM 56 min, ES 57.7), so the seed walk
+  truncates after one sample. `/api/marks` explains the hole: the seven Alpaca equities carry provider
+  clocks **122.8 minutes** old (the 20:00Z cash close) against **ingest ages of 180–558 ms**. Shipped
+  ADR-0113: a sensor advances on PRINTS, not on cycles — `PrintClock` admits a mark only when its provider
+  timestamp is strictly newer than the last one that sensor consumed.
+- **Rule 25: `stale` is a WARM-LOAD MARKER, not a freshness measure — never read it as "this price is old".**
+  `MarkCache.loadStale` sets it at boot and the first live tick clears it *permanently*. Both continuous
+  sensors carried the comment "never advance the sensor's windows on a repeated stale price" guarded by
+  exactly that flag, so the guard fired for seconds after each restart and was inert for the rest of the
+  process life — including for a name whose tape stopped hours ago. Rule 23 again, one layer down: the
+  question is not whether the guard exists, it is whether its *input* can ever be true on this feed.
+- **Rule 26: a repeated last-value price is not a quiet observation, it is a FALSE one — and it corrupts in
+  two directions.** It decays the scale estimator both sensors divide by toward zero, so the first real
+  move at the reopen is divided by a near-zero denominator and reports an extreme conviction (the ADR-0066
+  pin, reached from the other side, at the open, on the dominant-weight source); and it books a telemetry
+  call every cycle off a price that never moved, each resolving at exactly zero, which shrinks the cohort
+  standard error the ADR-0075 edge gate reads. Structural zeros do not make a statistic quieter, they make
+  it falsely significant.
+- **Rule 27: when two clocks disagree, name which one the code is asking about.** Ingest age (sub-second)
+  and provider age (two hours) were both live on the same mark and answered opposite questions. The
+  parameter-free test — "is this provider timestamp strictly newer than the last one I consumed?" — needs
+  no threshold, so there is no number to choose and none to give provenance to, and it reads a live feed,
+  a delayed feed, a replay and a sim clock identically (invariant 9). Prefer the formulation with no dial
+  in it over the one that works with a well-chosen dial.
+- **Attribution, honestly.** −$0.07 on a book holding nothing: neither market nor change. ADR-0112 *did*
+  reach the JVM (the per-name cost map grew from 8 entries to 12, ZB/ZF/ES at the floor, NVDA/AMZN/SAP
+  newly priced) and earns credit and blame for nothing, because nothing ever reached the cost gate. The
+  cost ladder was the right diagnosis of last cycle's telemetry and the wrong layer for this one.
+- **Predicted next, so it can be checked rather than re-derived.** Gross stays `$0.00` overnight — this
+  change *narrows* the observed universe and **lowers** exposure by design; it should score MIXED and that
+  is the correct outcome, not a failure. The thing to check at the next session open is whether the
+  equities' first real prints produce ordinary-magnitude readings rather than capped ones.
+- **Still open, unchanged:** `turnover_cost_by_name` has errored for a **twelfth** consecutive cycle. And
+  the HEDGE book still holds `−$3,093.31` realised on `$0.00` gross against ALPHA's `+$8,370.51`, trading
+  ES in 0.003–0.069 contract clips. That remains the next lever once the desk can form a view again.
