@@ -34,13 +34,11 @@ public final class HedgeController {
     private final ObjectProvider<InstrumentRefSource> refs;
     private final ObjectProvider<LastPriceCache> prices;
     private final ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection;
-    private final ObjectProvider<HedgeLifecycle> lifecycle;
     private final String hedgeBook;
 
     public HedgeController(HedgeAdvisor advisor, ObjectProvider<VarService> varService,
                            ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                            ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
-                           ObjectProvider<HedgeLifecycle> lifecycle,
                            @org.springframework.beans.factory.annotation.Value("${jethro.hedge.book:HEDGE}")
                            String hedgeBook) {
         this.advisor = advisor;
@@ -48,7 +46,6 @@ public final class HedgeController {
         this.refs = refs;
         this.prices = prices;
         this.projection = projection;
-        this.lifecycle = lifecycle;
         this.hedgeBook = hedgeBook;
     }
 
@@ -82,14 +79,8 @@ public final class HedgeController {
         }
 
         // The panel is read-only, so the price gate suffices here; the executing lifecycle also
-        // applies the quarantine gate (ADR-0042). The stream covariance is READ from the lifecycle's
-        // last publication rather than sampled here — the estimator is confined to the hedge thread,
-        // and a REST read must never inject an off-cadence sample into a series measured on a fixed
-        // grid (ADR-0095).
-        HedgeLifecycle hl = lifecycle == null ? null : lifecycle.getIfAvailable();
-        Optional<CovMath.Covariance> streamCov = hl == null
-                ? Optional.empty() : hl.streamCovarianceSnapshot();
-        return advisor.evaluate(cov, streamCov, exposures, isEquity, priceOf, betaOf, held, id -> true);
+        // applies the quarantine gate (ADR-0042).
+        return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf, held, id -> true);
     }
 
     public record ModeRequest(String mode) {

@@ -100,54 +100,6 @@ class HedgeMathTest {
                 Map.of(), "ES", new BigDecimal("5450"), new BigDecimal("50")).isEmpty());
     }
 
-    /**
-     * ADR-0095's admissibility argument, as arithmetic: the hedge ratio and ρ² are homogeneous of
-     * degree ZERO in Σ, so a covariance measured over a different sampling period sizes exactly the
-     * same hedge — which is what lets the mark-stream estimator's per-interval units feed this.
-     *
-     * <p>Worked: E_A = +$100,000, E_B = −$50,000; proxy F at 5,000 × 50 = $250,000/contract.
-     * <pre>
-     *   Cov(P&amp;L,F) = 100,000·2e-6 − 50,000·1e-6                  = 0.15
-     *   Var(P&amp;L)   = 1e10·4e-6 − 2·5e9·1e-6 + 2.5e9·1e-6         = 32,500
-     *   E_F*       = −0.15/1e-6                                  = −$150,000
-     *   qty        = −150,000/250,000                            = −0.600000  (SELL 0.6 F)
-     *   ρ²         = 0.15²/(32,500·1e-6) = 0.0225/0.0325         = 0.692308
-     *   σ_gross    = √32,500                                     = $180.28 per INTERVAL
-     * </pre>
-     * Scale every Σ entry by 100 and every one of those lines is unchanged except σ, which becomes
-     * √3,250,000 = $1,802.78 — the reason a stream-sourced proposal withholds its absolute σ.
-     */
-    @Test
-    void betaHedgeAndEffectivenessAreScaleInvariantInTheCovariance() {
-        Map<String, BigDecimal> book = Map.of("A", new BigDecimal("100000"),
-                "B", new BigDecimal("-50000"));
-        java.util.List<String> names = java.util.List.of("A", "B", "F");
-        double[][] unit = {{4e-6, 1e-6, 2e-6}, {1e-6, 1e-6, 1e-6}, {2e-6, 1e-6, 1e-6}};
-        double[][] scaled = new double[3][3];
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
-                scaled[i][j] = unit[i][j] * 100;
-            }
-        }
-        var fine = HedgeMath.betaHedge(new CovMath.Covariance(names, unit, 300), book,
-                "F", new BigDecimal("5000"), new BigDecimal("50"), 0.25).orElseThrow();
-        var coarse = HedgeMath.betaHedge(new CovMath.Covariance(names, scaled, 300), book,
-                "F", new BigDecimal("5000"), new BigDecimal("50"), 0.25).orElseThrow();
-
-        assertEquals(0, new BigDecimal("-150000.00").compareTo(fine.hedgeNotionalUsd()));
-        assertEquals(0, new BigDecimal("-0.600000").compareTo(fine.signedQuantity()));
-        assertEquals(0.692307692307692, fine.effectiveness(), 1e-12);
-        assertTrue(fine.recommended(), "ρ² 0.69 clears the 0.25 floor");
-
-        assertEquals(0, fine.signedQuantity().compareTo(coarse.signedQuantity()),
-                "the sampling period cannot move the hedge");
-        assertEquals(fine.effectiveness(), coarse.effectiveness(), 1e-12,
-                "nor the floor test");
-        // The one quantity that is NOT scale-free — hence withheld on a stream-sourced proposal.
-        assertEquals(0, new BigDecimal("180.28").compareTo(fine.grossSigmaUsd()));
-        assertEquals(0, new BigDecimal("1802.78").compareTo(coarse.grossSigmaUsd()));
-    }
-
     @Test
     void fxHedgeSellsTheNetForeignValueDirectly() {
         // Long €150,000 worth (as USD), hedge in EUR/USD @ 1.085.
