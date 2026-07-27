@@ -90,7 +90,7 @@ the password** (username is `teoleg`):
 git clone https://github.com/teoleg/jethro.git && cd jethro
 # Username: teoleg
 # Password: <paste the token — NOT your account password>
-git checkout claude/new-session-smb8v6
+git checkout claude/auto-improve
 git config credential.helper store   # optional: remember it so future pulls don't re-prompt
 ```
 
@@ -101,11 +101,15 @@ public half to github.com → _Settings → SSH and GPG keys_:
 ssh-keygen -t ed25519 -C "pi" -f ~/.ssh/id_ed25519 -N ""
 cat ~/.ssh/id_ed25519.pub          # paste this into GitHub → SSH keys
 git clone git@github.com:teoleg/jethro.git && cd jethro
-git checkout claude/new-session-smb8v6
+git checkout claude/auto-improve
 ```
 
 **C — GitHub CLI.** `sudo apt install gh && gh auth login` (choose HTTPS, authenticate in
-a browser), then `gh repo clone teoleg/jethro && cd jethro && git checkout claude/new-session-smb8v6`.
+a browser), then `gh repo clone teoleg/jethro && cd jethro && git checkout claude/auto-improve`.
+
+> The loop and the maintainer share **one branch, `claude/auto-improve`** — it is what the box builds,
+> runs, and commits to. (There is no separate maintainer branch; the old two-branch auto-merge was
+> removed because it conflict-aborted every cycle.)
 
 ## 6. One-command build + run (recommended)
 

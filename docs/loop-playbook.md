@@ -2,7 +2,8 @@
 
 This is the accumulated context the owner and maintainer want the continuous-improvement loop (ADR-0063)
 to carry, beyond the terse prompt. The loop's `claude -p` starts cold each cycle, so this file — plus
-`CLAUDE.md`, the ADRs, and the ledger — *is* your memory. It rides the auto-merge, so it stays current.
+`CLAUDE.md`, the ADRs, and the ledger — *is* your memory. It lives on `claude/auto-improve` (the one
+branch the loop works on), so it stays current with every cycle.
 
 ## Mission (what "better" means here)
 Grow the **firm total PnL** (all books incl. hedge — the Overview headline) while holding or **reducing
