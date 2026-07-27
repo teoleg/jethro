@@ -7,7 +7,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Persistence for ADR-0055 phase-1 signal telemetry. Records a source's directional call, resolves it
@@ -120,21 +122,38 @@ public final class SignalTelemetryStore {
      * <p>{@code flatThresholdBps} classifies each observation WIN/LOSS/FLAT exactly as
      * {@link SignalScoring#outcome(double, double)} does — a move counts only if it clears the
      * threshold — so the hit-rate is the same statistic wherever it is computed.
+     *
+     * <p><b>Bad prints are not evidence (ADR-0109).</b> An observation whose realised move exceeds the
+     * desk's own corporate-action / bad-print threshold for that instrument's asset class
+     * ({@code jethro.trading.mark-jump-bps}, via reference data) is excluded. The jump guard already
+     * says such a price never reaches P&amp;L, orders, sizing or history; letting it reach the
+     * expectancy — whose standard error is the denominator of every gate above it — is the same bad
+     * print arriving by another door. See {@link #discardedCount} for the count that goes with it.
      */
     public List<SignalScoring.Cohort> resolvedCohorts(String source, int horizonSeconds, Instant since,
                                                       long cohortWindowMillis, double flatThresholdBps,
-                                                      int cohortLimit) {
+                                                      int cohortLimit,
+                                                      Map<String, Integer> badPrintBpsByAssetClass) {
         BigDecimal threshold = BigDecimal.valueOf(Math.abs(flatThresholdBps) / 1e4);
+        String[] caps = capArrays(badPrintBpsByAssetClass);
         try {
             return jdbc.query("""
-                    with resolved_obs as (
-                        select entry_at, realized_return,
+                    with caps as (
+                        select cls, bps from unnest(string_to_array(?, ','),
+                                                    string_to_array(?, ',')::int[]) as t(cls, bps)
+                    ), resolved_obs as (
+                        select o.entry_at, o.realized_return,
                                case when extract(epoch from
-                                        entry_at - lag(entry_at) over (order by entry_at)) * 1000 > ?
+                                        o.entry_at - lag(o.entry_at) over (order by o.entry_at)) * 1000 > ?
                                     then 1 else 0 end as cohort_break
-                        from signal_observations
-                        where source = ? and horizon_seconds = ? and resolved = true
-                          and feed_mode = ? and resolved_at >= ? and realized_return is not null
+                        from signal_observations o
+                        left join instrument i on i.instrument_id = o.instrument
+                        left join caps c on c.cls = i.asset_class
+                        left join caps d on d.cls = 'DEFAULT'
+                        where o.source = ? and o.horizon_seconds = ? and o.resolved = true
+                          and o.feed_mode = ? and o.resolved_at >= ? and o.realized_return is not null
+                          and not (coalesce(c.bps, d.bps, 0) > 0
+                                   and abs(o.realized_return) >= coalesce(c.bps, d.bps) / 10000.0)
                     ), cohorted as (
                         select realized_return, entry_at,
                                sum(cohort_break) over (order by entry_at) as cohort_id
@@ -155,13 +174,75 @@ public final class SignalTelemetryStore {
                             rs.getBigDecimal("sum_squared_return").doubleValue(),
                             rs.getLong("wins"),
                             rs.getLong("losses")),
-                    cohortWindowMillis, source, horizonSeconds, mode(), Timestamp.from(since),
-                    threshold, threshold.negate(), cohortLimit);
+                    caps[0], caps[1], cohortWindowMillis, source, horizonSeconds, mode(),
+                    Timestamp.from(since), threshold, threshold.negate(), cohortLimit);
         } catch (Exception e) {
             log.debug("cohort read failed for {}@{}s: {}", source, horizonSeconds, e.toString());
             return List.of();
         }
     }
+
+    /**
+     * How many resolved observations the bad-print exclusion kept out of one source's expectancy at one
+     * horizon (ADR-0109) — the same predicate {@link #resolvedCohorts} applies, counted rather than
+     * dropped in silence. Evidence removed from a gate that governs exposure is not a detail: it is
+     * shown on {@code /api/signals/discards} and in the loop report, and a rising count is the desk
+     * telling the operator that its mark stream, not its alpha, is what changed.
+     */
+    public long discardedCount(String source, int horizonSeconds, Instant since,
+                               Map<String, Integer> badPrintBpsByAssetClass) {
+        String[] caps = capArrays(badPrintBpsByAssetClass);
+        try {
+            Long n = jdbc.queryForObject("""
+                    with caps as (
+                        select cls, bps from unnest(string_to_array(?, ','),
+                                                    string_to_array(?, ',')::int[]) as t(cls, bps)
+                    )
+                    select count(*)
+                    from signal_observations o
+                    left join instrument i on i.instrument_id = o.instrument
+                    left join caps c on c.cls = i.asset_class
+                    left join caps d on d.cls = 'DEFAULT'
+                    where o.source = ? and o.horizon_seconds = ? and o.resolved = true
+                      and o.feed_mode = ? and o.resolved_at >= ? and o.realized_return is not null
+                      and coalesce(c.bps, d.bps, 0) > 0
+                      and abs(o.realized_return) >= coalesce(c.bps, d.bps) / 10000.0
+                    """, Long.class, caps[0], caps[1], source, horizonSeconds, mode(),
+                    Timestamp.from(since));
+            return n == null ? 0 : n;
+        } catch (Exception e) {
+            log.debug("discard count failed for {}@{}s: {}", source, horizonSeconds, e.toString());
+            return 0;
+        }
+    }
+
+    /**
+     * The per-asset-class bad-print thresholds as two parallel comma-joined lists, the shape the
+     * queries above {@code unnest} into a join table. Fails OPEN: an absent or unusable map becomes a
+     * single {@code DEFAULT=0} entry, and zero disables the exclusion for that class exactly as it
+     * disables the jump guard itself — a mis-wired threshold must never be able to delete the desk's
+     * evidence. Class keys are restricted to the reference-data alphabet, so nothing but a name can
+     * reach the array literal.
+     */
+    static String[] capArrays(Map<String, Integer> badPrintBpsByAssetClass) {
+        List<String> classes = new ArrayList<>();
+        List<String> bps = new ArrayList<>();
+        if (badPrintBpsByAssetClass != null) {
+            for (var e : badPrintBpsByAssetClass.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null || !ASSET_CLASS_KEY.matcher(e.getKey()).matches()) {
+                    continue;
+                }
+                classes.add(e.getKey());
+                bps.add(Integer.toString(Math.max(0, e.getValue())));
+            }
+        }
+        if (classes.isEmpty()) {
+            return new String[] {"DEFAULT", "0"};
+        }
+        return new String[] {String.join(",", classes), String.join(",", bps)};
+    }
+
+    private static final java.util.regex.Pattern ASSET_CLASS_KEY = java.util.regex.Pattern.compile("[A-Z_]{1,16}");
 
     /** Distinct sources seen (this mode) — resolved or open — so the view lists every live source. */
     public List<String> sources() {

@@ -32,6 +32,7 @@ public class SignalConfig {
     @ConditionalOnProperty(prefix = "jethro.signals", name = "enabled", havingValue = "true", matchIfMissing = true)
     SignalTelemetry signalTelemetry(SignalTelemetryStore store,
                                     ObjectProvider<TradingCoreLifecycle> tradingCore,
+                                    ObjectProvider<io.jethro.app.trading.TradingCoreProperties> tradingProps,
                                     @Value("${jethro.signals.horizon-seconds:3600}") int horizonSeconds,
                                     @Value("${jethro.signals.horizon-rungs:3}") int horizonRungs,
                                     @Value("${jethro.signals.flat-threshold-bps:10}") double flatThresholdBps,
@@ -43,7 +44,31 @@ public class SignalConfig {
         // base, so which period this desk's edge is real over is measured rather than assumed. One rung
         // reproduces the pre-ADR-0082 single-horizon behaviour exactly.
         return new SignalTelemetry(store, marks, io.jethro.app.fusion.HorizonLadder.rungs(horizonSeconds, horizonRungs),
-                flatThresholdBps, rollingDays, cohortLimit, cohortWindowSeconds);
+                flatThresholdBps, rollingDays, cohortLimit, cohortWindowSeconds,
+                badPrintThresholds(tradingProps));
+    }
+
+    /**
+     * The desk's own corporate-action / bad-print thresholds, per asset class, reused verbatim as the
+     * bound on what counts as a measurable return (ADR-0109). No number is introduced here: these are
+     * {@code jethro.trading.mark-jump-bps.<CLASS>}, the same values the mark cache's jump guard uses to
+     * decide that a price never reaches P&amp;L, orders, sizing or history. Applying them per HORIZON
+     * rather than per update is strictly looser than the guard itself, which is the conservative
+     * direction for a rule that removes evidence. With no trading-core properties bound the map is
+     * empty and every resolved observation counts, exactly as before.
+     */
+    private static java.util.Map<String, Integer> badPrintThresholds(
+            ObjectProvider<io.jethro.app.trading.TradingCoreProperties> tradingProps) {
+        var props = tradingProps.getIfAvailable();
+        if (props == null) {
+            return java.util.Map.of();
+        }
+        var out = new java.util.LinkedHashMap<String, Integer>();
+        for (io.jethro.domain.AssetClass ac : io.jethro.domain.AssetClass.values()) {
+            out.put(ac.name(), props.markJumpBpsFor(ac.name()));
+        }
+        out.put("DEFAULT", props.markJumpBpsFor(null));
+        return java.util.Map.copyOf(out);
     }
 
     @Bean(destroyMethod = "close")

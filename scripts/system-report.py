@@ -25,7 +25,8 @@ TS = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 ENDPOINTS = {
     "ops_jvm": "/api/ops/jvm", "traffic": "/api/traffic", "feeds": "/api/feeds",
     "marks": "/api/marks", "quarantined": "/api/marks/quarantined",
-    "signals_telemetry": "/api/signals/telemetry", "fusion_targets": "/api/fusion/targets",
+    "signals_telemetry": "/api/signals/telemetry", "signals_discards": "/api/signals/discards",
+    "fusion_targets": "/api/fusion/targets",
     "var": "/api/var", "breaker": "/api/breaker", "regime": "/api/market/regime",
     "hedging": "/api/hedging", "hypotheses_stats": "/api/hypotheses/stats",
     "hypotheses_balance": "/api/hypotheses/balance", "discovery": "/api/discovery",

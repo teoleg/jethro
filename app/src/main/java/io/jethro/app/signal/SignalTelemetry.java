@@ -41,10 +41,12 @@ public final class SignalTelemetry {
     private final int rollingDays;
     private final int cohortLimit;
     private final long cohortWindowMillis;
+    private final java.util.Map<String, Integer> badPrintBpsByAssetClass;
 
     public SignalTelemetry(SignalTelemetryStore store, MarkSource marks, List<Integer> horizons,
                            double flatThresholdBps, int rollingDays, int cohortLimit,
-                           int cohortWindowSeconds) {
+                           int cohortWindowSeconds,
+                           java.util.Map<String, Integer> badPrintBpsByAssetClass) {
         this.store = store;
         this.marks = marks;
         this.horizons = normaliseLadder(horizons);
@@ -52,6 +54,16 @@ public final class SignalTelemetry {
         this.rollingDays = Math.max(1, rollingDays);
         this.cohortLimit = Math.max(2, cohortLimit); // a standard error needs two independent draws
         this.cohortWindowMillis = Math.max(0, cohortWindowSeconds) * 1000L;
+        this.badPrintBpsByAssetClass = badPrintBpsByAssetClass == null
+                ? java.util.Map.of() : java.util.Map.copyOf(badPrintBpsByAssetClass);
+    }
+
+    /** No bad-print thresholds to hand — every resolved observation counts (pre-ADR-0109 behaviour). */
+    public SignalTelemetry(SignalTelemetryStore store, MarkSource marks, List<Integer> horizons,
+                           double flatThresholdBps, int rollingDays, int cohortLimit,
+                           int cohortWindowSeconds) {
+        this(store, marks, horizons, flatThresholdBps, rollingDays, cohortLimit, cohortWindowSeconds,
+                java.util.Map.of());
     }
 
     /** Single-horizon telemetry — the pre-ADR-0082 shape, kept for callers with one horizon to measure. */
@@ -162,11 +174,39 @@ public final class SignalTelemetry {
                 // estimated in — and grouped where the rows live, so a wide cross-section no longer
                 // spends the budget faster than a narrow one and the gate's power tracks evidence.
                 List<SignalScoring.Cohort> cohorts = store.resolvedCohorts(
-                        source, horizon, since, cohortWindowMillis, flatThresholdBps, cohortLimit);
+                        source, horizon, since, cohortWindowMillis, flatThresholdBps, cohortLimit,
+                        badPrintBpsByAssetClass);
                 perSource.add(SignalScoring.aggregate(source, cohorts,
                         store.openCount(source, horizon)).atHorizon(horizon));
             }
             out.put(horizon, List.copyOf(perSource));
+        }
+        return out;
+    }
+
+    /** One source's observations kept out of the expectancy by the bad-print exclusion (ADR-0109). */
+    public record Discard(String source, long horizonSeconds, long discarded) {
+    }
+
+    /**
+     * What the bad-print exclusion removed from the evidence, per source and rung (ADR-0109). Counted
+     * and surfaced rather than dropped in silence: this is the only place an operator can see that a
+     * gate's verdict moved because the mark stream changed rather than because the alpha did. Rows with
+     * nothing discarded are omitted — the healthy state is an empty list.
+     */
+    public List<Discard> discards() {
+        Instant since = Instant.now().minus(Duration.ofDays(rollingDays));
+        List<Discard> out = new ArrayList<>();
+        if (badPrintBpsByAssetClass.isEmpty()) {
+            return out; // exclusion disabled — nothing can have been discarded
+        }
+        for (String source : store.sources()) {
+            for (int horizon : horizons) {
+                long n = store.discardedCount(source, horizon, since, badPrintBpsByAssetClass);
+                if (n > 0) {
+                    out.add(new Discard(source, horizon, n));
+                }
+            }
         }
         return out;
     }

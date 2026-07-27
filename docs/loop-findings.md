@@ -1265,3 +1265,55 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Remaining levers, in order.** (a) and (b) above. (c) The TCA shortfall is measured against the ARRIVAL
   mark so the whole cost series is biased low (deferred register). (d) `turnover_cost_by_name` in the
   report has now errored **seven** cycles running. (e) The frozen MACRO book, thirteen cycles unchanged.
+
+## 2026-07-27 — one impossible print was setting the gate's standard error, and the book stayed at zero (ADR-0109)
+
+- **What the window did.** Live `/api/risk` `.total` `$5725.58`, gross and net `$0.00`, every book
+  `unrealizedPnl 0.00000000`. PnL moved `$0.04` in four hours. `run-status.json` reads `on_track` true
+  at `pnl_growth_pct 542.34`, but that is one realised unwind flattering a frozen book — **read the
+  growth flag against the exposure, not on its own.** Last cycle's ADR-0108 scored ⚠️ MIXED and did
+  exactly what it claimed (`reversion`@225s 58 → 313 cohorts); it was not enough. **Claimed for the
+  change: nothing.** At `$0.00` gross for the whole window there are no positions for the market to
+  move either — nothing to attribute in any direction.
+- **The finding I shipped.** ADR-0108 uncapped the sample, so the constraint moved into what the larger
+  sample *contains*. `reversion`@225s over 313 cohorts: 4.55 bps, se 1.90, t = 2.18, p = 0.0152 against
+  α = 0.00758 — shut. Drop **one** cohort: 2.78 bps, se **0.55**, t = **4.33**. That cohort's mean is
+  +573 bps where every other sits inside ±35 bps, and its members are GOOG `174.77 → 323.58` (+8,515 bps)
+  and NQ `19,773 → 28,677` (+4,503 bps) **over 225 seconds**. The rest of the burst's entry marks are the
+  simulator's start levels (`AAPL 188.94`, `MSFT 429.14`, `ES 5438.30`, `GOOGL/TSLA/ORCL` ~`99.8`)
+  against a live alpaca tape (`AAPL 337.12`, `ES 7454.75`): a **tape handover booked as a market return**.
+  The fix reuses the desk's own bad-print threshold (`jethro.trading.mark-jump-bps`) as the bound on what
+  counts as evidence — no new number — and it removes 2 observations of 5,101 (0.04%).
+- **Rule 10: a statistic that gates money must have a BOUNDED influence function.** The ADR-0077 standard
+  error is a plain sample sd, and it is the denominator of every gate on the desk. One observation could
+  therefore set the desk's entire risk appetite, and no amount of honest measurement could outvote it —
+  it enters the denominator as well as the numerator. Ask of every estimator that gates something: *how
+  many observations does it take to change this answer?* If the answer is one, it is not a measurement.
+- **Rule 11: when a control refuses, check whether its INPUTS are physically possible before touching its
+  arithmetic.** An 85% equity move in four minutes is not a fact about alpha, and the desk already had a
+  name for it — the corporate-action jump guard, whose threshold was sitting in config the whole time,
+  keeping that same price out of P&L, orders, sizing and history while the expectancy read it anyway.
+  Look for the definition the desk already owns before inventing a new one.
+- **Rule 12 (sharpens Rule 9): test the candidate fix on the table, not just the diagnosis.** I nearly
+  shipped Hampel's 3-MAD winsor — the textbook answer to a heavy-tailed panel. Run on the live cohort
+  means it caps **7–20%** of cohorts, not the 0.27% it is calibrated for, and flips `reversion`@900s from
+  t = −0.24 to **t = +7.95**. A correct-sounding standard method can be a worse change than the bug.
+  I also killed a *diagnosis* the same way: horizon drift in `resolveDue` looked certain until the table
+  showed a median realised window of 237.5 s against a nominal 225 s.
+- **Sanity check that a fix is not buying significance:** exactly one of fifteen source × rung cells
+  changes verdict, every measured-negative source measures *more* negative (`trend`@225s −2.19 → −4.68),
+  and the surviving point estimate FALLS (4.55 → 2.63 bps). If a "cleanup" raises the point estimate or
+  rescues several failing sources at once, it is tuning, not cleaning.
+- **Expected next.** Gross rises from `$0.00` — unavoidable for a book at zero, stated as the trade-off.
+  The selected rung moves 3600s → 225s (so the ADR-0080 rate becomes `a = 1 − e^(−30/225)`) and `trend`,
+  which carries essentially the whole planned book at weight 1.26 while measuring t = −4.68 there, is
+  demoted to the ADR-0097 minimum. If exposure rises and PnL does not, ❌ BAD and the revert are correct.
+- **Remaining levers, in order.** (a) **The tape handover itself** — the mark source changed under a
+  running `feed_mode=SIM` session with no invariant-8 epoch roll, and the σ sensors, stream covariance
+  and daily-close series all still span both tapes (deferred register). Related and unexplained: the
+  20% jump guard did **not** fire on an 85% move and `/api/marks/quarantined` is empty. (b) `ALPHA JPM
+  SELL` REJECTED 45 consecutive times, `no market data for JPM`, while `/api/marks` showed JPM live —
+  a name whose feed goes quiet can be neither entered nor exited, a control failing in the dangerous
+  direction. (c) ADR-0084's entry/exit asymmetry: passive entries cancelled every re-plan while exits
+  cross. (d) `turnover_cost_by_name` has now errored **eight** cycles running. (e) The frozen MACRO book,
+  fourteen cycles unchanged to the cent.
