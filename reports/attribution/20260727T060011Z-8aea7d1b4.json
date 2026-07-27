@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T06:00:11Z",
+    "fees": "345.899988",
+    "gross": "30137.86537880",
+    "net": "831.98750880",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "30137.86537880",
+      "hedgePnl": "-423.34227580",
+      "netExposure": "831.98750880",
+      "realizedPnl": "176.03642527",
+      "strategyAlpha": "638.38983623",
+      "totalFees": "345.899988",
+      "totalPnl": "215.04756043",
+      "unrealizedPnl": "39.01113516"
+    },
+    "total_pnl": "215.04756043"
+  },
+  "before": {
+    "at": "2026-07-27T05:49:50Z",
+    "gross": "17627.35113570",
+    "net": "1011.23438646",
+    "total_pnl": "184.74298810"
+  },
+  "commit": "8aea7d1b40c05cb961ee40ef3aa25dd29aba288c",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "12510.51424310",
+    "net": "-179.24687766",
+    "total_pnl": "30.30457233"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj (PnL/$1 gross) worsened 0.01048\u21920.00714",
+  "revert": true,
+  "scoredAt": "2026-07-27T06:00:11Z",
+  "summary": "the hedge measures its own effectiveness on the mark stream instead of sizing itself from assigned betas forever, and a measurement below the rho-squared floor now unwinds the hedge instead of falling through to those betas (ADR-0095)",
+  "verdict": "\u274c BAD"
+}
