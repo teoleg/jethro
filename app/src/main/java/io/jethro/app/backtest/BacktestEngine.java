@@ -37,6 +37,9 @@ public final class BacktestEngine {
 
     private static final BookId BOOK = new BookId("BT");
     private static final RoundingMode ROUND = RoundingMode.HALF_EVEN;
+    /** Quantity scale for a name whose unit is a CONTRACT — the scale the order/fill/position
+     *  records already carry, so a backtested size is one the live path could actually submit. */
+    private static final int QTY_SCALE = 6;
     // Calibrate a backtest tick to the live 100ms tick so vol matches production (ADR-0014).
     private static final double TICK_SECONDS = 0.1;
     private static final double TRADING_YEAR_SECONDS = 252 * 6.5 * 3_600;
@@ -56,12 +59,17 @@ public final class BacktestEngine {
         long[] startPrices = new long[n];
         long[] maxSteps = new long[n];
         BigDecimal[] mult = new BigDecimal[n];
+        BigDecimal[] costBps = new BigDecimal[n];
         String[] ids = new String[n];
         Map<String, Book> books = new LinkedHashMap<>();
         for (int i = 0; i < n; i++) {
             var instr = cfg.instruments().get(i);
             ids[i] = instr.instrumentId();
             mult[i] = instr.multiplier();
+            // ADR-0085: this name's OWN per-fill cost when the caller stated one, else the
+            // config-wide charge. A blended charge across a universe whose spreads span two orders
+            // of magnitude is wrong in both directions at once — see the ADR.
+            costBps[i] = instr.costBps() != null ? instr.costBps() : cfg.costBps();
             startPrices[i] = Decimals.toScaledLong(instr.startPrice(), Decimals.PRICE_SCALE);
             maxSteps[i] = Math.max(1, Math.round(instr.annualVol()
                     * Math.sqrt(TICK_SECONDS / TRADING_YEAR_SECONDS) * Math.sqrt(3.0) * 1_000_000));
@@ -120,7 +128,7 @@ public final class BacktestEngine {
                     // Transaction cost: costBps of the traded notional (fees + slippage proxy),
                     // charged on every fill. Win/loss is judged on realized NET of this cost.
                     BigDecimal cost = qty.multiply(mark[idx]).multiply(mult[idx])
-                            .multiply(cfg.costBps()).movePointLeft(4);
+                            .multiply(costBps[idx]).movePointLeft(4);
                     BigDecimal realizedNet = applied.realizedPnl().subtract(cost);
                     if (realizedNet.signum() != 0) {
                         closingFills++;
@@ -171,7 +179,15 @@ public final class BacktestEngine {
             return null; // standing aside this regime
         }
         BigDecimal notionalPerUnit = price.multiply(multiplier);
-        BigDecimal qty = cfg.targetNotional().multiply(regimeScale).divide(notionalPerUnit, 0, RoundingMode.DOWN);
+        // ADR-0078/0085: size in the instrument's OWN contract terms, exactly as the live order path
+        // does (TargetPlanner.tradableQuantity) and as the ADR-0039 hedge advisor has always submitted
+        // on ES. A name quoted per unit of currency (multiplier 1 — every equity and FX pair) trades
+        // in whole units; a name whose unit is a CONTRACT does not, because one contract is worth
+        // price × multiplier and a correctly-sized position in it is routinely a fraction of one.
+        // Rounding is DOWN in both cases, so it can only ever size less than asked for.
+        int qtyScale = multiplier.compareTo(BigDecimal.ONE) == 0 ? 0 : QTY_SCALE;
+        BigDecimal qty = cfg.targetNotional().multiply(regimeScale)
+                .divide(notionalPerUnit, qtyScale, RoundingMode.DOWN);
         if (qty.signum() <= 0) {
             if (notionalPerUnit.compareTo(cfg.maxOrderNotional()) > 0) {
                 return null; // one unit already exceeds the order cap — unsizeable

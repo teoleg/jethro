@@ -36,8 +36,22 @@ public record BacktestConfig(
                 costBps, instruments, "momentum");
     }
 
-    /** One tradable instrument in the backtest universe. */
+    /**
+     * One tradable instrument in the backtest universe.
+     *
+     * @param costBps this NAME's own per-fill transaction cost in bps of traded notional — half its
+     *                own full bid/ask spread plus its asset class's fee, the same derivation the live
+     *                {@code SimulatedExecutor} charges (ADR-0085). Null falls back to
+     *                {@link BacktestConfig#costBps()}, which is what a caller with no per-name
+     *                economics to hand (a standalone test, an explicit cost override) supplies.
+     */
     public record Instrument(String instrumentId, BigDecimal startPrice, double annualVol,
-                             BigDecimal multiplier) {
+                             BigDecimal multiplier, BigDecimal costBps) {
+
+        /** A name with no cost of its own — it is charged the config-wide {@code costBps}. */
+        public Instrument(String instrumentId, BigDecimal startPrice, double annualVol,
+                          BigDecimal multiplier) {
+            this(instrumentId, startPrice, annualVol, multiplier, null);
+        }
     }
 }

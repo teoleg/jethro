@@ -71,14 +71,67 @@ class BacktestEngineTest {
     }
 
     @Test
-    void esIsUnsizeableAndLongOnlyNeverGoesShort() {
+    void longOnlyNeverGoesShort() {
         BacktestResult r = engine.run(config(42));
         for (BacktestResult.InstrumentResult ir : r.byInstrument()) {
             assertTrue(ir.endPosition().signum() >= 0, "long-only: " + ir.instrumentId() + " went short");
-            if (ir.instrumentId().equals("ES")) {
-                // One ES contract (5450 × 50 = 272,500) exceeds the 50,000 order cap → never traded.
-                assertEquals(0, ir.trades(), "ES should be unsizeable under the order cap");
-            }
         }
+    }
+
+    /**
+     * ADR-0085: a name whose unit is a CONTRACT sizes FRACTIONALLY, exactly as the live order path does
+     * (ADR-0078 {@code TargetPlanner.tradableQuantity}) and as the hedge advisor has always submitted on
+     * ES. Worked: one ES contract is worth 5450 × 50 = 272,500, so a 25,000 target notional is
+     * 25,000 / 272,500 = 0.091743… contracts, DOWN at scale 6 = 0.091743 — worth 0.091743 × 5450 × 50 =
+     * 24,999.97, the size that was asked for. Rounding that to a whole contract gave 0, and because one
+     * contract exceeds the 50,000 order cap the name was then declared unsizeable and never traded —
+     * which is why no future ever earned an OOS verdict, and so why the ADR-0049 veto barred every one
+     * of them from the fusion desk.
+     */
+    @Test
+    void aContractSizesFractionallyAndTradesRatherThanBeingUnsizeable() {
+        BacktestResult r = engine.run(tradingConfigWithEs(BigDecimal.ZERO));
+        BacktestResult.InstrumentResult es = r.byInstrument().stream()
+                .filter(ir -> ir.instrumentId().equals("ES")).findFirst().orElseThrow();
+        assertTrue(es.trades() > 0, "ES must now be sizeable in its own contract terms");
+        // Every quantity it traded is a multiple of the 1e-6 contract scale, never a whole-contract jump.
+        assertTrue(es.endPosition().abs().compareTo(new BigDecimal("1")) < 0,
+                "a 25k target notional in ES is a fraction of one contract, not a whole one");
+    }
+
+    /**
+     * ADR-0085: each name is charged its OWN per-fill cost, not one blend. Worked on ES: its per-fill
+     * cost is half its own full spread plus its class fee — 0.46 / 2 + 0.2 = 0.43 bps — where the old
+     * code charged it the EQUITY blend of 5 / 2 + 1 = 3.5 bps, 8.1x too much. Same tape, same fills:
+     * only the charge differs, and it differs LINEARLY in the rate, so doubling ES's rate exactly
+     * doubles the cost attributed to ES while AAPL's (held at zero here) stays zero.
+     */
+    @Test
+    void eachNameIsChargedItsOwnCost() {
+        BigDecimal free = engine.run(esAt(BigDecimal.ZERO, BigDecimal.ZERO)).totalCosts();
+        assertEquals(0, free.signum(), "zero rates -> no costs");
+        BigDecimal atRate = engine.run(esAt(new BigDecimal("0.43"), BigDecimal.ZERO)).totalCosts();
+        BigDecimal atDouble = engine.run(esAt(new BigDecimal("0.86"), BigDecimal.ZERO)).totalCosts();
+        assertTrue(atRate.signum() > 0, "ES must trade for the charge to be observable");
+        // AAPL is free in both runs, so every cost here is ES's, and cost = rate x notional is linear.
+        assertEquals(0, atDouble.compareTo(atRate.multiply(BigDecimal.TWO)),
+                "ES's cost must scale exactly with ES's own rate");
+    }
+
+    /** Aggressive params over a universe that includes ES, so both sizing rules are exercised. */
+    private static BacktestConfig tradingConfigWithEs(BigDecimal costBps) {
+        return esAt(costBps, costBps);
+    }
+
+    /** As above with ES and AAPL priced separately — the per-name cost path. */
+    private static BacktestConfig esAt(BigDecimal esCostBps, BigDecimal aaplCostBps) {
+        return new BacktestConfig(42, 30_000, true, 50,
+                12, 0.5, BigDecimal.ONE,
+                new BigDecimal("25000"), new BigDecimal("50000"), new BigDecimal("75000"), true,
+                BigDecimal.ONE, aaplCostBps,
+                List.of(new BacktestConfig.Instrument("AAPL", new BigDecimal("190"), 0.28, BigDecimal.ONE,
+                                aaplCostBps),
+                        new BacktestConfig.Instrument("ES", new BigDecimal("5450"), 0.15, new BigDecimal("50"),
+                                esCostBps)));
     }
 }

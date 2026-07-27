@@ -1,57 +1,49 @@
-The desk holds a strong signal it cannot afford to trade — so I made it stop paying the spread to enter: entries now POST, exits still CROSS (ADR-0084).
+The desk's edge gate has been saying "ES is the only name worth paying to trade" for fourteen cycles while the OOS selector said "I have no opinion on ES" — because the backtest could not size a futures contract at all. Fixed the measurement (ADR-0085).
 
 ## Situation (read from the live endpoints, not computed here)
 
-1. **Money.** Total PnL is unchanged run-over-run and unchanged across the last three runs — it has
-   been frozen at the same figure for thirteen consecutive cycles. Not bleeding; *stuck*, and off the
-   +1% / 3-iteration target. `underwater` and `stale` are both set.
-2. **Risk.** Gross and net exposure are both exactly zero and have been all thirteen cycles. Nothing
-   held, nothing at risk, nowhere near the drawdown breaker. There is no exposure to cut.
-3. **Cause.** Last cycle's change (ADR-0083, the volatility-split per-name budget) scored ⚠️ MIXED on
-   a zero move — like the four before it, it is **unmeasured, not refuted**, because a sizing change
-   cannot show up in a book that never trades. The culprit is not any one of those changes; it is
-   that the desk has had **no route to a fill** since 20:21.
-4. **Danger.** No — this is the opposite of a danger state. Zero exposure, zero orders. The failure
-   mode here is inaction, not risk.
-5. **Order-level post-mortem.** The window's orders end at 20:21 with the MSFT churn (BUY 4 / SELL 49
-   / BUY 77 within minutes) and its ES hedge legs; nothing since. Every fusion target now shows
-   `deltaQty: 0` against `currentQty: 0` — the planner wants a book (SAP, BRK.B, JPM, …) and routes
-   none of it.
-6. **Change vs market.** Attribution is exact and empty: **0% market, 0% change**. No position was
-   opened, closed or resized, so nothing this cycle can be credited or blamed for anything.
+1. **Money.** Total PnL is unchanged run-over-run and unchanged across the last three runs — frozen at
+   the same figure for a fourteenth consecutive cycle. Not bleeding; *stuck*, and a hard miss on the
+   +1%/3-iteration target. `underwater` and `stale` both set.
+2. **Risk.** Gross and net exposure are both exactly zero, as they have been all fourteen cycles.
+   Nothing held, nothing at risk, nowhere near the drawdown breaker. There is no exposure to cut.
+3. **Cause.** Last cycle's change (ADR-0084, passive entries) scored ⚠️ MIXED on a zero move — like
+   the five before it, **unmeasured, not refuted**: an execution-style change cannot show up in a book
+   that never places an order. It was also correct, and it was not the binding constraint.
+4. **Danger.** No. Flat book, no drawdown, no breaker proximity — this is a stuck-desk failure, not a
+   risk event, so the right move is to restore a route to a fill, not to de-risk.
+5. **Order-level post-mortem.** No orders in the window at all — the last fill was hours ago. Zero
+   triggers to attribute, no losing trade to fix.
+6. **Change vs market.** Both are exactly zero and separable without ambiguity: with no position and
+   no order, **0% of the move is market and 0% is my change** — there was no move.
 
-## Diagnosis — the mechanism
+## Diagnosis — the mechanism, at last
 
-The edge gate is **open**, not shut: `reversion` clears at the 225 s rung the ADR-0082 ladder
-selected, on 391 observations across 17 cohorts, p = 0.0006. ADR-0082 is visibly working. The block
-is one layer down, in **ADR-0075's per-name cost test**. Reversion's measured expectancy divided by
-its Fama-MacBeth standard error can survive a round trip of at most ~1.95 bps at the shipped
-confidence. Every name's *measured* round trip is its full bid/ask spread, because the desk submits
-MARKET orders and crosses on both legs: MSFT 2.87, JNJ 3.88, JPM 4.18, AAPL 4.21, GOOG 5.95, SAP
-8.16, GOOGL 20.11, unfilled names 6.34. Exactly one name clears — ES at 0.35 bps — and ES is the one
-name the ADR-0049 OOS selector never evaluates (its universe is the 17 equity/FX names), so the
-executor vetoes it for having no verdict. Every path to a fill is closed, and the last five changes
-all worked the *statistics* side of a comparison whose *cost* side was the binding one.
+The thing shutting the desk is *not* the statistics of the edge gate (five earlier cycles re-specified
+those, and every one worked on the term that was not binding). Reading the live gate: `reversion`
+clears decisively at the evidence-selected 225 s rung, and the gate then tests each name against its
+**own** measured round trip. Only **ES** clears — it is the cheapest name in the book by an order of
+magnitude — and the planner duly produces a non-zero ES delta every single cycle. That delta is then
+thrown away by the ADR-0049 backtest-support veto, because the OOS selector has **no verdict** for ES.
 
-## Decision
+It has no verdict because the harness cannot measure a futures contract. `BacktestEngine` sized every
+name in whole units, so ES's correct 0.091743-contract position rounded to zero, at which point the
+code read "one contract exceeds the order cap" and declared the name unsizeable. **No future has ever
+been measured** — 17 of 19 price-quoted names, all equity/FX. Compounding it, the harness charged
+every instrument the *equity* per-fill cost, 8.1× what the live executor actually charges ES. So the
+desk's own edge gate and its own backtest gate had reached opposite conclusions about the same name,
+and the disagreement was an artefact of arithmetic, not of evidence.
 
-Change the execution style, not the evidence bar. A risk-**increasing** fusion delta is now posted as
-a DAY LIMIT at the instrument's own arrival mark; a risk-**reducing** delta still crosses as MARKET,
-because a cut that waits for a better price is not a cut — the same asymmetry ADR-0065 and ADR-0080
-already apply to the gates and the adjustment rate. The layer retires its own working orders at the
-top of each planning tick so a fresh plan is never stacked on stale intent. The limit **is** the mark
-(no dial, no offset, no invented number), and it is also the right style for the source that is
-actually earning: reversion profits by supplying liquidity into an over-extension, and crossing to
-enter was paying away its own premium.
+## Change
 
-The hurdle, the α, the Bonferroni haircut and the degrees of freedom are all untouched — I did not
-loosen a single control. What falls is the measured cost the same unchanged test reads. On the
-current numbers, the identical test that rejects every tradable name at a crossing cost accepts them
-at a passive one. And even if the gate stays shut a while longer, a cheaper entry is more PnL for the
-same exposure on every trade the desk ever does, which is the objective exactly.
+ADR-0085: the OOS backtest sizes each name in its own contract terms (ADR-0078's rule, applied to the
+measurement path) and charges each name its own per-fill cost — half its refdata spread plus its class
+fee, the same derivation `OrderConfig` hands the live `SimulatedExecutor`, and the one the harness's
+own javadoc already claimed. No gate loosened, no hurdle moved, no number invented: multiplier and
+`spread_bps` are reference data, the fees are the ADR-0025 config. Replaying the selector's harness,
+ES goes from 0 trades / no verdict to 8 trades with a positive momentum median; NQ trades but medians
+to zero and stays vetoed, so the fail-closed veto still bites — it just finally has evidence to bite on.
 
-**The honest caveat, stated up front:** a posted entry may not fill, and a passive fill's cost
-migrates from the price (visible in TCA) into adverse selection (visible only in realised PnL). For a
-mean-reversion signal that "adverse" move strengthens the forecast, which is why this is sound for
-*this* source — but the ledger's realised-PnL verdict is what keeps it honest, and both gaps are
-written into the deferred register rather than glossed.
+If ES's edge turns out to be a property of the backtest tape rather than of the live stream, that
+shows up next cycle as PnL flat with exposure up, is scored ❌ BAD and reverted. What would be refuted
+then is ES's edge, not the measurement fix.

@@ -22,9 +22,12 @@ public class BacktestWiring {
     BacktestService backtestService(BacktestEngine engine, TradingCoreProperties sim,
                                     StrategyProperties strategy, InstrumentRefSource refs,
                                     ExecutionProperties execution) {
-        // The backtest charges what live sim execution charges (ADR-0025): EQUITY
-        // half-spread + fee per fill, so "backtest-supported" measures the same economics.
-        return new BacktestService(engine, sim, strategy, refs, execution.perFillCostBps("EQUITY"));
+        // The backtest charges what live sim execution charges (ADR-0025), PER NAME (ADR-0085): half
+        // that instrument's own refdata spread + its class fee, the same derivation OrderConfig hands
+        // the SimulatedExecutor — so "backtest-supported" measures the economics the desk would
+        // actually face in that name. The EQUITY blend stays as the fallback for a name refdata and
+        // the class config together cannot price.
+        return new BacktestService(engine, sim, strategy, refs, execution.perFillCostBps("EQUITY"), execution);
     }
 
     /** Walk-forward replay over real daily bars (ADR-0027 point 2); the bars file is
