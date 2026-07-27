@@ -1,0 +1,20 @@
+{
+  "commit": "3f52cb1f8e5d9672218a05ebf0e58a6dfdd7e8d5",
+  "fees": "381.923436",
+  "gross_exposure": "61795.00823189",
+  "net_exposure": "4924.80587589",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "61795.00823189",
+    "hedgePnl": "-524.71197694",
+    "netExposure": "4924.80587589",
+    "realizedPnl": "343.71090229",
+    "strategyAlpha": "855.78862173",
+    "totalFees": "381.923436",
+    "totalPnl": "331.07664479",
+    "unrealizedPnl": "-12.63425750"
+  },
+  "summary": "the hedge neutralizes only the systematic exposure that stands clear of its own churn \u2014 the target is shrunk toward flat by one standard deviation of its own step between the moments the hedge can act, measured on the stream, strictly one-way (ADR-0098)",
+  "total_pnl": "331.07664479",
+  "ts": "2026-07-27T07:35:31Z"
+}
