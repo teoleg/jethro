@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T05:00:11Z",
+    "fees": "328.993712",
+    "gross": "13739.84592516",
+    "net": "2500.91349924",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "13739.84592516",
+      "hedgePnl": "-348.65449480",
+      "netExposure": "2500.91349924",
+      "realizedPnl": "128.51140065",
+      "strategyAlpha": "480.14287497",
+      "totalFees": "328.993712",
+      "totalPnl": "131.48838017",
+      "unrealizedPnl": "2.97697952"
+    },
+    "total_pnl": "131.48838017"
+  },
+  "before": {
+    "at": "2026-07-27T04:52:02Z",
+    "gross": "22155.29205931",
+    "net": "-2240.24584247",
+    "total_pnl": "114.11212304"
+  },
+  "commit": "86520ccfe9ee227ae61a8ef1d4166cd2ea087465",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-8415.44613415",
+    "net": "4741.15934171",
+    "total_pnl": "17.37625713"
+  },
+  "note": "risk-adj (PnL/$1 gross) improved 0.00515\u21920.00957",
+  "revert": false,
+  "scoredAt": "2026-07-27T05:00:11Z",
+  "summary": "the no-trade band is measured against the aim rather than the target, so a buffer the desk can actually be inside stops it re-trading every name every cycle to hold a lagging fraction of its own target (ADR-0094)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
