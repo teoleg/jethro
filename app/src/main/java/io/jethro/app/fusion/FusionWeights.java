@@ -34,6 +34,17 @@ public final class FusionWeights {
         return new FusionWeights(TelemetryWeights.compute(stats, params), 1.0);
     }
 
+    /**
+     * The same weights with the ADR-0097 admission rule applied: a source that has not demonstrated a
+     * directional edge at the desk's own hurdle ({@code admission}) is held at the MIN weight so it
+     * cannot out-vote one that has. {@code admission} null ⇒ identical to {@link #fromTelemetry}.
+     */
+    public static FusionWeights fromTelemetry(List<SignalScoring.Stats> stats,
+                                              TelemetryWeights.Params params,
+                                              EdgeGate.Params admission) {
+        return new FusionWeights(TelemetryWeights.compute(stats, params, admission), 1.0);
+    }
+
     public double weightFor(String source) {
         return weights.getOrDefault(source, defaultWeight);
     }

@@ -145,12 +145,45 @@ public final class EdgeGate {
          * itself an estimate — rather than against a fixed normal quantile (ADR-0081).
          */
         public boolean clears(double roundTripBps, Params params) {
-            if (resolved < params.minSample() || !(stdErrorBps > 0) || cohorts < 2) {
-                return false;
-            }
-            double t = (avgReturnBps - roundTripBps) / stdErrorBps;
-            return Significance.studentTUpperTail(t, cohorts - 1.0) <= params.alpha();
+            return EdgeGate.clears(resolved, cohorts, avgReturnBps, stdErrorBps, roundTripBps, params);
         }
+    }
+
+    /**
+     * The desk's one significance test, in one place: does a measured expectancy of
+     * {@code avgReturnBps} — estimated with standard error {@code stdErrorBps} from {@code cohorts}
+     * independent draws (ADR-0077) — survive {@code roundTripBps} at the params' confidence? The
+     * surplus is divided by its estimated standard error and the ratio read against Student's t on
+     * {@code cohorts − 1} degrees of freedom, the distribution it follows when the denominator is
+     * itself an estimate, rather than against a fixed normal quantile (ADR-0081).
+     *
+     * <p>Factored out of {@link SourceEdge#clears} so the WEIGHTING side (ADR-0097) asks the desk's
+     * question with the desk's arithmetic instead of a second copy of it that could drift. Passing
+     * {@code roundTripBps = 0} asks the pure directional form — "is there an edge at all?" — which is
+     * the admission test the weights use, keeping execution cost out of the weighting exactly as
+     * {@link TelemetryWeights} intends.
+     *
+     * <p>Monotone in cost: the test at {@code 0} is implied by the test at any {@code roundTripBps ≥ 0},
+     * so nothing can clear the gate that this form rejects.
+     */
+    public static boolean clears(long resolved, long cohorts, double avgReturnBps, double stdErrorBps,
+                                 double roundTripBps, Params params) {
+        if (params == null || resolved < params.minSample() || !(stdErrorBps > 0) || cohorts < 2) {
+            return false;
+        }
+        double t = (avgReturnBps - roundTripBps) / stdErrorBps;
+        return Significance.studentTUpperTail(t, cohorts - 1.0) <= params.alpha();
+    }
+
+    /**
+     * Has this source demonstrated a DIRECTIONAL edge — expectancy distinguishable from zero at the
+     * desk's own hurdle (ADR-0097)? The admission test for the combination weights; gross of execution
+     * cost, because cost decides whether to trade at all ({@link EdgeGate}) and not whose view counts
+     * ({@link TelemetryWeights}).
+     */
+    public static boolean demonstratesEdge(SignalScoring.Stats s, Params params) {
+        return s != null
+                && clears(s.resolved(), s.cohorts(), s.avgReturnBps(), s.stdErrorBps(), 0.0, params);
     }
 
     /**

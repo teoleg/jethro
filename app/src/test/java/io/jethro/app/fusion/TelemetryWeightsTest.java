@@ -204,6 +204,109 @@ class TelemetryWeightsTest {
         assertEquals(10.0 / Math.sqrt(0.75), equal.value(), 1e-12);
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0097: a source that has not demonstrated a directional edge is held at the MIN weight.
+    // ---------------------------------------------------------------------------------------------
+
+    /** The gate's own parameters: 30 resolved observations minimum, α = 1 − Φ(2.0) = 0.0227501…. */
+    private static final EdgeGate.Params GATE = new EdgeGate.Params(30, 2.0);
+
+    /** A cohort-aware record: the ADR-0077 standard error is stdCohortMeanBps / √cohorts. */
+    private static SignalScoring.Stats cohortStat(String source, long resolved, long cohorts,
+                                                  double avgBps, double stdCohortMeanBps) {
+        return new SignalScoring.Stats(source, resolved, resolved / 2, 0, resolved - resolved / 2, 0,
+                1.0, avgBps, stdCohortMeanBps, cohorts, stdCohortMeanBps);
+    }
+
+    /**
+     * The live shape that motivated the rule, restated on round numbers.
+     *
+     * <p>STRONG: 500 resolved over 39 cohorts, +10.0 bps, cohort sd 6.0 bps.
+     * SE = 6.0/√39 = 0.960769…; t = 10.0/0.960769… = 10.4083…; on 38 df the upper tail is ~4e-13,
+     * far inside α = 0.02275 ⇒ ADMITTED.
+     *
+     * <p>WEAK: 51 resolved over 31 cohorts, +3.25 bps, cohort sd 10.7 bps.
+     * SE = 10.7/√31 = 1.921797…; t = 3.25/1.921797… = 1.69112…; on 30 df the upper tail is ≈ 0.0505,
+     * i.e. outside α ⇒ NOT admitted. Φ(1.69) = 0.9545 against Φ(10.4) = 1.0000, so on evidence alone
+     * WEAK carried ~95% of STRONG's trust — a source failing the desk's own test all but tying with
+     * the only one passing it. That is the saturation this rule closes.
+     */
+    @Test
+    void aSourceThatCannotDemonstrateAnEdgeIsHeldAtTheMinimumWeight() {
+        var stats = List.of(
+                cohortStat("strong", 500, 39, 10.0, 6.0),
+                cohortStat("weak", 51, 31, 3.25, 10.7));
+
+        assertTrue(EdgeGate.demonstratesEdge(stats.get(0), GATE), "t = 10.41 on 38 df clears α");
+        assertTrue(!EdgeGate.demonstratesEdge(stats.get(1), GATE), "t = 1.69 on 30 df does not");
+
+        var before = TelemetryWeights.compute(stats, K20);
+        var after = TelemetryWeights.compute(stats, K20, GATE);
+
+        assertTrue(before.get("weak") > 0.9 * before.get("strong"),
+                "without the rule the failing source nearly ties the passing one: "
+                        + before.get("weak") + " vs " + before.get("strong"));
+        assertEquals(0.25, after.get("weak"), 1e-12, "demoted to exactly Params.min()");
+        assertEquals(before.get("strong"), after.get("strong"), 1e-12, "the admitted source is untouched");
+    }
+
+    @Test
+    void theRuleIsOneWayAndNeverRaisesAWeight() {
+        var stats = List.of(
+                cohortStat("strong", 500, 39, 10.0, 6.0),
+                cohortStat("weak", 51, 31, 3.25, 10.7),
+                cohortStat("bad", 500, 23, -6.7, 6.26));
+        var before = TelemetryWeights.compute(stats, K20);
+        var after = TelemetryWeights.compute(stats, K20, GATE);
+        for (var e : before.entrySet()) {
+            assertTrue(after.get(e.getKey()) <= e.getValue() + 1e-12,
+                    e.getKey() + ": a demotion can only ever lower a weight");
+            assertTrue(after.get(e.getKey()) >= 0.25 - 1e-12, e.getKey() + ": never silenced");
+        }
+        assertEquals(0.25, after.get("bad"), 1e-12, "a measured-negative source is at MIN, never inverted");
+    }
+
+    @Test
+    void withNoSourceAdmittedTheWeightsAreLeftExactlyAsMeasured() {
+        // Nothing clears at zero cost ⇒ nothing can clear the gate at a non-negative cost either, so
+        // the desk is reduce-only; flattening the vector here would change the diversification
+        // multiplier for no gain. Byte-identical to the pre-ADR-0097 weights.
+        var stats = List.of(
+                cohortStat("weak", 51, 31, 3.25, 10.7),
+                cohortStat("bad", 500, 23, -6.7, 6.26));
+        assertEquals(TelemetryWeights.compute(stats, K20), TelemetryWeights.compute(stats, K20, GATE));
+    }
+
+    @Test
+    void nullAdmissionIsThePreviousBehaviourExactly() {
+        var stats = List.of(
+                cohortStat("strong", 500, 39, 10.0, 6.0),
+                cohortStat("weak", 51, 31, 3.25, 10.7));
+        assertEquals(TelemetryWeights.compute(stats, K20), TelemetryWeights.compute(stats, K20, null));
+    }
+
+    @Test
+    void theAdmissionTestIsTheGatesOwnTestAtZeroCost() {
+        var weak = cohortStat("weak", 51, 31, 3.25, 10.7);
+        var strong = cohortStat("strong", 500, 39, 10.0, 6.0);
+        // Monotone in cost: whatever clears at a positive round trip clears at zero, so the admitted
+        // set can never be smaller than the set the gate itself passes.
+        for (double cost : new double[] {0.0, 1.56, 5.0, 9.0}) {
+            assertTrue(!EdgeGate.clears(strong.resolved(), strong.cohorts(), strong.avgReturnBps(),
+                            strong.stdErrorBps(), cost, GATE)
+                            || EdgeGate.demonstratesEdge(strong, GATE),
+                    "clearing at cost " + cost + " implies clearing at zero");
+            assertTrue(!EdgeGate.clears(weak.resolved(), weak.cohorts(), weak.avgReturnBps(),
+                            weak.stdErrorBps(), cost, GATE)
+                            || EdgeGate.demonstratesEdge(weak, GATE),
+                    "clearing at cost " + cost + " implies clearing at zero");
+        }
+        // A sample below the gate's minimum is no evidence, whatever it reads.
+        assertTrue(!EdgeGate.demonstratesEdge(cohortStat("thin", 10, 9, 40.0, 1.0), GATE));
+        // A single cohort supports no standard error at all (ADR-0077) ⇒ no admission.
+        assertTrue(!EdgeGate.demonstratesEdge(cohortStat("onedraw", 500, 1, 40.0, 1.0), GATE));
+    }
+
     @Test
     void normalCdfMatchesPublishedValues() {
         assertEquals(0.5, TelemetryWeights.standardNormalCdf(0.0), 1e-9);

@@ -122,8 +122,14 @@ public class FusionConfig {
                         ? FusionWeights::equal
                         : () -> {
                             var selection = selectRung(telemetry, tca, gateParams);
+                            // ADR-0097: the SAME gateParams admit a source to the vote. A source that
+                            // cannot show a directional edge at the desk's own hurdle is held at the MIN
+                            // weight — Φ(t) saturates above the hurdle and cannot tell a source that
+                            // barely clears from one that clears sixfold, so without this a failing
+                            // source out-votes the only passing one on the desk's largest position.
                             return selection == null ? FusionWeights.equal()
-                                    : FusionWeights.fromTelemetry(selection.stats(), weightParams);
+                                    : FusionWeights.fromTelemetry(selection.stats(), weightParams,
+                                            gateParams);
                         };
         // ADR-0064: the edge gate re-reads BOTH measurements every cycle — per-source realised
         // expectancy (signal telemetry) and the desk's own realised slippage (TCA) — so it opens by

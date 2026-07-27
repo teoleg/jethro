@@ -1,62 +1,67 @@
-The desk's "no-trade band" has never suppressed a single order and structurally cannot — so the book is re-traded every cycle on every name and pays 95% of its gross alpha in fees; the band now sits around the AIM at a fraction of the average position, where it can actually bind (ADR-0094).
+The desk's own significance test passes exactly one source — and the combiner still let a source that FAILS that test out-vote it ten to one on the largest position in the book (ADR-0097).
 
-## Situation — read off the live endpoints; every figure below is quoted, none computed here
+## Situation — every figure below is quoted from the live endpoints; none is computed here
 
-**1. Money.** Total PnL is **up**, three runs running: `$67.76` now, `+$26.67` on the window and
-`+$200.52` across the last three. `pnl_growth_pct` is far ahead of the 1% target and `on_track` is true.
-The book is **not bleeding**.
+**1. Money.** Total PnL `$267.21` on `/api/risk` `.total`. The SITUATION header puts the window at
+`+34.22` and the last three runs at `+105.87`; `run-status.json` has `on_track` true with
+`pnl_growth_pct` far ahead of the 1% target, `stale` and `underwater` both false. The book is **not
+bleeding**. Attribution splits it `ALPHA +339.59`, `MACRO +376.99`, `HEDGE −451.51`, on `$356.76` of
+fees — the fee line is larger than the firm's entire profit, and the hedge alone loses more than the
+firm makes.
 
-**2. Risk.** Gross exposure `$26,197.73` against net `$3,527.47` — **up `+$3,162.22` this window**, but
-**down `-$28,806.42` over three**. VaR95 `$216.31` / ES95 `$279.14` on `$26,183.41` covered; the firm
-drawdown breaker is not tripped and is nowhere near it. Regime `CALM`, trend `CHOP`.
+**2. Risk — this is the failing half.** Gross exposure `$50,876.08` against net `$6,444.17`, with the
+header flagging **EXPOSURE RISING** at `+36,404.57` on the window and `+30,244.03` over three runs.
+VaR95 `$437.47` / ES95 `$527.26`; the firm drawdown breaker is `halted: false` and, against Oleg's
+`max-firm-drawdown` of `50000`, nowhere near tripping. So this is not a danger state by the owner's own
+stated tolerance — the book is small relative to every configured limit — but PnL is rising in tens of
+dollars while gross rises in tens of thousands, and that ratio is what is being scored.
 
-**3. Cause — the culprit is named and already gone.** Last cycle's change (`e33e9479c`, fusion weight =
-shrunk measured edge, ADR-0093) scored **❌ BAD** and the scorer auto-reverted it (`f73e297`). Its
-scored row is exactly the exposure rise the situation header flags: gross `$23,039.67 → $26,198.44` and
-net `$647.79 → $3,525.84` for a PnL move of `+$22.73`. So the one danger flag this cycle is that change's
-doing and is already backed out; I have not re-attempted that lever and will not.
+**3. Cause.** Last cycle's change (`d82aea4c8`, ADR-0096) was scored **❌ BAD** and auto-reverted at
+06:30. Gross is still `$50,876` *after* that revert, so the ramp is not that change's doing — it is
+structural, and it is why six of the last eight changes scored BAD on "exposure grew with no PnL gain".
+Honest attribution of this window: the exposure move is **mechanism, not last cycle's change** — the desk
+is grinding toward a target book an order of magnitude larger than what it holds, at the derived ADR-0080
+rate, and would have done so under any of these commits. I credit last cycle's change with none of the
+PnL move and none of the exposure move; the revert removed it before most of the window.
 
-**4. Danger state?** No. PnL rising, breaker far, VaR a fraction of gross, and the exposure rise is
-attributable to a change that has been reverted. No de-risk override — this cycle was free to go at a
-mechanism.
+**4. Danger.** Not a danger state: PnL up, breaker far away, VaR small. So the response is not to de-risk
+blindly — it is to fix the mechanism that keeps adding exposure without adding edge.
 
-**7. Change vs market, honestly.** I claim credit for nothing this window. ADR-0093 re-weighted every
-source, so it touched every name in the book — there is no untouched control group to read the market off,
-and the `+$26.67` cannot be split from the numbers alone. I say that rather than guess a cause. The
-exposure half *is* separable and *is* the change's: it moved net five-fold on a re-weighting that
-re-pointed the cross-section, and that is what the ❌ verdict priced.
+**5. Order-level post-mortem.** `recent_orders` shows the same trade every 30 s: `JPM SELL`, `AAPL SELL`,
+`JNJ BUY`, `GOOG BUY/SELL`, in the same direction, cycle after cycle, plus a `HEDGE ES BUY` chasing
+behind them. That is a monotone ramp, not a strategy firing. Winners: `AAPL +283.27`, `MSFT +127.15`,
+`JPM +120.73`, `JNJ +100.25`. Losers: `HEDGE ES −424.44` and `NQ −26.99`, `GOOGL −161.84` and
+`SAP −85.46` (both now flat), `GOOG −35.18`.
 
-## Diagnosis — the mechanism, from the order flow
+## Diagnosis — the mechanism
 
-`/api/attribution` is unambiguous about where the money goes: `ALPHA` shows `$268.61` of fees against a
-total of `$14.10`, so gross alpha before cost was ~`$283` and **the fee line is 95% of it**. The firm
-total is what survives. `HEDGE`'s `-$323.33` is realised history from cycles already fixed by ADR-0091 —
-it is holding on target now — and `MACRO`'s `+$376.99` is realised and flat. The only thing trading is
-`ALPHA`, on five equities, to a wash.
+The desk runs one statistic through two consumers and gets two answers. The **edge gate** passed exactly
+one source this cycle: `reversion` (`t = 10.65`, `p = 2.9e-13`). `social` failed it (`t = 1.82`,
+`p = 0.039`), and `momentum` (`−2.80`) and `trend` (`−4.96`) are measured significantly **negative**. Yet
+the combination weights read `reversion 2.106`, **`social 1.757`** — a source the desk itself says has
+not demonstrated an edge carrying 83% of the weight of the only one that has.
 
-Why: the ADR-0055 no-trade band is `|target| × 0.5` compared against the gap **to the target**, and
-ADR-0080 partial adjustment deliberately never takes the desk to its target. So the gap is ~0.9 of the
-target every cycle and the band has one answer. `fusion_targets` proves it — **all thirteen** planned
-names with a non-zero gap traded at exactly the derived rate `0.032784`, not one suppressed, while the
-desk held **5–30%** of its own target (AAPL −7 against −142, JNJ 47 against 260, GOOG 38 against 131).
-`recent_orders` is the same fact in the time domain: AAPL bought for three cycles then sold for twelve
-straight, JNJ round-tripped BUY→SELL→BUY inside eight minutes. The desk pays a continuous proportional
-cost to hold a small, lagging fraction of the risk it decided to take.
+The cause is that the weighting statistic is `Φ(t)`, a **probability**. Essentially all of Φ's dynamic
+range lies in `t ∈ [−2.5, 2.5]`; past the hurdle it is flat, so it cannot tell a source that barely
+clears from one that clears fivefold. On `JPM` — the desk's largest position, `$13,288` gross, planned
+`−162.58` shares — social's `−16.00 × 1.757` out-voted reversion's `+1.29 × 2.106` roughly ten to one and
+**reversed the sign of the only view with a demonstrated edge**. The desk then spends every cycle, and
+every basis point of fee, grinding into that short.
 
 ## Change
 
-`PositionBuffer` (ADR-0094, Proposed, same commit): trade toward the **aim** — the ADR-0080 exponential
-path itself — and only when the held position has drifted more than a buffer away from it, then only back
-to the buffer's near edge. Exposure is unchanged by construction (the aim path *is* the position the old
-policy converged to); what stops is buying and selling the last stretch every thirty seconds. Buffer width
-is Carver's published 10% of the average position, and the average position is derived per name from the
-cycle's own arithmetic — no money number authored, and Oleg's `buffer-fraction=0.5` left exactly as set.
-A flat target is never buffered, so every "get out" control (ADR-0086 cut, ADR-0065 unwind, the breaker)
-works in full as before; a shut edge gate clamps reduce-only and re-seeds the aim so intent cannot pile up
-behind it. `./gradlew -Pci test` green.
+`EdgeGate.demonstratesEdge` — the desk's existing significance test at **zero cost** (cost still decides
+whether to trade, never whose view counts) — now admits a source to the vote, and any source that fails
+it is held at the existing MIN weight. It still contributes, so the active-source count and the ADR-0076
+diversification multiplier are unaffected. No new dial, no new statistic, no money number: `min-sample`
+and `t-hurdle` are the gate's own. Strictly **one-way** — MIN is the clamp bound already applied, so a
+demotion can only lower a weight and a measured-negative source is never inverted into a contrarian bet.
+That one-wayness is the property ADR-0087 and ADR-0093 both lacked, and this repeats neither: it does not
+remove the floor and it does not replace `Φ(t)`. Proposed **ADR-0097** in the same commit; full suite
+green.
 
-**What I expect to see next run:** turnover and the fee line fall materially on `ALPHA` with gross
-exposure roughly where it is. If gross falls *and* PnL does not improve, the buffer is too wide and the
-next lever is its width, not another mechanism. If turnover does **not** fall, my reading of the aim path
-is wrong and the suspect becomes the target's own oscillation — the reversion sensor's span — rather than
-the execution policy.
+Expected: the desk stops sizing its largest positions on evidence it had already judged insufficient, the
+weight vector concentrates so `DM` falls (`JPM` 1.1944 → 1.1299, its fused view `−7.66` → ≈`−1.5`, under
+`min-forecast-to-route`), and the planned book — and the ramp toward it — shrinks. If this scores BAD the
+source-weighting lever is definitively closed and the next cycle must move to the hedge (`−451.51` on
+`$8,306` of gross, the firm's single worst position) or to the reversion sensor's own span.

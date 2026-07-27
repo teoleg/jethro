@@ -826,3 +826,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   rates 0.23/0.31 on n=299/69) at the 0.25 weight floor against reversion's `+12.42` bps at weight 3.0;
   that asymmetry is real but the weight lever is burned, so any future attempt must come at it from a
   different direction (e.g. horizon selection or dropping a source outright, not re-weighting it).
+
+## 2026-07-27 — the gate and the weights disagreed, and the weights won
+
+- **What the window did.** Total PnL `$267.21` (`+34.22` on the window, `+105.87` over three runs, on
+  track) while gross exposure went `+36,404.57` to `$50,876.08` — EXPOSURE RISING for the sixth run
+  running. `recent_orders` is the same four names traded the same direction every 30 s (`JPM SELL`,
+  `AAPL SELL`, `JNJ BUY`) with a `HEDGE ES BUY` chasing behind: a monotone ramp toward a target book an
+  order of magnitude above what is held, not a strategy firing. Attribution: `ALPHA +339.59`,
+  `MACRO +376.99`, `HEDGE −451.51`, fees `$356.76`.
+- **Attribution honesty.** Last cycle's `d82aea4c8` was scored ❌ BAD and reverted at 06:30, and gross is
+  still `$50,876` *after* the revert — so the ramp is the desk's own mechanism, not that change. It gets
+  credit for none of the PnL move and blame for none of the exposure move. **Rule: when the same flag
+  fires on six consecutive commits with different content, stop scoring the commits and find the process.**
+- **The trigger.** The desk runs ONE statistic through TWO consumers with two answers. The edge gate
+  passed exactly one source (`reversion`, t = 10.65) and failed `social` (t = 1.82, p = 0.039),
+  `momentum` (−2.80) and `trend` (−4.96) — yet the combination weights read `reversion 2.106`,
+  **`social 1.757`**. On `JPM`, the desk's LARGEST position, social's `−16.00 × 1.757` out-voted
+  reversion's `+1.29 × 2.106` ten to one and reversed the sign of the only view with a demonstrated edge.
+- **Rule 1: a probability is not an effect size.** `Φ(t)` has essentially all its dynamic range in
+  `t ∈ [−2.5, 2.5]`. Any statistic used to RANK sources must stay informative past the hurdle; Φ is flat
+  there and reads t = 1.7 and t = 10.6 as near-equals. Where a bounded, never-negative weight is wanted,
+  keep Φ but gate ADMISSION separately.
+- **Rule 2: the desk must obey its own tests.** If a test is trusted to decide whether risk may be taken,
+  it must also decide whose view directs it — otherwise the desk has built rigour and then routed around
+  it. Fixed by `EdgeGate.demonstratesEdge` (the same test at zero cost — cost decides *whether* to trade,
+  never *whose view counts*, so it is not charged twice) holding non-admitted sources at the MIN weight.
+- **On the burned lever.** The previous entry recorded source-weighting as burned (ADR-0087, ADR-0093 both
+  reverted) and named "dropping a source outright" as the permitted different direction. This is the safe
+  form of exactly that: held at MIN rather than 0, so the active-source count and the ADR-0076 multiplier
+  are untouched, and — unlike both reverted attempts — it is **strictly one-way** and can only lower a
+  weight. Taken deliberately with that history in view.
+- **Expected next.** Planned book and the ramp shrink (`JPM` DM 1.1944 → 1.1299, fused view −7.66 → ≈−1.5,
+  under `min-forecast-to-route`). **If this scores BAD the weight lever is definitively closed** — do not
+  return to it in any form. The next levers, in order: the HEDGE book (`−451.51` on `$8,306` of gross, the
+  firm's single worst position, structurally beta-sized from ASSIGNED betas while the measured ρ² fails
+  the effectiveness floor — but note ADR-0095 already tried unwinding it and was reverted, so come at the
+  cost/chase side, not the ρ² side), then the reversion sensor's own span.
+- **Standing observation, not yet acted on.** `turnover_cost_by_name` in the report has been erroring
+  (`| error |`) for several cycles — the loop is blind to per-name cost. Worth a report-only fix on a
+  cycle where no trading lever is clearly better.

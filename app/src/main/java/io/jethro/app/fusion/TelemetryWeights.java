@@ -68,6 +68,14 @@ import java.util.Map;
  * only *whose view counts more* among sources that all face the same cost. Keeping the two separate
  * stops one measurement from being charged twice.
  *
+ * <p><b>…but Φ saturates, so it needs an admission test (ADR-0097).</b> Φ is a probability, and
+ * essentially its whole dynamic range is {@code t ∈ [−2.5, 2.5]}: past the desk's hurdle the curve is
+ * flat, so a source that barely clears reads almost identically to one that clears by a factor of six.
+ * That is right for the question Φ answers and wrong for the one the combiner asks. So a source that has
+ * not demonstrated a directional edge — {@link EdgeGate#demonstratesEdge}, the desk's own significance
+ * test at zero cost — is held at MIN by {@link #compute(List, Params, EdgeGate.Params)}. Strictly
+ * one-way (MIN is the clamp bound already applied), and inert unless some source IS admitted.
+ *
  * <p>{@link ForecastCombiner} normalises by Σweights, so only the RATIOS matter — this can rotate
  * conviction between sources but can never scale the target book up or down; MIN&gt;0 keeps a decayed
  * source CONTRIBUTING (down-weighted, not dropped — the combiner skips weight≤0) so the active-source
@@ -99,6 +107,64 @@ public final class TelemetryWeights {
 
     /** Per-source weights from telemetry stats. Empty in → empty out (caller falls back to the equal default). */
     public static Map<String, Double> compute(List<SignalScoring.Stats> stats, Params p) {
+        return compute(stats, p, null);
+    }
+
+    /**
+     * The same weights, with the ADR-0097 admission rule applied: a source that has NOT demonstrated a
+     * directional edge at the desk's own significance hurdle is held at {@code p.min()} — it still
+     * contributes (the combiner skips only weight ≤ 0, so the active-source count and with it the
+     * diversification multiplier are unchanged) but it may not out-vote a source that has.
+     *
+     * <p><b>Why the continuous statistic alone is not enough.</b> The evidence term is {@code Φ(t)}, a
+     * PROBABILITY, and Φ saturates: essentially its whole dynamic range lies in {@code t ∈ [−2.5, 2.5]},
+     * so above the hurdle the function is flat and a source that barely clears is indistinguishable from
+     * one that clears by a factor of six. That is correct for the question Φ answers — "how sure are we
+     * the sign is positive?" — and wrong for the question the combiner asks, which is whose view should
+     * steer the book. Measured live, a source at {@code t = 1.69} (failing the desk's own gate) carried
+     * ~83% of the weight of the only source clearing it at {@code t = 10.6}, and on the desk's largest
+     * position it out-voted that source by an order of magnitude and reversed the sign of the trade.
+     *
+     * <p><b>The test is the desk's own, at zero cost.</b> {@link EdgeGate#demonstratesEdge} — expectancy
+     * against its Fama–MacBeth standard error (ADR-0077), read against Student's t on {@code cohorts−1}
+     * at the gate's own α (ADR-0081/0082). No new dial and no new statistic: the same two dials the gate
+     * already uses. Gross of execution cost deliberately, so no measurement is charged twice.
+     *
+     * <p><b>One-way, and inert when it has nothing to defer to.</b> {@code p.min()} is the lower clamp
+     * bound this method already applies, so a demotion can only ever LOWER a weight — a failing source is
+     * never inverted into a contrarian bet and no weight is ever raised. And the rule applies only when
+     * at least one source IS admitted: with nothing to defer to, demoting everyone would merely flatten
+     * the weight vector, and in that state the gate is reduce-only anyway (its test is the same one at a
+     * non-negative cost, so nothing can clear it that fails here) — so the desk is adding no risk.
+     *
+     * @param admission the edge gate's own {@code minSample}/α parameters; {@code null} disables the rule
+     *                  and returns the pre-ADR-0097 weights byte for byte
+     */
+    public static Map<String, Double> compute(List<SignalScoring.Stats> stats, Params p,
+                                              EdgeGate.Params admission) {
+        Map<String, Double> out = weights(stats, p);
+        if (admission == null || out.isEmpty()) {
+            return out;
+        }
+        List<SignalScoring.Stats> demoted = new java.util.ArrayList<>(stats.size());
+        boolean anyAdmitted = false;
+        for (SignalScoring.Stats s : stats) {
+            if (EdgeGate.demonstratesEdge(s, admission)) {
+                anyAdmitted = true;
+            } else {
+                demoted.add(s);
+            }
+        }
+        if (!anyAdmitted) {
+            return out; // nothing has earned the right to steer — leave the weights as measured
+        }
+        for (SignalScoring.Stats s : demoted) {
+            out.computeIfPresent(s.source(), (k, w) -> Math.min(w, p.min()));
+        }
+        return out;
+    }
+
+    private static Map<String, Double> weights(List<SignalScoring.Stats> stats, Params p) {
         Map<String, Double> out = new HashMap<>();
         if (stats == null || stats.isEmpty()) {
             return out;
