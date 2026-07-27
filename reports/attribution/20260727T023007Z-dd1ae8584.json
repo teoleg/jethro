@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T02:30:07Z",
+    "fees": "253.831045",
+    "gross": "13625.66732666",
+    "net": "394.16217366",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "13625.66732666",
+      "hedgePnl": "-197.14981565",
+      "netExposure": "394.16217366",
+      "realizedPnl": "-328.39021969",
+      "strategyAlpha": "-126.99837662",
+      "totalFees": "253.831045",
+      "totalPnl": "-324.14819227",
+      "unrealizedPnl": "4.24202742"
+    },
+    "total_pnl": "-324.14819227"
+  },
+  "before": {
+    "at": "2026-07-27T02:20:33Z",
+    "gross": "81226.64733507",
+    "net": "25101.60314995",
+    "total_pnl": "-402.51312050"
+  },
+  "commit": "dd1ae8584524da73a2f21d71c1869ebbe653a9ce",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-67600.98000841",
+    "net": "-24707.44097629",
+    "total_pnl": "78.36492823"
+  },
+  "note": "PnL up, exposure not up; risk-adj (PnL/$1 gross) worsened -0.00496\u2192-0.02379",
+  "revert": false,
+  "scoredAt": "2026-07-27T02:30:07Z",
+  "summary": "the two book-level fusion sizing controls are given a covariance measured on the mark stream \u2014 synchronised per-cycle mark snapshots seeded on one bucket grid of the feed's own clock \u2014 because the daily-close covariance they read admits a name only after several sessions in the running feed mode and so covers none of this book, leaving the concentration multiplier and the volatility budget silently no-op while the desk carries a full per-name budget on every name of a one-sided short; one estimator per cycle chosen by coverage, ties to the incumbent, both consumers scale-invariant and one-way so it can only ever shrink the book (ADR-0089)",
+  "verdict": "\u2705 GOOD"
+}
