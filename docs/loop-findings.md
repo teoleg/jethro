@@ -1182,3 +1182,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   (d) Parametric VaR reads `coveredExposure 0.00` against `skippedExposure 7,176.74` while the
   mark-stream covariance covers `23/23` names — the firm's second risk sensor is blind for the reason
   ADR-0089 already fixed for fusion. (e) The frozen MACRO book, eleven cycles unchanged.
+
+## 2026-07-27 — the desk was dumping its whole position on every crossing of its own forecast
+
+- **What the window did.** Report SITUATION: total PnL `$922.59`, window `+25.40`, three runs `+67.26`,
+  `pnl_growth_pct 11.96` vs a `1.0` target, `on_track` true, exposure FALLING (`−9,680.61` on the
+  window). No danger state. Last cycle's ADR-0106 scored ⚠️ MIXED and is one-way by construction, so it
+  cannot have caused the exposure collapse — that was the book unwinding across a restart. Clean split:
+  the `+25.40` is realised P&L on positions the change never touched.
+- **The finding I shipped.** `/api/fusion/targets` plans 23 names into the hundreds of thousands of
+  dollars and reports `deltaQty` **exactly zero on every equity name**, against a live gross of
+  `$2,677.67` — the desk holds a rounding error of its own plan while filling `3,004` orders and paying
+  `$403.17` of ALPHA fees against `$1,255.29` of ALPHA P&L. The tape shows why: AAPL bought
+  `1/3/3/4/5/7/8` then sold `22` and `13`; JNJ bought `19/9/28/6` then sold `14/14/34`. ADR-0090 ruled
+  that only a FLAT TARGET is an exit, but ADR-0094 moved order derivation into `PositionBuffer`, which
+  keyed the full-speed branch on `aim.signum() == 0` — faithful until ADR-0102 began clamping an
+  inverted intent to flat in ONE step. With a mean-reverting source that is the steady state, so every
+  crossing was read as a cut and liquidated the position at MARKET, paying the full spread on a book
+  ADR-0084 had built passively for free.
+- **Rule 6: when a later ADR changes how a value can be REACHED, re-check every branch that keys on that
+  value.** ADR-0102 did not touch `bufferedDelta`, and `bufferedDelta`'s test for "exit" stayed literally
+  correct while becoming semantically wrong. A condition is only as good as the set of ways its input can
+  arise. Key a branch on the *cause* (a control planned the name flat) rather than on a *symptom* the
+  arithmetic happens to produce.
+- **Expected next.** Turnover and fees down; **average gross exposure UP**, because positions now persist
+  through crossings instead of round-tripping. Stated as the trade-off up front: if exposure rises and
+  PnL does not, ❌ BAD is the correct verdict and the revert is right. A ⚠️ MIXED with PnL up and the
+  risk-adjusted read improving is the success case.
+- **Remaining levers, in order.** (a) Four sources measured significantly negative at EVERY rung
+  (`trend` −6.67 bps t≈−5.9 on 45 cohorts, `momentum`, `social`) hold `1.00` of combined weight against
+  `reversion`'s `2.19` — ~31% of the fused forecast comes from sources measured to lose, and on many
+  names `trend` is the exact mirror of `reversion` (SAP: `+20` vs `−20`). Do NOT re-attempt ADR-0087's
+  floor removal (BAD/reverted); find a different formulation. (b) ADR-0101 widths interact with the
+  ADR-0102 clamp so that any name with `2C/mu ≥ |forecast|/TARGET_ABS` can never be opened from flat —
+  GOOGL (10.05 bps measured slippage, width capped at 1.0) and SAP are structurally frozen; check
+  whether that duplicates the edge gate's own per-name veto. (c) `turnover_cost_by_name` in the report
+  has now errored **six** cycles running. (d) The frozen MACRO book, twelve cycles unchanged to the cent.

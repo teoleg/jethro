@@ -126,7 +126,8 @@ public final class PositionBuffer {
             BigDecimal target = t.targetQty() == null ? BigDecimal.ZERO : t.targetQty();
             BigDecimal aim = nextAim(t.instrument(), target, held, rate);
             double width = widthFor(t.instrument(), gate, edgeBps);
-            BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held, width));
+            BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held, width),
+                    target, rate);
             if (gate != null && !gate.mayIncrease(t.instrument())) {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
@@ -333,17 +334,57 @@ public final class PositionBuffer {
      * The order to submit this cycle: nothing inside the buffer, otherwise the gap to the aim less the
      * buffer — i.e. trade to the NEAR EDGE of the no-trade region, never all the way to the aim.
      *
-     * <p>A zero aim is an exit and is never buffered: the whole position is traded, this cycle.
+     * <p><b>An EXIT is what a control ORDERED, not what the arithmetic happens to read (ADR-0107).</b>
+     * Every control that means "get out" says so by planning the name FLAT — the ADR-0086 chandelier
+     * cut, the ADR-0065 orphan unwind, the ADR-0027 breaker above them — and a flat target is worked in
+     * full, unbuffered and unrated, exactly as ADR-0090 works it. That is the {@code target == 0}
+     * branch and it is unchanged.
+     *
+     * <p>What is NOT an exit is a change of view. ADR-0102 clamps an intent that has ended up on the
+     * wrong side of the current target to flat, in ONE step — so on the cycle a mean-reverting forecast
+     * crosses the held position, {@code aim} becomes 0 while the target is very much alive. Keying the
+     * unbuffered branch on {@code aim == 0} read that as a cut and liquidated the whole accumulated
+     * position at market, which is precisely the round trip ADR-0090 removed, reintroduced for the one
+     * case this desk's only measured source produces most often. Two things follow, and only in that
+     * case:
+     * <ul>
+     *   <li>the move is <b>buffered</b> like any other — traded to the near edge of the no-trade
+     *       region, not through it;</li>
+     *   <li>the part of it that <b>unwinds the holding</b> is worked at the ADR-0080 derived rate,
+     *       because the aim reached the other side of flat by a jump rather than by a rated step, so
+     *       the rate the aim path carries everywhere else is missing from exactly this gap.</li>
+     * </ul>
+     * The part that would OPEN on the aim's own side is left alone: that side is on the aim path and is
+     * already rated by it.
+     *
+     * <p>Strictly one-way. {@code |edge| ≤ |gap|} and the rate is in [0, 1], so the order returned is
+     * never larger, and never of a different sign, than the one this method returned before — it can
+     * only ever trade LESS. It never opens a position the desk was not already opening, and it can
+     * never slow a cut a risk control ordered, because such a cut arrives with a flat target and
+     * returns above.
+     *
+     * @param target the planner's target for this name — flat means a control ordered the exit
+     * @param adjustmentRate the ADR-0080 derived partial-adjustment fraction for this cycle
      */
-    static BigDecimal bufferedDelta(BigDecimal aim, BigDecimal held, BigDecimal band) {
+    static BigDecimal bufferedDelta(BigDecimal aim, BigDecimal held, BigDecimal band, BigDecimal target,
+                                    double adjustmentRate) {
         BigDecimal gap = aim.subtract(held).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
-        if (aim.signum() == 0) {
-            return gap; // an exit is worked in full (ADR-0090)
+        if (target.signum() == 0) {
+            return gap; // a control ordered the exit — worked in full (ADR-0090/0086/0065)
         }
         if (gap.abs().compareTo(band) <= 0) {
             return BigDecimal.ZERO.setScale(QTY_SCALE);
         }
-        BigDecimal edge = gap.abs().subtract(band);
-        return edge.multiply(BigDecimal.valueOf(gap.signum())).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+        BigDecimal edge = gap.abs().subtract(band).multiply(BigDecimal.valueOf(gap.signum()))
+                .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+        if (held.signum() == 0 || aim.signum() == held.signum()) {
+            return edge; // the aim moved by a rated step on its own side — ADR-0094, unchanged
+        }
+        // The intent crossed flat in one step: rate the half of the move that unwinds the holding.
+        BigDecimal unwind = TargetPlanner.reduceOnly(edge, held);
+        double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
+        return edge.subtract(unwind)
+                .add(unwind.multiply(BigDecimal.valueOf(rate)))
+                .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
     }
 }

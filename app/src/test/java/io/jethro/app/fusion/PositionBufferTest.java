@@ -79,7 +79,7 @@ class PositionBufferTest {
         // gap = −33, band = 14.763413 ⇒ trade −(33 − 14.763413) = −18.236587, leaving the position
         // exactly one band short of the aim rather than at it.
         assertThat(PositionBuffer.bufferedDelta(new BigDecimal("-40"), new BigDecimal("-7"),
-                new BigDecimal("14.763413")))
+                new BigDecimal("14.763413"), new BigDecimal("-142.319300"), RATE))
                 .isEqualByComparingTo(new BigDecimal("-18.236587"));
     }
 
@@ -195,20 +195,67 @@ class PositionBufferTest {
     }
 
     @Test
-    void anInvertedIntentIsCutOnceAndThenRebuildsThroughTheBuffer() {
+    void anInvertedIntentIsUnwoundAtTheDerivedRateNotDumped() {
         PositionBuffer buffer = new PositionBuffer(0.10);
-        // Long 104 while the target is −219.420787: the first cycle clamps intent to flat and sells
-        // the whole holding (an aim of zero is not buffered), which is the risk-REDUCING half of the
-        // move — it stops at flat and does not build the short at full speed.
+        // ADR-0107. Long 104 while the target is −219.420787: ADR-0102 clamps intent to flat, but the
+        // target is ALIVE, so this is a change of view and not a cut. The move is buffered and its
+        // unwinding half is rated:
+        //   averagePosition = 219.420787 x 10 / 12.64 = 173.592395 ; band = 17.359240
+        //   stepped         = 104 + a(−219.420787 − 104) = 93.397005 → clamped to 0 (ADR-0102)
+        //   gap             = 0 − 104 = −104.000000 ; |gap| > band
+        //   edge            = −(104.000000 − 17.359240) = −86.640760      (to the near buffer edge)
+        //   all of it unwinds the holding ⇒ x a = −86.640760 x 0.0327838995179941 = −2.840422
         var cut = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "104")), null, RATE);
         assertThat(cut.aims().get("JNJ")).isEqualByComparingTo("0");
-        assertThat(cut.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-104.000000"));
-        // Next cycle the path restarts from flat: aim = 0 + a(−219.420787) = −7.193469, against a band
-        // of 219.420787 x 10 / 12.64 x 0.10 = 17.359240 — inside it, so nothing is traded and the
-        // short is rebuilt at the derived rate, not round-tripped.
-        var rebuild = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "0")), null, RATE);
-        assertThat(rebuild.aims().get("JNJ")).isEqualByComparingTo(new BigDecimal("-7.193469"));
-        assertThat(rebuild.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+        assertThat(cut.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-2.840422"));
+        // Next cycle the aim path restarts from flat and runs to the new side, so the gap keeps
+        // growing and the unwind cannot stall: aim = 0 + a(−219.420787) = −7.193469 against a book
+        // still long 101 ⇒ gap −108.193469, edge −90.834229, x a = −2.977900.
+        var next = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "101")), null, RATE);
+        assertThat(next.aims().get("JNJ")).isEqualByComparingTo(new BigDecimal("-7.193469"));
+        assertThat(next.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-2.977900"));
+    }
+
+    @Test
+    void aControlOrderedCutStillCrossesInFullOnTheSameHolding() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        // The ADR-0107 distinction: the SAME long 104, but now a control (chandelier stop, orphan
+        // unwind, silenced source) has planned the name FLAT. That is an exit and is neither buffered
+        // nor rated — the whole position goes, this cycle, exactly as ADR-0090 works it.
+        var exit = buffer.apply(List.of(target("JNJ", 0.0, "0", "104")), null, RATE);
+        assertThat(exit.aims().get("JNJ")).isEqualByComparingTo("0");
+        assertThat(exit.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-104.000000"));
+    }
+
+    @Test
+    void theViewChangeUnwindIsStrictlyOneWay() {
+        // It may only ever trade LESS than the unbuffered dump, never more and never the other way:
+        // |delta| <= |aim − held| and the sign is the gap's, on every combination.
+        for (String h : List.of("104", "-104", "7", "-7", "0")) {
+            for (String t : List.of("-219.420787", "17285.020487", "-14.766000")) {
+                for (String a : List.of("0", "-7.193469", "6.557800")) {
+                    BigDecimal held = new BigDecimal(h);
+                    BigDecimal aim = new BigDecimal(a);
+                    BigDecimal gap = aim.subtract(held);
+                    BigDecimal delta = PositionBuffer.bufferedDelta(aim, held,
+                            new BigDecimal("17.359240"), new BigDecimal(t), RATE);
+                    assertThat(delta.abs()).isLessThanOrEqualTo(gap.abs());
+                    if (delta.signum() != 0) {
+                        assertThat(delta.signum()).isEqualTo(gap.signum());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void aSameSideReductionKeepsItsUnratedSpeed() {
+        // ADR-0107 touches only the gap that crossed flat in one step. An intent that shrank on its
+        // OWN side arrived there by a rated aim step, so de-risking there is as fast as it ever was:
+        // gap = −40 − (−120) = +80, band 17.359240 ⇒ +62.640760, unrated.
+        assertThat(PositionBuffer.bufferedDelta(new BigDecimal("-40"), new BigDecimal("-120"),
+                new BigDecimal("17.359240"), new BigDecimal("-219.420787"), RATE))
+                .isEqualByComparingTo(new BigDecimal("62.640760"));
     }
 
     @Test
