@@ -3,9 +3,10 @@
 Implementation of ADR-0063, run on your **Claude Max subscription** (no per-token API charge).
 It is inert until you turn it on with `ops/loop-control.sh on`.
 
-## One full cycle (every 2 hours), all local on the box
+## One full cycle (every 30 minutes), all local on the box
 ```
-report the live app  ->  Claude deep analysis  ->  (only if warranted) one code change
+report the live app  ->  build this run's prompt (contract + freshest situation/memory)
+   ->  Claude deep analysis  ->  (only if warranted) one code change
    ->  run tests (./gradlew -Pci test)  ->  commit to claude/auto-improve  ->  push
    ->  rebuild + restart the app  ->  done till next run
 ```
@@ -21,7 +22,7 @@ report the live app  ->  Claude deep analysis  ->  (only if warranted) one code 
 - `improve-loop.sh` runs `unset ANTHROPIC_API_KEY` so every cycle stays on Max. Don't put an API key
   in the cron environment.
 - Cost on Max is **plan usage, not dollars**; if you hit the cap the loop pauses until reset — no
-  runaway bill. Every-2-hours, mostly no-change cycles, is modest.
+  runaway bill. Every-30-minutes, mostly no-change cycles, is modest.
 
 ## One-time setup (on the Pi — needs a 64-bit OS)
 ```sh
@@ -66,13 +67,16 @@ The box works on **`claude/auto-improve`** and runs whatever is committed there.
 autonomy, leave it as-is. To review each change before it runs live, set `JETHRO_DEPLOY_CMD` empty
 (so it commits+pushes but doesn't restart) and rebuild/restart yourself after you've looked.
 
-**Auto-updating from the maintainer branch.** Each cycle the loop `git merge`s `$UPSTREAM`
-(default `origin/claude/new-session-smb8v6`, override with `JETHRO_UPSTREAM_BRANCH`) into
-`auto-improve` before it works — so maintainer fixes pushed there are picked up **automatically, no
-manual merge**. The loop only ever commits its own experiments to `auto-improve`; the maintainer only
-ever writes `$UPSTREAM`; so the two never fight over one branch. A rare merge conflict is aborted and
-logged, not left half-applied. (One-time bootstrap: the box needs this version of `improve-loop.sh`
-first, so do a single manual merge once; after that it is automatic.)
+**One branch — the loop and the maintainer share `claude/auto-improve`.** There is no second
+"upstream" branch and no auto-merge. (There used to be: the loop merged `origin/claude/new-session-smb8v6`
+into `auto-improve` every cycle. Both branches edited the same files, so that merge **conflict-aborted
+every cycle** — maintainer changes never landed and the system silently split into two diverging
+branches. Removed.) Each cycle the loop `git fetch`es and **fast-forwards** to any commits already on
+`origin/claude/auto-improve`, so a maintainer change lands the moment it is pushed there — no merge step
+to fail. To push a maintainer change: commit it to `claude/auto-improve` and push. If the box has
+un-pushed local commits (it commits its ledger/heartbeat every cycle), pull once when it is idle
+(`ops/loop-control.sh off` → `git pull --ff-only origin claude/auto-improve` → `ops/loop-control.sh on`)
+so both sides converge cleanly.
 
 ## Watch it in the UI — the Improve page
 Every cycle (change or not) writes one deterministic heartbeat line to `reports/run-status.json`, which

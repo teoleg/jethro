@@ -215,6 +215,22 @@ def cmd_score():
         print(f"score: cannot measure current vector ({e}); leaving pending baseline for next run")
         return 0
 
+    # Invariant 8 (ADR-0029): sim / live / replay are NEVER aggregated across modes. A sim↔live switch
+    # starts a new epoch, so a baseline recorded in one mode must not be scored against a vector measured
+    # in another — the delta would be meaningless and could auto-revert a good commit on garbage. If the
+    # feed mode changed since the baseline, discard it (unscored) rather than compare across the boundary.
+    base_mode = (base.get("source") or {}).get("feedMode")
+    cur_mode = raw_after.get("feedMode")
+    if base_mode and cur_mode and base_mode != cur_mode:
+        os.remove(PENDING)
+        git("add", "reports/.pending-baseline.json", check=False)
+        git("commit", "-m",
+            f"chore(ledger): feed mode {base_mode}->{cur_mode} — prior baseline discarded, not scored "
+            f"across modes (invariant 8)", check=False)
+        print(f"score: feed mode changed {base_mode} -> {cur_mode}; discarded the {base_mode} baseline "
+              f"for {base.get('commit', 'unknown')[:9]} unscored (invariant 8 — no cross-mode aggregation)")
+        return 0
+
     before = {
         "pnl": dec(base.get("total_pnl", base.get("alpha_pnl", "0"))),  # fallback: score an old-format baseline
         "gross": dec(base["gross_exposure"]),
@@ -352,8 +368,23 @@ def cmd_status(argv):
         except Exception:
             entries = []
     prev = entries[0] if entries else None
+    cur_mode = raw.get("feedMode") if raw else None
+
+    def comparable(entry):
+        # Invariant 8 (ADR-0029): never compute a delta / growth across feed modes. If either side's
+        # mode is unknown we can't tell, so we don't block; a KNOWN mismatch (e.g. this run is LIVE, the
+        # entry we'd compare to is SIM) is not comparable and yields no number until same-mode history
+        # accumulates.
+        if not entry:
+            return False
+        em = entry.get("feedMode")
+        if em is None or cur_mode is None:
+            return True
+        return em == cur_mode
 
     def pct(cur, *prev_keys):
+        if not comparable(prev):
+            return None
         pv = None
         for k in prev_keys:  # try new key first, fall back to any old-format key
             if prev and prev.get(k) not in (None, ""):
@@ -371,6 +402,8 @@ def cmd_status(argv):
     # flat/negative PnL not on track — is a failure the loop must act on, surfaced here for the UI + prompt.
     def growth_over(window):
         if not available or len(entries) < window:
+            return None
+        if not comparable(entries[window - 1]):  # invariant 8: don't measure growth across a mode switch
             return None
         ov = entries[window - 1].get("total_pnl", entries[window - 1].get("alpha_pnl"))
         if ov in (None, ""):

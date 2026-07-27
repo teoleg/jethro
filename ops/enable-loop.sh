@@ -2,7 +2,7 @@
 # One-shot setup + enable for the Jethro continuous-improvement loop (ADR-0063).
 #
 # Bundles every step into one run: pull latest -> preflight checks -> (optional) one dry-run cycle
-# -> install the every-2-hours cron. Safe to re-run; it just re-checks and re-installs the cron line.
+# -> install the every-30-minutes cron. Safe to re-run; it just re-checks and re-installs the cron line.
 #
 # Usage:
 #   JETHRO_DEPLOY_CMD='<your build+restart>' ops/enable-loop.sh            # check, then enable
@@ -99,13 +99,13 @@ if [ "$DRY_RUN" -eq 1 ]; then
   LOG="logs/improve-$(date +%F).log"
   say "Last 40 lines of $LOG"
   tail -n 40 "$LOG" 2>/dev/null || warn "no log yet"
-  say "Dry run complete. Re-run without --dry-run to install the every-2-hours cron."
+  say "Dry run complete. Re-run without --dry-run to install the every-30-minutes cron."
   exit 0
 fi
 
 # --- 4. Confirm + enable ---
 if [ "$ASSUME_YES" -eq 0 ]; then
-  printf '\n\033[1mInstall the every-2-hours cron now? [y/N] \033[0m'
+  printf '\n\033[1mInstall the every-30-minutes cron now? [y/N] \033[0m'
   read -r reply || reply=""
   case "$reply" in
     y|Y|yes|YES) ;;

@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # Jethro continuous-improvement loop (ADR-0063) — ONE full cycle, all local on the box.
 #
-#   report the live app -> Claude deep analysis -> (if warranted) one code change -> run tests
-#   -> commit to a feature branch -> push -> rebuild + restart the app -> done till next run.
+#   report the live app -> build this run's prompt (contract + freshest situation/memory)
+#   -> Claude deep analysis -> (if warranted) one code change -> run tests
+#   -> commit to claude/auto-improve -> push -> rebuild + restart the app -> done till next run.
+#
+# ONE branch: the loop works on, commits to, pushes, and deploys `claude/auto-improve` — the same
+# branch the maintainer pushes to. There is no second "upstream" branch and no auto-merge (that fork
+# conflict-aborted every cycle and split the system in two). To land a maintainer change, push it to
+# claude/auto-improve and let the box `git pull` it (see ops/README.md).
 #
 # Runs on the Claude MAX subscription (NOT an API key): `unset ANTHROPIC_API_KEY` keeps every run
 # on the plan you already pay for. One-time setup + on/off switch: see ops/README.md.
@@ -37,24 +43,14 @@ echo "==== $(date -Is) cycle start ====" >> "$LOG"
 python3 scripts/system-report.py >> "$LOG" 2>&1 || {
   echo "report generation failed — skipping cycle" >> "$LOG"; exit 0; }
 
-# 2. Work on the feature branch.
+# 2. Work on the single branch. Fast-forward to any maintainer changes pushed to it since last cycle
+#    (one branch, no second "upstream" to merge). A non-ff divergence is left alone — the loop's own
+#    commits below get pushed and reconciled — so a maintainer push never wedges the cycle.
 git fetch origin >> "$LOG" 2>&1 || true
 git checkout -B "$BRANCH" >> "$LOG" 2>&1
+git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 && echo "fast-forwarded to origin/$BRANCH" >> "$LOG" \
+  || echo "no fast-forward from origin/$BRANCH (local has un-pushed commits, or already current)" >> "$LOG"
 BEFORE=$(git rev-parse HEAD)
-
-# 2a. Auto-merge maintainer fixes from the upstream branch so they NEVER need merging by hand. The
-#     loop commits its own experiments to $BRANCH; maintainer changes land on $UPSTREAM and are pulled
-#     in here. They fall inside BEFORE..AFTER below, so they also get pushed and (if code changed)
-#     deployed. A conflict (rare — different files) is aborted and skipped, not left half-applied.
-UPSTREAM="${JETHRO_UPSTREAM_BRANCH:-origin/claude/new-session-smb8v6}"
-if git rev-parse --verify --quiet "$UPSTREAM" >/dev/null 2>&1; then
-  if git merge --no-edit "$UPSTREAM" >> "$LOG" 2>&1; then
-    echo "auto-merged $UPSTREAM" >> "$LOG"
-  else
-    git merge --abort >> "$LOG" 2>&1 || true
-    echo "WARN: auto-merge of $UPSTREAM conflicted — skipped this cycle (resolve by hand)" >> "$LOG"
-  fi
-fi
 
 # Was a prior change awaiting its score at cycle start? Drives the run-status "scored/reverted" state.
 HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
@@ -66,9 +62,19 @@ HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
 #     trigger the rebuild. All numbers come from /api/attribution + /api/risk, none from Claude.
 python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-zero (see above)" >> "$LOG"
 
-# 3. Claude Code (headless, on Max) reads logs/report.md, diagnoses against the objective, and ONLY
-#    if warranted makes one change, runs the tests, and commits. It does NOT push or restart — the
-#    wrapper owns those so build+restart only happen on a verified commit.
+# 2c. Build THIS RUN'S prompt: the stable contract (ops/improve-prompt.md) followed by a generated
+#     "THIS RUN'S LIVE CONTEXT" section that surfaces the freshest situation + memory (the ⚠ SITUATION
+#     header, the latest objective flags, the last few scored ledger rows, recent findings) right in
+#     the prompt, so the obvious money/risk state is never missed. It only QUOTES code-computed numbers
+#     — it invents none (invariant 7). If it fails for any reason, fall back to the static contract so
+#     the cycle still runs.
+PROMPT_FILE="logs/improve-prompt.rendered.md"
+python3 scripts/build-prompt.py >> "$LOG" 2>&1 && [ -s "$PROMPT_FILE" ] \
+  || { echo "prompt build failed — falling back to the static contract" >> "$LOG"; PROMPT_FILE="ops/improve-prompt.md"; }
+
+# 3. Claude Code (headless, on Max) reads the rendered prompt + logs/report.md, diagnoses against the
+#    objective, and ONLY if warranted makes one change, runs the tests, and commits. It does NOT push
+#    or restart — the wrapper owns those so build+restart only happen on a verified commit.
 # 9>&- closes the single-flight lock fd for Claude and everything it spawns — otherwise a persistent
 # child (notably the Gradle DAEMON that `./gradlew -Pci test` leaves running for hours) inherits the
 # lock and holds it long after the cycle ends, wedging every later cycle into "skipped".
@@ -78,7 +84,7 @@ if ! command -v claude >/dev/null 2>&1; then
        "still ran). Install Claude Code for the cron user, or add its dir to PATH. PATH=$PATH" >> "$LOG"
 else
   BRAIN_RAN=1
-  claude -p "$(cat ops/improve-prompt.md)" \
+  claude -p "$(cat "$PROMPT_FILE")" \
     --allowedTools "Bash Read Edit Grep Glob Skill" \
     --permission-mode acceptEdits \
     >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero (see above)" >> "$LOG"
