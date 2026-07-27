@@ -1,0 +1,20 @@
+{
+  "commit": "abb9d4732c1eabe6c15f66d420d2dfc0d4b2b602",
+  "fees": "481.442117",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "-3093.30503794",
+    "netExposure": "0.00000000",
+    "realizedPnl": "5654.19929642",
+    "strategyAlpha": "8747.50433436",
+    "totalFees": "481.442117",
+    "totalPnl": "5654.19929642",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "a name the desk has neither filled nor quoted is charged the execution cost its own print series implies \u2014 Roll's effective spread \u2014 instead of the desk blend, which was dearer than the measured edge could afford and so held every unmeasured name reduce-only forever (ADR-0112)",
+  "total_pnl": "5654.19929642",
+  "ts": "2026-07-27T21:20:27Z"
+}
