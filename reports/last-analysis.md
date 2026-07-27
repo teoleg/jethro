@@ -1,66 +1,74 @@
-Stopped the desk from reading a change of mind as a danger cut: only a FLAT target now exits at full speed, because the fee bill from that ratchet is the large majority of the firm's loss (ADR-0090).
+Found the desk netting its target against its own hedge book, so every contract the hedger bought was answered by an equal short opened in a strategy book — the hedge was exactly cancelled and its notional counted twice in gross (ADR-0091).
 
 ## Situation (read from the live endpoints; every number below is quoted, none computed here)
 
-1. **Money.** Total PnL is **higher** than last run — the situation header reads `-323.92` against
-   `+62.18` on the window and `+468.58` over the last three runs. The book is still `UNDERWATER` in
-   absolute terms but it is climbing, and the 3-iteration growth target is comfortably met.
-2. **Risk.** Exposure **fell hard**: gross `13,626.76` against `-65,530.23` on the window, net `394.39`.
-   Historical VaR95 is `126.31`, the firm gross limit is far above this level and the drawdown breaker
-   is untripped. This is the opposite of last cycle's danger state — the desk is small and balanced.
-3. **Cause.** Last cycle's change (`dd1ae8584`, the ADR-0089 mark-stream covariance) scored **✅ GOOD**
-   and stays in. Honest attribution: most of the exposure collapse is **mechanism, not market** — but
-   not the mechanism the ADR claimed. The book was flattened at the process restart, when every sensor
-   was still cold, so the held names had no view and were unwound down the ADR-0065 orphan path. The
-   PnL improvement over the window is largely **market** on positions the loop did not touch. I am
-   crediting ADR-0089 with the *absence* of a re-ramp rather than with the cut itself; that is the
-   honest read, and it is weaker than the ledger row implies.
-4. **Danger.** No. Not bleeding, exposure falling, nowhere near the breaker. So this is a cycle to
-   attack the structural cost problem rather than to de-risk.
+1. **Money.** Total PnL is **higher** again — the situation header reads `-224.60` against `+89.91` on
+   the window and `+399.03` over the last three runs. Still `UNDERWATER` in absolute terms, but the
+   3-iteration growth target is met several times over. Not bleeding.
+2. **Risk.** Exposure **rose hard**: gross `64,650.20` against `+33,984.70` on the window — it roughly
+   doubled — with net `-14,733.72`. Historical VaR95 is `516.76`, the breaker is untripped and the firm
+   gross limit is far above this level, so nothing is close to binding. The flag that matters is
+   `EXPOSURE RISING`, and it is the trajectory, not the level.
+3. **Cause.** Last cycle's change (`b14caf54a`, ADR-0090) scored **⚠️ MIXED** — PnL up, gross up — and
+   stays in. That is the outcome last cycle's own note predicted and named the follow-up for. Honest
+   attribution: ADR-0090 did what it was built to do (positions now persist instead of being zeroed on
+   every forecast crossing), and persistence is *why* gross grew. But it is not the reason gross grew
+   this much, and the real reason predates it.
+4. **Danger.** No — PnL rising, nothing near a limit. So this is a cycle to attack the exposure
+   mechanism rather than to de-risk.
 
 ## The order-level post-mortem — what the window's fills actually did
 
-The `recent_orders` trace is one shape repeated on every name. AAPL is bought in 3-share steps once
-every 30-second cycle for seven straight minutes, then sold **101 shares in a single order**, then
-immediately begins grinding back the other way. JPM: five small buys, then `-20`, `-13`, `-14`. JNJ:
-two buys, one `-14`, then six buys. There is no losing *trigger* to name here — the trigger is the
-policy itself. Set against the attribution: total fees are the **large majority of the firm's total
-loss**, and gross-of-fees the desk is close to flat. The desk is not losing on its views; it is paying
-its views away in turnover.
+The trace splits cleanly in two. On the equities the ADR-0090 grind is visible and much calmer than
+last window: MSFT and JPM step in single-digit lots, JNJ in twenties, and the 100-share single-order
+reversals are gone. That part is working.
+
+The futures are a different story, and it is the whole story. `MACRO` sells ES on almost every cycle —
+`-0.021379`, `-0.021984`, `-0.018927`, `-0.023809` — while `HEDGE` **buys** ES on almost every cycle,
+`+0.030490`, `+0.057041`, `+0.026591`, four seconds apart from MACRO's sells. Two books of the same
+firm crossing the same contract in opposite directions through the street, all window.
+
+The book that results: `MACRO` short `0.060884` ES, `HEDGE` long `0.050697` ES. That is `$30,408` of
+gross exposure — **47% of the firm's total** — carrying `-$2,776` of net, **9%** of it. And the hedge
+book is the firm's single worst position: its loss, `-244.03`, is larger than the firm's entire loss of
+`-224.60`, while the two strategy books together are positive. Almost all of it is realised rather than
+mark-to-market — paid on round trips, not lost on a view.
 
 ## Diagnosis — the mechanism
 
-ADR-0080 derived the partial-adjustment rate so exposure e-folds toward target in exactly one
-measurement horizon (`a = 1 − e^(−c/h)`, ~0.0083 at the shipped 30 s cycle and 3600 s horizon) — one
-round trip per horizon of return, which is the trade the edge gate prices. But it applied that rate to
-only the risk-*increasing* half of the gap and traded every *reduction* in full, justified as "a cut
-that waits is not a cut". `orderDelta` never sees **why** the target moved, so it reads a mere change
-of view as a danger cut. `reversion` — the one source with strong measured expectancy, and the
-dominant weight — is mean-reverting by construction and crosses the held position repeatedly inside
-one horizon. Every crossing liquidates the entire accumulated position at once.
+`FusionConfig` hands the fusion lifecycle two suppliers that disagree about who owns the hedge book.
+`heldInRoutedBooks` **excludes** it, and its javadoc says exactly why: "two legs where there was one,
+gross exposure up, and the two loops fighting each other every cycle." `firmPositions`, three lines
+below, **summed every book** — so the quantity the planner measured its gap against included the
+hedger's leg. The failure the first supplier was written to prevent arrived by the second route: not
+through the *span* of the target book, through the *arithmetic* of the gap.
 
-So `τ_in = h` and `τ_out = 0`. The desk enters at the rate the evidence justifies and exits at infinite
-rate on a wobble: it pays the **full** cost of a round trip while the position **never reaches the
-size** at which a single-digit-bps expectancy could pay for it. Cost scales with turnover, which is
-unconstrained; edge scales with size, which is a small fraction of what was planned. That is exactly
-the "N round trips against one horizon" over-permissiveness ADR-0080 was written to remove,
-reintroduced on the other side of the trade.
+That closes a loop. The hedger drives `e + h → floor` by trading `h`, reading `h` from its own book.
+The planner drives `s + h → target` by trading `s`, because `current = s + h`. Neither sees the other's
+control variable, and each one's action moves the other's error term: every contract the hedger buys
+raises the planner's `current` by one, so the planner sells one more into a strategy book — and that
+sale does not touch the cash-equity exposure the hedger measures, so the hedger's target is unchanged
+and its leg stays on. The fixed point is `s = target − h`. The firm holds `|target − h| + |h|` where the
+economics call for `|target|`; the hedge is exactly cancelled, present in gross and in the fee bill and
+contributing nothing to net; and the offsetting leg grows with `h`, so there is no fixed point in gross
+at all. The planner's own target book gives it away: it reported `ES: current = +0.011200` — a
+*positive* current on a contract the strategy book is short by five times that.
 
-## The change (ADR-0090, Proposed, same commit)
+## The change (ADR-0091, Proposed, same commit)
 
-One branch in `TargetPlanner.orderDelta`: a reduction toward a **flat** target is an exit and trades in
-full; a reduction toward a **non-zero** target is a rebalance and is worked at the same rate as an
-increase. Every control that actually means "get out" already says so by setting the target flat — the
-ADR-0086 chandelier stop plans against a literal zero, the ADR-0065 orphan unwind is an implicit zero,
-and the ADR-0027 breaker and pre-trade guardrail sit below this code entirely — so all of them are
-unchanged, bit for bit. What is left is the exponential smoother ADR-0080's own identity describes,
-e-folding toward the aim in one horizon **in both directions**, pinned as a test over three legs (up,
-down, through flat). Expected: turnover and the fee bill fall sharply, and gross should fall too,
-because an aim that oscillates smooths to a small position rather than a sawtooth that keeps
-rebuilding to full size.
+`firmPositions` becomes `routedBookPositions(risk, hedgeBook)` and skips the configured
+`jethro.hedge.book`, exactly as its neighbour already did. The two suppliers now answer the same
+question the same way — one says *which* names the desk is responsible for, the other *how much* of each
+it holds — and neither treats a book this layer cannot trade as its own inventory.
 
-Stated trade-off, in the ADR: the ADR-0083 volatility budget and the ADR-0079/0089 concentration
-multiplier *scale* targets rather than flattening them, so their de-risking is now worked over one
-horizon instead of one cycle. They are sizing controls, not danger detectors; the danger detectors
-flatten, and flattening is untouched. No new dial, no new money or risk number — only which half of
-the existing rate applies. Full suite green.
+It is a signed `BigDecimal` sum with one book filtered out: no new dial, no new money or risk number, no
+rounding introduced, and every instrument the hedge book does not hold is unaffected quantity for
+quantity. The hedger, the pre-trade guardrail and the firm breaker are untouched. Worked example, pinned
+as a test on the live figures: at convergence the old read settles the strategy leg at `target − h =
+-0.210797` and the new one at `target = -0.160100`; the gross removed is exactly `h`, the hedger's own
+notional, and the firm's net moves toward flat by the same amount because the hedge finally offsets
+instead of being traded away. Stated trade-off in the ADR: the firm may still hold a view and a hedge in
+the same contract as two book-level legs — bounded and honest, and strictly smaller than what the old
+read converged to. Netting the two *intents* into one firm position is the better next step but crosses
+the fusion/hedge boundary and changes book attribution, so it is deliberately not attempted here. Full
+suite green.

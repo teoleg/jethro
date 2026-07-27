@@ -12,8 +12,9 @@ import java.util.function.Function;
  * Builds the fused target book (ADR-0055 phase 4), the pure heart of "combine all sources before any
  * order decision": for each instrument it weights the fresh per-source forecasts, combines them
  * (ForecastCombiner), sizes a deterministic target (TargetPlanner), and computes the Gârleanu-Pedersen
- * order delta against the current firm position. One combined target per name ⇒ the deltas are
- * inherently netted across every sleeve. Pure and testable; the caller decides whether a delta is
+ * order delta against the position held in the books this layer routes into (ADR-0091 — the hedge
+ * overlay is not one of them). One combined target per name ⇒ the deltas are inherently netted across
+ * every strategy sleeve. Pure and testable; the caller decides whether a delta is
  * routed (shadow vs live) — this class never places an order (ADR-0016 / invariant 7).
  */
 public final class FusionPlanner {
@@ -59,7 +60,12 @@ public final class FusionPlanner {
      *                              the money value of one unit, {@code price × multiplier}; null/≤0
      *                              means the contract spec is unknown and the name is planned flat
      *                              rather than sized as if it were a share.
-     * @param currentQtyFor         instrument → current firm position quantity
+     * @param currentQtyFor         instrument → the quantity currently held in the books this layer
+     *                              ROUTES INTO (ADR-0091). This is what the gap is measured against,
+     *                              so it must be inventory the desk can actually trade: a position
+     *                              held by the hedge overlay is not, and counting it makes the planner
+     *                              open an equal and opposite leg in a strategy book every time the
+     *                              hedger acts. See {@code FusionConfig.routedBookPositions}.
      */
     public static List<Target> plan(Map<String, List<Forecast>> forecastsByInstrument,
                                     Collection<String> heldInstruments,

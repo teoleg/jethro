@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.math.BigDecimal;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -152,7 +153,13 @@ public class FusionConfig {
                 // spec to size against, so it plans flat (and the executor vetoes it in any case).
                 instrument -> refs.find(instrument).map(io.jethro.trading.riskpnl.InstrumentRef::multiplier)
                         .orElse(null),
-                () -> firmPositions(risk),
+                // ADR-0091: net against the books this layer ROUTES INTO, not against the hedge
+                // overlay. The two suppliers below must agree about which positions are the desk's
+                // own; when the quantity read included the hedge book and the span set did not, every
+                // contract the hedger bought was answered by an equal, opposite one opened in a
+                // strategy book — the ratchet the span set's own javadoc warns about, reached by the
+                // other route.
+                () -> routedBookPositions(risk, hedgeBook),
                 () -> heldInRoutedBooks(risk, hedgeBook),
                 weightsSupplier, params, routeOrders, executor.getIfAvailable(), scheduler, intervalSeconds,
                 minForecastToRoute, gateSupplier, covarianceSupplier, evidenceHorizonSeconds,
@@ -387,15 +394,54 @@ public class FusionConfig {
         return out;
     }
 
-    /** Firm-wide net quantity per instrument, summed across books from the risk snapshot. */
-    private static Map<String, BigDecimal> firmPositions(ObjectProvider<RiskProjection> risk) {
+    /**
+     * Net quantity per instrument across the books this layer ROUTES INTO — every book except the
+     * hedge (ADR-0091). Exact decimal throughout: a plain signed sum of the projection's quantities,
+     * no rounding introduced.
+     *
+     * <p><b>Why the hedge book is excluded.</b> This map is the {@code current} the planner measures
+     * its gap against, so it defines what the desk considers its own inventory. The hedge book is not
+     * inventory: it is the ADR-0019/0039 hedger's own continuously re-targeted leg, held against the
+     * strategy books' residual exposure, and this layer cannot trade it — it routes by asset class
+     * into the strategy books. Counting it as inventory makes the two loops a closed positive
+     * feedback: the hedger buys `h` of the proxy to offset the strategy books; the planner reads its
+     * gap as `target − (own + h)` and opens an extra `−h` in a STRATEGY book to close it; the hedger's
+     * own target is unchanged by that, so nothing converges. Both legs grow together, the firm ends up
+     * long and short the same contract in size, gross exposure carries a hedge that has been exactly
+     * cancelled, and both books pay the spread on every step.
+     *
+     * <p>Measured on the live book at the time of writing: the hedger held +0.050697 ES against the
+     * strategy books' short cash equities while the planner, reading a firm net of +0.011200, was
+     * selling ES into MACRO toward a target of −0.160100. At convergence the old read leaves MACRO at
+     * {@code target − h = −0.210797} and the new read leaves it at {@code target = −0.160100} — the
+     * difference is exactly {@code h}, i.e. the hedge's own notional double-counted as gross, and the
+     * hedge's offset restored to the firm's net rather than being traded away.
+     *
+     * <p>The two suppliers passed to the lifecycle now answer the same question the same way: {@link
+     * #heldInRoutedBooks} decides WHICH names the desk is responsible for, this decides HOW MUCH of
+     * each it holds. Any instrument the hedge book does not hold is unaffected, quantity for quantity.
+     */
+    private static Map<String, BigDecimal> routedBookPositions(ObjectProvider<RiskProjection> risk,
+                                                               String hedgeBook) {
         RiskProjection projection = risk.getIfAvailable();
-        Map<String, BigDecimal> out = new HashMap<>();
         if (projection == null) {
-            return out;
+            return new HashMap<>();
         }
         ConsolidatedRisk snap = projection.snapshot(System.currentTimeMillis());
-        for (PositionRisk p : snap.positions()) {
+        return routedBookPositions(snap.positions(), hedgeBook);
+    }
+
+    /** The pure part of {@link #routedBookPositions(ObjectProvider, String)} — see its javadoc. */
+    static Map<String, BigDecimal> routedBookPositions(Collection<PositionRisk> positions,
+                                                       String hedgeBook) {
+        Map<String, BigDecimal> out = new HashMap<>();
+        if (positions == null) {
+            return out;
+        }
+        for (PositionRisk p : positions) {
+            if (hedgeBook != null && hedgeBook.equalsIgnoreCase(p.bookId())) {
+                continue;
+            }
             out.merge(p.instrumentId(), p.quantity(), BigDecimal::add);
         }
         return out;

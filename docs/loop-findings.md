@@ -695,3 +695,50 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   smooths to a small position — but if gross rises with PnL flat, the scorer will call it ❌ BAD and the
   right follow-up is the no-trade band (`buffer-fraction = 0.5` is measured against the GAP, so it
   never binds while the desk is far from target), not a re-attempt of this lever.
+
+## 2026-07-27 — the desk was netting against its own hedge (ADR-0091)
+
+- Situation: PnL up again on the window and up over three runs; gross roughly DOUBLED (`64,650.20`,
+  `+33,984.70`). VaR95 `516.76`, breaker untripped, nothing near a limit — so no danger state, and the
+  cycle went at the exposure mechanism rather than de-risking.
+- **Honest attribution on last cycle's ⚠️ MIXED (ADR-0090).** It did what it was built to do: the
+  equity trace is visibly calmer, single-digit steps and no more 100-share single-order reversals.
+  Positions now persist instead of being zeroed on every crossing, and persistence is *part* of why
+  gross grew — but it is not why gross grew this much. The dominant term predates it and is structural.
+  Credit for the calmer equity trace; no blame for the gross.
+- **The finding, and it is the biggest single item on the balance sheet.** `FusionConfig` handed the
+  fusion lifecycle two suppliers that disagreed about who owns the hedge book: `heldInRoutedBooks`
+  EXCLUDED it (its javadoc even says why — "two legs where there was one, gross exposure up, and the two
+  loops fighting each other every cycle") while `firmPositions`, three lines below, SUMMED every book.
+  So the planner's `current` included the hedger's leg. Closed positive feedback: the hedger buys `h` to
+  offset the strategy books, the planner reads its gap as `target − (s + h)` and opens `−h` in a STRATEGY
+  book, and since that sale does not move the cash-equity exposure the hedger measures, its target is
+  unchanged and its leg stays on. Fixed point `s = target − h`: the firm holds `|target − h| + |h|` where
+  the economics call for `|target|`, the hedge is EXACTLY cancelled, and the offsetting leg grows with
+  `h` — **no fixed point in gross at all.**
+- Order post-mortem that exposed it: `MACRO` selling ES every cycle while `HEDGE` bought ES four seconds
+  later, all window. Resulting book `MACRO −0.060884` / `HEDGE +0.050697` = `$30,408` gross (47% of the
+  firm) for `−$2,776` net (9%). The hedge book was the firm's single worst position — its loss larger
+  than the whole firm's — and almost all of it REALISED, i.e. paid on round trips, not lost on a view.
+  Change: net against the books the layer routes into; skip the hedge book.
+- **Rule: when two code paths answer "is this position ours?", they must be the same code path.** The
+  bug was not that either supplier was wrong on its own — it was that they disagreed, three lines apart,
+  in the same method call. Next time a control has a scope (which books, which names, which modes), grep
+  for every other place that scope is decided and check they agree.
+- **Rule 2: read the planner's own `currentQty` against the book, not just its targets.** The tell was
+  sitting in `fusion_targets` for cycles: `ES: current = +0.011200` — a POSITIVE current on a contract
+  the strategy book was short by five times that. A `current` that does not match any book you can trade
+  is a scope bug, and it is visible without any new instrumentation.
+- **Rule 3: a hedge that costs money and moves no net is not a hedge.** Compare the hedge book's PnL
+  against the firm's, and its REALISED against its unrealised. Realised-dominant on an overlay means it
+  is round-tripping, and round-tripping against your own strategy book is the first thing to check.
+- Expected next: gross falls by the hedger's notional on the proxy and keeps falling as the ratchet
+  unwinds; firm net moves TOWARD flat because the hedge finally offsets. If gross does not fall, the
+  next suspect is not this change but the planned book itself — the target book is currently sized at
+  roughly an order of magnitude above the held book and is ramping into it, which is the standing open
+  item once this loop is closed.
+- Still open (sixth cycle): **forecast saturation** — `reversion` dominant at weight 2.87 and running
+  near its cap on most names while `trend` is measured significantly NEGATIVE at the weight floor, so
+  the cross-section carries little selection information and every name points the same way. Removing
+  the weight floor (ADR-0087) was tried and reverted; the untried lever is re-scaling the reversion
+  forecast so the cap stops binding.
