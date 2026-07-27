@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T12:00:07Z",
+    "fees": "465.516134",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "-709.20231344",
+      "netExposure": "0.00000000",
+      "realizedPnl": "922.58819876",
+      "strategyAlpha": "1631.79051220",
+      "totalFees": "465.516134",
+      "totalPnl": "922.58819876",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "922.58819876"
+  },
+  "before": {
+    "at": "2026-07-27T11:52:54Z",
+    "gross": "12139.06115700",
+    "net": "1451.79724500",
+    "total_pnl": "899.04977146"
+  },
+  "commit": "0f7d25a177a2ae8f87c60eaa78f62f6e3d2753e6",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-12139.06115700",
+    "net": "-1451.79724500",
+    "total_pnl": "23.53842730"
+  },
+  "note": "risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-27T12:00:07Z",
+  "summary": "a measured round trip that comes out non-positive is arrival-mark drift booked as execution, not a cost \u2014 it is treated as no measurement and takes the quoted/blend fallback, so the desk-wide gate can no longer be opened at a price no round trip can pay (ADR-0106)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
