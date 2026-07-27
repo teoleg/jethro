@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T23:00:11Z",
+    "fees": "481.442117",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "-3093.30503794",
+      "netExposure": "0.00000000",
+      "realizedPnl": "5665.94128433",
+      "strategyAlpha": "8759.24632227",
+      "totalFees": "481.442117",
+      "totalPnl": "5665.94128433",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "5665.94128433"
+  },
+  "before": {
+    "at": "2026-07-27T22:25:37Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "5654.13092967"
+  },
+  "commit": "961d0dd27163eb4a591defaa42191361c3270ab5",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "11.81035466"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-27T23:00:11Z",
+  "summary": "a continuous forecast sensor advances on PRINTS, not on cycles \u2014 a mark is fed to the trend and reversion sensors only when the market's own clock has moved, so a tape that has stopped printing can no longer decay the scale estimator they divide by or book telemetry calls that resolve at exactly zero (ADR-0113)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
