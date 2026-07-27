@@ -76,10 +76,23 @@ import java.util.Map;
  * test at zero cost — is held at MIN by {@link #compute(List, Params, EdgeGate.Params)}. Strictly
  * one-way (MIN is the clamp bound already applied), and inert unless some source IS admitted.
  *
+ * <p><b>…and a source measured LOSING is stood down, not floored (ADR-0111).</b> "Has not demonstrated
+ * an edge" covers two different findings: the sample cannot tell (UNPROVEN) and the sample says the
+ * source loses money (CONTRADICTED — {@link EdgeGate#contradictsEdge}, the identical test with the
+ * measured sign reversed). MIN is the right answer to the first and the wrong answer to the second: at
+ * MIN a disconfirmed source still subtracts conviction from every name it has a fresh view on, and on a
+ * desk whose weights had spread to 2.90 : 0.25 that cost ~14% of the combined forecast on every name —
+ * enough, measured live, to leave the only name clearing the ADR-0075 cost gate short of its own
+ * ADR-0101 no-trade band and the whole book at zero exposure. A stood-down source carries weight 0, so
+ * {@link ForecastCombiner} skips it and it stops counting toward the ADR-0076 diversification
+ * multiplier — which is the honest reading: a view the desk will not act on is not breadth.
+ *
  * <p>{@link ForecastCombiner} normalises by Σweights, so only the RATIOS matter — this can rotate
- * conviction between sources but can never scale the target book up or down; MIN&gt;0 keeps a decayed
+ * conviction between sources but can never scale the target book up or down; MIN&gt;0 keeps an UNPROVEN
  * source CONTRIBUTING (down-weighted, not dropped — the combiner skips weight≤0) so the active-source
- * count, and with it the diversification multiplier, is unchanged. Pure, dimensionless, exactly testable
+ * count, and with it the diversification multiplier, is unchanged. A CONTRADICTED source is the one
+ * exception (ADR-0111): it leaves the vote entirely, and the multiplier falls to the breadth that
+ * remains. Pure, dimensionless, exactly testable
  * — a conviction weight, never a size or a price (ADR-0016 / invariant 7).
  */
 public final class TelemetryWeights {
@@ -130,9 +143,19 @@ public final class TelemetryWeights {
      * at the gate's own α (ADR-0081/0082). No new dial and no new statistic: the same two dials the gate
      * already uses. Gross of execution cost deliberately, so no measurement is charged twice.
      *
+     * <p><b>Three states, not two (ADR-0111).</b> A source that fails the admission test above is only
+     * UNPROVEN if the sample genuinely cannot tell. When the same test at the same α passes with the
+     * measured sign reversed ({@link EdgeGate#contradictsEdge}) the desk has not failed to find an edge —
+     * it has found one pointing the wrong way, and such a source is stood down to weight 0 rather than
+     * held at MIN. The two verdicts are mutually exclusive, so the classification is total and
+     * unambiguous, and a stood-down source is dropped from the vote by {@link ForecastCombiner} (which
+     * skips weight ≤ 0) and therefore from the ADR-0076 diversification multiplier as well.
+     *
      * <p><b>One-way, and inert when it has nothing to defer to.</b> {@code p.min()} is the lower clamp
-     * bound this method already applies, so a demotion can only ever LOWER a weight — a failing source is
-     * never inverted into a contrarian bet and no weight is ever raised. And the rule applies only when
+     * bound this method already applies, and a stand-down floors at 0, so either demotion can only ever
+     * LOWER a weight — a failing source is never inverted into a contrarian bet (the canonical overfit)
+     * and no weight is ever raised. At least one weight always survives: a stand-down only happens when
+     * some source IS admitted, and no source can be both admitted and contradicted. And the rule applies only when
      * at least one source IS admitted: with nothing to defer to, demoting everyone would merely flatten
      * the weight vector, and in that state the gate is reduce-only anyway (its test is the same one at a
      * non-negative cost, so nothing can clear it that fails here) — so the desk is adding no risk.
@@ -147,12 +170,15 @@ public final class TelemetryWeights {
             return out;
         }
         List<SignalScoring.Stats> demoted = new java.util.ArrayList<>(stats.size());
+        List<SignalScoring.Stats> stoodDown = new java.util.ArrayList<>(stats.size());
         boolean anyAdmitted = false;
         for (SignalScoring.Stats s : stats) {
             if (EdgeGate.demonstratesEdge(s, admission)) {
                 anyAdmitted = true;
+            } else if (EdgeGate.contradictsEdge(s, admission)) {
+                stoodDown.add(s); // ADR-0111: measured LOSING at the desk's own hurdle
             } else {
-                demoted.add(s);
+                demoted.add(s); // ADR-0097: unproven — held at the floor, still contributing
             }
         }
         if (!anyAdmitted) {
@@ -160,6 +186,9 @@ public final class TelemetryWeights {
         }
         for (SignalScoring.Stats s : demoted) {
             out.computeIfPresent(s.source(), (k, w) -> Math.min(w, p.min()));
+        }
+        for (SignalScoring.Stats s : stoodDown) {
+            out.computeIfPresent(s.source(), (k, w) -> Math.min(w, 0.0));
         }
         return out;
     }

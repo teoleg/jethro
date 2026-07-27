@@ -1400,3 +1400,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   100% one-way, seven EQUITY positions, while the HEDGE book holds `$0.00` gross on `-$3,071.55`
   realised and trades ES in `0.003`-contract clips. A hedge that rounds to nothing is not a hedge.
   That is next cycle's change, unless the deploy is still not turning the JVM over.
+
+## 2026-07-27 20:00Z — a full target book placing zero orders, and the 14% conviction tax that kept it there
+
+- **The finding.** Gross `$0.00` with **eleven live targets** and `deltaQty: 0` on every one — the desk
+  was not idle, it was *blocked*. `/api/fusion/targets` names the two gates that compose into a halt:
+  (a) ADR-0075 charges each name its own measured round trip against `reversion`'s 225 s edge
+  (`avgReturnBps 2.0087`, `stdErrorBps 0.4271`), and of the equities only **AAPL** (`0.897` bps) clears —
+  JPM `1.075`, JNJ `1.204`, MSFT `1.338`, GOOG `1.854`, GOOGL `20.106`, blend `1.327` do not; seven of
+  eight `aims` read exactly `0.0`, which is only reachable through the reduce-only re-seed. (b) AAPL then
+  sits just inside its own ADR-0101 band. Meanwhile `trend` (−1.5033 bps, 451 cohorts, **t = −3.89**) and
+  `momentum` (−2.9177, **t = −3.02**) each held the ADR-0097 floor weight 0.25 against `reversion`'s
+  2.899 — and with opposite-signed forecasts that cost 13.6% of the combined value on every name they
+  called (GOOG: `13.319070` instead of `15.134`). Shipped ADR-0111: stand a **contradicted** source down
+  to weight 0; keep the floor for a merely **unproven** one.
+- **Rule 19: `deltaQty: 0` on a book with live targets is a BLOCK, not a decision — read the aims.** A
+  flat book and a flat *target* book look identical in the SITUATION header and are opposite diagnoses.
+  `aims` reading exactly `0.0` is the tell: that value is unreachable through the rate step (it would be
+  `target·a`) and can only come from the ADR-0064/0075 reduce-only re-seed. One endpoint call separates
+  "the desk has no view" from "the desk has a view it is forbidden to act on".
+- **Rule 20: two controls that are each individually correct can compose into a halt, and neither will
+  report it.** The gate published `mayIncrease: true` while the *per-name* test refused seven of eight
+  names; the buffer published nothing at all. Nobody was wrong and the book was at zero. When exposure is
+  `$0.00` against a non-empty target book, look for the *composition*, not the culprit.
+- **Rule 21: "not demonstrated" is two findings.** UNPROVEN (the sample cannot tell) and CONTRADICTED
+  (the sample says it loses) deserve different treatment; collapsing them hands live conviction to a
+  measured loser. The test costs nothing to add — it is the same statistic with the sign reversed.
+- **Predicted next, so it can be checked rather than re-derived.** Gross should rise from `$0.00`;
+  ADR-0111 raises exposure by design, and if the reversion edge does not survive contact the loss is
+  larger, not smaller. Do **not** credit or blame this change for a market move on positions it did not
+  open — cross `recent_orders` against the scored diff first.
+- **The binding constraint is NOT re-weighting — it is execution cost.** Seven of eight names remain shut
+  because measured round trips (0.90–1.85 bps/name) sit close to what a measured edge with a sub-1 bp
+  lower bound can pay. Next cycle's lever, unless the vector says otherwise: cost. Note
+  `turnover_cost_by_name` — the one aggregate that would show cost per name — has now errored for a
+  **tenth** consecutive cycle, and 553 orders died on ADR-0084 re-plan churn.
+- **Rule 17 fired again, unchanged:** `6578cf49f` is `docs/`+`ops/`+`reports/` only and was still scored
+  (⚠️ MIXED, −$72.74 / −$10,401.12). The numbers are the scorer's and sound; the *attribution* is void.

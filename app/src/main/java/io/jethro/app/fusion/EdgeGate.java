@@ -187,6 +187,26 @@ public final class EdgeGate {
     }
 
     /**
+     * Has this source demonstrated a directional edge that runs AGAINST it — expectancy distinguishable
+     * from zero, at the desk's own hurdle, on the LOSING side (ADR-0111)?
+     *
+     * <p>Exactly {@link #demonstratesEdge} with the measured sign reversed, so it is the same statistic,
+     * the same standard error, the same reference distribution and the same α: no second test and no new
+     * dial. The two are mutually exclusive for any α &lt; ½ — a mean cannot be significantly above and
+     * significantly below zero — so a source is in exactly one of three states: DEMONSTRATED (its
+     * expectancy is positive), UNPROVEN (the sample cannot tell), or CONTRADICTED (its expectancy is
+     * negative). ADR-0097 collapsed the last two into one and gave both the floor weight; they are not
+     * the same evidence and they do not deserve the same trust.
+     *
+     * <p>Gross of execution cost, for the same reason {@link #demonstratesEdge} is: cost decides whether
+     * the desk should pay to trade at all, not whose view counts.
+     */
+    public static boolean contradictsEdge(SignalScoring.Stats s, Params params) {
+        return s != null
+                && clears(s.resolved(), s.cohorts(), -s.avgReturnBps(), s.stdErrorBps(), 0.0, params);
+    }
+
+    /**
      * The gate's answer. {@code mayIncrease} false ⇒ reduce-only. {@code reason} is prose for the
      * operator; {@code sources} is the per-source arithmetic and {@code roundTripBpsByInstrument} the
      * desk's own measured round-trip cost per name, so every verdict — desk-wide and per name — can be

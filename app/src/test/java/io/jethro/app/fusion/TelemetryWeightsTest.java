@@ -261,9 +261,85 @@ class TelemetryWeightsTest {
         for (var e : before.entrySet()) {
             assertTrue(after.get(e.getKey()) <= e.getValue() + 1e-12,
                     e.getKey() + ": a demotion can only ever lower a weight");
-            assertTrue(after.get(e.getKey()) >= 0.25 - 1e-12, e.getKey() + ": never silenced");
+            assertTrue(after.get(e.getKey()) >= 0.0, e.getKey() + ": never inverted into a contrarian bet");
         }
-        assertEquals(0.25, after.get("bad"), 1e-12, "a measured-negative source is at MIN, never inverted");
+        // ADR-0111: "bad" reads −6.7 bps on 23 cohorts, cohort sd 6.26 ⇒ SE = 6.26/√23 = 1.30528…,
+        // t = −5.1329… — significantly LOSING on 22 df, not merely unproven. It is stood down, not
+        // floored; the weight is 0, never negative.
+        assertEquals(0.0, after.get("bad"), 1e-12, "a measured-LOSING source leaves the vote (ADR-0111)");
+        assertEquals(0.25, after.get("weak"), 1e-12, "an UNPROVEN source is still held at MIN (ADR-0097)");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0111: unproven and disconfirmed are different findings and get different treatment.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    void theThreeStatesAreTotalAndMutuallyExclusive() {
+        var strong = cohortStat("strong", 500, 39, 10.0, 6.0);   // t = +10.41 on 38 df
+        var weak = cohortStat("weak", 51, 31, 3.25, 10.7);       // t = +1.69 on 30 df
+        var bad = cohortStat("bad", 500, 23, -6.7, 6.26);        // t = −5.13 on 22 df
+        assertTrue(EdgeGate.demonstratesEdge(strong, GATE) && !EdgeGate.contradictsEdge(strong, GATE),
+                "DEMONSTRATED");
+        assertTrue(!EdgeGate.demonstratesEdge(weak, GATE) && !EdgeGate.contradictsEdge(weak, GATE),
+                "UNPROVEN — the sample cannot tell either way");
+        assertTrue(!EdgeGate.demonstratesEdge(bad, GATE) && EdgeGate.contradictsEdge(bad, GATE),
+                "CONTRADICTED");
+        // Mutually exclusive for any α < ½: a mean cannot be significantly above AND below zero. The
+        // mirrored test is the same statistic on the same sample, so this holds by construction.
+        for (double avg : new double[] {-40.0, -6.7, -0.01, 0.0, 0.01, 3.25, 40.0}) {
+            var s = cohortStat("s", 500, 39, avg, 6.0);
+            assertTrue(!(EdgeGate.demonstratesEdge(s, GATE) && EdgeGate.contradictsEdge(s, GATE)),
+                    "no source is both admitted and contradicted at avg " + avg);
+        }
+    }
+
+    @Test
+    void standingDownADisconfirmedSourceRestoresTheConvictionItWasSubtracting() {
+        // The live shape at the 225 s rung that motivated the rule, on the desk's own readings:
+        //   reversion  +2.0087 bps, SE 0.4271 ⇒ t = +4.70  ⇒ DEMONSTRATED, weight 2.899…
+        //   trend      −1.5033 bps, SE 0.3860 ⇒ t = −3.89  ⇒ CONTRADICTED, weight 0.25 (was)
+        // and GOOG's two fresh forecasts that cycle: reversion +15.134, trend −13.974.
+        //
+        // Held at MIN, by hand:
+        //   average = (15.134·2.899 + (−13.974)·0.25) / (2.899 + 0.25) = 40.379966/3.149 = 12.823139…
+        //   Σw²ₙ    = (2.899² + 0.25²)/3.149² = 8.466701/9.916201 = 0.8538178…
+        //   DM      = 1/√(0.8538178… + 0.5·(1 − 0.8538178…)) = 1/√0.9269089… = 1.0386636…
+        //   combined = 12.823139… × 1.0386636… = 13.319070…
+        // Stood down, by hand: one active source ⇒ average = 15.134, Σw²ₙ = 1, DM = 1, combined = 15.134.
+        // The disconfirmed source was costing 13.6% of the desk's conviction on this name.
+        var reversion = Forecast.of("reversion", "GOOG", 15.134);
+        var trend = Forecast.of("trend", "GOOG", -13.974);
+
+        var floored = ForecastCombiner.combine("GOOG", List.of(
+                new ForecastCombiner.Weighted(reversion, 2.899),
+                new ForecastCombiner.Weighted(trend, 0.25)), 0.5);
+        var stoodDown = ForecastCombiner.combine("GOOG", List.of(
+                new ForecastCombiner.Weighted(reversion, 2.899),
+                new ForecastCombiner.Weighted(trend, 0.0)), 0.5);
+
+        assertEquals(13.319070, floored.value(), 1e-6, "the shipped behaviour, by hand");
+        assertEquals(2, floored.activeSources());
+        assertEquals(15.134, stoodDown.value(), 1e-9, "one view, no diversification claimed");
+        assertEquals(1, stoodDown.activeSources(), "a stood-down source is not breadth");
+        assertEquals(1.0, stoodDown.diversificationMultiplier(), 1e-12);
+        assertTrue(stoodDown.value() > floored.value(),
+                "conviction the desk had measured is no longer surrendered to a measured loser");
+    }
+
+    @Test
+    void someWeightAlwaysSurvivesTheStandDown() {
+        // A stand-down happens only when some source IS admitted, and no source is both — so the
+        // weight vector can never be zeroed out from under the combiner.
+        var stats = List.of(
+                cohortStat("strong", 500, 39, 10.0, 6.0),
+                cohortStat("bad", 500, 23, -6.7, 6.26),
+                cohortStat("worse", 500, 39, -10.0, 6.0));
+        var after = TelemetryWeights.compute(stats, K20, GATE);
+        assertTrue(after.values().stream().anyMatch(w -> w > 0), "at least one source still votes");
+        assertEquals(0.0, after.get("bad"), 1e-12);
+        assertEquals(0.0, after.get("worse"), 1e-12);
+        assertTrue(after.get("strong") > 0);
     }
 
     @Test

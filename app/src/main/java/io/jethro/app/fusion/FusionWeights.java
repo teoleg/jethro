@@ -37,7 +37,9 @@ public final class FusionWeights {
     /**
      * The same weights with the ADR-0097 admission rule applied: a source that has not demonstrated a
      * directional edge at the desk's own hurdle ({@code admission}) is held at the MIN weight so it
-     * cannot out-vote one that has. {@code admission} null ⇒ identical to {@link #fromTelemetry}.
+     * cannot out-vote one that has — and, under ADR-0111, one whose measured edge is significantly
+     * NEGATIVE at that same hurdle is stood down to 0 and leaves the vote altogether.
+     * {@code admission} null ⇒ identical to {@link #fromTelemetry}.
      */
     public static FusionWeights fromTelemetry(List<SignalScoring.Stats> stats,
                                               TelemetryWeights.Params params,
