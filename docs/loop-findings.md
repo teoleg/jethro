@@ -616,3 +616,45 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   source count for the diversification multiplier — was invalidated by ADR-0076. That is the next lever;
   it was not taken this cycle because removing the floor **raises** forecast magnitude and so exposure,
   which is the wrong trade to make in the same window as a new risk control.
+
+### 2026-07-27T02:15Z — ADR-0089 (the desk measures correlation on the stream it trades)
+- Situation: first genuine **DANGER** state in many cycles — bleeding AND adding exposure. Gross went
+  from roughly ten thousand to `184,719.88` in one window (net `-75,988.06`, a large one-sided short)
+  while PnL fell `-45.30`. No configured limit is close (VaR95 `1,157.61`, firm gross limit `1,500,000`,
+  breaker untripped) — the damage is entirely to PnL *per unit of exposure*, which is the objective.
+- Order post-mortem: pure thrash. MSFT +49 → −27/−16/−12 → +34/+16/+11/+9; AAPL +5/+9/+8 then
+  −56/−36/−27/−23/−19 four minutes later. `reversion` is pinned at its ±20 cap on most names and flips
+  sign inside minutes; every flip pays a round trip, and fees are a large share of the realised loss.
+- **The mechanism was not the last change.** ADR-0088 scored ❌ BAD and was reverted, but exposure was
+  ramping ~×9 per window *before* it and kept ramping after. The ramp is ADR-0080 walking the desk
+  toward a planned book far bigger than anything the risk controls priced. Blaming the scored change
+  would have been the wrong post-mortem; the ledger verdict answers "did this help", not "what is the
+  mechanism".
+- **The finding.** ADR-0079's concentration multiplier and ADR-0083's volatility budget — the only two
+  controls that look at the BOOK rather than at a name — both read a `daily_close` covariance. Under
+  ADR-0073 that series admits an instrument only after several consecutive sessions **in the running
+  feed mode**, and this stream has two. So the estimate covers nothing, both controls hit their
+  "no measurement, no claim" branch and silently no-op, and a book short nearly every name at once
+  carries N independent per-name budgets of what is arithmetically ONE position. Change: measure it on
+  the mark stream (synchronised per-cycle snapshots, seeded on one bucket grid of the feed's clock),
+  choosing per cycle whichever estimator covers more of the planned book.
+- **Rule: a control that falls back to "make no claim" fails SILENTLY and looks safe.** Every such
+  branch is a place the desk can be running with the control absent while the code reads as if it were
+  present. When diagnosing a risk that a control should have caught, check its COVERAGE on the live
+  book first — before questioning its logic. This is the second time the same root cause has cost a
+  cycle (ADR-0086 found it for σ; this is the same gap on the pairs). Next time: grep every
+  `Optional.empty()` fallback in the sizing path and ask what fraction of the live book it is returning.
+- **Rule 2: measure the ramp, not just the level.** Exposure rising ~×9 per window for three consecutive
+  cycles was visible in the run-status history the whole time and none of those cycles named it, because
+  each window's absolute level was still under every configured limit. A limit is a backstop; the
+  trajectory toward it is the signal.
+- Honest attribution: the window's PnL fall is mostly *market* on positions the ramp had already opened;
+  the exposure rise is *mechanism*, not market. This change gets credit for none of it — it went in
+  after the measurement. Expected next: gross falls on an unchanged view. If gross does not move, the
+  estimator is not covering the book and the SEED is the first suspect, not the control.
+- Still open (fifth cycle): **forecast saturation** — `reversion` pinned at ±20 with `trend` measured
+  negative at the weight floor means the cross-section carries almost no selection information, which is
+  *why* every name points the same way. The concentration haircut treats the symptom honestly; the
+  saturation is the cause and is the next lever. Note that removing the weight floor (ADR-0087) was
+  already tried and reverted — the lever to try is re-scaling the reversion forecast so the cap stops
+  binding, not re-weighting the sources.

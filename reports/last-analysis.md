@@ -1,46 +1,50 @@
-Gave the fusion desk the one risk response its whole thesis rests on and has never had: a position is now cut when it gives back more than its own measured volatility says a live view should (ADR-0086).
+Gave the concentration control a correlation it can actually measure: the fusion desk now prices how much of its book is one bet from the mark stream, because the daily-close covariance it was reading covers none of this book (ADR-0089).
 
 ## Situation (read from the live endpoints; every number below is quoted, none computed here)
 
-1. **Money.** Total PnL is **higher** than last run — `-823.80` against `-826.06`, a move of **+$2.26**,
-   and the same **+$2.26** across the last three runs. It is the first non-zero move in fifteen cycles.
-   Not bleeding. Still `underwater` and still a hard miss on the +1%/3-iteration target.
-2. **Risk.** Gross exposure went from exactly zero to **$956.98**, net **−$956.98** — one small ES short
-   in MACRO, the only open position on the book; all seven equity lines are flat. `EXPOSURE RISING` is
-   set, but from nothing, and historical VaR95 on it is **$11.04**. The breaker is not halted and is
-   nowhere near. This is not a danger state.
-3. **Cause.** Last cycle's change (ADR-0085, futures sizing in the OOS backtest) scored **❌ BAD** and
-   was auto-reverted. The live numbers say it **worked**: it is the only change in fifteen cycles that
-   produced a trade at all, and the book it opened is **+$2.32** on **$0.136** of fees over three fills
-   (two passive entries at 0.30 and 0.00 bps, one market exit at 0.23 bps). The ❌ is deadband
-   arithmetic, not a loss — off a flat book the exposure deadband is 1% of zero, so any position reads
-   as "exposure up", and a $2.45 profit sits inside the $50 PnL deadband, so it reads as "PnL not up".
-   Any change that ends a flat book is scored BAD unless it earns >$50 in one 30-minute window. **I have
-   not touched the scorer or the ledger — flagging the measurement for Oleg, not adjusting my own grade.**
-4. **Danger.** No. PnL up, one small position, unrealised **−$0.19**, breaker far away.
-5. **Order post-mortem.** The window's only orders are the three MACRO/ES fusion fills. All winners; no
-   losing trigger fired. The `-$895.94` in ALPHA is legacy-path churn from before 20:21 and did not move.
-6. **Attribution — change vs market.** Unusually clean: every equity line is flat with zero unrealised,
-   so the market contributed ~nothing to the firm total this window. **~100% of the move is the direct
-   effect of last cycle's change**, ~0% market. Nothing here is overfitting to a market drift.
+1. **Money.** Total PnL is **lower** than last run — the situation header reads `-45.30` on the window,
+   leaving the firm total negative — and the book is flagged **BLEEDING**. Over the last three runs PnL
+   is up (`+119.21`), so the 3-iteration growth target is still met on paper, but the latest window went
+   the wrong way and the book is `underwater`.
+2. **Risk.** This is the emergency. Gross exposure went from about ten thousand to `184,719.88` in one
+   window — `+171,034.78` — with net `-75,988.06`: the desk is now a large one-sided short. Historical
+   VaR95 is `1,157.61`, the firm gross limit is `1,500,000` and the drawdown breaker is untripped, so no
+   configured limit is close. But PnL per unit of exposure is collapsing, and that is the objective.
+   Flags: **DANGER — bleeding AND adding exposure.**
+3. **Cause.** Last cycle's change (ADR-0088) scored **❌ BAD** and the scorer already reverted it. That
+   verdict is not the mechanism, though: exposure was ramping the same way *before* it and has kept
+   ramping after. The culprit is not one change — it is the ADR-0080 partial-adjustment ramp walking the
+   desk toward a **planned book** far larger than anything the risk controls priced.
+4. **Order post-mortem.** The window's fills are a thrash: MSFT bought 49, sold down through 27/16/12,
+   then bought back 34/16/11/9; AAPL bought 5/9/8 then sold 56/36/27/23/19 four minutes later. `reversion`
+   sits at its ±20 forecast cap on most names and flips sign inside minutes, and each flip pays a round
+   trip — fees are a large share of the realised loss, nearly all of it in the ALPHA book.
+5. **The structural read — what I acted on.** The planner's targets are short *nearly every name it
+   covers*, each at a full per-name budget. The two controls that would price that — the ADR-0079
+   concentration multiplier and the ADR-0083 volatility budget, the only two that look at the book rather
+   than at a name — both read a `daily_close` covariance, and under ADR-0073 that series admits an
+   instrument only after several consecutive sessions **in the running feed mode**. This stream has two.
+   So the estimate covers nothing (the parametric VaR built on the same covariance reports its entire
+   exposure as *skipped*), both controls silently no-op, and a book that is arithmetically one position
+   carries N independent budgets of risk. That is not the market moving against us; it is a control
+   absent exactly where the concentration is — ADR-0086's lesson about σ, one layer up, on the pairs.
 
-## Diagnosis and what I changed
+## The change
 
-The desk's real problem is no longer evidence — `reversion` clears the gate at the 900s rung (+8.09 bps,
-184 resolved calls, 8 cohorts, p = 0.0025) — it is that the only place that edge can be expressed is a
-book with **no per-name risk control whatsoever**. Every fusion control asks whether risk may be put ON;
-nothing asks whether a position already held has gone wrong. The legacy path has had a stop since
-ADR-0019; the fusion path, the sole order origin, has none, and the firm breaker is a whole-book halt,
-not a per-name exit. That gap is worst for a mean-reversion view, whose payoff is short optionality — a
-long run of small gains ended by one large loss.
+Measure the covariance on the **mark stream** — the series ADR-0086 already fell back to for σ, for this
+exact coverage reason: an EWMA of return cross-products over synchronised per-cycle mark snapshots, fed
+the same prices the plan was made from, seeded from the durable mark history replayed on one bucket grid
+of the feed's own clock (a covariance of returns taken at different instants measures the misalignment).
+One estimator per cycle, chosen by which covers more of the book being planned, ties to the incumbent
+daily estimate, never a blend. Both consumers are homogeneous of degree zero in the covariance, so no
+trading-day convention is invented and the sampling period cannot move a size; both are one-way — the
+multiplier is capped at 1, the budget at the gross it replaced — so this can only ever **shrink** the
+book, which is the right shape of change for a danger state. No money dial, no gate loosened, no
+deterministic floor touched. Full suite green.
 
-So this cycle the desk gets a volatility-scaled trailing exit (chandelier): a name is worked flat once
-its mark retraces from the best level seen since the position opened by more than `k ×` its own σ over
-the desk's own derived holding horizon, then stands aside for one horizon. σ had to be measured from the
-**mark stream**, not from daily closes: the daily estimate every other risk control uses covers 3 of 23
-planned names and **none of the names actually held** — the parametric VaR currently reports its entire
-covered exposure as skipped, so a control keyed on it would be silent exactly where risk sits. The rule
-can only ever set a target flat and clamp a delta to a reduction, so it cannot lever the book up, and a
-name with no measured σ is left exactly as planned. One dial, `sigma-multiple = 3.0`, marked PLACEHOLDER
-— the conservative end of the 2.5–3× ATR convention, deliberately reluctant to cut. Deterministic floor
-untouched; worked example pinned as an exact-decimal test; three deferred-register rows filed.
+**Attribution, honestly.** My change gets credit for none of this window: it went in after the
+measurement. The window's PnL fall is mostly *market*, on positions the ramp had already opened; the
+exposure rise is *mechanism* — the ramp, not the market. What I expect next is gross falling on an
+unchanged view. If exposure comes down and PnL is not worse, the correlation haircut is working; if
+gross does not move at all, the estimator is not covering the book and the **seed** is the first suspect,
+not the control.
