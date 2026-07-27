@@ -1,0 +1,20 @@
+{
+  "commit": "851082687a2fb25754ae09c28b0c5f0833041cfb",
+  "fees": "158.453066",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "69.88228362",
+    "netExposure": "0.00000000",
+    "realizedPnl": "-826.05938139",
+    "strategyAlpha": "-895.94166501",
+    "totalFees": "158.453066",
+    "totalPnl": "-826.05938139",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "the OOS backtest gate sizes each instrument in its own contract terms and charges it its own per-fill cost, so futures \u2014 including ES, the only name whose measured round trip clears the edge gate \u2014 can earn a verdict at all instead of being vetoed for a silence that was arithmetic (ADR-0085)",
+  "total_pnl": "-826.05938139",
+  "ts": "2026-07-27T00:22:28Z"
+}
