@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T05:30:12Z",
+    "fees": "337.739806",
+    "gross": "24873.03345947",
+    "net": "4382.20909651",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "24873.03345947",
+      "hedgePnl": "-382.70330885",
+      "netExposure": "4382.20909651",
+      "realizedPnl": "154.71623506",
+      "strategyAlpha": "570.73674211",
+      "totalFees": "337.739806",
+      "totalPnl": "188.03343326",
+      "unrealizedPnl": "33.31719820"
+    },
+    "total_pnl": "188.03343326"
+  },
+  "before": {
+    "at": "2026-07-27T05:19:59Z",
+    "gross": "20202.99155816",
+    "net": "-1944.16508336",
+    "total_pnl": "161.52927506"
+  },
+  "commit": "8e80ceabc5108e216076aa98fac382fd7a5f918b",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "4670.04190131",
+    "net": "6326.37417987",
+    "total_pnl": "26.50415820"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj (PnL/$1 gross) worsened 0.00800\u21920.00756",
+  "revert": true,
+  "scoredAt": "2026-07-27T05:30:12Z",
+  "summary": "the reversion sensor's Donchian range window is doubled to 40 minutes (normalisation span with it, holding the 2x proportion that keeps E|score| ~ 1 and so the book size fixed), because the position path's ~20-25 minute full-amplitude sweep \u2014 and therefore the turnover the desk pays fee and spread on \u2014 is set by that window, while the horizon ladder measures this source's edge as largest at its long rungs",
+  "verdict": "\u274c BAD"
+}
