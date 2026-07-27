@@ -30,10 +30,9 @@ import java.util.Map;
  *   aim   ← 0                           when the target is FLAT: an exit is not buffered (ADR-0090)
  *   scale = |target| · TARGET_ABS / |forecast|     the name's position at a typical-strength forecast
  *   band  = scale · bufferFraction
- *   gap   = target − held                the distance from the optimum the band is derived about
- *   |gap| ≤ band → 0                     inside the buffer: the desk is close enough to its optimum
- *   otherwise    → aim − held, capped at gap − band·sgn(gap)   the rate-limited step, never past the
- *                                        NEAR EDGE of the buffer
+ *   gap   = aim − held
+ *   |gap| ≤ band → 0                     inside the buffer: the desk is where it means to be
+ *   otherwise    → gap − band·sgn(gap)   trade to the NEAR EDGE of the buffer, not to the aim
  * </pre>
  * The aim path is byte-identical to the position the old policy converged to, so the desk's intended
  * risk — and therefore its exposure — is unchanged by construction. What changes is that the last
@@ -64,12 +63,6 @@ import java.util.Map;
  * outgrow, or end up on the opposite side of, the target it holds NOW. See {@link #withinTarget}: the
  * aim is clamped into the closed interval between flat and this cycle's target, which can only ever
  * shrink intent or put it back on the side the forecast is on.
- *
- * <p><b>And the region is around the TARGET, not around the aim (ADR-0103).</b> The width above is
- * derived about the frictionless optimum; the aim is an exponentially lagged path toward it, so testing
- * the aim gap tested a quantity roughly the adjustment rate — a few percent — of the one the width was
- * sized for. See {@link #bufferedDelta}: the band decides WHETHER the position is far enough from its
- * target to be worth a round trip, the aim decides HOW FAR to move once it is.
  *
  * <p><b>What it can never do.</b> It never widens a trade the desk was not already going to make in the
  * same direction on the same aim path, it never moves the aim past the target, and it never buffers an
@@ -133,8 +126,7 @@ public final class PositionBuffer {
             BigDecimal target = t.targetQty() == null ? BigDecimal.ZERO : t.targetQty();
             BigDecimal aim = nextAim(t.instrument(), target, held, rate);
             double width = widthFor(t.instrument(), gate, edgeBps);
-            BigDecimal delta = bufferedDelta(aim, held,
-                    band(target, t.combinedForecast(), held, width), target);
+            BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held, width));
             if (gate != null && !gate.mayIncrease(t.instrument())) {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
@@ -338,70 +330,20 @@ public final class PositionBuffer {
     }
 
     /**
-     * The order to submit this cycle — <b>ADR-0103</b>: the no-trade region is a region around the
-     * <b>target</b>, and the {@link #nextAim} step only says how far into it to move.
+     * The order to submit this cycle: nothing inside the buffer, otherwise the gap to the aim less the
+     * buffer — i.e. trade to the NEAR EDGE of the no-trade region, never all the way to the aim.
      *
-     * <pre>
-     *   step = aim − held                         the ADR-0080 rate-limited move
-     *   gap  = target − held                      the distance from the position ADR-0101 is about
-     *   |gap| ≤ band            → 0               the desk is close enough to its optimum to leave it
-     *   otherwise               → the step, capped at the NEAR EDGE, gap − band·sgn(gap)
-     * </pre>
-     *
-     * <h3>Why the gap that decides is the one to the target</h3>
-     * {@link #widthFor} derives the width from {@code |g| > 2C/(λσ²)} where {@code g = a − h} and
-     * {@code a = μ/(λσ²)} is the <b>frictionless optimum</b> — this planner's target. It was being
-     * handed {@code aim − held} instead. The aim is the ADR-0080 exponential path, so in steady state
-     * it sits a factor of the adjustment rate away from the position: at the live rate
-     * ({@code a = 1 − e^(−30/900) = 0.0328}) the quantity being tested was about 3% of the one the
-     * width was sized for. Two things followed, both measured live on this book:
-     * <ul>
-     *   <li><b>A position could not be opened at a useful speed.</b> From flat the aim has to
-     *       accumulate a whole band before the first order — for the live GOOG plan (forecast −16.19,
-     *       width 0.494) that is 30.5% of the target, about eleven cycles, five and a half minutes of
-     *       unbroken agreement before a single share trades.</li>
-     *   <li><b>And the wait was restarted constantly.</b> The one source that passes this desk's gate
-     *       is mean-reverting at the 900 s rung and changes side well inside those five minutes. Each
-     *       change of side clamps the aim flat (ADR-0102), which the old rule read as an EXIT and
-     *       dumped at market, unbuffered. Live: GOOG sold 8 shares at forecast −16.19 and bought all 8
-     *       back four minutes later at +2.00 — a full round trip, spread paid twice, on a name whose
-     *       target was −103. Gross exposure fell to $7.90 firm-wide while fees kept accruing.</li>
-     * </ul>
-     * Testing the target gap fixes both at their common cause. The first order off a flat book is the
-     * rate-limited step itself, so a position builds from the cycle the view appears; and an aim
-     * clamped flat by a change of side is no longer an exit — it is a move like any other, permitted
-     * only when the position is more than a band away from the target, which is exactly the test that
-     * says a round trip is worth its cost. A wobble that leaves the position inside the band now
-     * trades nothing at all, where before it round-tripped the whole holding.
-     *
-     * <h3>What is unchanged</h3>
-     * A genuinely FLAT target — the ADR-0086 chandelier cut, the ADR-0065 orphan unwind, the ADR-0027
-     * breaker, a silenced source — still returns the whole position in one cycle, unbuffered: that
-     * branch is now keyed on the target being flat rather than on the aim, which is the same condition
-     * for every control that means "get out" ({@link #nextAim} snaps the aim to zero precisely then).
-     * The band width (ADR-0101), the band location's scale (ADR-0094), the aim path and its clamp
-     * (ADR-0080/0102), the reduce-only clamp (ADR-0064/0075) and the deterministic floor above all of
-     * them are untouched. The step is still never larger than the ADR-0080 one and still never carries
-     * the position past the near edge, so the desk's settled position is {@code target − band·sgn} —
-     * strictly inside its own target by a full cost-derived buffer, as before.
-     *
-     * <p>Exact decimal throughout (invariant 1); it introduces no number — the bound is the target and
-     * the band the planner already computed (invariant 7 / ADR-0016).
+     * <p>A zero aim is an exit and is never buffered: the whole position is traded, this cycle.
      */
-    static BigDecimal bufferedDelta(BigDecimal aim, BigDecimal held, BigDecimal band, BigDecimal target) {
-        BigDecimal step = aim.subtract(held).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
-        if (target.signum() == 0) {
-            return step; // an exit is worked in full (ADR-0090)
+    static BigDecimal bufferedDelta(BigDecimal aim, BigDecimal held, BigDecimal band) {
+        BigDecimal gap = aim.subtract(held).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+        if (aim.signum() == 0) {
+            return gap; // an exit is worked in full (ADR-0090)
         }
-        BigDecimal gap = target.subtract(held).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
         if (gap.abs().compareTo(band) <= 0) {
-            return BigDecimal.ZERO.setScale(QTY_SCALE); // inside the no-trade region around the optimum
+            return BigDecimal.ZERO.setScale(QTY_SCALE);
         }
-        if (step.signum() == 0 || step.signum() != gap.signum()) {
-            return BigDecimal.ZERO.setScale(QTY_SCALE); // the intent does not point at the optimum
-        }
-        BigDecimal toEdge = gap.abs().subtract(band).multiply(BigDecimal.valueOf(gap.signum()))
-                .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
-        return step.abs().compareTo(toEdge.abs()) <= 0 ? step : toEdge;
+        BigDecimal edge = gap.abs().subtract(band);
+        return edge.multiply(BigDecimal.valueOf(gap.signum())).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
     }
 }

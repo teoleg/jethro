@@ -4,7 +4,6 @@
 - **Date:** 2026-07-27
 - **Deciders:** Oleg
 - **Tags:** backend, fusion, execution, cost
-- **Superseded in part by:** [ADR-0103](0103-the-no-trade-region-sits-around-the-target-not-around-the-aim.md) — the band's LOCATION returns to the target once ADR-0101 measured a width that binds there. The average-position scale and the trade-to-the-near-edge policy shape below stand.
 
 ## Context
 

@@ -18,14 +18,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   averagePosition = 142.319300 x 10 / 9.64 = 147.634128
  *   band            = 0.10 x 147.634128      =  14.763413
  *   aim (first)     = −7 + 0.032784 x (−142.319300 − (−7)) = −7 − 4.436294… = −11.436294
- *   gap (ADR-0103)  = −142.319300 − (−7)     = −135.319300
- *   |gap| = 135.319300 > 14.763413           ⇒  take the step, −4.436294
+ *   gap             = −11.436294 − (−7)      =  −4.436294
+ *   |gap| = 4.436294 <= 14.763413            ⇒  NO ORDER
  * </pre>
- * ADR-0094 tested {@code aim − held = −4.436294} here and suppressed the order. That gap is the
- * ADR-0080 lag, not the distance from the optimum the width is derived about — a factor of the
- * adjustment rate smaller — so the test could only be passed by drift, never by a view. ADR-0103 tests
- * the target gap: the band now suppresses a target that WOBBLES near the position (the round trip that
- * actually costs money) instead of suppressing the accumulation toward it.
+ * The ADR-0080 policy sold 4 shares here, every cycle, for as long as the target stayed out of reach.
  */
 class PositionBufferTest {
 
@@ -56,70 +52,35 @@ class PositionBufferTest {
                 .isEqualByComparingTo(new BigDecimal("4.000000"));
     }
 
-    // ---------------------------------------------------------------------------------------------
-    // ADR-0103 — the region is around the TARGET (the position the width is derived about), and the
-    // aim step says how far into it to move. The width the desk MEASURES (ADR-0101, 0.24–1.00 average
-    // positions live) binds there; Carver's 0.10, which ADR-0094 was written against, did not.
-    // ---------------------------------------------------------------------------------------------
-
     @Test
-    void aPositionFarFromItsTargetMovesAtExactlyTheRateLimitedStep() {
+    void theWorkedExampleIsInsideTheBufferAndTradesNothing() {
         PositionBuffer buffer = new PositionBuffer(0.10);
         var result = buffer.apply(List.of(target("AAPL", -9.64, "-142.319300", "-7")), null, RATE);
-        // aim = −7 + a(−142.3193 + 7) = −11.436294; a = 1 − e^(−30/900) = 0.0327839…
-        // gap = −142.319300 − (−7) = −135.319300, |gap| > band 14.763413 ⇒ outside the region, so the
-        // whole ADR-0080 step trades: −11.436294 − (−7) = −4.436294. At Carver's 0.10 this name is a
-        // long way from its optimum and rebalancing plainly pays; ADR-0094 suppressed it because it
-        // was testing the aim gap, which is ~3% of the distance the width is about.
+        // aim = −7 + a(−142.3193 + 7); a = 1 − e^(−30/900) = 0.0327839…
         assertThat(result.aims().get("AAPL")).isEqualByComparingTo(new BigDecimal("-11.436294"));
-        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-4.436294"));
-        assertThat(result.insideBuffer()).isZero();
-        assertThat(result.traded()).isEqualTo(1);
-        // Outside the region the desk moves at exactly the unbuffered ADR-0080 rate — the buffer
-        // decides WHETHER to trade, never how fast.
-        assertThat(TargetPlanner.orderDelta(new BigDecimal("-142.319300"), new BigDecimal("-7"),
-                0.5, RATE)).isEqualByComparingTo(new BigDecimal("-4.436294"));
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+        assertThat(result.insideBuffer()).isEqualTo(1);
+        assertThat(result.traded()).isZero();
     }
 
     @Test
-    void aPositionInsideItsOwnMeasuredBandTradesNothing() {
-        // The live GOOG plan this was diagnosed from, at its ADR-0101 measured width. Round trip
-        // 1.9714 bps against the passing source's 7.9748 bps ⇒ width 2C/μ = 0.4944; the desk holds −8
-        // and the forecast has flipped to +2.00, target +28.092000:
-        //   averagePosition = 28.092000 x 10 / 2.00 = 140.460000
-        //   band            = 140.460000 x 0.4944   =  69.443424
-        //   gap             = 28.092000 − (−8)      =  36.092000  ≤ band ⇒ NO ORDER
-        // The old rule read the ADR-0102 sign clamp (aim 0) as an exit and bought all 8 back at
-        // market. It is a wobble inside the band, and the desk now sits through it.
-        assertThat(PositionBuffer.bufferedDelta(BigDecimal.ZERO, new BigDecimal("-8"),
-                new BigDecimal("69.443424"), new BigDecimal("28.092000")))
-                .isEqualByComparingTo("0");
+    void theOldPolicyWouldHaveTradedTheSameNameEveryCycle() {
+        // The ADR-0055 band is |target| x 0.5 = 71.159650 against a gap of 135.319300 — it cannot bind,
+        // so the desk sells the full rated fraction. This is the order ADR-0094 suppresses.
+        BigDecimal delta = TargetPlanner.orderDelta(new BigDecimal("-142.319300"), new BigDecimal("-7"),
+                0.5, RATE);
+        assertThat(delta).isEqualByComparingTo(new BigDecimal("-4.436294"));
     }
 
     @Test
-    void theStepIsCappedAtTheNearEdgeAndNeverCarriesThePositionPastIt() {
-        // Intent already at −40 against a −7 holding, target −142.319300, band 14.763413. The step
-        // −33 lands at −40, still 102.319300 short of the target ⇒ taken whole.
+    void onceTheAimHasDriftedItTradesToTheBufferEdgeNotToTheAim() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        // Same name, but the desk's intent has already accumulated to −40 against a −7 holding.
+        // gap = −33, band = 14.763413 ⇒ trade −(33 − 14.763413) = −18.236587, leaving the position
+        // exactly one band short of the aim rather than at it.
         assertThat(PositionBuffer.bufferedDelta(new BigDecimal("-40"), new BigDecimal("-7"),
-                new BigDecimal("14.763413"), new BigDecimal("-142.319300")))
-                .isEqualByComparingTo(new BigDecimal("-33.000000"));
-        // Intent at −140: the step −133 would carry the position past the near edge, so it is capped
-        // at gap − band·sgn = −(135.319300 − 14.763413) = −120.555887, landing at −7 − 120.555887 =
-        // −127.555887 = target + band exactly — one full buffer inside the target, as before.
-        assertThat(PositionBuffer.bufferedDelta(new BigDecimal("-140"), new BigDecimal("-7"),
-                new BigDecimal("14.763413"), new BigDecimal("-142.319300")))
-                .isEqualByComparingTo(new BigDecimal("-120.555887"));
-        assertThat(new BigDecimal("-7").add(new BigDecimal("-120.555887")))
-                .isEqualByComparingTo(new BigDecimal("-142.319300").add(new BigDecimal("14.763413")));
-    }
-
-    @Test
-    void anIntentThatDoesNotPointAtTheOptimumTradesNothing() {
-        // Held −7 against a target of −142.319300 (gap −135.319300, outside the band) but an intent of
-        // +5: the desk would be buying while its own optimum is further short. Nothing to do.
-        assertThat(PositionBuffer.bufferedDelta(new BigDecimal("5"), new BigDecimal("-7"),
-                new BigDecimal("14.763413"), new BigDecimal("-142.319300")))
-                .isEqualByComparingTo("0");
+                new BigDecimal("14.763413")))
+                .isEqualByComparingTo(new BigDecimal("-18.236587"));
     }
 
     @Test
@@ -137,14 +98,10 @@ class PositionBufferTest {
         PositionBuffer buffer = new PositionBuffer(0.10);
         buffer.apply(List.of(target("AAPL", -9.64, "-142.319300", "-7")), null, RATE);
         buffer.apply(List.of(target("AAPL", 0.0, "0", "-11")), null, RATE); // stopped out
-        // Re-armed with a fresh view, the aim restarts from the (now flat) book — not from the old
-        // intent — and ADR-0103 lets the rebuild start on that very cycle: aim = 0 + a(−142.319300) =
-        // −4.665782, gap = −142.319300 outside the band, so the step trades whole. Under the old rule
-        // the desk waited for the aim to accumulate a full band (~11 cycles) before its first share,
-        // and the mean-reverting source changed side long before that.
+        // Re-armed with a fresh view, the aim restarts from the (now flat) book — not from the old intent.
         var again = buffer.apply(List.of(target("AAPL", -9.64, "-142.319300", "0")), null, RATE);
         assertThat(again.aims().get("AAPL")).isEqualByComparingTo(new BigDecimal("-4.665782"));
-        assertThat(again.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-4.665782"));
+        assertThat(again.targets().get(0).deltaQty()).isEqualByComparingTo("0");
     }
 
     @Test
@@ -246,14 +203,12 @@ class PositionBufferTest {
         var cut = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "104")), null, RATE);
         assertThat(cut.aims().get("JNJ")).isEqualByComparingTo("0");
         assertThat(cut.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-104.000000"));
-        // Next cycle the path restarts from flat: aim = 0 + a(−219.420787) = −7.193469. Under ADR-0103
-        // the gap that decides is −219.420787 − 0, far outside the band of
-        // 219.420787 x 10 / 12.64 x 0.10 = 17.359240, so the short is rebuilt from this very cycle at
-        // the derived rate — not round-tripped, and not stalled for the ~11 cycles the aim would have
-        // needed to accumulate a whole band under ADR-0094.
+        // Next cycle the path restarts from flat: aim = 0 + a(−219.420787) = −7.193469, against a band
+        // of 219.420787 x 10 / 12.64 x 0.10 = 17.359240 — inside it, so nothing is traded and the
+        // short is rebuilt at the derived rate, not round-tripped.
         var rebuild = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "0")), null, RATE);
         assertThat(rebuild.aims().get("JNJ")).isEqualByComparingTo(new BigDecimal("-7.193469"));
-        assertThat(rebuild.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-7.193469"));
+        assertThat(rebuild.targets().get(0).deltaQty()).isEqualByComparingTo("0");
     }
 
     @Test
@@ -298,42 +253,27 @@ class PositionBufferTest {
     }
 
     @Test
-    void aMoveTheConventionWouldHaveTradedIsInsideTheMeasuredBuffer() {
-        // ADR-0103 moved the region back onto the target, so the measured WIDTH now bites where a
-        // width is supposed to bite: on a position already NEAR its target, where the remaining move
-        // is small and the round trip is not worth paying for. Held 160 against a target of 200:
-        //   averagePosition = 200 x 10 / 16 = 125     measured band = 125 x 0.50 = 62.500000
-        //   gap             = 200 - 160     =  40     40 <= 62.500000  =>  NO ORDER
+    void aGapTheConventionWouldHaveTradedIsInsideTheMeasuredBuffer() {
         PositionBuffer buffer = new PositionBuffer(0.10);
         var gate = gateAt(8.0, 5.0, java.util.Map.of("AAPL", 2.0));
-        var measured = buffer.apply(List.of(target("AAPL", 16.0, "200", "160")), gate, RATE);
+        // a = 1 - e^(-30/900) = 0.0327838995…; from a flat book the aim path is
+        //   cycle 1: 0 + a(200 - 0)             =  6.557800
+        //   cycle 2: 6.557800 + a(200 - 6.5578) = 12.898603
+        // and the book is still flat, so the gap is +12.898603 — OUTSIDE Carver's 12.500000 band,
+        // INSIDE the measured 62.500000 one.
+        buffer.apply(List.of(target("AAPL", 16.0, "200", "0")), gate, RATE);
+        var measured = buffer.apply(List.of(target("AAPL", 16.0, "200", "0")), gate, RATE);
+        assertThat(measured.aims().get("AAPL")).isEqualByComparingTo(new BigDecimal("12.898603"));
         assertThat(measured.targets().get(0).deltaQty()).isEqualByComparingTo("0");
         assertThat(measured.insideBuffer()).isEqualTo(1);
 
-        // The same cycle with no measurement: Carver's 0.10 bands at 12.500000, the gap of 40 is
-        // outside it, and the desk pays for the ADR-0080 step
-        //   aim = 160 + a(200 - 160) = 161.311356,  a = 1 - e^(-30/900) = 0.0327838995…
-        // which is 1.311356 of turnover this desk's own cost-to-edge ratio says to skip.
+        // The same two cycles with no measurement: Carver's 0.10 trades the 12.898603 - 12.500000 =
+        // 0.398603 that lies beyond its near edge.
         PositionBuffer unmeasured = new PositionBuffer(0.10);
-        var conventional = unmeasured.apply(List.of(target("AAPL", 16.0, "200", "160")), null, RATE);
-        assertThat(conventional.aims().get("AAPL")).isEqualByComparingTo(new BigDecimal("161.311356"));
+        unmeasured.apply(List.of(target("AAPL", 16.0, "200", "0")), null, RATE);
+        var conventional = unmeasured.apply(List.of(target("AAPL", 16.0, "200", "0")), null, RATE);
         assertThat(conventional.targets().get(0).deltaQty())
-                .isEqualByComparingTo(new BigDecimal("1.311356"));
-    }
-
-    @Test
-    void theMeasuredWidthStillDoesNotStallTheApproachToATarget() {
-        // The failure ADR-0103 fixes, stated as a test: from a FLAT book the same measured 62.500000
-        // band must not suppress the approach — the gap is 200, far outside it, so the desk moves at
-        // the derived rate from the first cycle. Under ADR-0094 this name traded nothing until the
-        // aim itself had accumulated past 62.500000, which the live 900 s mean-reverting source never
-        // gave it before changing side.
-        PositionBuffer buffer = new PositionBuffer(0.10);
-        var gate = gateAt(8.0, 5.0, java.util.Map.of("AAPL", 2.0));
-        var first = buffer.apply(List.of(target("AAPL", 16.0, "200", "0")), gate, RATE);
-        assertThat(first.aims().get("AAPL")).isEqualByComparingTo(new BigDecimal("6.556780"));
-        assertThat(first.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("6.556780"));
-        assertThat(first.traded()).isEqualTo(1);
+                .isEqualByComparingTo(new BigDecimal("0.398603"));
     }
 
     @Test
