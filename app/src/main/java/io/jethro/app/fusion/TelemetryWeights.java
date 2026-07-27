@@ -55,7 +55,7 @@ import java.util.Map;
  * threshold.
  *
  * <p><b>Why Φ and not the raw t.</b> Φ is bounded in (0,1) and monotone, so a weight can never be
- * negative — a measured-bad source is DOWN-weighted toward MIN, never inverted into a contrarian bet
+ * negative — a measured-bad source is DOWN-weighted toward zero, never inverted into a contrarian bet
  * (inverting a losing signal is the canonical overfit; Harvey, Liu &amp; Zhu, <i>RFS</i> 2016). It also
  * keeps the null at exactly ½ for every source regardless of sample, so "no evidence" reads equal.
  * Crucially the previous statistic, {@code max(0, 2·hitRate−1)}, was floored at zero, which made every
@@ -68,25 +68,42 @@ import java.util.Map;
  * only *whose view counts more* among sources that all face the same cost. Keeping the two separate
  * stops one measurement from being charged twice.
  *
+ * <p><b>The lower bound is gone too (ADR-0087).</b> {@code min} now defaults to ZERO and the shrunk
+ * ratio stands on its own at the bottom of the range, for the same reason ADR-0074 retired the
+ * min-sample floor: a hard floor is a second, discontinuous copy of a protection credibility already
+ * provides continuously, and it is strictly MORE trusting than the shrunk value for every source it
+ * binds on — so it can only ever bind on the worst-measured source on the desk. Its stated
+ * justification here was that {@code MIN > 0} keeps a decayed source CONTRIBUTING, preserving the
+ * active-source count and with it the diversification multiplier; ADR-0076 replaced that count with
+ * the concentration of the weights actually used, so the justification is retired. The source still
+ * contributes without it: {@code shrunk_s ≥ (1 − c_s)·pool} and {@code c_s = n/(n+K) &lt; 1} for every
+ * finite sample, so the ratio is strictly positive however bad the reading, and the combiner's
+ * {@code weight > 0} test still admits it. A floor remains available as a dial for anyone who wants
+ * one — it is only the DEFAULT that changed.
+ *
  * <p>{@link ForecastCombiner} normalises by Σweights, so only the RATIOS matter — this can rotate
- * conviction between sources but can never scale the target book up or down; MIN&gt;0 keeps a decayed
- * source CONTRIBUTING (down-weighted, not dropped — the combiner skips weight≤0) so the active-source
- * count, and with it the diversification multiplier, is unchanged. Pure, dimensionless, exactly testable
- * — a conviction weight, never a size or a price (ADR-0016 / invariant 7).
+ * conviction between sources but can never scale the target book up or down. Pure, dimensionless,
+ * exactly testable — a conviction weight, never a size or a price (ADR-0016 / invariant 7).
  */
 public final class TelemetryWeights {
 
     /**
      * Modelling dials — MINE, to validate against OOS, NOT market conventions. shrinkageK: the number of
      * resolved observations at which a source's data is half-trusted vs the pooled prior (higher ⇒ more
-     * shrinkage toward equal). min/max bound each weight around the 1.0 null so no source is silenced or
-     * dominates on thin evidence (the analogue of Carver's diversification-multiplier cap).
+     * shrinkage toward equal). max caps how far a single source can dominate on thin evidence (the
+     * analogue of Carver's diversification-multiplier cap).
+     *
+     * <p>{@code min} is the LOWER bound and is zero by default (ADR-0087): shrinkage is the whole
+     * thin-sample defence, so nothing needs to be held up off the floor, and a floor above the shrunk
+     * value only ever over-trusts the worst-measured source. A negative min is meaningless — Φ is
+     * bounded in (0,1) and a weight is never inverted — so it reads as zero rather than as an
+     * instruction. Passing a positive min restores a floor for anyone who wants one.
      */
     public record Params(double shrinkageK, double min, double max) {
         public Params {
             shrinkageK = shrinkageK > 0 ? shrinkageK : 20.0;
-            if (min <= 0) {
-                min = 0.25;
+            if (!(min > 0)) {
+                min = 0.0;
             }
             if (max < min) {
                 max = Math.max(min, 3.0);

@@ -24,12 +24,12 @@ import java.util.List;
  * for ρ &lt; 1, so the weighted DM is never LARGER than the count DM: re-weighting can shrink the book,
  * never grow it.
  *
- * <p>Why that matters for money: weights are bounded on {@code [0.25, 3.0]} (a 12× span), so when the
- * telemetry down-weights a source to the floor for measured-negative expectancy, that source still
- * bought the desk a full extra unit of diversification leverage under the count rule — the emptier the
- * evidence, the more concentrated the weights, and the more the count over-levered. One source holding
- * 91% of the weight is one view, not two, and restoring √2 of scale for it is leverage no measurement
- * supports. This replaces the ADR-0067 property "re-weighting cannot scale the book" with the strictly
+ * <p>Why that matters for money: a source the telemetry has down-weighted almost to nothing for
+ * measured-negative expectancy still bought the desk a full extra unit of diversification leverage
+ * under the count rule — the emptier the evidence, the more concentrated the weights, and the more the
+ * count over-levered. One source holding 91% of the weight is one view, not two, and restoring √2 of
+ * scale for it is leverage no measurement supports. (Since ADR-0087 the weights have no lower bound at
+ * all, so the concentration this formula reads is the concentration the evidence actually produced.) This replaces the ADR-0067 property "re-weighting cannot scale the book" with the strictly
  * safer "re-weighting cannot GROW the book"; equal weights remain the maximum.
  *
  * <p>Pure and dimensionless — the combined value is a conviction, never a size or a price (ADR-0016 /
