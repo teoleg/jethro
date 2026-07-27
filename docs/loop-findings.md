@@ -826,3 +826,48 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   rates 0.23/0.31 on n=299/69) at the 0.25 weight floor against reversion's `+12.42` bps at weight 3.0;
   that asymmetry is real but the weight lever is burned, so any future attempt must come at it from a
   different direction (e.g. horizon selection or dropping a source outright, not re-weighting it).
+
+## 2026-07-27 — the position's oscillation period IS the reversion sensor's window
+
+- Situation: fifth consecutive up run — PnL `128.01` (`+12.01` window, `+182.92` over three), gross
+  `13,531.44` (`-8,622.67` window, `-15,836.61` over three), net `2,701.97`, VaR95 `108.96`, breaker far.
+  No danger flags: PnL rising while exposure falls is the right quadrant, so no de-risk override.
+  **Attribution: I claimed the turnover half of ADR-0094 and NOT the PnL half.** That change touched the
+  execution path on every planned name, so there is no untouched control group to read the market off;
+  the `+12.01` cannot be split from the numbers and I said so instead of guessing.
+- **Last cycle's prediction resolved: the aim-band bound.** A 5-min bucket count over `fills` shows ALPHA
+  dropping from ~25–35 fills / `$17–22k` traded per bucket to ~11–15 / `$5–13k`, with the step-down landing
+  at the deploy and no other boundary. So ADR-0094 is vindicated and **its width is NOT the next lever** —
+  per my own contingent note, the next suspect was the target's own oscillation. It was.
+- **The finding.** Reconstructing each name's position path from `fills`: only 22 sign flips in 838 ALPHA
+  fills, so the churn is NOT reversals — it is a full-amplitude sweep *within* a sign, on a **~20–25 minute
+  period** (JNJ `-104 → +16 → -84`, AAPL `-9 → +45 → -2 → +42 → -13`, JPM `+2 → +48 → +19 → +47 → -8`).
+  `jethro.fusion.reversion.range-span=120` at a 10s cadence is a **20-minute** window. Same number.
+  `pos` is a Donchian level bounded to `[-1,+1]` that traverses the interval on the time scale of its own
+  window, so **the sensor's window length — not the book size — sets the position path's TOTAL VARIATION**,
+  and total variation is what the desk pays fee and spread on.
+- **Rule: when a book oscillates, measure the PERIOD and go looking for a config value equal to it.** The
+  amplitude is set by the forecast cap and the budget; the *frequency* is set by the sensor's lookback, and
+  frequency is the half that costs money. Cost per unit of edge = round trips per grading horizon.
+- **Rule 2: a shape dial can be tuned where a sizing dial cannot, IF the sensor renormalises its own
+  output.** This sensor's `score = q / EWMA|q|` gives `E|score| ~ 1` for any span, so changing the span
+  moves *which* stretches it fades and never how big the book is — provided the normalisation span moves
+  with the range span (kept at 2x). That invariance is exactly what ADR-0088 lacked: it averaged the fused
+  conviction DOWNSTREAM of the combiner, which shrank the signal's variance and let the sizing layer lever
+  the book up 18x. Same goal, different mechanism, opposite exposure behaviour — do not confuse them.
+- **Ruled out this cycle, with reasons, so no one re-checks them:** (a) the HEDGE book is the firm's biggest
+  loss line, but its loss is *directional* (short ES into a rising ES, fees only a small part) and it offsets
+  ALPHA's net long — cutting a hedge because it lost money is the classic hindsight error; (b) the hedge is
+  always STRUCTURAL because the daily-close covariance covers `$0.00` of the book (the parametric VaR says so
+  outright) — real, but wiring the stream covariance in would likely size the hedge LARGER, i.e. exposure up;
+  (c) the boot-time "sensor still cold after seeding N of N" warnings are an off-by-one (N prices give N-1
+  returns) that self-heals on the next live tick — noise, not a dead control.
+- Expected next: ALPHA fills-per-bucket and traded notional fall again with gross exposure roughly unchanged
+  (the E|score| invariance means the target book is the same size, just slower). If turnover falls and PnL
+  does NOT improve, the reversion edge itself degrades at a 40-minute stretch and the honest read is that the
+  window was already near optimal — revert and go at cost from the routing side instead. If gross exposure
+  RISES, the E|score| invariance did not hold in practice and the normalisation span is the suspect.
+- Do NOT re-attempt: source re-weighting (ADR-0087 floor removal, ADR-0093 measured-edge weights) — reverted
+  twice; note also that trend/momentum measure significantly negative but OPPOSE reversion on most names, so
+  down-weighting or dropping them mechanically ENLARGES the combined forecast and the book. That is why both
+  attempts scored BAD on exposure, and any future attempt at that asymmetry must carry its own size control.
