@@ -40,9 +40,8 @@ CLI, that `ANTHROPIC_API_KEY` is empty so it bills Max, that the app's `/api/att
 answer), then asks before installing the cron. It finds the repo from its own location, so it works
 wherever you cloned it.
 ```sh
-# Set your build+restart, then run. It confirms before enabling.
-JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' \
-  ops/enable-loop.sh
+# Runs the repo's own rebuild+restart (scripts/svc.sh restart app) unless you say otherwise.
+ops/enable-loop.sh
 
 ops/enable-loop.sh --dry-run    # run ONE cycle now and STOP (don't install the cron) — great first test
 ops/enable-loop.sh --yes        # skip the confirmation prompt
@@ -51,20 +50,25 @@ ops/enable-loop.sh --yes        # skip the confirmation prompt
 
 ## Or the low-level switch directly
 ```sh
-# Tell it how to rebuild + restart YOUR app, then enable. Example (adjust to how you run Jethro):
-JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' \
-  ops/loop-control.sh on
+ops/loop-control.sh on         # enable — deploys with scripts/svc.sh restart app
 
 ops/loop-control.sh status     # ON / OFF
 ops/loop-control.sh off        # disable — removes the cron line, nothing runs on its own
 ```
-- `JETHRO_DEPLOY_CMD` is **your** build-and-restart command; the loop runs it only after a verified
-  commit. If you leave it empty, changes still commit+push but the app won't restart (it warns you).
+- `JETHRO_DEPLOY_CMD` overrides the build-and-restart command; the loop runs it only after a verified
+  commit. **Leave it unset** unless you deploy some other way — the default is the repo's own
+  `scripts/svc.sh restart app`, which stops the app before rebuilding (so the jar is never rewritten
+  under a live JVM) and re-reads `local.env` so the feed provider and keys come back identical.
+- **The deploy is verified, not assumed** (ADR-0110): after running it the loop asks the app when it
+  booted, and if the process didn't turn over it falls back to the repo command and logs loudly. Don't
+  paste a deploy command you haven't tested — a silent deploy failure means the next cycle scores the
+  new commit against a binary that never contained it.
+- `JETHRO_DEPLOY_CMD=none` = review-before-live: commit+push, never restart.
 - `on`/`off` just add/remove one tagged crontab line, so it's safe to toggle anytime.
 
 ## The branch is the gate
 The box works on **`claude/auto-improve`** and runs whatever is committed there. For hands-off
-autonomy, leave it as-is. To review each change before it runs live, set `JETHRO_DEPLOY_CMD` empty
+autonomy, leave it as-is. To review each change before it runs live, set `JETHRO_DEPLOY_CMD=none`
 (so it commits+pushes but doesn't restart) and rebuild/restart yourself after you've looked.
 
 **One branch — the loop and the maintainer share `claude/auto-improve`.** There is no second

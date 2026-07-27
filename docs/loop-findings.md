@@ -1317,3 +1317,51 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   direction. (c) ADR-0084's entry/exit asymmetry: passive entries cancelled every re-plan while exits
   cross. (d) `turnover_cost_by_name` has now errored **eight** cycles running. (e) The frozen MACRO book,
   fourteen cycles unchanged to the cent.
+
+## 2026-07-27 — the last two changes were never deployed; the loop was scoring a JVM that predated them (ADR-0110)
+
+- **What the window did.** Live `/api/risk` `.total` `$5725.58`, gross and net `$0.00`, `/api/var`
+  `"no positions"`, `/api/breaker` `halted: false`. PnL moved `$0.00`. `run-status.json` reads
+  `on_track` true at `pnl_growth_pct 538.17` — still one realised unwind flattering a frozen book.
+  **Claimed for last cycle's change: nothing**, and this time not for want of positions to attribute:
+  the change had not executed at all.
+- **The finding.** The running JVM (pid 912480) started `11:19:32`; ADR-0109 was committed at `12:18:59`.
+  `logs/improve-2026-07-27.log` at both the 10:00 and 12:00 cycles: `Failed to restart jethro.service:
+  Unit jethro.service not found.` → `deploy command FAILED — app NOT restarted`. The crontab carried the
+  **systemd EXAMPLE from `ops/README.md`** on a box that runs the app from `scripts/run-local.sh`. So
+  ADR-0108 and ADR-0109 were built, committed, pushed, baselined and **scored** against a binary that
+  never contained them — two ⚠️ MIXED "no material change" verdicts that describe the old jar. And the
+  `./gradlew :app:bootJar` half kept succeeding, rewriting `app-0.1.0-SNAPSHOT.jar` under the **live**
+  JVM, which has thrown `ClassNotFoundException: org.springframework.util.PatternMatchUtils` ever since.
+- **Rule 13: a verdict on code that was not running is not a measurement — it is manufactured evidence.**
+  Worse than a wasted cycle, because it is *consistent*: the ledger row, the report and the heartbeat all
+  agree, and the next agent correctly concludes "that idea did nothing" about an idea that never ran. The
+  fix verifies the deploy against the **running process** (`/api/ops/jvm`: boot time = `now − uptimeSeconds`
+  must be ≥ the moment the deploy started), not against the deploy command's exit status, and falls back
+  to `scripts/svc.sh restart app`. Chosen because it is mechanism-agnostic and asks the only question the
+  scorer's validity rests on.
+- **Rule 14: check the CLOCKS before the statistics.** I spent the first minutes of this cycle re-deriving
+  the edge gate's t-statistics from `signals_telemetry` — sensible-looking work on a table that could not
+  have reflected the change I was grading. What actually broke the case was three timestamps: process
+  start `11:19:32`, commit `12:18:59`, jar mtime `12:20`. Before diagnosing why a change "did nothing",
+  confirm it *ran*: `ops_jvm.uptimeSeconds` against `git log --date=iso` is a ten-second check and it
+  invalidates every other reading when it fails.
+- **Rule 15: a restart must reproduce the CONFIGURATION, not just the binary.** The fallback is
+  `svc.sh restart app` and not a bare relaunch because `run-local.sh` defaults `PROVIDER` to `yahoo` and
+  only reaches `alpaca` through `local.env`. A "restart" that silently changes the mark source is an
+  invariant-8 epoch event — precisely the tape handover ADR-0109 was cleaning up after. Also: it stops
+  the app *before* rebuilding, so the jar is never rewritten under a live JVM.
+- **Expected next.** The next scored window contains **three** deployments' worth of code (ADR-0108 and
+  ADR-0109 finally reaching the JVM, plus this fix), so its vector will not attribute cleanly to any one.
+  Gross should rise from `$0.00` — ADR-0109's stated trade-off, which it never got to demonstrate. Read
+  the next verdict as "the last three cycles, now actually running", and do not credit or blame this
+  change for the trading outcome.
+- **Remaining levers, in order.** (a) Teach the scorer to refuse to score a commit it cannot prove was
+  deployed — the deeper fix, kept out of this change because the scorer is the invariant-7 authority for
+  the ledger's money numbers (deferred register). (b) The crontab still carries the bad
+  `JETHRO_DEPLOY_CMD`; one owner edit removes the failure-then-fallback path. It was NOT edited here —
+  `crontab -l` stopped returning content mid-cycle and a blind rewrite could have deleted the schedule.
+  (c) The tape handover under a running `feed_mode=SIM` session, and the jump guard that did not fire on
+  an 85% move. (d) `ALPHA JPM SELL` REJECTED 45× on `no market data for JPM` — a name that can be neither
+  entered nor exited. (e) ADR-0084's entry/exit asymmetry. (f) `turnover_cost_by_name` errored a **ninth**
+  cycle. (g) The frozen MACRO book, fifteen cycles unchanged.

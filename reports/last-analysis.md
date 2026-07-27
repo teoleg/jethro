@@ -1,89 +1,81 @@
-One cohort of impossible prices — GOOG "+85% in 225 seconds" — was setting the edge gate's standard error and holding the whole book at zero exposure; the desk's own bad-print threshold now bounds what counts as evidence (ADR-0109).
+The last two changes were never deployed — the loop scored them against a JVM that predated them, and the failing deploy was rewriting the jar underneath the live app (ADR-0110).
 
-*Every figure below is quoted from the live endpoints, the report or the ledger, or computed by a script
-against the live database; none is authored here. The ledger's numbers are the scorer's.*
+*Every figure below is quoted from the live endpoints, the report, the ledger or the loop's own log;
+none is authored here. The ledger's numbers are the scorer's.*
 
 ## Situation — answered before anything else
 
-**1. Money.** Live `/api/risk` `.total` reads total PnL `$5725.58` with `unrealizedPnl 0.00000000`.
-The report's SITUATION header reads the same figure, `+0.04` on the window and `+4828.40` over three
-runs. `run-status.json` reads `pnl_growth_pct 542.34` against a `1.0` target — `on_track` true, `stale`
-false, `underwater` false. **But that headline is an artefact:** the whole three-run gain is one
-realised unwind, and PnL has now moved `$0.04` in four hours. The book is not bleeding; it is frozen.
-`/api/attribution` splits it `ALPHA +8,419.44`, `MACRO +376.996` (unchanged to the cent for a
-**fourteenth** cycle), `HEDGE −3,070.86`, fees `$471.21`.
+**1. Money.** Live `/api/risk` `.total` reads total PnL `$5725.58`. The report's SITUATION header reads
+the same figure and `+0.00` on the window. `run-status.json` reads `pnl_growth_pct 538.17` against a
+`1.0` target — `on_track` true, `stale` false, `underwater` false. The book is not bleeding. It is
+frozen: PnL has not moved a cent in four hours, and the three-run growth that clears the target is one
+realised unwind (ADR-0107) still sitting in the numerator.
 
-**2. Risk.** Gross `$0.00`, net `$0.00`. VaR/ES `0.00`, note "no positions". Breaker clear, hedge axis
-`FLAT`. No danger state is possible — the book carries no risk at all, and that is the problem.
+**2. Risk.** Gross `$0.00`, net `$0.00`. `/api/var` returns `"note": "no positions"`. `/api/breaker`
+reads `halted: false`. Nothing is at risk because nothing is on. Zero exposure is not safety here — it
+is the absence of the thing the objective divides by.
 
-**3. Cause.** Last cycle's `8b5719853` (ADR-0108) scored **⚠️ MIXED**, `$5,725.54 → $5,725.58` at zero
-gross. It did exactly what it claimed: `reversion`@225s went from 58 emission cohorts to **313**. It
-was not enough, and I do not claim the `$0.04` for it — at zero exposure nothing could move.
+**3. Cause — and this is the whole cycle.** Last cycle's ADR-0109 scored ⚠️ MIXED, "no material change".
+It never ran. The running JVM (pid 912480) started `Mon Jul 27 11:19:32 2026`; commit `905b343` was made
+at `12:18:59`. `logs/improve-2026-07-27.log` records the reason at both the 10:00 and 12:00 cycles:
+`Failed to restart jethro.service: Unit jethro.service not found.` → `deploy command FAILED — app NOT
+restarted`. The crontab was re-installed carrying the **systemd example from `ops/README.md`** on a box
+that runs the app from `scripts/run-local.sh`. So **ADR-0108 and ADR-0109 were both built, committed,
+pushed, baselined and scored against a binary that never contained them** — two ⚠️ MIXED verdicts that
+are true statements about the old jar and say nothing whatever about the changes they name. Worse, the
+`./gradlew :app:bootJar` half of that command kept succeeding: `app-0.1.0-SNAPSHOT.jar` was rewritten at
+`12:20` underneath the live JVM, which has been throwing `ClassNotFoundException:
+org.springframework.util.PatternMatchUtils` ever since (12:59, in the report's stack traces). A failed
+deploy was actively damaging the running process.
 
-**4. Danger.** None, and none possible. Zero exposure earns zero, so the on-track flag goes stale by
-construction next cycle. This is still the binding constraint.
+**4. Danger.** Not bleeding, exposure not rising, breaker clear — no live danger state. The danger is
+epistemic and worse for being quiet: with no human in the loop, a silent deploy failure does not waste
+cycles, it **manufactures evidence**. The next agent reads MIXED, concludes the idea failed, and moves to
+a different lever — and every artefact it reads is internally consistent.
 
-**5. Order-level post-mortem.** The tape is two non-trades: `ALPHA JPM SELL 23` REJECTED **45 times**
-(`no market data for JPM`) before finally filling, and `ALPHA MSFT BUY` CANCELLED every cycle by the
-ADR-0084 re-plan. Both real, both logged for a later cycle, neither the reason the book is flat — the
-gate refuses to plan a delta at all.
+**5. Order-level post-mortem.** `recent_orders` covers 12:17–12:43 and stops there — the last fills
+predate this window entirely, consistent with a book that went flat and stayed flat. Two triggers stand
+out and both are on the old binary: `ALPHA JPM SELL` REJECTED 45 consecutive times with `no market data
+for JPM`, and `ALPHA MSFT BUY` CANCELLED repeatedly by `fusion re-plan — passive order superseded by a
+fresh target (ADR-0084)`. `orders_by_status` reads FILLED 3052 / CANCELLED 545 / REJECTED 45. Nothing
+here can be attributed to ADR-0109, which was not running.
 
-**6. Memory.** `docs/loop-findings.md` Rule 8 — a control that cannot be improved by gathering evidence
-is broken — is what pointed me here, and Rule 9 (check the story against the table *before* writing
-code) killed two candidate changes below.
+**6/7. Change vs market.** Nothing to split. Gross was `$0.00` for the whole window, so there were no
+positions for the market to move and none the change could have opened or resized. **Claimed for last
+cycle's change: nothing** — and now demonstrably so, since it never executed.
 
-**7. Change vs market.** Cleanly separable: at `$0.00` gross across the whole window there are no
-positions for the market to move. The entire `$0.04` is neither market nor change. Nothing to attribute.
+## What I changed
 
-## What I checked, and what it said
+The loop verifies every link in its own circuit except the one that makes the rest meaningful. Step 5 of
+`ops/improve-loop.sh` ran `JETHRO_DEPLOY_CMD` and moved on; its success was never checked and nothing
+downstream ever asked whether the binary being measured contained the commit being named.
 
-ADR-0108 uncapped the sample and the gate stayed shut, so the constraint had moved into what the larger
-sample *contains*. I re-ran the gate's own arithmetic against the live table. `reversion`@225s: 313
-cohorts, mean 4.55 bps, standard error 1.90 bps, t = 2.18, p = 0.0152 against α = 0.00758 — shut. Then
-I dropped a **single** cohort: 2.78 bps, standard error **0.55**, t = **4.33**, p = 0.00001.
+It now asks the app. After the deploy, the loop polls `/api/ops/jvm` and computes the answering process's
+boot time as `now − uptimeSeconds`; the deploy is verified only if the app answers **and** that boot time
+is at or after the moment the deploy started. That is deploy-mechanism agnostic — no pidfile, unit name or
+container convention assumed — and it is the only question the scorer's validity rests on. If the check
+fails, the loop falls back to the repo's own `scripts/svc.sh restart app`, which is right here for two
+reasons that are the decision rather than incidental: it **stops the app before rebuilding**, so the jar is
+never rewritten under a live JVM, and `run-local.sh` re-reads `local.env`, so provider, keys, heap and
+profile come back identical — a restart that silently reverted `PROVIDER` to the script default would be a
+feed switch, an invariant-8 epoch event, not a restart. `JETHRO_DEPLOY_CMD` unset now means that repo
+default rather than "do nothing"; `=none` is the explicit review-before-live mode; `loop-control.sh` no
+longer bakes an empty value into the cron line (which would have overridden the new default with "deploy
+nothing"), and the systemd example is gone from the docs it was copied from. When neither command
+restarts the app, the log now says the thing the next reader needs: *the next cycle's verdict will
+describe code that never ran.* ADR-0110 is Proposed in the same commit; `./gradlew -Pci test` green.
 
-That cohort's mean is +573 bps where every other cohort in the sample sits inside ±35 bps. Its two
-extreme members are GOOG `174.768112 → 323.580000` (**+8,515 bps**) and NQ `19,773.35 → 28,677.00`
-(**+4,503 bps**) — over 225 seconds. An 85% move in GOOG in four minutes did not happen. The rest of
-that burst's entry marks say what did: `AAPL 188.94`, `MSFT 429.14`, `ES 5438.30`, `GOOGL/TSLA/ORCL`
-all near `99.8` — the **simulator's own start levels** — against a live alpaca tape at `AAPL 337.12`,
-`MSFT 390.37`, `ES 7454.75`. Twenty-one of twenty-three names entered and exited on the same tape and
-behaved (+0.7 to +15.8 bps). Two crossed a tape handover, and the handover was booked as a return.
+**What I deliberately did not do.** I did not edit `scripts/score-change.py` to refuse to score an
+undeployed commit — that is the deeper fix and the right eventual home for the rule, but the scorer is the
+invariant-7 authority for every money number in the ledger and should not move in the same breath as the
+plumbing that feeds it (deferred register). I also did not rewrite the crontab: it is not in the repo, and
+`crontab -l` stopped returning content partway through this cycle, so rewriting it from here risked
+deleting the loop's own schedule. The bad line stays; the verification above makes it harmless. The
+standing recommendation for Oleg is one edit — drop `JETHRO_DEPLOY_CMD='…'` from the cron line so the repo
+default applies directly instead of via a failure and a fallback.
 
-The ADR-0077 standard error is a plain sample standard deviation — unbounded influence function — and
-it is the denominator of every gate above it. So one bad print was holding the entire book at zero, and
-would go on doing so for the seven-day rolling window, then reset on the next one.
-
-**Two candidate fixes I tested numerically and rejected before writing any code.** (a) My first
-hypothesis was horizon drift — that `resolveDue` scores against the mark at sweep time, so a backlog
-would book a 20-minute return as a 225-second one. The table refutes it: median realised window 237.5 s
-against a nominal 225 s, p90 263 s. (b) Winsorizing the cohort means at Hampel's 3-MAD rule — the
-textbook answer — caps **7–20%** of cohorts rather than the 0.27% it is calibrated for, because the
-distribution is genuinely heavy-tailed, and it flips `reversion`@900s from t = −0.24 to **t = +7.95**.
-That is redefining the estimand, not removing contamination. Both are recorded in ADR-0109.
-
-## The change
-
-An observation whose realised move reaches the desk's **own** corporate-action / bad-print threshold for
-that instrument's asset class — `jethro.trading.mark-jump-bps` (EQUITY/DEFAULT 2000, FUTURE/SWAP 1000,
-FX/BOND 800), resolved through reference data exactly as the mark cache's jump guard resolves it — is
-not evidence of a signal. **No number is introduced:** those thresholds already exist to say "this is a
-bad print, not the market", and the guard already keeps such a price out of P&L, orders, sizing and
-history. It was reaching the expectancy through another door.
-
-Applied at read time, in the SQL ADR-0108 moved the grouping into, so the contaminated history already
-in the table is healed and `signal_observations` stays intact as the audit record. Symmetric on the
-absolute move. **Fails open** — a class set to 0 disables it, and an absent map counts everything.
-What is excluded is **counted**, at `/api/signals/discards` and in the loop report.
-
-Verified with the production query against the live database before shipping: it removes **2
-observations of 5,101** at `reversion`@225s (0.04%), at most 7% in any of the fifteen source × rung
-cells, and **exactly one** cell changes verdict — `reversion`@225s, t = 2.17 → 4.05, OPEN. Every
-measured-negative source measures *more* negative (`trend`@225s t = −2.19 → −4.68). The surviving point
-estimate **falls**, 4.55 → 2.63 bps. It is not a friendlier test; it is a better-measured one.
-
-Expected: the gate opens at 225s on `reversion`, permission arrives name by name under the ADR-0075
-cost test, and `trend` — which carries essentially the whole planned book at weight 1.26 while measuring
-t = −4.68 at that rung — is demoted to the ADR-0097 minimum weight. Gross exposure rises from `$0.00`,
-which a book at zero cannot avoid, and I state that as the trade-off up front: if exposure rises and PnL
-does not, ❌ BAD and the revert are the right answer, and the scorer settles it.
+**Honest caveat, stated now rather than discovered later.** The next scored window contains **three**
+deployments' worth of code: ADR-0108 and ADR-0109 finally reaching the JVM, plus this change. Its vector
+will not attribute cleanly to any one of them. Read the next verdict as "what the last three cycles did,
+now that they are actually running" — and expect gross to rise from `$0.00`, which is what ADR-0109
+predicted and could not demonstrate.
