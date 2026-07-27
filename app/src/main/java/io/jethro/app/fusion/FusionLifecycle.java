@@ -38,11 +38,10 @@ public final class FusionLifecycle implements AutoCloseable {
                              double portfolioRiskMultiplier, int covarianceCoveredNames,
                              int volBudgetNames, double volBudgetDispersion, double volBudgetLeverCap,
                              List<TrailingRiskCut.Cut> riskCuts, int riskCutStoppedNames,
-                             int streamVolMeasuredNames,
-                             long forecastSmoothingSeconds, int forecastSmoothedNames) {
+                             int streamVolMeasuredNames) {
         static TargetBook empty() {
             return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0, 0, 1.0, 1.0,
-                    List.of(), 0, 0, 0L, 0);
+                    List.of(), 0, 0);
         }
     }
 
@@ -70,8 +69,6 @@ public final class FusionLifecycle implements AutoCloseable {
     private final StreamVolatility streamVol;
     /** ADR-0086: the volatility-scaled trailing exit — null ⇒ disabled, book untouched. */
     private final TrailingRiskCut riskCut;
-    /** ADR-0088: averages each name's conviction over the horizon its edge is measured on — null ⇒ off. */
-    private final ForecastSmoother forecastSmoother;
     /** ADR-0071: durable mark history, so the σ sensor is not permanently cold on a redeployed desk. */
     private final SensorWarmup.History markHistory;
     /** Provider timestamp of a name's current mark — the σ sensor's seed anchor (ADR-0071 correction). */
@@ -93,7 +90,7 @@ public final class FusionLifecycle implements AutoCloseable {
                            double volBudgetWinsorPct) {
         this(registry, priceFor, multiplierFor, positionsSupplier, heldSupplier, weightsSupplier, params,
                 routeOrders, executor, scheduler, intervalSeconds, minForecastToRoute, edgeGate,
-                covariance, baseHorizonSeconds, volBudgetWinsorPct, null, null, null, null, null);
+                covariance, baseHorizonSeconds, volBudgetWinsorPct, null, null, null, null);
     }
 
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
@@ -105,9 +102,7 @@ public final class FusionLifecycle implements AutoCloseable {
                            Supplier<EdgeGate.Decision> edgeGate,
                            Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
                            double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
-                           SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
-                           ForecastSmoother forecastSmoother) {
-        this.forecastSmoother = forecastSmoother;
+                           SensorWarmup.History markHistory, Function<String, Long> markTimeFor) {
         this.streamVol = streamVol;
         this.riskCut = riskCut;
         this.markHistory = markHistory;
@@ -180,20 +175,11 @@ public final class FusionLifecycle implements AutoCloseable {
             // sizes this cycle's step with is not known until the gate has spoken.
             EdgeGate.Decision gate = edgeGate == null ? null : edgeGate.get();
             FusionPlanner.Params cycleParams = withHoldingPeriod(gate);
-            // ADR-0080/0082/0088: ONE horizon per cycle. It is the period the evidence selected, and it
-            // now sets three things that must never disagree — the return the gate credited, how long
-            // the position is held, and how long the CONVICTION is averaged over.
-            long horizon = gate != null && gate.horizonSeconds() > 0 ? gate.horizonSeconds() : baseHorizonSeconds;
-            // ADR-0088: filter the fused conviction over that same horizon, so a view that reverses
-            // faster than the desk can be graded on it is averaged down instead of dragging the book
-            // through a round trip it was never credited for.
-            ForecastSmoother.Smoothing smoothing = forecastSmoother == null ? ForecastSmoother.NONE
-                    : (id, value) -> forecastSmoother.smooth(id, value, now, horizon);
             // ADR-0065: plan over the names we HOLD as well as the names we have a view on, so a
             // position never falls out of the target book when its sources go quiet.
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
-                    multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), cycleParams, smoothing);
+                    multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), cycleParams);
             ReturnCovarianceSource cov = covariance == null ? ReturnCovarianceSource.NONE : covariance.get();
             // ADR-0083: split the per-name cash budget by each name's own MEASURED volatility before
             // anything looks at the book as a whole, so every name contributes the same standalone risk
@@ -221,15 +207,14 @@ public final class FusionLifecycle implements AutoCloseable {
             // ADR-0086: the risk-reactive exit runs LAST, so a cut is the desk's final word on a name.
             // Everything above decides how much risk the desk WANTS; this is the only step that asks
             // whether a position it already holds has gone wrong. It can only ever set a target flat.
+            long horizon = gate != null && gate.horizonSeconds() > 0 ? gate.horizonSeconds() : baseHorizonSeconds;
             var cut = applyRiskCut(targets, now, horizon, cycleParams);
             targets = cut.targets();
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
                     normalised.multiplier(), normalised.coveredNames(),
                     budgeted.coveredNames(), budgeted.dispersion(), budgeted.leverCap(),
                     cut.cuts(), cut.stoppedNames(),
-                    streamVol == null ? 0 : streamVol.measuredNames(),
-                    forecastSmoother == null ? 0L : horizon,
-                    forecastSmoother == null ? 0 : forecastSmoother.trackedNames());
+                    streamVol == null ? 0 : streamVol.measuredNames());
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {

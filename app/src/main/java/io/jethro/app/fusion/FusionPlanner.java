@@ -68,32 +68,6 @@ public final class FusionPlanner {
                                     Function<String, BigDecimal> multiplierFor,
                                     Function<String, BigDecimal> currentQtyFor,
                                     Params params) {
-        return plan(forecastsByInstrument, heldInstruments, weightFor, priceFor, multiplierFor,
-                currentQtyFor, params, ForecastSmoother.NONE);
-    }
-
-    /**
-     * The same pass with the combined forecast filtered before it is sized (ADR-0088).
-     *
-     * <p>The filter sits between "what do the sources say" and "how big a position is that" — after the
-     * weighted average and the diversification multiplier, before {@link TargetPlanner#targetQuantity}.
-     * The value it returns is the one carried on {@link Target#combinedForecast()}, so the conviction
-     * floor, the operator's book and the routed size all read the SAME number the desk actually traded
-     * on; {@link Target#contributions()} keeps each source's RAW reading, which is what makes the
-     * difference between the view and its average visible rather than hidden.
-     *
-     * @param smoothing per-instrument filter; {@link ForecastSmoother#NONE} reproduces the 7-arg form
-     *                  exactly
-     */
-    public static List<Target> plan(Map<String, List<Forecast>> forecastsByInstrument,
-                                    Collection<String> heldInstruments,
-                                    Function<String, Double> weightFor,
-                                    Function<String, BigDecimal> priceFor,
-                                    Function<String, BigDecimal> multiplierFor,
-                                    Function<String, BigDecimal> currentQtyFor,
-                                    Params params,
-                                    ForecastSmoother.Smoothing smoothing) {
-        ForecastSmoother.Smoothing filter = smoothing == null ? ForecastSmoother.NONE : smoothing;
         // ADR-0065: the target book spans {names with a view} ∪ {names we hold}. Planning only the
         // first set is what orphans a position: when its sources fall silent or the OOS selector
         // drops the name, it vanishes from the cross-section and nothing ever revisits it. A held
@@ -120,21 +94,16 @@ public final class FusionPlanner {
             }
             ForecastCombiner.Combined combined =
                     ForecastCombiner.combine(instrument, weighted, params.assumedCorrelation());
-            // ADR-0088: size on the conviction averaged over the horizon the edge was measured on, not
-            // on this instant's reading. Applied to every planned name including a held name with no
-            // fresh view — its combined forecast is 0, and averaging that in is exactly how a decayed
-            // view is worked down rather than dropped in one step.
-            double conviction = Forecast.clamp(filter.apply(instrument, combined.value()));
             BigDecimal price = priceFor.apply(instrument);
             BigDecimal current = currentQtyFor.apply(instrument);
             if (current == null) {
                 current = BigDecimal.ZERO;
             }
             BigDecimal multiplier = multiplierFor == null ? null : multiplierFor.apply(instrument);
-            BigDecimal target = TargetPlanner.targetQuantity(conviction, params.unitNotional(),
+            BigDecimal target = TargetPlanner.targetQuantity(combined.value(), params.unitNotional(),
                     price, multiplier);
             BigDecimal delta = TargetPlanner.orderDelta(target, current, params.bufferFraction(), params.adjustmentRate());
-            out.add(new Target(instrument, conviction, combined.activeSources(),
+            out.add(new Target(instrument, combined.value(), combined.activeSources(),
                     combined.diversificationMultiplier(), price, target, current, delta, contributions));
         }
         out.sort((a, b) -> Double.compare(Math.abs(b.combinedForecast()), Math.abs(a.combinedForecast())));
