@@ -1,0 +1,20 @@
+{
+  "commit": "a70d880ac6d21003ef0c59e96847a383c1027e86",
+  "fees": "169.791780",
+  "gross_exposure": "4105.85827573",
+  "net_exposure": "4105.85827573",
+  "source": {
+    "feedMode": "SIM",
+    "grossExposure": "4105.85827573",
+    "hedgePnl": "45.19223998",
+    "netExposure": "4105.85827573",
+    "realizedPnl": "-788.21353820",
+    "strategyAlpha": "-837.57514547",
+    "totalFees": "169.791780",
+    "totalPnl": "-792.38290549",
+    "unrealizedPnl": "-4.16936729"
+  },
+  "summary": "the fusion source-weight MIN floor is removed, so a source measured significantly negative at every rung of the horizon ladder is weighted by its own evidence instead of being held up at several times it \u2014 the floor bound on exactly one live source, the desk's worst-measured, and since that source is a mirror of the only source measured positive, the over-trust was a partial cancellation of the desk's only edge; Buhlmann credibility is now the single continuous thin-sample defence, exactly as ADR-0074 established when it removed this floor's twin (ADR-0087)",
+  "total_pnl": "-792.38290549",
+  "ts": "2026-07-27T01:18:22Z"
+}
