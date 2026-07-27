@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T09:30:08Z",
+    "fees": "423.243477",
+    "gross": "46170.23482579",
+    "net": "8213.37688741",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "46170.23482579",
+      "hedgePnl": "-626.93319453",
+      "netExposure": "8213.37688741",
+      "realizedPnl": "679.41335711",
+      "strategyAlpha": "1375.59360108",
+      "totalFees": "423.243477",
+      "totalPnl": "748.66040655",
+      "unrealizedPnl": "69.24704944"
+    },
+    "total_pnl": "748.66040655"
+  },
+  "before": {
+    "at": "2026-07-27T09:23:36Z",
+    "gross": "44378.05733488",
+    "net": "10180.72634712",
+    "total_pnl": "666.64848839"
+  },
+  "commit": "86c6e5def9970d27f89d774c568be618069177b8",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "1792.17749091",
+    "net": "-1967.34945971",
+    "total_pnl": "82.01191816"
+  },
+  "note": "risk-adj (PnL/$1 gross) improved 0.01502\u21920.01622",
+  "revert": false,
+  "scoredAt": "2026-07-27T09:30:08Z",
+  "summary": "each name's no-trade buffer is widened to its own measured cost-to-edge ratio 2C/mu, floored at Carver's convention, so the desk stops re-trading the last fraction of every position at a price its own arithmetic says it is not worth (ADR-0101)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
