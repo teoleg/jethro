@@ -82,10 +82,11 @@ public final class HedgeController {
         }
 
         // The panel is read-only, so the price gate suffices here; the executing lifecycle also
-        // applies the quarantine gate (ADR-0042). The ADR-0098 churn σ is READ here and never
-        // sampled — polling this endpoint must not shorten the step the estimator measures.
+        // applies the quarantine gate (ADR-0042). The ADR-0098 churn σ and the ADR-0100 efficiency
+        // are READ here and never sampled — polling this endpoint must not shorten the step the
+        // estimator measures.
         return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf, held, id -> true,
-                churn::sigmaUsd);
+                churn::sigmaUsd, churn::efficiencyRatio);
     }
 
     public record ModeRequest(String mode) {

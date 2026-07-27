@@ -60,14 +60,17 @@ public final class HedgeAdvisor {
      *  {@code effectiveness} null — asserted, never a fake ρ²), or "—" when not sizing.
      *  {@code rawTargetNotionalUsd} is the tier's target BEFORE the ADR-0098 churn shrinkage — the
      *  series {@link HedgeTargetChurn} samples — and {@code churnSigmaUsd} is the σ that was
-     *  subtracted (null while warming). */
+     *  subtracted (null while warming). {@code trackingRate} is the ADR-0100 directional efficiency
+     *  of that same series, the fraction of the remaining gap the hedge closes when it is GROWING
+     *  the overlay (null while warming = closes it in full, the pre-ADR-0100 behaviour). */
     public record Axis(String axis, String proxyId, BigDecimal netExposureUsd, BigDecimal floorUsd,
                        double utilization, boolean hedging, boolean hedgeRecommended,
                        String hedgeSide, BigDecimal hedgeQuantity, BigDecimal hedgeNotionalUsd,
                        Double effectiveness, BigDecimal grossSigmaUsd, BigDecimal residualSigmaUsd,
                        BigDecimal heldProxyQty, BigDecimal targetProxyQty,
                        String status, String tier, String rationale,
-                       BigDecimal rawTargetNotionalUsd, BigDecimal churnSigmaUsd) {
+                       BigDecimal rawTargetNotionalUsd, BigDecimal churnSigmaUsd,
+                       BigDecimal trackingRate) {
     }
 
     public record Snapshot(String mode, boolean covarianceReady, List<Axis> axes, String note) {
@@ -197,6 +200,27 @@ public final class HedgeAdvisor {
                              Map<String, BigDecimal> heldByProxy,
                              Predicate<String> tradable,
                              Function<String, Optional<BigDecimal>> churnSigmaOf) {
+        return evaluate(covariance, exposuresUsd, isEquity, priceOf, betaOf, heldByProxy, tradable,
+                churnSigmaOf, id -> Optional.empty());
+    }
+
+    /**
+     * @param efficiencyOf directional efficiency of the raw hedge target's own path on the axis
+     *                     ({@link HedgeTargetChurn#efficiencyRatio}), empty while warming. The
+     *                     hedge closes this fraction of the gap to its target per evaluation when
+     *                     it is GROWING the overlay (ADR-0100); reductions — including a full
+     *                     unwind — always trade in one cycle, so the rate can only ever leave the
+     *                     hedge smaller than it would otherwise have been.
+     */
+    public Snapshot evaluate(Optional<CovMath.Covariance> covariance,
+                             Map<String, BigDecimal> exposuresUsd,
+                             Predicate<String> isEquity,
+                             Function<String, Optional<BigDecimal>> priceOf,
+                             Function<String, Optional<BigDecimal>> betaOf,
+                             Map<String, BigDecimal> heldByProxy,
+                             Predicate<String> tradable,
+                             Function<String, Optional<BigDecimal>> churnSigmaOf,
+                             Function<String, Optional<BigDecimal>> efficiencyOf) {
         Map<String, BigDecimal> equityExposures = exposuresUsd.entrySet().stream()
                 .filter(e -> isEquity.test(e.getKey()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
@@ -206,7 +230,8 @@ public final class HedgeAdvisor {
 
         Axis axis = mode == Mode.OFF
                 ? idle(net, held, "OFF", "hedging OFF for this axis")
-                : act(net, held, equityExposures, covariance, priceOf, betaOf, tradable, churnSigmaOf);
+                : act(net, held, equityExposures, covariance, priceOf, betaOf, tradable, churnSigmaOf,
+                        efficiencyOf);
         String note = mode == Mode.AUTO
                 ? "AUTO — the book is held target-flat: the hedge DELTA (target − held) auto-submits (sim-gated, ADR-0019)"
                 : "ADVISE — the sized hedge-to-flat surfaces here; execute from the ticket";
@@ -217,7 +242,8 @@ public final class HedgeAdvisor {
                      Map<String, BigDecimal> equityExposures, Optional<CovMath.Covariance> covariance,
                      Function<String, Optional<BigDecimal>> priceOf,
                      Function<String, Optional<BigDecimal>> betaOf, Predicate<String> tradable,
-                     Function<String, Optional<BigDecimal>> churnSigmaOf) {
+                     Function<String, Optional<BigDecimal>> churnSigmaOf,
+                     Function<String, Optional<BigDecimal>> efficiencyOf) {
         List<Candidate> candidates = candidates(priceOf, tradable);
         boolean flatTarget = net.abs().compareTo(rebalanceFloorUsd) <= 0;
         Target target;
@@ -245,6 +271,13 @@ public final class HedgeAdvisor {
                 .setScale(2, RoundingMode.HALF_UP);
         BigDecimal churnSigma = churnSigmaOf.apply(EQUITY_AXIS).orElse(null);
         target = shrinkToChurnBoundary(target, targetContractUsd, rawTargetNotional, churnSigma);
+
+        // ADR-0100: approach that target at the rate its own path earns — full speed when the
+        // target is going somewhere, barely at all when it is only churning. Growing the overlay
+        // only; reductions and unwinds still trade in one cycle.
+        BigDecimal trackingRate = efficiencyOf.apply(EQUITY_AXIS).orElse(null);
+        target = trackTowardTarget(target, held.getOrDefault(target.proxy().id(), BigDecimal.ZERO),
+                trackingRate);
 
         // Per-proxy targets: the chosen proxy gets the sized target; every other held proxy
         // targets zero. Execute the largest delta above the min-trade notional (one order per
@@ -294,7 +327,7 @@ public final class HedgeAdvisor {
                     plain(heldSelected), plain(target.signedQty()), status, target.tier(),
                     heldVsTarget + " — largest delta under the " + money(band)
                             + " no-trade band, holding",
-                    rawTargetNotional, churnSigma);
+                    rawTargetNotional, churnSigma, trackingRate);
         }
         boolean unwindingOther = !bestProxy.equals(target.proxy().id());
         String side = bestDelta.signum() < 0 ? "SELL" : "BUY";
@@ -309,7 +342,61 @@ public final class HedgeAdvisor {
                 target.effectiveness(), target.grossSigmaUsd(), target.residualSigmaUsd(),
                 plain(held.getOrDefault(bestProxy, BigDecimal.ZERO)),
                 plain(targets.get(bestProxy)), status, target.tier(), story,
-                rawTargetNotional, churnSigma);
+                rawTargetNotional, churnSigma, trackingRate);
+    }
+
+    /**
+     * ADR-0100 — close only the fraction {@code a} of the gap to the target that the target's own
+     * path has earned, where {@code a} is its directional efficiency
+     * ({@link HedgeTargetChurn#efficiencyRatio}): the share of the distance the target travels that
+     * is net displacement rather than round trip.
+     *
+     * <p>Asymmetric, exactly as ADR-0080 established on the strategy side: the rate applies only to
+     * the part of the move that <b>grows</b> the overlay. Reducing the proxy position — including a
+     * full unwind, and including the free leg of a move that crosses flat — trades in one cycle, so
+     * ADR-0069's "an unwind is always executable" promise is untouched.
+     *
+     * <ul>
+     *   <li>same sign (or from flat) and {@code |d| ≤ |h|} — a reduction: {@code q = d}</li>
+     *   <li>same sign (or from flat) and {@code |d| > |h|} — growing: {@code q = h + a·(d − h)}</li>
+     *   <li>opposite signs — cut to flat free, rebuild slowed: {@code q = a·d}</li>
+     * </ul>
+     *
+     * <p>In every branch {@code q} lies on the segment between {@code h} and {@code d}, so
+     * {@code |q| ≤ max(|h|,|d|)} and {@code |q| ≤ |d|} whenever the move grows the hedge: a rate
+     * estimated from the stream can only ever leave the overlay smaller than ADR-0098 already
+     * allows, never larger. {@code a = 1} reproduces the previous behaviour exactly.
+     */
+    private Target trackTowardTarget(Target t, BigDecimal heldQty, BigDecimal rate) {
+        if (rate == null || t.signedQty() == null) {
+            return t;
+        }
+        BigDecimal a = rate.max(BigDecimal.ZERO).min(BigDecimal.ONE);
+        if (a.compareTo(BigDecimal.ONE) == 0) {
+            return t;
+        }
+        BigDecimal d = t.signedQty();
+        BigDecimal h = heldQty == null ? BigDecimal.ZERO : heldQty;
+        BigDecimal tracked;
+        if (h.signum() != 0 && d.signum() != 0 && h.signum() != d.signum()) {
+            tracked = d.multiply(a);
+        } else if (d.abs().compareTo(h.abs()) <= 0) {
+            return t; // a reduction (incl. a full unwind) trades in full
+        } else {
+            tracked = h.add(d.subtract(h).multiply(a));
+        }
+        tracked = tracked.setScale(6, RoundingMode.HALF_EVEN);
+        if (tracked.abs().compareTo(d.abs()) > 0) {
+            tracked = d; // belt and braces: rounding may never carry the hedge past its target
+        }
+        if (tracked.compareTo(d) == 0) {
+            return t;
+        }
+        String note = " · tracked at its own efficiency (ADR-0100): " + plain(h) + " + "
+                + a.stripTrailingZeros().toPlainString() + "·(" + plain(d) + " − " + plain(h)
+                + ") → " + plain(tracked) + " " + t.proxy().id();
+        return new Target(t.proxy(), tracked, t.tier(), t.effectiveness(), t.grossSigmaUsd(),
+                t.residualSigmaUsd(), t.rationale() + note);
     }
 
     /**
@@ -495,7 +582,7 @@ public final class HedgeAdvisor {
         BigDecimal heldQty = incumbent == null ? BigDecimal.ZERO : held.get(incumbent);
         return new Axis("EQUITY", incumbent != null ? incumbent : structuralProxyId, money(net),
                 rebalanceFloorUsd, 0.0, false, false, null, null, null, null, null, null,
-                plain(heldQty), null, status, "—", rationale, null, null);
+                plain(heldQty), null, status, "—", rationale, null, null, null);
     }
 
     private static double eff(Target t) {

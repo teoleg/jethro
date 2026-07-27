@@ -125,7 +125,7 @@ public final class HedgeLifecycle {
 
             HedgeAdvisor.Snapshot snap = advisor.evaluate(
                     vs.covarianceSnapshot(), vs.exposuresUsd(), isEquity, priceOf, betaOf,
-                    held, tradable, churn::sigmaUsd);
+                    held, tradable, churn::sigmaUsd, churn::efficiencyRatio);
             long now = System.currentTimeMillis();
             // ADR-0098: this executing loop is the ONLY writer of the churn series, so the step is
             // sampled on the hedge's own clock — a REST poll of /api/hedging must never shorten it.

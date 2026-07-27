@@ -945,3 +945,45 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   reacts is either mis-scaled or dead code; (c) `turnover_cost_by_name` in the report is STILL erroring
   (several cycles now — the loop remains blind to per-name cost, and this cycle only worked around it
   by reading TCA off the live endpoint instead).
+
+## 2026-07-27 — the hedge's target does not just churn, it wanders across zero: the level was fixed, the rate was not
+
+- **What the window did.** Total PnL `$572.09` (`+66.45` on the window, `+333.01` over three runs,
+  on track, no danger flags) with gross `$19,422.48` — **down** `−16,180.65` on the window. Last
+  cycle's ADR-0099 scored ✅ GOOD (risk-adj `0.01446 → 0.02948`) and `fusion_targets` confirms the
+  mechanism live: the wide-quoted names (`GS`, `BRK.B`, `NFLX`, `ORCL`, `TSLA`) still carry large
+  planned targets with `deltaQty: 0` — planned, not entered. Attribution `ALPHA +794.32`,
+  `MACRO +376.99` (frozen to the cent for a **fifth** cycle), `HEDGE −599.22`.
+- **Attribution honesty.** The window's gain is on ALPHA names ADR-0099 never opened or resized — it
+  only removed names from the increasable set — so market and change cannot be separated there and
+  the change is credited with none of it. Attributable to it: the gross collapse and the wide names
+  staying out. The HEDGE line is attributable to neither cycle's work.
+- **The trigger.** One HEDGE ES order per cooldown, eleven in a row: BUY `.0068`, BUY `.0097`,
+  BUY `.0022`, BUY `.0060`, BUY `.0037`, SELL `.0046`, SELL `.0050`, SELL `.0008`, SELL `.0064`,
+  SELL `.0036`, BUY `.0058` — `0.0545` contracts traded to end holding `−0.00494`. **Runs** of buys
+  then runs of sells, not alternation: the target is not noise, it is a large quantity that wanders
+  across zero because it is minus the net of a book that re-signs its names.
+- **Rule 1: fixing the LEVEL of a control does not fix its RATE — check which one the live numbers
+  indict.** ADR-0098 subtracts one σ of the target's step and scored GOOD, but here the raw target is
+  `−$6,039.12` against `σ_step = $958.51` — **6.3 σ** — so it removes 16% and the overlay chases
+  freely. A soft-threshold on the level is invisible to a target that is large and directionless.
+  When a control still misbehaves after a level fix, ask whether the defect was ever about size.
+- **Rule 2: when a path is missing an identity another path already earned, port the identity before
+  inventing a new control.** ADR-0080's asymmetric partial adjustment (slow the risk-increasing leg,
+  cut in one cycle) had never been applied to the hedge overlay. Porting it needed only a *rate* with
+  provenance, and the owner's own thesis names one — the efficiency ratio. `E = |EWMA(step)|/EWMA(|step|)`
+  at the same `λ = 0.94`, zero-initialised so the `(1−λⁿ)` bias cancels in the ratio. No dial, no number.
+- **Rule 3: a monotone five-reading bleed outranks any single-window signal.** HEDGE went
+  `−323.33 → −451.51 → −509.21 → −550.99 → −599.22` across five scored cycles, independent of
+  everything changed above it, while handing back 51% of what the strategy books made. That is the
+  definition of signal, and it beat the other queued levers on size alone.
+- **Expected next.** The overlay's travelled distance falls (steady-state round trip goes from the
+  full `2×|target|` to `2·E×|target|`); the HEDGE directional bleed and firm gross fall with it.
+  **If this scores BAD, the hedge's sizing AND rate sides are both closed** — do not tune the overlay
+  again. The next question is the one ADR-0098 and ADR-0100 both deferred: does a mean-reversion book
+  want a beta overlay at all? After that, in order: (a) the frozen MACRO book — five cycles unchanged
+  to the cent, a stranded `0.000029` ES position carrying `+376.99` of realised PnL that nothing is
+  managing; (b) no book-level volatility target, which is the literature's answer to a planned book
+  that scales gross faster than PnL; (c) the ADR-0086 chandelier exit still shows zero fires; (d)
+  `turnover_cost_by_name` in the report is STILL erroring — several cycles now, the loop remains blind
+  to per-name cost from Postgres and works around it off the live TCA endpoint.

@@ -25,6 +25,17 @@ import java.util.concurrent.ConcurrentHashMap;
  * biased low while warming; σ is published only from the second step, and until then the caller
  * shrinks nothing and the hedge behaves exactly as it did before ADR-0098.
  *
+ * <p><b>Directional efficiency (ADR-0100).</b> The same sampled series also answers a second
+ * question: of the distance the target travels, how much of it is <em>displacement</em> rather than
+ * round trip? That is Kaufman's efficiency ratio in exponential form — {@code E = |D| / A} over an
+ * EWMA of the signed step {@code D} and an EWMA of its absolute value {@code A}, both at the same
+ * {@code λ}. {@code |D| ≤ A} by the triangle inequality on identical weights, so {@code E ∈ [0,1]}
+ * with no clamping: 1 = every step in the same direction (a target that is going somewhere), 0 = a
+ * pure oscillation (a target that is only churning). Unlike the variance recursion these two are
+ * initialised at <b>zero</b>, not seeded: the warm-up factor {@code (1−λⁿ)} is then identical in
+ * numerator and denominator and cancels exactly in the ratio, so E is unbiased from its first
+ * reading (n steps of {@code +x} give E = 1 exactly; {@code +x, −x} gives {@code (1−λ)/(1+λ)}).
+ *
  * <p>Exact decimal throughout (invariant 1) at 20 significant digits — the recursion multiplies by
  * λ every step, so the working precision must be bounded explicitly or the scale grows without limit.
  * State is keyed per hedge <b>axis</b>, not per proxy instrument: the notional is in USD either way,
@@ -44,6 +55,9 @@ public final class HedgeTargetChurn {
     private static final class State {
         private BigDecimal last;
         private BigDecimal ewmaVariance = BigDecimal.ZERO;
+        /** ADR-0100 — zero-initialised on purpose: the (1−λⁿ) warm-up bias cancels in |drift|/absStep. */
+        private BigDecimal ewmaDrift = BigDecimal.ZERO;
+        private BigDecimal ewmaAbsStep = BigDecimal.ZERO;
         private int steps;
         private long lastSampleMillis = Long.MIN_VALUE;
     }
@@ -85,6 +99,10 @@ public final class HedgeTargetChurn {
             BigDecimal squared = step.multiply(step, MC);
             s.ewmaVariance = s.steps == 0 ? squared
                     : s.ewmaVariance.multiply(LAMBDA, MC).add(squared.multiply(ONE_MINUS_LAMBDA, MC), MC);
+            s.ewmaDrift = s.ewmaDrift.multiply(LAMBDA, MC)
+                    .add(step.multiply(ONE_MINUS_LAMBDA, MC), MC);
+            s.ewmaAbsStep = s.ewmaAbsStep.multiply(LAMBDA, MC)
+                    .add(step.abs().multiply(ONE_MINUS_LAMBDA, MC), MC);
             s.steps++;
         }
     }
@@ -103,6 +121,27 @@ public final class HedgeTargetChurn {
                 return Optional.empty();
             }
             return Optional.of(s.ewmaVariance.sqrt(MC).setScale(2, RoundingMode.HALF_UP));
+        }
+    }
+
+    /**
+     * Directional efficiency of the target's path on this axis (ADR-0100): the fraction of the
+     * distance it travels that is net displacement, {@code E = |EWMA(step)| / EWMA(|step|)} in
+     * {@code [0,1]}. Empty while warming (&lt; 2 steps) or when the target has not moved at all —
+     * in both cases the caller must not slow the hedge, and it tracks its target as it did before.
+     */
+    public Optional<BigDecimal> efficiencyRatio(String axis) {
+        State s = axis == null ? null : byAxis.get(axis);
+        if (s == null) {
+            return Optional.empty();
+        }
+        synchronized (s) {
+            if (s.steps < MIN_STEPS || s.ewmaAbsStep.signum() <= 0) {
+                return Optional.empty();
+            }
+            BigDecimal ratio = s.ewmaDrift.abs().divide(s.ewmaAbsStep, 6, RoundingMode.HALF_EVEN);
+            // |D| ≤ A holds exactly; the clamp only absorbs the last-digit rounding of the divide.
+            return Optional.of(ratio.min(BigDecimal.ONE));
         }
     }
 }
