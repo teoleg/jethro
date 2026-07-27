@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T04:30:11Z",
+    "fees": "319.080900",
+    "gross": "26198.44344688",
+    "net": "3525.84299032",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "26198.44344688",
+      "hedgePnl": "-323.87373427",
+      "netExposure": "3525.84299032",
+      "realizedPnl": "65.61096039",
+      "strategyAlpha": "390.00659083",
+      "totalFees": "319.080900",
+      "totalPnl": "66.13285656",
+      "unrealizedPnl": "0.52189617"
+    },
+    "total_pnl": "66.13285656"
+  },
+  "before": {
+    "at": "2026-07-27T04:21:45Z",
+    "gross": "23039.67192537",
+    "net": "647.79154661",
+    "total_pnl": "43.40700360"
+  },
+  "commit": "e33e9479cfb0c6f9813e2898c5906d6867260922",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "3158.77152151",
+    "net": "2878.05144371",
+    "total_pnl": "22.72585296"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj (PnL/$1 gross) improved 0.00188\u21920.00252",
+  "revert": true,
+  "scoredAt": "2026-07-27T04:30:11Z",
+  "summary": "fusion source weight is the shrunk measured edge (leave-one-out prior, floored at zero) instead of Phi of the t-statistic, so four sources failing the desk's own significance test stop carrying most of the weight against the one that passes (ADR-0093)",
+  "verdict": "\u274c BAD"
+}
