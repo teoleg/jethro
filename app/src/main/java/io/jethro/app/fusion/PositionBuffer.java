@@ -50,8 +50,13 @@ import java.util.Map;
  * (every step between them — the ADR-0083 volatility budget, the ADR-0079 portfolio normaliser — is a
  * per-name or book-wide scalar that does not depend on forecast STRENGTH), so
  * {@code |target| · TARGET_ABS / |forecast|} is that name's position at a typical forecast: Carver's
- * "average position", read off this cycle's own arithmetic with no estimator and no warm-up. Only the
- * buffer WIDTH is a dial, and it is a dimensionless fraction, not a money number.
+ * "average position", read off this cycle's own arithmetic with no estimator and no warm-up.
+ *
+ * <p><b>And so is the buffer WIDTH (ADR-0101).</b> Carver's 0.10 is a published convention for a desk
+ * whose cost and edge he does not know; this desk measures both, per name and per source, and the width
+ * that follows from them is not 0.10. See {@link #widthFor} for the derivation and the one-way
+ * guarantee: a measured width is used only where it is WIDER than the convention, so it can only ever
+ * remove turnover, never add it.
  *
  * <p><b>What it can never do.</b> It never widens a trade the desk was not already going to make in the
  * same direction on the same aim path, it never moves the aim past the target, and it never buffers an
@@ -69,10 +74,11 @@ public final class PositionBuffer {
     private static final int QTY_SCALE = 6;
 
     /**
-     * Buffer width as a fraction of the name's average position. {@code 0.10} is Carver's published
-     * buffering convention (<i>Systematic Trading</i> 2015; <i>Advanced Futures Trading Strategies</i>
-     * 2023) — a cited market convention, not a self-chosen default. Dimensionless: it sizes nothing,
-     * it only decides when a difference is worth paying spread for.
+     * Buffer width as a fraction of the name's average position, and the FLOOR under the measured width
+     * of ADR-0101. {@code 0.10} is Carver's published buffering convention (<i>Systematic Trading</i>
+     * 2015; <i>Advanced Futures Trading Strategies</i> 2023) — a cited market convention, not a
+     * self-chosen default. Dimensionless: it sizes nothing, it only decides when a difference is worth
+     * paying spread for.
      */
     private final double bufferFraction;
 
@@ -104,6 +110,7 @@ public final class PositionBuffer {
             return new Result(List.of(), Map.of(), 0, 0);
         }
         double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
+        double edgeBps = passingEdgeBps(gate); // ADR-0101: measured once, the same for every name
         List<FusionPlanner.Target> out = new ArrayList<>(targets.size());
         Map<String, BigDecimal> snapshot = new HashMap<>(targets.size());
         int inside = 0;
@@ -112,7 +119,8 @@ public final class PositionBuffer {
             BigDecimal held = t.currentQty() == null ? BigDecimal.ZERO : t.currentQty();
             BigDecimal target = t.targetQty() == null ? BigDecimal.ZERO : t.targetQty();
             BigDecimal aim = nextAim(t.instrument(), target, held, rate);
-            BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held));
+            double width = widthFor(t.instrument(), gate, edgeBps);
+            BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held, width));
             if (gate != null && !gate.mayIncrease(t.instrument())) {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
@@ -166,13 +174,99 @@ public final class PositionBuffer {
      * cannot happen with a non-zero holding) or inventing a scale for it.
      */
     BigDecimal band(BigDecimal target, double forecast, BigDecimal held) {
+        return band(target, forecast, held, bufferFraction);
+    }
+
+    /** As above at an explicit width — the ADR-0101 measured one, or the convention when unmeasured. */
+    BigDecimal band(BigDecimal target, double forecast, BigDecimal held, double width) {
         double f = Math.abs(forecast);
         BigDecimal scale = target.signum() != 0 && f > 0.0
                 ? target.abs().multiply(BigDecimal.valueOf(Forecast.TARGET_ABS))
                         .divide(BigDecimal.valueOf(f), QTY_SCALE, RoundingMode.HALF_EVEN)
                 : held.abs();
-        return scale.multiply(BigDecimal.valueOf(bufferFraction))
+        return scale.multiply(BigDecimal.valueOf(width))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+    }
+
+    /**
+     * ADR-0101 — the buffer width this name's OWN measured cost and the desk's OWN measured edge imply,
+     * floored at Carver's convention.
+     *
+     * <h3>The derivation</h3>
+     * Hold a position {@code n} (as a multiple of the name's average position) whose view earns
+     * {@code μ} per unit over the horizon the edge was measured at, against a quadratic risk penalty —
+     * the objective every step of this planner is linear in:
+     * <pre>
+     *   U(n) = μ·n − ½λσ²n²      maximised at the aim  a = μ/(λσ²)
+     *   U(a) − U(h) = ½λσ²(a−h)²        the value of closing a gap g = a − h
+     *   cost of closing it = C·|g|      C = the name's MEASURED round trip, proportional in quantity
+     * </pre>
+     * Rebalancing is worth its cost exactly when {@code ½λσ²g² > C|g|}, i.e. when
+     * {@code |g| > 2C/(λσ²)}; substituting {@code λσ² = μ/a} gives the no-trade half-width
+     * <pre>
+     *   band = a · (2C/μ)                       width = 2C/μ, a pure ratio of two measured bps figures
+     * </pre>
+     * so the width the desk should use is its own cost-to-edge ratio and nothing else. The policy shape
+     * — a no-trade region traded to its near EDGE — is unchanged and is the one proportional costs call
+     * for (Constantinides, <i>JPE</i> 1986; Davis &amp; Norman, <i>Math. of OR</i> 1990); this is the
+     * myopic benefit-versus-cost threshold for its width, the standard closed form (Grinold &amp; Kahn,
+     * <i>Active Portfolio Management</i> 2e ch. 16), stated here as such and not as the exact dynamic
+     * boundary.
+     *
+     * <h3>Why the convention was wrong for THIS desk</h3>
+     * 0.10 is the width of a desk whose {@code 2C/μ} happens to be 0.10. Ours is not: the desk trades on
+     * one measured source and charges every name a measured round trip, and the ratio of the two is
+     * several times that — so the last tenth of every position was being bought and sold at a cost the
+     * desk's own arithmetic says the position is not worth paying.
+     *
+     * <h3>Inputs, and what happens without them</h3>
+     * {@code C} is this name's own measured round trip, falling back to the desk blend for a name that
+     * has never filled — the identical convention {@link EdgeGate.Decision#mayIncrease(String)} already
+     * applies, so cost is read one way everywhere. {@code μ} is the gross expectancy of the
+     * best-evidenced source that PASSES the gate, at the ADR-0082 rung the evidence selected: the very
+     * reading that admitted the desk to trade at all. Gross, not net — the cost is charged once, on the
+     * {@code C} side, and netting it off {@code μ} too would charge it twice.
+     *
+     * <p>With no gate, no passing source, a non-positive measured edge or a non-positive measured cost
+     * there is no measurement and therefore no claim to make: the convention stands exactly as today
+     * (invariant 7 / ADR-0016 — a number that gates money is measured or cited, never invented).
+     *
+     * <h3>One-way</h3>
+     * The measured width is taken only where it is WIDER than the convention and is capped at one
+     * average position. So this can only ever suppress a trade the desk would have made, never add one
+     * and never enlarge one; the aim path, and therefore the desk's intended exposure, is untouched
+     * quantity for quantity; and an EXIT is still not buffered at all — a flat target snaps the aim to
+     * zero and {@link #bufferedDelta} trades it in full, so the ADR-0086 cut, the ADR-0065 unwind and
+     * the deterministic floor above them are unaffected by any width.
+     */
+    double widthFor(String instrument, EdgeGate.Decision gate, double edgeBps) {
+        if (gate == null || !(edgeBps > 0.0)) {
+            return bufferFraction;
+        }
+        Double own = instrument == null ? null : gate.roundTripBpsByInstrument().get(instrument);
+        double costBps = own == null ? gate.roundTripCostBps() : own;
+        if (!(costBps > 0.0)) {
+            return bufferFraction;
+        }
+        double derived = 2.0 * costBps / edgeBps;
+        return Math.max(bufferFraction, Math.min(1.0, derived));
+    }
+
+    /**
+     * The gross expectancy the desk is trading on: the best-evidenced source that clears the gate
+     * ({@code sources} is already ordered best-evidenced first). {@code 0} when nothing passes — no
+     * evidence, no derived width.
+     */
+    static double passingEdgeBps(EdgeGate.Decision gate) {
+        if (gate == null) {
+            return 0.0;
+        }
+        for (EdgeGate.SourceEdge e : gate.sources()) {
+            if (e.passes()) {
+                return e.avgReturnBps();
+            }
+        }
+        return 0.0;
     }
 
     /**

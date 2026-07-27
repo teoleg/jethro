@@ -987,3 +987,48 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   that scales gross faster than PnL; (c) the ADR-0086 chandelier exit still shows zero fires; (d)
   `turnover_cost_by_name` in the report is STILL erroring — several cycles now, the loop remains blind
   to per-name cost from Postgres and works around it off the live TCA endpoint.
+
+## 2026-07-27 — the desk was flat on the window while filling 2,254 orders: the buffer's WIDTH was the last unmeasured number in the cost chain
+
+- **What the window did.** Total PnL `$626.57` (`+2.07` on the window — effectively flat — `+292.11` over
+  three runs, on track, no danger flags) with gross `$34,531.90`, **down** `−27,584.72`. Last cycle's
+  ADR-0100 scored ⚠️ MIXED (risk-adj `0.00996 → 0.01809`) and the live axis confirms the mechanism:
+  `trackingRate 0.52696`, `ON-TARGET … under the 4104.24 no-trade band, holding`, **one** HEDGE ES order
+  this window against eleven last. Attribution `ALPHA +879.66`, `MACRO +376.99` (frozen to the cent for a
+  **sixth** cycle), `HEDGE −630.08`.
+- **Attribution honesty.** The `+2.07` is noise on positions ADR-0100 never touched; it is credited with
+  the gross collapse and the overlay going quiet, and with none of the PnL. HEDGE's `−30.86` is the market
+  against a short ES leg — `412` ES fills at a measured `0.207` bps and `$43.57` of fees, so directional,
+  not execution, and attributable to neither recent cycle.
+- **The trigger.** No trigger opened a loser: `GOOGL −161.84` and `SAP −85.46` are closed and flat (fixed
+  by ADR-0099) and every live position is a winner. The leak is the price of the *good* triggers — JNJ
+  bought thirteen times in twelve minutes, GOOG bought five then sold eight, AAPL sold eleven, walking
+  toward a target never reached. **ALPHA paid `$355.89` of fees to make `$879.66`: two fifths of what the
+  desk makes is handed to the cost of getting there.**
+- **Rule 1: when every input to a control is measured but the control's own constant is not, that constant
+  is the bug.** ADR-0094 fixed WHAT the no-trade band is measured against and left its WIDTH at Carver's
+  published `0.10`. But the desk measures both inputs the width is a function of, every cycle, *for the
+  edge gate* — each name's round trip (`0.49–1.01` bps + 1 bp fee a side) and the passing source's gross
+  expectancy (`reversion 8.82` bps, 500 resolved, 65 cohorts, `t = 9.3`). `2C/μ` is several times `0.10`.
+- **Rule 2: derive the constant from a first-order condition and the parameter you never stated cancels.**
+  Closing a gap is worth its cost when `½λσ²g² > C|g|`; substituting the aim's own condition
+  `a = μ/(λσ²)` gives `band = a·(2C/μ)`. The risk aversion `λσ²` disappears — so no invented number, where
+  a hand-picked wider fraction would have been the `$250k` hedge-cap mistake in miniature.
+- **Rule 3: prefer the lever that moves PnL at CONSTANT risk over the bigger lever that moves posture.**
+  `HEDGE −630.08` is the larger number (47.5% of firm gross, more than the whole firm's PnL) but its sizing
+  and rate sides are both closed and what remains is the posture question; standing the overlay down would
+  take firm net `$940 → $17,349` on the strength of a market that has been rising. Turnover is the same
+  order of magnitude and costs no risk posture at all.
+- **Expected next.** Fills and fees per dollar of PnL fall; gross and net are unchanged by construction
+  (the aim path is untouched), so this should read as PnL up at flat exposure. **If this scores BAD, the
+  cost chain is fully closed** — model (ADR-0099), rate (ADR-0080), band location (ADR-0094) and band width
+  (ADR-0101) — do not tune turnover again. Next levers, in order: (a) the overlay POSTURE question ADR-0098
+  and ADR-0100 both deferred — does a mean-reversion book want a beta overlay at all, and if so, hedged
+  down to what, given `equity-rebalance-floor-usd = 0` hedges from the first dollar with no reference to
+  any declared appetite; (b) no absolute book-level volatility target — the planned book is ~$300k gross
+  (`AUDUSD` alone targets `118,737` units, `$78k`) against `$18.1k` held, so gross is set by how many names
+  pass the gate, not by how much risk the desk wants; (c) the frozen MACRO book, six cycles unchanged to
+  the cent around a stranded `0.000029` ES; (d) the ADR-0086 chandelier exit still shows zero fires — with
+  positions living minutes, a 3σ-over-the-holding-horizon stop may be structurally unreachable; (e)
+  `turnover_cost_by_name` in the report is STILL erroring, and it is now the aggregate that would grade
+  this very decision.
