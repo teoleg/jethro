@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-27T02:20:52Z",
+    "feedMode": "SIM",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-386.09113919",
+    "gross": "79156.99081542",
+    "net": "23020.84871026",
+    "fees": "248.850090",
+    "pnl_pct": 38.09,
+    "gross_pct": 478.42,
+    "pnl_growth_pct": 51.01,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": true,
+    "stale": false,
+    "underwater": true,
+    "action": "reverted",
+    "last_verdict": "\u274c BAD",
+    "decision": "backed off 2bee6b873 (\u274c BAD) \u2014 next run tries a different lever",
+    "reasoning": "Gave the concentration control a correlation it can actually measure: the fusion desk now prices how much of its book is one bet from the mark stream, because the daily-close covariance it was reading covers none of this book (ADR-0089).\n\n## Situation (read from the live endpoints; every number below is quoted, none computed here)\n\n1. **Money.** Total PnL is **lower** than last run \u2014 the situation header reads `-45.30` on the window,\n   leaving the firm total negative \u2014 and the book is flagged **BLEEDING**. Over the last three runs PnL\n   is up (`+119.21`), so the 3-iteration growth target is still met on paper, but the latest window went\n   the wrong way and the book is `underwater`.\n2. **Risk.** This is the emergency. Gross exposure went from about ten thousand to `184,719.88` in one\n   window \u2014 `+171,034.78` \u2014 with net `-75,988.06`: the desk is now a large one-sided short. Historical\n   VaR95 is `1,157.61`, the firm gross limit is `1,500,000` and the drawdown breaker is untripped, so no\n   configured limit is close. But PnL per unit of exposure is collapsing, and that is the objective.\n   Flags: **DANGER \u2014 bleeding AND adding exposure.**\n3. **Cause.** Last cycle's change (ADR-0088) scored **\u274c BAD** and the scorer already reverted it. That\n   verdict is not the mechanism, though: exposure was ramping the same way *before* it and has kept\n   ramping after. The culprit is not one change \u2014 it is the ADR-0080 partial-adjustment ramp walking the\n   desk toward a **planned book** far larger than anything the risk controls priced.\n4. **Order post-mortem.** The window's fills are a thrash: MSFT bought 49, sold down through 27/16/12,\n   then bought back 34/16/11/9; AAPL bought 5/9/8 then sold 56/36/27/23/19 four minutes later. `reversion`\n   sits at its \u00b120 forecast cap on most names and flips sign inside minutes, and each flip pays a round\n   trip \u2014 fees are a large share of the realised loss, nearly all of it in the ALPHA book.\n5. **The structural read \u2014 what I acted on.** The planner's targets are short *nearly every name it\n   covers*, each at a full per-name budget. The two controls that would price that \u2014 the ADR-0079\n   concentration multiplier and the ADR-0083 volatility budget, the only two that look at the book rather\n   than at a name \u2014 both read a `daily_close` covariance, and under ADR-0073 that series admits an\n   instrument only after several consecutive sessions **in the running feed mode**. This stream has two.\n   So the estimate covers nothing (the parametric VaR built on the same covariance reports its entire\n   exposure as *skipped*), both controls silently no-op, and a book that is arithmetically one position\n   carries N independent budgets of risk. That is not the market moving against us; it is a control\n   absent exactly where the concentration is \u2014 ADR-0086's lesson about \u03c3, one layer up, on the pairs.\n\n## The change\n\nMeasure the covariance on the **mark stream** \u2014 the series ADR-0086 already fell back to for \u03c3, for this\nexact coverage reason: an EWMA of return cross-products over synchronised per-cycle mark snapshots, fed\nthe same prices the plan was made from, seeded from the durable mark history replayed on one bucket grid\nof the feed's own clock (a covariance of returns taken at different instants measures the misalignment).\nOne estimator per cycle, chosen by which covers more of the book being planned, ties to the incumbent\ndaily estimate, never a blend. Both consumers are homogeneous of degree zero in the covariance, so no\ntrading-day convention is invented and the sampling period cannot move a size; both are one-way \u2014 the\nmultiplier is capped at 1, the budget at the gross it replaced \u2014 so this can only ever **shrink** the\nbook, which is the right shape of change for a danger state. No money dial, no gate loosened, no\ndeterministic floor touched. Full suite green.\n\n**Attribution, honestly.** My change gets credit for none of this window: it went in after the\nmeasurement. The window's PnL fall is mostly *market*, on positions the ramp had already opened; the\nexposure rise is *mechanism* \u2014 the ramp, not the market. What I expect next is gross falling on an\nunchanged view. If exposure comes down and PnL is not worse, the correlation haircut is working; if\ngross does not move at all, the estimator is not covering the book and the **seed** is the first suspect,\nnot the control.",
+    "commit": "0d46a06"
+  },
+  {
     "ts": "2026-07-27T01:47:40Z",
     "feedMode": "SIM",
     "available": true,
