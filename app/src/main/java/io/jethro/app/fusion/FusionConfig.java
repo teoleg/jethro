@@ -84,6 +84,8 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.risk-cut.enabled:true}") boolean riskCutEnabled,
                                     @Value("${jethro.fusion.risk-cut.sigma-multiple:3.0}") double riskCutSigmaMultiple,
                                     @Value("${jethro.fusion.risk-cut.vol-span:120}") int riskCutVolSpan,
+                                    @Value("${jethro.fusion.stream-covariance.enabled:true}") boolean streamCovEnabled,
+                                    @Value("${jethro.fusion.stream-covariance.span:120}") int streamCovSpan,
                                     @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
@@ -162,7 +164,15 @@ public class FusionConfig {
                 riskCutEnabled ? new StreamVolatility(new StreamVolatility.Params(riskCutVolSpan)) : null,
                 riskCutEnabled ? new TrailingRiskCut(new TrailingRiskCut.Params(riskCutSigmaMultiple)) : null,
                 storedPrices(markHistory),
-                instrument -> markTimeFor(tradingCore, instrument));
+                instrument -> markTimeFor(tradingCore, instrument),
+                // ADR-0089: the correlation the two sizing controls above are measured with. The
+                // daily-close covariance they were built on covers an instrument only after several
+                // admissible sessions in the RUNNING feed mode (ADR-0073), so on a young stream it
+                // covers none of the planned book and both controls fall silent — the desk then
+                // carries one per-name budget for every name of what may be a single bet. Measured
+                // here on the mark stream instead, the same series ADR-0086's σ already had to fall
+                // back to for the same reason. Disabled ⇒ null and the book is byte-identical.
+                streamCovEnabled ? new StreamCovariance(new StreamCovariance.Params(streamCovSpan)) : null);
         lifecycle.start();
         return lifecycle;
     }

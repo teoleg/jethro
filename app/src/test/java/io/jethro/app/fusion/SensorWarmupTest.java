@@ -147,4 +147,53 @@ class SensorWarmupTest {
         // reads a window entirely in the feed's future and seeds nothing.
         assertThat(SensorWarmup.seedPrices(history, "AAPL", NOW, interval, samples)).isEmpty();
     }
+
+    /**
+     * ADR-0089: a covariance seed must be SYNCHRONISED. Two names whose stored series print on
+     * different sub-second offsets must land in the same bucket of the store's own clock, so the
+     * returns replayed into the estimator are contemporaneous rather than merely adjacent.
+     */
+    @Test
+    void jointSeedAlignsNamesOnOneBucketGrid() {
+        List<SensorWarmup.Point> a = new ArrayList<>();
+        List<SensorWarmup.Point> b = new ArrayList<>();
+        for (int i = 9; i >= 0; i--) {
+            a.add(new SensorWarmup.Point(NOW - i * 10_000L, BigDecimal.valueOf(100 + (9 - i))));
+            // B prints 3 s later inside the same 10 s bucket, and twice in it.
+            b.add(new SensorWarmup.Point(NOW - i * 10_000L - 7_000L, BigDecimal.valueOf(50)));
+            b.add(new SensorWarmup.Point(NOW - i * 10_000L - 3_000L, BigDecimal.valueOf(200 + (9 - i))));
+        }
+        SensorWarmup.History history = (instrumentId, since) ->
+                ("A".equals(instrumentId) ? a : b).stream().filter(p -> p.timestampMillis() >= since).toList();
+
+        var samples = SensorWarmup.jointSeedSamples(history, List.of("A", "B"), NOW, 10_000L, 4);
+
+        assertThat(samples).hasSize(4);
+        for (var s : samples) {
+            assertThat(s).containsOnlyKeys("A", "B"); // every snapshot carries both names
+        }
+        // Newest bucket last, and the LAST print inside a bucket is the one taken.
+        assertThat(samples.get(3).get("A")).isEqualByComparingTo("109");
+        assertThat(samples.get(3).get("B")).isEqualByComparingTo("209");
+        assertThat(samples.get(0).get("A")).isEqualByComparingTo("106");
+    }
+
+    /** The joint seed truncates at a hole on the same tolerance the per-name seed uses. */
+    @Test
+    void jointSeedStopsAtAHoleRatherThanBridgingIt() {
+        List<SensorWarmup.Point> points = new ArrayList<>();
+        for (int i = 0; i < 20; i++) { // an old block, an hour before the recent one
+            points.add(new SensorWarmup.Point(NOW - 3_600_000L - (19 - i) * 1_000L, BigDecimal.valueOf(50 + i)));
+        }
+        for (int i = 0; i < 5; i++) {
+            points.add(new SensorWarmup.Point(NOW - (4 - i) * 1_000L, BigDecimal.valueOf(100 + i)));
+        }
+        SensorWarmup.History history = (instrumentId, since) ->
+                points.stream().filter(p -> p.timestampMillis() >= since).toList();
+
+        var samples = SensorWarmup.jointSeedSamples(history, List.of("A"), NOW, 1_000L, 40);
+
+        assertThat(samples).hasSize(5); // the contiguous tail only — never across the hole
+        assertThat(samples.get(4).get("A")).isEqualByComparingTo("104");
+    }
 }

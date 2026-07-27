@@ -38,11 +38,22 @@ public final class FusionLifecycle implements AutoCloseable {
                              double portfolioRiskMultiplier, int covarianceCoveredNames,
                              int volBudgetNames, double volBudgetDispersion, double volBudgetLeverCap,
                              List<TrailingRiskCut.Cut> riskCuts, int riskCutStoppedNames,
-                             int streamVolMeasuredNames) {
+                             int streamVolMeasuredNames, String covarianceBasis) {
         static TargetBook empty() {
             return new TargetBook(0, false, 0, Map.of(), List.of(), null, 1.0, 0, 0, 1.0, 1.0,
-                    List.of(), 0, 0);
+                    List.of(), 0, 0, Basis.NONE_NAME);
         }
+    }
+
+    /**
+     * Which measured covariance sized this cycle's book, and the estimator itself (ADR-0089). Purely a
+     * disclosure alongside the source — the operator must be able to see WHICH measurement moved the
+     * sizes, since the two estimators are of the same statistic over different sampling periods.
+     */
+    record Basis(String name, ReturnCovarianceSource source) {
+        static final String NONE_NAME = "none";
+        static final String DAILY_NAME = "daily-close";
+        static final String STREAM_NAME = "mark-stream";
     }
 
     private final ForecastRegistry registry;
@@ -75,6 +86,10 @@ public final class FusionLifecycle implements AutoCloseable {
     private final Function<String, Long> markTimeFor;
     /** Instruments already seeded into the σ sensor — touched only from the scheduled tick thread. */
     private final java.util.Set<String> volSeeded = new java.util.HashSet<>();
+    /** ADR-0089: pairwise covariance measured on the mark stream — null ⇒ not wired, book untouched. */
+    private final StreamCovariance streamCov;
+    /** Instruments already in the ADR-0089 joint seed — touched only from the scheduled tick thread. */
+    private final java.util.Set<String> covSeeded = new java.util.HashSet<>();
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -90,7 +105,7 @@ public final class FusionLifecycle implements AutoCloseable {
                            double volBudgetWinsorPct) {
         this(registry, priceFor, multiplierFor, positionsSupplier, heldSupplier, weightsSupplier, params,
                 routeOrders, executor, scheduler, intervalSeconds, minForecastToRoute, edgeGate,
-                covariance, baseHorizonSeconds, volBudgetWinsorPct, null, null, null, null);
+                covariance, baseHorizonSeconds, volBudgetWinsorPct, null, null, null, null, null);
     }
 
     public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
@@ -103,6 +118,24 @@ public final class FusionLifecycle implements AutoCloseable {
                            Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
                            double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
                            SensorWarmup.History markHistory, Function<String, Long> markTimeFor) {
+        this(registry, priceFor, multiplierFor, positionsSupplier, heldSupplier, weightsSupplier, params,
+                routeOrders, executor, scheduler, intervalSeconds, minForecastToRoute, edgeGate,
+                covariance, baseHorizonSeconds, volBudgetWinsorPct, streamVol, riskCut, markHistory,
+                markTimeFor, null);
+    }
+
+    public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
+                           Function<String, BigDecimal> multiplierFor,
+                           Supplier<Map<String, BigDecimal>> positionsSupplier,
+                           Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
+                           FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
+                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
+                           Supplier<EdgeGate.Decision> edgeGate,
+                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
+                           double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
+                           SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
+                           StreamCovariance streamCov) {
+        this.streamCov = streamCov;
         this.streamVol = streamVol;
         this.riskCut = riskCut;
         this.markHistory = markHistory;
@@ -180,7 +213,13 @@ public final class FusionLifecycle implements AutoCloseable {
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
                     multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), cycleParams);
-            ReturnCovarianceSource cov = covariance == null ? ReturnCovarianceSource.NONE : covariance.get();
+            ReturnCovarianceSource dailyCov = covariance == null ? ReturnCovarianceSource.NONE : covariance.get();
+            // ADR-0089: both sizing controls below are silent on a name their covariance does not cover,
+            // and the daily-close estimate covers none of this book on a stream only a session or two
+            // old. Measure the same statistic on the mark stream and size on whichever of the two
+            // actually covers more of the book that is about to be planned.
+            Basis basis = sizingCovariance(dailyCov, targets);
+            ReturnCovarianceSource cov = basis.source();
             // ADR-0083: split the per-name cash budget by each name's own MEASURED volatility before
             // anything looks at the book as a whole, so every name contributes the same standalone risk
             // instead of the same cash. Applied FIRST because the correlation control below prices how
@@ -214,7 +253,7 @@ public final class FusionLifecycle implements AutoCloseable {
                     normalised.multiplier(), normalised.coveredNames(),
                     budgeted.coveredNames(), budgeted.dispersion(), budgeted.leverCap(),
                     cut.cuts(), cut.stoppedNames(),
-                    streamVol == null ? 0 : streamVol.measuredNames());
+                    streamVol == null ? 0 : streamVol.measuredNames(), basis.name());
             if (routeOrders) {
                 int routed = 0;
                 for (FusionPlanner.Target t : targets) {
@@ -275,6 +314,103 @@ public final class FusionLifecycle implements AutoCloseable {
                     String.format("%.4f", c.sigmaOverHorizon() * 100.0), c.horizonSeconds());
         }
         return result;
+    }
+
+    /**
+     * The covariance this cycle's two sizing controls are measured with (ADR-0089): the mark-stream
+     * estimate when it covers strictly more of the planned book than the daily-close estimate, the
+     * daily-close estimate otherwise.
+     *
+     * <p><b>Why coverage and not preference.</b> Both are estimates of the same statistic — the
+     * covariance of contemporaneous returns — measured over different sampling periods, and both
+     * consumers are scale-invariant in Σ, so the choice cannot change the units the answer is read in
+     * (see {@link StreamCovariance}). What it does change is how many names carry a measurement at
+     * all, and a control that covers nothing is not a conservative control, it is an absent one. The
+     * tie goes to the incumbent daily-close estimate, so this can only ever ADD coverage: on a desk
+     * whose daily series has matured the behaviour is exactly what it was before.
+     *
+     * <p><b>One estimator, never a blend.</b> A matrix stitched from two sources is not a covariance
+     * of anything — its off-diagonals would be measured over a different period than its diagonals, and
+     * the quadratic forms above would mix them. Both controls read from the ONE source chosen here.
+     *
+     * <p>The stream estimator is fed the same prices the plan was just made from — one read of the
+     * mark per cycle, so the sizes and the correlation that scales them cannot come from two different
+     * instants — and is seeded on first sight from the durable mark history on a shared bucket grid
+     * (ADR-0071/0089), because its warm-up is an hour of samples and the process lifetime is a
+     * fraction of that.
+     */
+    private Basis sizingCovariance(ReturnCovarianceSource dailyCov, List<FusionPlanner.Target> targets) {
+        List<String> planned = new java.util.ArrayList<>(targets.size());
+        Map<String, BigDecimal> sample = new java.util.LinkedHashMap<>();
+        for (FusionPlanner.Target t : targets) {
+            planned.add(t.instrument());
+            if (t.price() != null && t.price().signum() > 0) {
+                sample.put(t.instrument(), t.price());
+            }
+        }
+        int dailyNames = coveredCount(dailyCov, planned);
+        if (streamCov == null) {
+            return new Basis(dailyNames > 0 ? Basis.DAILY_NAME : Basis.NONE_NAME, dailyCov);
+        }
+        seedCovariance(sample.keySet());
+        streamCov.update(sample);
+        int streamNames = streamCov.measuredNames(planned);
+        if (streamNames > dailyNames) {
+            return new Basis(Basis.STREAM_NAME, streamCov.asSource());
+        }
+        return new Basis(dailyNames > 0 ? Basis.DAILY_NAME : Basis.NONE_NAME, dailyCov);
+    }
+
+    /** How many of {@code planned} carry a measured variance in {@code cov} — coverage, never a size. */
+    private static int coveredCount(ReturnCovarianceSource cov, List<String> planned) {
+        if (cov == null) {
+            return 0;
+        }
+        int n = 0;
+        for (String id : planned) {
+            if (cov.covariance(id, id).isPresent()) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Replays the durable mark history into the ADR-0089 covariance estimator, as SYNCHRONISED
+     * snapshots on one bucket grid, the first time any name needs it. Unlike the per-name σ seed this
+     * must be replayed for the whole cross-section at once — a covariance of returns taken at different
+     * instants measures the misalignment — so the seed is re-run whenever the planned universe grows,
+     * and the estimator's own warm-up counter decides when a pair may speak.
+     */
+    private void seedCovariance(java.util.Collection<String> instruments) {
+        if (markHistory == null || streamCov == null || covSeeded.containsAll(instruments)) {
+            return;
+        }
+        covSeeded.addAll(instruments);
+        Long providerMillis = null;
+        for (String id : instruments) {
+            Long t = markTimeFor == null ? null : markTimeFor.apply(id);
+            if (t != null && t > 0 && (providerMillis == null || t > providerMillis)) {
+                providerMillis = t; // the newest provider stamp on the book — one clock, the feed's
+            }
+        }
+        long anchor = providerMillis != null ? providerMillis : System.currentTimeMillis();
+        var samples = SensorWarmup.jointSeedSamples(markHistory, instruments, anchor,
+                intervalSeconds * 1_000L, streamCov.warmupSamples());
+        for (var s : samples) {
+            streamCov.update(s);
+        }
+        int measured = streamCov.measuredNames(instruments);
+        if (measured == 0) {
+            // WARN, not INFO: with no covered name the concentration control is silent, which is the
+            // exact failure this seed exists to prevent (the ADR-0071 correction's lesson).
+            log.warn("fusion covariance still cold after seeding {} synchronised snapshots of {} name(s) "
+                            + "— the book cannot be scaled for concentration until the mark history "
+                            + "accumulates (ADR-0089)", samples.size(), instruments.size());
+        } else {
+            log.info("fusion covariance warmed {} of {} name(s) from {} synchronised snapshots (ADR-0089)",
+                    measured, instruments.size(), samples.size());
+        }
     }
 
     /** Replays this name's stored recent prices into the σ sensor the first time it is planned. */

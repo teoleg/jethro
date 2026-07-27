@@ -137,6 +137,105 @@ public final class SensorWarmup {
     }
 
     /**
+     * The SYNCHRONISED seed for a multi-name estimator (ADR-0089): at most {@code samples} snapshots,
+     * oldest first, each one a map of instrument → the last stored price inside the same
+     * {@code intervalMillis}-wide bucket of provider time.
+     *
+     * <p><b>Why bucketing rather than {@link #seedPrices} per name.</b> A covariance is a statement
+     * about CONTEMPORANEOUS returns. {@link #seedPrices} thins each name's series backwards from that
+     * name's own anchor, so two names' seeds are aligned only by luck — and a covariance built from
+     * misaligned returns measures the misalignment. Bucketing on a common grid of the store's own clock
+     * makes every snapshot simultaneous to within one bucket, which is the same synchronisation the
+     * live path has (one read of the mark cache per cycle, each mark up to its own age old).
+     *
+     * <p><b>Last mark carried forward — because that is what live does.</b> A name is read at each grid
+     * point from its most recent print at or before it, not only from prints landing inside the bucket.
+     * That is exactly the live sampling semantics: the fusion loop reads the mark cache once per cycle
+     * and a name that has not printed since the last cycle reads its previous mark, contributing a zero
+     * return. Bucketing raw prints instead would drop a name out of the snapshots whenever its series
+     * is sparse or its prints straddle a boundary — and a name absent from a snapshot never pairs with
+     * anything, so its correlation would silently never accumulate. A carried-forward mark biases a
+     * covariance toward zero, which biases the control it feeds toward NOT shrinking the book: the
+     * conservative direction for a one-way control. A name whose last print is more than
+     * {@link #GAP_TOLERANCE_SAMPLES} buckets old is omitted from that snapshot rather than carried —
+     * past that it is not a stale mark, it is no mark.
+     *
+     * <p>The walk is newest-first and stops at a hole wider than {@link #GAP_TOLERANCE_SAMPLES}
+     * buckets — the same tolerance, in the same units, that the per-name seed already bridges a
+     * redeploy blip with and truncates a genuine outage at. Buckets are then returned oldest-first so
+     * the consumer replays them exactly as it would have received them live.
+     *
+     * @param anchorMillis the newest point of interest, in the store's own clock (a PROVIDER
+     *                     timestamp), never wall-clock now — see the class note
+     * @return an empty list when there is no usable history; the caller then cold-starts as before
+     */
+    public static List<java.util.Map<String, BigDecimal>> jointSeedSamples(
+            History history, java.util.Collection<String> instruments, long anchorMillis,
+            long intervalMillis, int samples) {
+        if (history == null || instruments == null || instruments.isEmpty() || samples <= 0
+                || intervalMillis <= 0) {
+            return List.of();
+        }
+        long lookback = intervalMillis * (long) samples * LOOKBACK_MULTIPLE;
+        // instrument → (bucket index of provider time → the LAST price printed inside that bucket)
+        java.util.Map<String, java.util.NavigableMap<Long, BigDecimal>> byName = new java.util.LinkedHashMap<>();
+        java.util.NavigableSet<Long> grid = new java.util.TreeSet<>();
+        for (String id : instruments) {
+            if (id == null) {
+                continue;
+            }
+            List<Point> points;
+            try {
+                points = history.since(id, anchorMillis - lookback);
+            } catch (RuntimeException e) {
+                continue; // a history read must never stop an estimator from starting
+            }
+            if (points == null) {
+                continue;
+            }
+            for (Point p : points) {
+                if (p == null || p.price() == null || p.price().signum() <= 0
+                        || p.timestampMillis() > anchorMillis) {
+                    continue;
+                }
+                long bucket = Math.floorDiv(p.timestampMillis(), intervalMillis);
+                byName.computeIfAbsent(id, k -> new java.util.TreeMap<>()).put(bucket, p.price());
+                grid.add(bucket);
+            }
+        }
+        if (grid.isEmpty()) {
+            return List.of();
+        }
+        // The grid points to emit: newest first, stopping at a hole no name printed across.
+        Deque<Long> buckets = new ArrayDeque<>();
+        long previousAccepted = Long.MIN_VALUE;
+        for (long bucket : grid.descendingSet()) {
+            if (buckets.size() >= samples) {
+                break;
+            }
+            if (previousAccepted != Long.MIN_VALUE && previousAccepted - bucket > GAP_TOLERANCE_SAMPLES) {
+                break; // a hole in the series: warm from the contiguous tail, never across it
+            }
+            buckets.addFirst(bucket);
+            previousAccepted = bucket;
+        }
+        List<java.util.Map<String, BigDecimal>> out = new ArrayList<>(buckets.size());
+        for (long bucket : buckets) {
+            java.util.Map<String, BigDecimal> snapshot = new java.util.LinkedHashMap<>();
+            for (var e : byName.entrySet()) {
+                var latest = e.getValue().floorEntry(bucket); // the mark as of this grid point
+                if (latest != null && bucket - latest.getKey() <= GAP_TOLERANCE_SAMPLES) {
+                    snapshot.put(e.getKey(), latest.getValue());
+                }
+            }
+            if (!snapshot.isEmpty()) {
+                out.add(snapshot);
+            }
+        }
+        return out;
+    }
+
+    /**
      * Replays one instrument's seed prices, oldest first, into a sensor's ordinary update path.
      *
      * @param anchorMillis the store's own clock, as in {@link #seedPrices} — a provider timestamp
