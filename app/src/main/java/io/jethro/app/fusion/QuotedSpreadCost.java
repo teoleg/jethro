@@ -38,16 +38,37 @@ import java.util.OptionalDouble;
  * own measured cost always wins where it exists — this only ever fills the gap where nothing has been
  * measured, and it is displaced permanently by the first fill.
  *
+ * <h2>A round trip that pays the desk is not a measurement of cost (ADR-0106)</h2>
+ * The realised figure is an implementation shortfall against the arrival mark, so it carries the
+ * price DRIFT over the fill window as well as the spread the desk crossed. Under ADR-0084 the desk
+ * posts to enter, and a passive order is filled precisely when the price comes to it — so the drift
+ * term is systematically favourable at entry, and on a name where it exceeds the exit's half-spread
+ * the arithmetic returns a <b>negative</b> round trip. A round trip cannot pay the desk: entering and
+ * leaving a position crosses the touch or waits for it, and the fee is charged twice either way. Such
+ * a reading is drift that belongs to the signal, booked as if it were execution.
+ *
+ * <p>Left in the map it does real damage, because {@link EdgeGate} states the desk-wide verdict at the
+ * CHEAPEST round trip in the map (ADR-0075): a single negative entry becomes the desk-wide cost, and
+ * {@code netEdgeBps = avgReturnBps − cheapest} then exceeds the expectancy that was actually measured
+ * — the gate crediting the desk with edge no signal produced. It also collapses that name's ADR-0101
+ * no-trade buffer {@code 2C/μ} to its Carver floor, so the desk re-trades its least honestly-priced
+ * name the most often. A non-positive measurement is therefore treated here as NO measurement, and the
+ * name falls back to the quoted/blend path exactly as an as-yet-unfilled name does (ADR-0099) — the
+ * same rule, reached because a reading that cannot be a cost tells the desk nothing about its cost.
+ *
  * <h2>One-way by construction</h2>
  * {@link #withQuotedFallback} charges an unmeasured name {@code max(deskBlend, quotedRoundTrip)} —
  * never less than the blend it is charged today. Three consequences, all provable from that line:
  * <ul>
  *   <li><b>It can only ever remove a trade, never add one.</b> Every per-name hurdle is greater than
  *       or equal to today's, and {@link EdgeGate}'s test is monotone in cost.</li>
- *   <li><b>The desk-wide verdict is untouched.</b> That verdict is taken at the cheapest round trip in
- *       the map-plus-blend, and no entry added here is below the blend, so the minimum cannot move.</li>
+ *   <li><b>The desk-wide verdict can only get STRICTER.</b> That verdict is taken at the cheapest
+ *       round trip in the map-plus-blend. No entry added by the quoted fallback is below the blend, so
+ *       it cannot lower the minimum; and dropping a non-positive measurement (ADR-0106) can only
+ *       RAISE it. Either way the cost the desk charges itself never falls.</li>
  *   <li><b>No number is invented.</b> The value is the live quote or the existing blend, whichever is
- *       larger; nothing is chosen, and a name with no two-sided quote is left exactly as it is today.</li>
+ *       larger; nothing is chosen, and a name with no two-sided quote is left exactly as it is today —
+ *       absent from the map, which {@link EdgeGate} already charges the blend.</li>
  * </ul>
  *
  * <p>Feed-agnostic (invariant 9): the input is whatever bid/ask the running feed publishes — a venue's
@@ -94,8 +115,10 @@ public final class QuotedSpreadCost {
      * quoted one instead of the desk blend — but never less than that blend, so this is strictly a
      * tightening (see the class doc).
      *
-     * @param measured        instrumentId → the desk's own MEASURED round trip in bps (ADR-0075); these
-     *                        entries are returned untouched, a fill always beating a quote
+     * @param measured        instrumentId → the desk's own MEASURED round trip in bps (ADR-0075); a
+     *                        POSITIVE entry is returned untouched, a fill always beating a quote. A
+     *                        non-positive (or non-finite) entry is not a cost and is treated as absent
+     *                        (ADR-0106), so the name takes the quoted/blend fallback below
      * @param deskBlendBps    the blended measured round trip an unmeasured name is charged today — the
      *                        floor below which this may never charge anyone
      * @param quotedRoundTrip instrumentId → the round trip its live quote implies, for the price-quoted
@@ -109,7 +132,18 @@ public final class QuotedSpreadCost {
                                                          Map<String, Double> quotedRoundTrip) {
         Map<String, Double> out = new LinkedHashMap<>();
         if (measured != null) {
-            out.putAll(measured);
+            for (var e : measured.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null) {
+                    continue;
+                }
+                double m = e.getValue();
+                // ADR-0106: a round trip cannot pay the desk. A non-positive reading is arrival-mark
+                // drift booked as execution, not a cost — drop it so the name takes the fallback.
+                if (!Double.isFinite(m) || m <= 0.0) {
+                    continue;
+                }
+                out.put(e.getKey(), m);
+            }
         }
         if (quotedRoundTrip == null) {
             return out;

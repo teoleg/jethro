@@ -108,18 +108,70 @@ class QuotedSpreadCostTest {
     }
 
     @Test
-    void theDeskWideVerdictCannotMoveBecauseTheMinimumCannotFall() {
+    void theDeskWideCostCanOnlyRise() {
         // The gate takes its desk-wide verdict at the cheapest round trip in map-plus-blend. Nothing
-        // this adds is below the blend, so that minimum — and so the verdict — is untouched.
+        // the quoted fallback adds is below the blend, so it cannot lower that minimum; and dropping a
+        // non-positive reading (ADR-0106) can only raise it. Here NQ's −0.25 was the minimum and was
+        // buying the desk 0.25 bps of edge no signal produced: netEdge 8.81 − (−0.25) = 9.06 > 8.81.
         var stats = List.of(stats("reversion", 500, 56, 8.81, 0.97));
         var measured = Map.of("NQ", -0.25);
         double blend = 1.48;
         var before = EdgeGate.evaluate(stats, blend, measured, PARAMS);
+        assertThat(before.sources().get(0).netEdgeBps()).isEqualTo(8.81 - -0.25);
+
         var after = EdgeGate.evaluate(stats, blend,
                 QuotedSpreadCost.withQuotedFallback(measured, blend, Map.of("BRK.B", 20.0, "EURUSD", 0.44)),
                 PARAMS);
-        assertThat(after.mayIncrease()).isEqualTo(before.mayIncrease());
-        assertThat(after.sources().get(0).netEdgeBps()).isEqualTo(before.sources().get(0).netEdgeBps());
+        // NQ is gone from the map, so the cheapest is the blend itself: 8.81 − 1.48 = 7.33.
+        assertThat(after.sources().get(0).netEdgeBps()).isEqualTo(8.81 - 1.48);
+        assertThat(after.sources().get(0).netEdgeBps())
+                .isLessThan(before.sources().get(0).netEdgeBps());
+        assertThat(after.mayIncrease()).isTrue(); // still 7.33/0.97 ≈ 7.6 σ — a real edge survives it
+    }
+
+    // ---- ADR-0106: a round trip that pays the desk is not a cost -------------------------------
+
+    @Test
+    void aNegativeMeasuredRoundTripIsTreatedAsNoMeasurement() {
+        // Live shape: NQ measured −0.25445 bps, desk blend 1.3449575609756097, NQ's own quote
+        // 20000 × (19786.142008 − 19785.884790) / (19786.142008 + 19785.884790) = 0.12999… bps.
+        // max(blend, quoted) = the blend, because the quote is tighter than the desk's own average.
+        double blend = 1.3449575609756097;
+        var measured = Map.of("NQ", -0.25445, "ES", 0.41852998);
+        var merged = QuotedSpreadCost.withQuotedFallback(measured, blend, Map.of("NQ", 0.12999));
+        assertThat(merged).containsEntry("NQ", blend);
+        assertThat(merged).containsEntry("ES", 0.41852998); // a positive measurement is untouched
+    }
+
+    @Test
+    void aNonPositiveMeasurementWithNoQuoteFallsOutOfTheMapAndTakesTheBlend() {
+        var stats = List.of(stats("reversion", 500, 56, 8.81, 0.97));
+        double blend = 1.48;
+        var merged = QuotedSpreadCost.withQuotedFallback(Map.of("NQ", -0.25, "ZERO", 0.0), blend, Map.of());
+        assertThat(merged).isEmpty(); // absent — and EdgeGate charges an absent name the blend
+        var gate = EdgeGate.evaluate(stats, blend, merged, PARAMS);
+        assertThat(gate.sources().get(0).netEdgeBps()).isEqualTo(8.81 - 1.48);
+    }
+
+    @Test
+    void droppingANonPositiveReadingCanOnlyRaiseEveryHurdle() {
+        // Monotonicity is the whole safety argument: no name is charged less than it is today, so no
+        // trade this change newly admits. Asserted across the live cross-section's shape.
+        double blend = 1.3449575609756097;
+        var measured = new LinkedHashMap<String, Double>();
+        measured.put("NQ", -0.25445);   // not a cost
+        measured.put("ES", 0.41852998); // the genuinely cheapest name
+        measured.put("AAPL", 0.88944818);
+        measured.put("GOOGL", 20.1056125);
+        var merged = QuotedSpreadCost.withQuotedFallback(measured, blend, Map.of("NQ", 0.12999));
+        for (var name : List.of("NQ", "ES", "AAPL", "GOOGL")) {
+            assertThat(merged.getOrDefault(name, blend))
+                    .as("hurdle for %s may never fall", name)
+                    .isGreaterThanOrEqualTo(measured.get(name));
+        }
+        // The desk-wide minimum moves from NQ's impossible −0.25445 to ES's real 0.41852998.
+        assertThat(merged.values().stream().mapToDouble(Double::doubleValue).min().orElseThrow())
+                .isEqualTo(0.41852998);
     }
 
     @Test

@@ -1124,3 +1124,61 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   exactly the reason ADR-0089 fixed for fusion, and the mark-stream covariance that covers 23/23 names was
   never propagated to it; (e) `turnover_cost_by_name` in the report is STILL erroring, fourth cycle
   running.
+
+## 2026-07-27 — the desk's own cost measurement can come out impossible, and one impossible reading sets the desk-wide hurdle (ADR-0106)
+
+- **Situation.** On track, not a de-risk cycle: `pnl_growth_pct 15.33` against a `1.0` target,
+  `on_track` true, breaker clear. Attribution `ALPHA +1,213.87`, `MACRO +376.996` (frozen to the cent
+  for an **eleventh** cycle), `HEDGE −700.65`, fees `$459.59`.
+- **Attribution honesty.** The window's `−1.25` is inside the deadband and is market on positions
+  nothing of mine touched — no PnL credit claimed. The `EXPOSURE RISING` flag is **100%** last cycle's
+  ADR-0105 revert (`gross 0.00 → 7,181.05`), not a change of mine.
+- **Rule 1: verify a DANGER flag against the live endpoints before obeying it.** The header raised
+  `BLEEDING; EXPOSURE RISING; DANGER`. Both legs were artifacts — a sub-deadband PnL move, and exposure
+  measured from a `$0.00` prior reading (the book re-opening after the ADR-0104 brake flattened it, plus
+  the revert). Live gross had *fallen* `7,176.74 → 2,170.03` with PnL *up* by the time I looked. A
+  reflexive de-risk would have cut a healthy book. **A delta measured from zero is not a trend.**
+- **Rule 2: when a family of levers has two BAD verdicts in five cycles, the next idea in that family is
+  the same idea in a costume.** The hedge is the biggest prize on the desk (`realizedPnl −701.03` against
+  `feesPaid 46.82` — the overlay's entire loss is realised round-trip churn, ~30 units of turnover per
+  unit of exposure moved, consuming 55% of ALPHA's P&L and 39% of firm gross). Every fix I could justify
+  mapped onto 0095 / 0098 / 0100 / 0105. I left it. The one genuinely untried angle is rebalance
+  **cadence** (the overlay re-prices every ~60s against a book whose measured holding horizon is 900s)
+  rather than target **shape** — that is the next hedge cycle, and it should be one-way (slow only
+  risk-increasing deltas; reductions and unwinds keep trading in one cycle).
+- **Rule 3: a pure scale change is worthless to this loop.** I nearly shipped "strip the diversification
+  multiplier from measured-failing sources". It cuts exposure ~5% — and PnL by the same ~5%, because DM
+  is pure leverage. **PnL-per-unit-exposure is unchanged.** Before shipping a size control, ask whether
+  it changes the *ratio* or only the *scale*; only the first is progress. What moves the ratio is better
+  signal per unit of risk, cheaper turnover, or removing exposure that earns nothing.
+- **Rule 4: check a proposed control against the telemetry before believing your own story.** Two
+  candidates died this way. Cross-sectional demeaning ("the reversion signal manufactures the beta the
+  hedge then pays to remove") — the live cross-section is already balanced, `net/gross −0.064`, so it
+  would have done nothing. A time stop at the measured horizon — the ladder reads `+8.43` bps at 900s
+  and `+9.48` at 3600s, and forecasts are re-emitted every cycle, so a held position is a *renewed* call,
+  not un-evidenced risk. Both were good stories; neither survived the numbers.
+- **The finding I shipped.** `roundTripBpsByInstrument.NQ = −0.25445`. A round trip cannot pay the desk
+  — both legs cross the touch or wait for it and the fee is charged twice. It is arrival-mark drift
+  booked as execution, and under ADR-0084 the desk *posts* to enter, so entry drift is systematically
+  favourable. Because ADR-0075 states the desk-wide verdict at the **cheapest** entry, that one number
+  became the desk's cost and `netEdgeBps` came out **above the measured expectancy for every source at
+  once** (`reversion` 8.683 vs a measured 8.429). It also collapsed that name's ADR-0101 buffer to the
+  0.10 Carver floor, so the desk re-traded its least honestly-priced name the most often.
+- **Rule 5: a MIN over a per-name series is only as honest as its worst entry — sanity-check the sign
+  and the units of anything an extremum selects.** The desk-wide gate is monotone in cost and takes the
+  minimum, which is correct; it just has no defence against an entry that cannot exist. Any control that
+  picks the best/cheapest/loudest element of a measured series inherits that element's estimation errors
+  whole.
+- **Expected next.** Strictly one-way — every per-name hurdle rises or stays, so this can only remove a
+  trade. Exposure cannot grow because of it; PnL effect is small and confined to that name's turnover.
+  Expect ⚠️ MIXED or "no material change"; **if it scores BAD the verdict is not about this change**, as
+  it cannot add exposure — look for the market or a concurrent revert.
+- **Remaining levers, in order.** (a) The TCA shortfall is measured against the ARRIVAL mark, so the
+  *whole* cost series is biased low, not just where it crosses zero — every cost-keyed control (gate
+  hurdle, per-name veto, ADR-0101 `2C/mu` width) is too permissive by an unmeasured amount; decompose
+  shortfall into spread and drift (deferred register). (b) Hedge rebalance cadence, per Rule 2.
+  (c) `turnover_cost_by_name` in the report has been erroring **five** cycles running (`column "qty"
+  does not exist`) — it is the aggregate that would grade exactly (a); now in the deferred register.
+  (d) Parametric VaR reads `coveredExposure 0.00` against `skippedExposure 7,176.74` while the
+  mark-stream covariance covers `23/23` names — the firm's second risk sensor is blind for the reason
+  ADR-0089 already fixed for fusion. (e) The frozen MACRO book, eleven cycles unchanged.

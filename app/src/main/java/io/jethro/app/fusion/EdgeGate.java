@@ -251,10 +251,14 @@ public final class EdgeGate {
 
     /**
      * @param stats             per-source rolling telemetry (feed-mode scoped by its store, invariant 8)
-     * @param roundTripCostBps  the desk's MEASURED round-trip execution cost; {@code null} when this
-     *                          feed mode has not produced a fill yet. Null and "zero" are deliberately
-     *                          distinct — a measured zero (or a negative, i.e. price improvement) is a
-     *                          real reading the gate must use, not an absent one.
+     * @param roundTripCostBps  the desk's MEASURED round-trip execution cost — the BLEND across every
+     *                          name the desk has filled; {@code null} when this feed mode has not
+     *                          produced a fill yet, which leaves the gate inactive rather than
+     *                          asserting a cost of zero. Per-NAME readings are cleaned before they
+     *                          reach this method: a round trip that comes out non-positive is arrival-
+     *                          mark drift booked as execution, not price improvement the desk can
+     *                          repeat, and {@link QuotedSpreadCost#withQuotedFallback} drops it so the
+     *                          name is charged its quote or this blend instead (ADR-0106).
      * @param params            the significance hurdle
      */
     public static Decision evaluate(List<SignalScoring.Stats> stats, Double roundTripCostBps, Params params) {
