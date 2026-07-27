@@ -73,7 +73,7 @@ public class FusionConfig {
                                     ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
                                     @Value("${jethro.fusion.weights.mode:telemetry}") String weightsMode,
                                     @Value("${jethro.fusion.weights.shrinkage-k:20}") double shrinkageK,
-                                    @Value("${jethro.fusion.weights.min:0}") double weightMin,
+                                    @Value("${jethro.fusion.weights.min:0.25}") double weightMin,
                                     @Value("${jethro.fusion.weights.max:3.0}") double weightMax,
                                     ObjectProvider<io.jethro.order.ExecutionQualityRepository> tca,
                                     @Value("${jethro.fusion.edge-gate.enabled:true}") boolean edgeGateEnabled,
