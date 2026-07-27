@@ -1365,3 +1365,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   an 85% move. (d) `ALPHA JPM SELL` REJECTED 45× on `no market data for JPM` — a name that can be neither
   entered nor exited. (e) ADR-0084's entry/exit asymmetry. (f) `turnover_cost_by_name` errored a **ninth**
   cycle. (g) The frozen MACRO book, fifteen cycles unchanged.
+
+## 2026-07-27 19:00Z — a merge can revert a fix while leaving its ADR standing
+
+- **The finding.** ADR-0110's deploy verification is **not in `HEAD`**. Merge `014359b` had two parents:
+  `d754109` (local, carrying the verification) and `ef16deb` (remote, `fix(ops): safe deploy — stop the
+  app BEFORE rebuilding the jar`) — an independently-authored fix to the *same* step of
+  `ops/improve-loop.sh`. The merge kept the remote side. ADR-0110's document, its README lines and its
+  finding all survived; only the code died. The 15:00 log proves it: still
+  `deploy: ./gradlew :app:bootJar -x test && sudo systemctl restart jethro` →
+  `Failed to restart jethro.service` → `deploy command FAILED — app NOT restarted`, and the `bootJar`
+  half still rewriting the jar under the live JVM. Restored, reconciled with `ef16deb` rather than
+  reverting it: the default *and* the fallback are now `scripts/svc.sh deploy app` (stop-before-rebuild,
+  strictly better than ADR-0110's original `restart app`), with the `/api/ops/jvm` boot-time check on top.
+- **Rule 16: a surviving ADR is not evidence that its code survived.** Rule 14 said check the clocks
+  before the statistics; this is its twin — check that the *mechanism* is still in the tree before
+  trusting the *record* that says it was built. `git log --format='%h %p'` on the merges and
+  `git diff <fix-sha> HEAD -- <the file>` is a ten-second check, and on this branch the loop and the
+  maintainer share one branch and edit the same ops files, so same-region collisions are the norm, not
+  an accident. When a fix and a doc land together, the doc is the thing most likely to outlive the fix.
+- **Rule 17: a commit that touches no runtime code cannot have moved the vector — do not let it be
+  scored.** `668a95704` is `docs/` + `ops/` + `reports/` only, yet it was charged with `+$10,408` of
+  gross and auto-reverted as ❌ BAD. The gross move was ADR-0107's flattening reversing as ADR-0108/0109
+  finally reached the JVM — which last cycle's finding had explicitly predicted. Two compounding harms:
+  the ledger carries a manufactured verdict, and the loop tried to amputate its own plumbing. The revert
+  then **conflicted** (loop-only commits touch `reports/last-analysis.md`, which every cycle rewrites),
+  so the row says "reverted" while nothing was — the note is false even though the numbers are sound.
+- **Rule 18: read the DANGER flag as a question, not a verdict.** It fired on `-$0.78` (0.014% of PnL)
+  plus a gross move from `$0.00` — a book that had been flattened coming back to life. Bleeding-plus-
+  adding-risk is the right thing to watch for, but "exposure rose from zero" is re-entry, not
+  escalation, and de-risking into it would have undone the gate work of the last three cycles. Check
+  whether the prior gross was `$0.00` before treating a rise as risk being added into a loss.
+- **Untouched, and now the top lever:** net exposure `$10,407.01` **equals** gross — the book is
+  100% one-way, seven EQUITY positions, while the HEDGE book holds `$0.00` gross on `-$3,071.55`
+  realised and trades ES in `0.003`-contract clips. A hedge that rounds to nothing is not a hedge.
+  That is next cycle's change, unless the deploy is still not turning the JVM over.

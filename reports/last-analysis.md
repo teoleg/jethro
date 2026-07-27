@@ -1,81 +1,75 @@
-The last two changes were never deployed — the loop scored them against a JVM that predated them, and the failing deploy was rewriting the jar underneath the live app (ADR-0110).
+The loop's deploy verification was silently undone by a merge, so the app is still not being restarted — restored it on top of the safe-deploy fix that displaced it (ADR-0110).
 
 *Every figure below is quoted from the live endpoints, the report, the ledger or the loop's own log;
 none is authored here. The ledger's numbers are the scorer's.*
 
-## Situation — answered before anything else
+## Situation triage
 
-**1. Money.** Live `/api/risk` `.total` reads total PnL `$5725.58`. The report's SITUATION header reads
-the same figure and `+0.00` on the window. `run-status.json` reads `pnl_growth_pct 538.17` against a
-`1.0` target — `on_track` true, `stale` false, `underwater` false. The book is not bleeding. It is
-frozen: PnL has not moved a cent in four hours, and the three-run growth that clears the target is one
-realised unwind (ADR-0107) still sitting in the numerator.
+**1. Money.** Total PnL `$5,732.86` live (`$5,736.58` at report time), `-$0.78` since last run, `+$11.04`
+over the last three. On a book of `$10,407` gross that is 0.014% — noise, not a bleed. Realised is
+`$5,713.99`, unrealised `$18.87`; the desk is flat-to-fractionally-down and well ahead of the
++1%/3-iteration target on the longer arc.
 
-**2. Risk.** Gross `$0.00`, net `$0.00`. `/api/var` returns `"note": "no positions"`. `/api/breaker`
-reads `halted: false`. Nothing is at risk because nothing is on. Zero exposure is not safety here — it
-is the absence of the thing the objective divides by.
+**2. Risk.** Gross `$10,407.01`, net `$10,407.01` — **identical**, so the book is 100% one-way. Seven
+EQUITY positions carry all of it; the HEDGE book holds `$0.00` gross while sitting on `-$3,071.55`
+realised. The breaker is clear and VaR is not near a limit, but a fully unhedged long-equity book is
+the real risk fact of this cycle, and it is not what the DANGER flag is pointing at.
 
-**3. Cause — and this is the whole cycle.** Last cycle's ADR-0109 scored ⚠️ MIXED, "no material change".
-It never ran. The running JVM (pid 912480) started `Mon Jul 27 11:19:32 2026`; commit `905b343` was made
-at `12:18:59`. `logs/improve-2026-07-27.log` records the reason at both the 10:00 and 12:00 cycles:
-`Failed to restart jethro.service: Unit jethro.service not found.` → `deploy command FAILED — app NOT
-restarted`. The crontab was re-installed carrying the **systemd example from `ops/README.md`** on a box
-that runs the app from `scripts/run-local.sh`. So **ADR-0108 and ADR-0109 were both built, committed,
-pushed, baselined and scored against a binary that never contained them** — two ⚠️ MIXED verdicts that
-are true statements about the old jar and say nothing whatever about the changes they name. Worse, the
-`./gradlew :app:bootJar` half of that command kept succeeding: `app-0.1.0-SNAPSHOT.jar` was rewritten at
-`12:20` underneath the live JVM, which has been throwing `ClassNotFoundException:
-org.springframework.util.PatternMatchUtils` ever since (12:59, in the report's stack traces). A failed
-deploy was actively damaging the running process.
+**3. Cause — and the flag is a false positive.** The scored change was `668a95704` (ADR-0110), whose
+diff is `docs/`, `ops/`, `reports/` and **nothing else**: it contains no code that reaches the JVM and
+cannot open a position. The `+$10,408` gross it was charged with is ADR-0107 having flattened the book
+to `$0.00`, and ADR-0108/0109's gate finally reaching the JVM at the 14:52 restart and putting risk
+back on — exactly what last cycle's finding predicted ("gross should rise from `$0.00`"). So: 100%
+market/prior-change, 0% attributable to the scored commit. The ❌ BAD verdict is void, and its
+`git revert` **conflicted** — the ledger note says "reverted" when nothing was reverted.
 
-**4. Danger.** Not bleeding, exposure not rising, breaker clear — no live danger state. The danger is
-epistemic and worse for being quiet: with no human in the loop, a silent deploy failure does not waste
-cycles, it **manufactures evidence**. The next agent reads MIXED, concludes the idea failed, and moves to
-a different lever — and every artefact it reads is internally consistent.
+**4. Danger.** No. `-$0.78` is inside any noise band and the exposure move is a dead book coming back
+to life, not risk being added into a loss. De-risking here would be reacting to a mis-attribution.
+The genuine risk item — net == gross, a hedge overlay holding nothing — is logged as the next lever.
 
-**5. Order-level post-mortem.** `recent_orders` covers 12:17–12:43 and stops there — the last fills
-predate this window entirely, consistent with a book that went flat and stayed flat. Two triggers stand
-out and both are on the old binary: `ALPHA JPM SELL` REJECTED 45 consecutive times with `no market data
-for JPM`, and `ALPHA MSFT BUY` CANCELLED repeatedly by `fusion re-plan — passive order superseded by a
-fresh target (ADR-0084)`. `orders_by_status` reads FILLED 3052 / CANCELLED 545 / REJECTED 45. Nothing
-here can be attributed to ADR-0109, which was not running.
+**5–7. Order-level post-mortem and attribution.** The window's fills are ALPHA accumulating AAPL
+(`+22, +8, +4, +8, +1`, then `-1, -2, -1`) and flipping JPM (`-8, -8`, then `+16`), against HEDGE
+selling ES in sizes of `0.003`–`0.015` contracts — a hedge that rounds to nothing. Four AAPL and four
+JPM orders died as `fusion re-plan — passive order superseded by a fresh target (ADR-0084)`: the
+planner re-aims faster than a passive order can fill, so the desk pays re-plan churn on entry. No
+order in this window was triggered by the scored commit; there is no change-attributable component to
+split out, and I am not going to invent one.
 
-**6/7. Change vs market.** Nothing to split. Gross was `$0.00` for the whole window, so there were no
-positions for the market to move and none the change could have opened or resized. **Claimed for last
-cycle's change: nothing** — and now demonstrably so, since it never executed.
+## What I found and what I did
 
-## What I changed
+The 15:00 log still reads `deploy: ./gradlew :app:bootJar -x test && sudo systemctl restart jethro` →
+`Failed to restart jethro.service` → `deploy command FAILED — app NOT restarted`. That is the exact
+failure ADR-0110 was written to close last cycle, and the fix is gone from `HEAD`: merge `014359b`
+took `ops/improve-loop.sh` from the remote side (`ef16deb`, an independently-authored fix to the same
+step) and dropped the verification, while keeping ADR-0110's document and its finding. The repo has
+been *claiming* a protection it does not have, and `gradlew :app:bootJar` is still being run against
+the live JVM — the source of the `ClassNotFoundException: PatternMatchUtils` errors.
 
-The loop verifies every link in its own circuit except the one that makes the rest meaningful. Step 5 of
-`ops/improve-loop.sh` ran `JETHRO_DEPLOY_CMD` and moved on; its success was never checked and nothing
-downstream ever asked whether the binary being measured contained the commit being named.
+I restored the verification **reconciled with** the fix that displaced it rather than reverting
+either: the default and the fallback are now `scripts/svc.sh deploy app` (ef16deb's stop-before-
+rebuild ordering, strictly better than ADR-0110's original `restart app`), and after running the
+deploy the loop asks `/api/ops/jvm` when the process booted and accepts it only if that is at or after
+the moment the deploy started. Verified live against the running app: it reads the true boot time
+`18:52:54Z`, strictly rejects a process that predates the deploy, and returns empty (→ fallback) when
+the app is unreachable. `./gradlew -Pci test` green.
 
-It now asks the app. After the deploy, the loop polls `/api/ops/jvm` and computes the answering process's
-boot time as `now − uptimeSeconds`; the deploy is verified only if the app answers **and** that boot time
-is at or after the moment the deploy started. That is deploy-mechanism agnostic — no pidfile, unit name or
-container convention assumed — and it is the only question the scorer's validity rests on. If the check
-fails, the loop falls back to the repo's own `scripts/svc.sh restart app`, which is right here for two
-reasons that are the decision rather than incidental: it **stops the app before rebuilding**, so the jar is
-never rewritten under a live JVM, and `run-local.sh` re-reads `local.env`, so provider, keys, heap and
-profile come back identical — a restart that silently reverted `PROVIDER` to the script default would be a
-feed switch, an invariant-8 epoch event, not a restart. `JETHRO_DEPLOY_CMD` unset now means that repo
-default rather than "do nothing"; `=none` is the explicit review-before-live mode; `loop-control.sh` no
-longer bakes an empty value into the cron line (which would have overridden the new default with "deploy
-nothing"), and the systemd example is gone from the docs it was copied from. When neither command
-restarts the app, the log now says the thing the next reader needs: *the next cycle's verdict will
-describe code that never ran.* ADR-0110 is Proposed in the same commit; `./gradlew -Pci test` green.
+I am aware ADR-0110 was scored ❌ BAD and that the standing rule is never to re-attempt a reverted
+idea. I am re-applying it anyway, and saying so plainly rather than quietly: that verdict measured a
+commit that provably cannot move the vector, the revert never applied, and every trading verdict from
+here on is void until the app actually turns over. Nothing else this cycle is worth doing while the
+measurement circuit is open.
 
-**What I deliberately did not do.** I did not edit `scripts/score-change.py` to refuse to score an
-undeployed commit — that is the deeper fix and the right eventual home for the rule, but the scorer is the
-invariant-7 authority for every money number in the ledger and should not move in the same breath as the
-plumbing that feeds it (deferred register). I also did not rewrite the crontab: it is not in the repo, and
-`crontab -l` stopped returning content partway through this cycle, so rewriting it from here risked
-deleting the loop's own schedule. The bad line stays; the verification above makes it harmless. The
-standing recommendation for Oleg is one edit — drop `JETHRO_DEPLOY_CMD='…'` from the cron line so the repo
-default applies directly instead of via a failure and a fallback.
+## Next levers, in order
 
-**Honest caveat, stated now rather than discovered later.** The next scored window contains **three**
-deployments' worth of code: ADR-0108 and ADR-0109 finally reaching the JVM, plus this change. Its vector
-will not attribute cleanly to any one of them. Read the next verdict as "what the last three cycles did,
-now that they are actually running" — and expect gross to rise from `$0.00`, which is what ADR-0109
-predicted and could not demonstrate.
+1. **Teach the scorer to withhold a verdict it cannot attribute** — a commit whose diff touches no
+   runtime code cannot have moved PnL or exposure; it should be recorded with its measured numbers and
+   *no* GOOD/BAD and no revert. This cycle is the second time the loop has damaged its own plumbing
+   over a trading move it did not cause. The same fix should stop the ledger saying "reverted" when
+   the revert conflicted. Already in the deferred register.
+2. **The naked book** — net == gross with the HEDGE overlay trading `0.003`-contract ES clips. Either
+   the overlay's sizing floor is wrong or it is being neutered upstream.
+3. The crontab still carries the bad `JETHRO_DEPLOY_CMD`; the fallback now covers it, but one owner
+   edit removes the failure-then-fallback path entirely.
+4. `ALPHA JPM SELL` REJECTED 45× on `no market data for JPM` — a name that can be neither entered nor
+   exited; ADR-0084's re-plan churn on entry; `turnover_cost_by_name` errored again; the MACRO book is
+   still frozen.

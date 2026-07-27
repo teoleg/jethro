@@ -62,6 +62,12 @@ ops/loop-control.sh off        # disable — removes the cron line, nothing runs
 ```
 - `JETHRO_DEPLOY_CMD` is **your** build-and-restart command; the loop runs it only after a verified
   commit. If you leave it empty, changes still commit+push but the app won't restart (it warns you).
+  Left **unset** entirely, the loop uses the repo's own `scripts/svc.sh deploy app`.
+- The loop does not trust that command's exit status. After running it, it asks the app when it
+  booted (`/api/ops/jvm` uptime) and accepts the deploy only if a process that started *after* the
+  deploy began is answering; otherwise it falls back to `scripts/svc.sh deploy app` and, if that also
+  fails, writes a loud line saying the next cycle's verdict is void (ADR-0110). A verdict scored
+  against a binary that never contained the change is manufactured evidence, not a measurement.
 - `on`/`off` just add/remove one tagged crontab line, so it's safe to toggle anytime.
 
 ## The branch is the gate

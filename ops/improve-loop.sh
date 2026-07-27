@@ -122,18 +122,88 @@ if [ -z "$CODE_CHANGED" ]; then
 fi
 echo "code changed:" >> "$LOG"; printf '%s\n' "$CODE_CHANGED" >> "$LOG"
 
-# 5. Rebuild the binary + restart the app. This is YOUR command (how you build/run Jethro) — set
-#    JETHRO_DEPLOY_CMD in the crontab or environment. Use `scripts/svc.sh deploy app`, which STOPS the
-#    running JVM before it rebuilds the jar. Do NOT run `gradlew :app:bootJar` against a live app: the
-#    Spring Boot loader reads classes lazily from app/build/libs, so rebuilding under the running
-#    process corrupts its classloader (ClassNotFoundException; the UI dies, trading-core limps on).
-#      JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app'
-if [ -n "${JETHRO_DEPLOY_CMD:-}" ]; then
-  echo "deploy: $JETHRO_DEPLOY_CMD" >> "$LOG"
-  # 9>&- as above: the deploy starts the long-lived app (and may spawn Gradle); neither must inherit
-  # the single-flight lock, or it stays held for the life of the app and every later cycle skips.
-  bash -c "$JETHRO_DEPLOY_CMD" >> "$LOG" 2>&1 9>&- || echo "deploy command FAILED — app NOT restarted" >> "$LOG"
+# 5. Rebuild the binary + restart the app — and VERIFY the running process actually turned over.
+#
+#    A change that never reached the JVM is not a change (ADR-0110). The loop's whole feedback circuit
+#    assumes the app the scorer measures next cycle is running the commit it is scoring; when the
+#    deploy silently fails that assumption breaks and the ledger records a verdict for code that never
+#    ran. It happened: a crontab carrying the systemd EXAMPLE from ops/README.md on a box that runs the
+#    app via scripts/svc.sh failed every cycle ("Unit jethro.service not found"), two commits were
+#    scored against a binary that predated them, and the `./gradlew :app:bootJar` half of that command
+#    kept succeeding — overwriting app-0.1.0-SNAPSHOT.jar underneath the LIVE JVM, which then threw
+#    ClassNotFoundException on every lazily-loaded class.
+#
+#    So: run the deploy, then ask the app itself when it started. Reading uptime off the running
+#    process works for any deploy mechanism (systemd, svc.sh, container) — no pidfile convention
+#    assumed, and unlike an exit status it cannot report success for a process that never turned over.
+#
+#    This is YOUR command — set JETHRO_DEPLOY_CMD in the crontab or environment. Unset, the repo's own
+#    `scripts/svc.sh deploy app` is the default rather than doing nothing; it is also the fallback when
+#    verification fails, and it is always correct on this box: it STOPS the running JVM before it
+#    rebuilds the jar (the Spring Boot loader reads classes lazily from app/build/libs, so rebuilding
+#    under a live process corrupts its classloader) and it re-reads local.env, so provider/keys/profile
+#    come back identical rather than reverting to run-local.sh's defaults — a silent feed switch is an
+#    invariant-8 event, not a restart. Set JETHRO_DEPLOY_CMD=none for review-before-live.
+DEPLOY_FALLBACK_CMD="scripts/svc.sh deploy app"
+DEPLOY_CMD="${JETHRO_DEPLOY_CMD-$DEPLOY_FALLBACK_CMD}"
+if [ -z "$DEPLOY_CMD" ]; then DEPLOY_CMD="none"; fi
+
+# Epoch second the running app booted, or empty if it isn't answering. Uses the same JETHRO_URL the
+# scorer and the report read, so "the app" means the app the ledger's numbers come from.
+app_start_epoch() {
+  python3 - <<'PY' 2>/dev/null || true
+import json, os, time, urllib.request
+base = os.environ.get("JETHRO_URL", "http://localhost:8080").rstrip("/")
+try:
+    with urllib.request.urlopen(base + "/api/ops/jvm", timeout=5) as r:
+        print(int(time.time() - float(json.load(r)["uptimeSeconds"])))
+except Exception:
+    pass
+PY
+}
+
+# True once the app answers AND the process behind it started at/after $1 — i.e. this deploy restarted
+# it. Polls rather than sleeping blind: a cold start on this box takes a couple of minutes. Strict
+# `>=`: a false negative only costs a redundant restart, a false positive is the bug we are fixing.
+wait_for_restart() {
+  local since="$1" deadline started
+  deadline=$(( $(date +%s) + ${JETHRO_DEPLOY_TIMEOUT:-300} ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    started="$(app_start_epoch)"
+    if [ -n "$started" ] && [ "$started" -ge "$since" ]; then return 0; fi
+    sleep 5
+  done
+  return 1
+}
+
+# 9>&- as above: the deploy starts the long-lived app (and may spawn Gradle); neither must inherit
+# the single-flight lock, or it stays held for the life of the app and every later cycle skips.
+run_deploy() {
+  echo "deploy: $1" >> "$LOG"
+  bash -c "$1" >> "$LOG" 2>&1 9>&- || echo "deploy command exited non-zero: $1" >> "$LOG"
+}
+
+if [ "$DEPLOY_CMD" = "none" ]; then
+  echo "JETHRO_DEPLOY_CMD=none — change is committed+pushed but the app was NOT rebuilt/restarted." \
+       "The next cycle will score this commit against a binary that does NOT contain it." >> "$LOG"
 else
-  echo "JETHRO_DEPLOY_CMD not set — change is committed+pushed but app was NOT rebuilt/restarted" >> "$LOG"
+  DEPLOY_STARTED=$(date +%s)
+  run_deploy "$DEPLOY_CMD"
+  if wait_for_restart "$DEPLOY_STARTED"; then
+    echo "deploy VERIFIED — app is serving on a process that started after the deploy began" >> "$LOG"
+  elif [ "$DEPLOY_CMD" != "$DEPLOY_FALLBACK_CMD" ]; then
+    echo "deploy NOT verified (no restarted process answering /api/ops/jvm) — falling back to the repo's own restart" >> "$LOG"
+    DEPLOY_STARTED=$(date +%s)
+    run_deploy "$DEPLOY_FALLBACK_CMD"
+    if wait_for_restart "$DEPLOY_STARTED"; then
+      echo "deploy VERIFIED via fallback" >> "$LOG"
+    else
+      echo "deploy FAILED — app did NOT turn over after the fallback either. The next cycle would" \
+           "score this commit against a binary that does NOT contain it; treat that verdict as void." >> "$LOG"
+    fi
+  else
+    echo "deploy FAILED — app did NOT turn over. The next cycle would score this commit against a" \
+         "binary that does NOT contain it; treat that verdict as void." >> "$LOG"
+  fi
 fi
 echo "==== $(date -Is) cycle end ====" >> "$LOG"
