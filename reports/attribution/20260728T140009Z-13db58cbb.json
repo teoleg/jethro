@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-28T14:00:09Z",
+    "fees": "0.042361",
+    "gross": "759.70500000",
+    "net": "84.48500000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "759.70500000",
+      "hedgePnl": "-1.45255732",
+      "netExposure": "84.48500000",
+      "realizedPnl": "-0.04236100",
+      "strategyAlpha": "1.25611000",
+      "totalFees": "0.042361",
+      "totalPnl": "-0.19644732",
+      "unrealizedPnl": "-0.15408632"
+    },
+    "total_pnl": "-0.19644732"
+  },
+  "before": {
+    "at": "2026-07-28T13:50:29Z",
+    "gross": "760.67980000",
+    "net": "84.04980000",
+    "total_pnl": "-0.63164732"
+  },
+  "commit": "13db58cbbd8b5200b9e2021453c09c14b4702fb4",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-0.97480000",
+    "net": "0.43520000",
+    "total_pnl": "0.43520000"
+  },
+  "note": "no material change (within noise band); risk-adj (PnL/$1 gross) improved -0.00083\u2192-0.00026",
+  "revert": false,
+  "scoredAt": "2026-07-28T14:00:09Z",
+  "summary": "the risk cut's per-name sigma advances on the market's own prints instead of on our planning cycle, so a republished mark can no longer decay the stop distance toward zero and cut every name held across a close on the first move of the next session (ADR-0116)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
