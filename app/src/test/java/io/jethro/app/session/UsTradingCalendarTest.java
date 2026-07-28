@@ -48,4 +48,22 @@ class UsTradingCalendarTest {
         // Thu 2026-04-02 18:00 ET, Good Friday next → rolls straight to Monday Apr 6.
         assertEquals(LocalDate.of(2026, 4, 6), atEastern("2026-04-02T22:00:00Z").sessionDay());
     }
+
+    @Test
+    void regularSessionHoursGateOpeningTrades() {
+        // Tue 2026-07-14 is EDT (ET = UTC-4); regular session 09:30–16:00 ET.
+        assertFalse(atEastern("2026-07-14T13:29:00Z").isTradingSessionOpen(), "09:29 ET — pre-open");
+        assertTrue(atEastern("2026-07-14T13:30:00Z").isTradingSessionOpen(), "09:30 ET — open");
+        assertTrue(atEastern("2026-07-14T19:59:00Z").isTradingSessionOpen(), "15:59 ET — open");
+        assertFalse(atEastern("2026-07-14T20:00:00Z").isTradingSessionOpen(), "16:00 ET — closed (exclusive)");
+        assertFalse(atEastern("2026-07-11T16:00:00Z").isTradingSessionOpen(), "Saturday noon — closed");
+        assertFalse(atEastern("2026-04-03T16:00:00Z").isTradingSessionOpen(), "Good Friday noon — closed");
+
+        // A continuous-tape (sim/replay) calendar keeps the always-open default — unaffected by hours.
+        TradingCalendar continuousTape = new TradingCalendar() {
+            @Override public LocalDate sessionDay() { return LocalDate.of(2026, 7, 14); }
+            @Override public String description() { return "continuous-tape"; }
+        };
+        assertTrue(continuousTape.isTradingSessionOpen(), "sim/replay tape is always open");
+    }
 }

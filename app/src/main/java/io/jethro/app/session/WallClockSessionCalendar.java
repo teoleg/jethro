@@ -44,6 +44,11 @@ public final class WallClockSessionCalendar implements TradingCalendar {
     }
 
     @Override
+    public boolean isTradingSessionOpen() {
+        return UsTradingCalendar.isRegularSessionOpen(ZonedDateTime.now(clock).withZoneSameInstant(zone));
+    }
+
+    @Override
     public String description() {
         return "wall-clock (" + zone + ", rolls " + String.format("%02d:00", rollHour)
                 + ", US trading days)";

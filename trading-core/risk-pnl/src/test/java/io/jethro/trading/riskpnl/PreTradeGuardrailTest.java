@@ -108,6 +108,28 @@ class PreTradeGuardrailTest {
     }
 
     @Test
+    void sessionGateBlocksRiskAddingWhenClosedButAllowsFlattening() {
+        var p = projectionWithMark();
+        // already long 80 @100 → gross 8,000
+        p.applyFill(new Fill("f1", "o1", new BookId("ALPHA"), new InstrumentId("AAPL"),
+                Side.BUY, new BigDecimal("80"), new BigDecimal("100"), Instant.EPOCH));
+        // huge cap so the SESSION gate is the only thing that can reject (ADR-0115)
+        RiskLimitSource huge = grossCap("100000000");
+
+        // session CLOSED: growing the long is refused …
+        var closed = new PreTradeGuardrail(p, huge, () -> false);
+        Optional<String> add = closed.rejectionReason("ALPHA", "AAPL", new BigDecimal("10"));
+        assertTrue(add.isPresent());
+        assertTrue(add.get().contains("session is closed"), add.get());
+        // … but flattening is always allowed, so a stuck position can still be closed out-of-hours
+        assertTrue(closed.rejectionReason("ALPHA", "AAPL", new BigDecimal("-10")).isEmpty());
+
+        // session OPEN: the same risk-adding order is fine again
+        var open = new PreTradeGuardrail(p, huge, () -> true);
+        assertTrue(open.rejectionReason("ALPHA", "AAPL", new BigDecimal("10")).isEmpty());
+    }
+
+    @Test
     void perInstrumentConcentrationCapRejects() {
         var p = projectionWithMark();
         RiskLimitSource instrCap = book -> new RiskLimits(null, null, null, new BigDecimal("5000"));

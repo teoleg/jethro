@@ -307,10 +307,22 @@ public class RiskConfig {
         return new RiskLimitEvaluator(properties.warnRatioOrDefault());
     }
 
-    /** Pre-trade exposure guardrail (ADR-0018), consumed by the order module via its port. */
+    /** Pre-trade exposure guardrail (ADR-0018), consumed by the order module via its port. Also carries
+     *  the session gate (ADR-0115): outside the US session the guardrail admits only risk-reducing
+     *  orders (SIM/REPLAY tapes run continuously — the wall-clock calendar reports always-open for
+     *  them via its default). Off → around-the-clock opening. */
     @Bean
-    PreTradeGuardrail preTradeGuardrail(RiskProjection projection, RiskLimitSource limits) {
-        return new PreTradeGuardrail(projection, limits);
+    PreTradeGuardrail preTradeGuardrail(RiskProjection projection, RiskLimitSource limits,
+                                        org.springframework.beans.factory.ObjectProvider<io.jethro.app.session.TradingCalendar> calendar,
+                                        @org.springframework.beans.factory.annotation.Value("${jethro.trading.session-gate.enabled:true}") boolean sessionGateEnabled) {
+        PreTradeGuardrail.SessionGate gate = () -> {
+            if (!sessionGateEnabled) {
+                return true;
+            }
+            var cal = calendar.getIfAvailable();
+            return cal == null || cal.isTradingSessionOpen();  // no calendar wired -> do not block
+        };
+        return new PreTradeGuardrail(projection, limits, gate);
     }
 
     /** The firm circuit breaker's switch (ADR-0027) — always present so the strategy and
