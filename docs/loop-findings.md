@@ -2018,3 +2018,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Queued follow-up (NOT this change):** the gate's Bonferroni divides α by RUNGS only
   (`hypotheses: 3`), not by sources. A fifth source makes the un-corrected source multiplicity worse, so
   a passing `xsreversion` reading deserves more scepticism than the gate expresses.
+
+## 2026-07-28T19:30Z — held (1/6); ADR-0121 landed on every predicted clause, and single-source names turn out to be max-conviction with no stop
+
+- **No change — evidence window open.** `score`: `68ff73eb2 still accumulating evidence (1/6 cycles)`;
+  `reports/.pending-baseline.json` present for `68ff73eb2`, stamped `2026-07-28T19:17:20Z`. Book flat
+  (gross `$0.00`, net `$0.00`, VaR `note: "no positions"`), breaker clear, feed live
+  (`lastUpdateAgeMillis: 10`). PnL `$0.61209817` for a sixth consecutive run. `orders_day.total: 7`,
+  newest ~3.5 h old — **zero orders**, so the move is `+0.00` from market AND `+0.00` from code.
+- **Last cycle's prediction landed on every clause.** `xsreversion` is live and publishing:
+  `resolved: 17`, `cohorts: 2`, `open: 9` @225s; `cohorts: 0`, `open: 10` @900s and @3600s. All eight of
+  its `fusion_targets` contributions are equities; `NQ` (the only non-equity routed name) carries none.
+  So it is correctly EQUITY-scoped and the **`min-peers` failure branch is closed** — from here the
+  diagnosis is the signal itself, not the plumbing. Weight sits mid-pack at `1.0113609266093764`.
+- **Rule 59: do not read a 2-cohort row's sign, not even your own new source's.** `xsreversion`@225s
+  reads `avgReturnBps -2.857963236111111`, `hitRate 0.25` — on one degree of freedom, where the gate
+  demands `t ≈ 41.97`. This desk already watched a 2-cohort row walk from far above the hurdle to
+  negative. The temptation to grade your own change early is exactly what the 6-cycle window exists to
+  resist; the falsification standard is "null once it has REAL cohorts", and that has not happened yet.
+- **Rule 60: coverage is not conviction — the combiner rewards breadth but never discounts thinness.**
+  `ForecastCombiner.combine` (`ForecastCombiner.java:104`) forms `average × dm × agreement`; at one
+  source the average IS that source's raw reading (no cross-source shrinkage), `dm = 1.0`,
+  `agreement = 1.0`. So a name held up by ONE source with two cohorts of measurement is scaled exactly
+  like GOOG, where four sources agree. `xsreversion` is currently the sole source on **TSLA** and
+  **NFLX**, and TSLA carries the largest `|combinedForecast|` (`-19.482833721224054`, near the clamp)
+  and the largest notional target in the book.
+- **The uncomfortable overlap, and why it is the next lever.** Those two names are single-source
+  *because* their own-history sensors are cold (`trend` seeded `66 of 193` for TSLA, `34 of 193` for
+  NFLX) — and the same WARN log says `risk-cut σ sensor still cold` for both: "this name cannot be
+  stopped out until its mark history has accumulated". **The thinnest-conviction, largest-target names
+  are the ones with no working stop.** Harmless today only because `mayIncrease: false` pins every
+  `deltaQty` to 0. This is a risk-control asymmetry, not an edge question — legitimate to act on under
+  the edge-first priority — but it gets a quantitative pre-check before it becomes a commit, not before.
+- **Predicted next, so it can be checked.** Scorer at `2/6`; no ledger row for five more cycles, PnL flat
+  at `$0.61209817` absent orders. `xsreversion`@900s should resolve its first cohorts within a cycle or
+  two, 3600s later. If it measures null once it has real cohorts, the honest next move is a different
+  feed — not a sixth source.

@@ -1,82 +1,82 @@
-Nothing this desk measures predicts returns, so I stopped tuning the machinery and built a new predictor: cross-sectional residual reversion (ADR-0121), which fades a name against its peer group instead of against its own past.
+Held at 1/6 while ADR-0121 measures — the new source landed exactly as predicted, and it exposed a real structural asymmetry: the two names where it is the ONLY view are the two names that currently cannot be stopped out.
 
 *Every figure below is read from the live endpoints, `reports/run-status.json`, the ledger or this run's
 report; none is authored here (invariant 7 / ADR-0016 — the scorer owns every number that gates money).
-The t-statistics, p-values and params quoted are the edge gate's own published output.*
+The t-statistics quoted are computed by script from the gate's own published cohort dispersions.*
+
+**No change this cycle — the evidence window is open.** `score` prints `68ff73eb2 still accumulating
+evidence (1/6 cycles)`; `reports/.pending-baseline.json` exists for `68ff73eb2` (ADR-0121), stamped
+`2026-07-28T19:17:20Z`. Diagnosed, checked last cycle's prediction against the live telemetry, recorded
+one new structural finding, stopped.
 
 ## 1–4. The live situation, in plain numbers
 
-**Money.** Total PnL `$0.61209817` — unchanged for a fifth consecutive run. Since last run `+0.00`;
-over the last three runs `+0.00`. Not bleeding, but flat and off target: `pnl_growth_pct` `0.0%`
-against `pnl_target_pct` `1.0%`, `on_track=False`, `stale=True`, `underwater=False`.
+**Money.** Total PnL `$0.61209817` — unchanged for a sixth consecutive run. Since last run `+0.00`; over
+the last three runs `+0.00`. `pnl_growth_pct` `0.0%` against `pnl_target_pct` `1.0%`, `on_track=False`,
+`stale=True`, `underwater=False`. Not bleeding; stalled.
 
-**Risk.** Gross exposure `$0.00`, net `$0.00`. VaR `0.00` with `note: "no positions"`. Breaker clear
-(`halted: false`). Nothing at risk, so nothing to de-risk — the danger state does not apply.
+**Risk.** Gross `$0.00`, net `$0.00`. VaR `0.00` with `note: "no positions"`. Breaker `halted: false`.
+Books flat and summing to the firm total: HEDGE (ES) `+0.95512117`, ALPHA (AAPL) `-0.34302300`. Feed live
+(`alpaca` connected, `lastUpdateAgeMillis: 10`, 35 instruments, `ticksDropped: 0`). Nothing at risk.
 
-**Cause.** The pending change `9be1633c2` (ADR-0120, a cohort is one sweep) completed its evaluation
-window and scored `⚠️ INCONCLUSIVE` — `risk-adj return/cycle +0.000000 over 7 cycles, t=+0.00`. That
-is the correct verdict and not a failure of the change: `orders_day.total: 7` with the newest order
-now hours old, so **zero orders** were placed across the whole window. The move decomposes exactly:
-`+0.00` from market and `+0.00` from code. Nothing to attribute, in either direction.
+**Cause.** `68ff73eb2` (ADR-0121) has no verdict yet — `1/6`. The last scored row was `⚠️ INCONCLUSIVE`.
 
-**Danger.** None. Not bleeding, exposure not rising, breaker clear, feed live
-(`lastUpdateAgeMillis: 10`, provider `alpaca`, 35 instruments, `ticksDropped: 0`).
+**Danger.** None. Not bleeding, exposure not rising, breaker clear.
 
-## 5–6. Post-mortem and memory
+**5. Order post-mortem.** `orders_day.total: 7`, newest created `2026-07-28 15:50:41` UTC against a report
+clock of `1785267002113` — roughly three and a half hours old. **Zero orders this window.** Every routed
+name shows `deltaQty: 0` and `currentQty: 0`: the designed reduce-only behaviour while
+`edgeGate.mayIncrease: false`. No trigger to blame or strengthen.
 
-No orders this window, so there is no trigger to blame or strengthen. The memory (Rule 56, last
-cycle) already retired the queued edge-gate admission fix — I re-checked that it stays retired, and it
-does. The compounding lesson from the last five cycles is unambiguous: the ledger's INCONCLUSIVE wall
-is not noise about good changes, it is what happens when every change targets the *combiner*, the
-*gate* or the *sensor mechanics* while the *measurements themselves* are null.
+**7. Change vs market — exactly separable.** Zero orders and a flat book: the window's move is `+0.00`
+from market **and** `+0.00` from code. Neither credit nor blame is available.
 
-## 7. What I checked on the edge mission, and what I did about it
+## Last cycle's prediction, checked — it landed on every clause
 
-I read every source × horizon row before deciding. The gate reads `mayIncrease: false`; against a
-`roundTripCostBps` of `0.6278285714285714`, no source clears at any rung — the best `tStat` anywhere
-is `0.6564771217276463` (`social`@3600 s on 5 cohorts). I also computed the other two rungs' t-stats
-from the published cohort dispersions rather than assuming: `reversion`@900 s ≈ `0.27` on 29 cohorts,
-`reversion`@225 s ≈ `0.25` on 77. So the "horizon ladder" lever I flagged last cycle is **dead** —
-moving the gate's measurement rung would not open it either, and I am recording that so it is not
-re-attempted.
+I predicted `xsreversion` would appear in `signals_telemetry` within a cycle or two, with cohorts in the
+low single digits at 225 s and nothing yet at 3600 s, and that the EQUITY group would be the only one
+clearing `min-peers: 4`. All three landed. It reads `resolved: 17`, `cohorts: 2`, `open: 9` at 225 s and
+`cohorts: 0`, `open: 10` at both 900 s and 3600 s — the longer rungs have simply not resolved yet. Every
+one of its eight contributions in `fusion_targets` is an equity (TSLA, MSFT, AMZN, JPM, GOOG, NVDA, NFLX,
+JNJ); `NQ` is the only non-equity routed name and carries no `xsreversion` term. So the source is live,
+correctly EQUITY-scoped, and the `min-peers` failure branch is **closed** — the diagnosis is the signal
+from here, not the plumbing. Its weight sits mid-pack at `1.0113609266093764`.
 
-But the null is not uniform, and its shape is informative. `reversion` is the only source
-positive-signed at *every* rung (`0.6500729504188325` bps at 225 s over 77 cohorts,
-`1.2532288851764135` at 900 s over 29, `6.940456315814394` at 3600 s over 8), while `trend` measures
-negative on both its best-sampled rungs (`-0.21794567180606306` at 225 s over 87,
-`-8.299129091035356` at 3600 s over 10). That is a weak positive structure with real sample behind it
-and no way to sharpen it by re-weighting.
+**Its early sign is negative, and I am deliberately not reading it.** `avgReturnBps
+-2.857963236111111`, `hitRate 0.25` — but on `cohorts: 2`, i.e. one degree of freedom, where my own
+computed table says the gate demands `t ≈ 41.97`. This desk has already watched a 2-cohort row walk from
+far above the hurdle to negative. Two cohorts is not evidence in either direction.
 
-The reversal literature says precisely why a raw own-price reversal signal measures like that: the
-documented effect lives in the **idiosyncratic** component. Fading a name that is down *because the
-whole cross-section is down* is a bet on the market factor — roughly zero expectancy over an hour,
-plus the reversal trade's full turnover cost — and pooling it with the residual bet dilutes the one
-that works. ADR-0019 hedges net equity toward flat anyway, so that factor component is exposure the
-desk deliberately does not keep, currently being measured as if it were alpha.
+## The one thing worth flagging, which the flat book is hiding
 
-## The change
+Reading `fusion_targets` name by name: `xsreversion` is the **sole** source on **TSLA** and **NFLX** —
+and TSLA carries the largest `|combinedForecast|` (`-19.482833721224054`, near the clamp) and the largest
+notional target in the book. The mechanism is plain in `ForecastCombiner.combine`
+(`app/src/main/java/io/jethro/app/fusion/ForecastCombiner.java:104`): the combined value is
+`average × dm × agreement`, and at one source the average IS that source's raw reading — no cross-source
+shrinkage — while `dm = 1.0` and `agreement = 1.0`. That is correct per ADR-0119/0076 as written (the
+javadoc says so explicitly: "unanimous sources (and the single-source case) return 1 and change nothing"),
+but note what it means: the fusion layer has a **bonus for broad coverage and no discount for thin
+coverage**. A name held up by one source with two cohorts of measurement is treated exactly like GOOG,
+where four sources agree.
 
-A fifth forecast source, `xsreversion`, on the identical ADR-0066/0070 contract: it publishes a
-conviction, records every reading in the phase-1 telemetry, and must earn its own measured expectancy
-through the edge gate before it sizes anything. Per sweep, in the feed's own clock: a name is admitted
-only if it printed in **both halves** of the lookback window (dial-free — so a name that stopped
-printing cannot pass off a stale partial return as current); its move is `ln(P_last/P_first)/√span`,
-vol-time normalised because print rates here span seconds to tens of minutes; peers are its **asset
-class from the instrument master**; the score is `−clamp((r − median)/(1.4826·MAD), ±4)` within a
-group of at least four. Median/MAD because peer groups are single-digit and one bad print would
-otherwise flip everyone else's sign. It emits the whole cross-section at once — exactly one ADR-0120
-cohort — so the gate counts it correctly with no special case. No money/risk/exposure number is
-introduced; the three shape dials carry provenance in `application.properties`.
+Why those two names specifically is answered by the WARN log, and it is the uncomfortable part: TSLA and
+NFLX are precisely where the own-history sensors are still cold (`trend` seeded `66 of 193` for TSLA,
+`34 of 193` for NFLX), which is *why* only the cross-sectional source has a view. And the same log says
+`risk-cut σ sensor still cold for TSLA` / `for NFLX` — "this name cannot be stopped out until its mark
+history has accumulated". So the two names with the thinnest conviction and the largest targets are the
+two names with **no working stop**.
 
-**Why this is safe while it measures.** The gate is reduce-only and this source cannot change that; it
-can only alter how a held position is worked down, and the book is flat. The cost of being wrong is
-measurement time, not money.
+**This is currently harmless** — `mayIncrease: false` holds every `deltaQty` at 0, so none of it routes.
+I am not acting on it this cycle and I would not act on it as a combiner tweak. But it is a risk-control
+asymmetry, not an edge question, and it is the lever I intend to pre-check (quantitatively, before it
+becomes a commit) once ADR-0121 scores: conviction should not be independent of whether the name can be
+stopped.
 
-**The honest cost, stated up front.** The gate's Bonferroni correction divides α by *rungs* only, not
-by sources, so a fifth source makes the un-corrected source multiplicity worse — a passing
-`xsreversion` reading deserves more scepticism than the gate will express. Fixing that is the queued
-follow-up, not this change.
+## Predicted next, so it can be checked
 
-**What would falsify it.** If `xsreversion` also measures null once it has real cohorts, that is
-strong evidence this universe has no short-horizon reversal to capture at all — and the right next
-move is a different feed, not a sixth source. I will say so plainly rather than adding one.
+Scorer at `2/6` next run; no ledger row for another five cycles and PnL flat at `$0.61209817` absent
+orders. `xsreversion`@900 s should resolve its first cohorts within a cycle or two; 3600 s later. The
+falsification standard from last cycle stands unchanged: **if `xsreversion` measures null once it has real
+cohorts, that is evidence this universe has no short-horizon reversal to capture, and the honest next move
+is a different feed — not a sixth source.**
