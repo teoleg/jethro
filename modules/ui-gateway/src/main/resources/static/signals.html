@@ -38,6 +38,7 @@
   .whyno { font-size:11px; color:var(--dim); }
   .lead { color:var(--dim); font-size:12px; margin:2px 2px 0; }
 </style>
+  <script src="format.js"></script>
 </head>
 <body>
 <div class="topbar">
@@ -99,7 +100,7 @@
           ? '<span class="up" title="auto-executed on the AI sleeve">AUTO ✓</span>' + oc
           : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}" title="${esc(r.reason||'')}">${esc(r.verdict)}</span>`
             + (r.reason ? ` <span class="whyno" title="${esc(r.reason)}">· ${esc(r.reason)}</span>` : '');
-        return `<tr><td class="muted mono">${new Date(r.ts).toLocaleTimeString()}</td>
+        return `<tr><td class="muted mono">${fmtTimeET(r.ts)}</td>
           <td title="${esc(r.note||'')}">${esc(r.instr)} — ${esc(r.thesis)}</td>
           <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conv||'')}</td>
           <td>${v}</td><td>${btCell(r.btSupports, r.btPnl, r.btTrades)}</td></tr>`;
@@ -128,7 +129,7 @@
       "<table><tr><th>time</th><th>action</th><th>instr</th><th>qty</th><th>reason</th></tr>" +
       rows.map(a => {
         const isExit = a.kind === "EXIT";
-        return `<tr><td class="muted mono">${new Date(a.timestampMillis).toLocaleTimeString()}</td>
+        return `<tr><td class="muted mono">${fmtTimeET(a.timestampMillis)}</td>
           <td class="${a.side==='BUY'?'up':'down'}">${esc(a.side)}${isExit?'<span class="ktag">exit</span>':''}</td>
           <td class="cls">${esc(a.instrumentId)} <span class="muted" style="font-size:10px">${esc(a.book)}</span></td>
           <td class="mono">${esc(a.quantity)}</td>

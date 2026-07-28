@@ -210,7 +210,7 @@
   let lastVar = null; // /api/var refreshes slower than /api/risk; cache for the tile
   let lastEod = null; // /api/eod — session day + today's P&L measured from the previous close
   function renderRisk(r) {
-    document.getElementById("asof").textContent = "· " + new Date(r.asOfMillis).toLocaleTimeString();
+    document.getElementById("asof").textContent = "· " + fmtTimeET(r.asOfMillis);
     const t = r.total;
     const varTile = lastVar == null ? "" : (lastVar.note
       ? `<div class="stat"><div class="k">VaR 95 (1d)</div><div class="v mono muted" style="font-size:12px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</div></div>`
@@ -238,7 +238,7 @@
     if (items.length > 50) { items = items.slice(0, 50); } // cap DOM in a long-open tab (memory de-load)
     feed.innerHTML = items.map(i =>
       `<div class="card ${esc(i.severity)}"><div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
-         <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${new Date(i.timestampMillis).toLocaleTimeString()}</div></div>`).join("");
+         <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${fmtTimeET(i.timestampMillis)}</div></div>`).join("");
   }
 
   // Backend service (SSE stream) indicator: always labelled "system"; the LED colour carries
@@ -392,7 +392,7 @@
           ? '<span class="up" title="auto-executed on the AI sleeve — closed & scored at horizon expiry">AUTO ✓</span>' + oc
           : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}" title="${esc(r.reason||'')}">${esc(r.verdict)}</span>`
             + (r.reason ? ` <span class="whyno" title="${esc(r.reason)}">· ${esc(r.reason)}</span>` : '');
-        return `<tr class="${r.executed?'hypo-exec':''}"><td class="muted mono">${new Date(r.ts).toLocaleTimeString()}</td>
+        return `<tr class="${r.executed?'hypo-exec':''}"><td class="muted mono">${fmtTimeET(r.ts)}</td>
           <td title="${esc(r.note||'')}">${esc(r.instr)} — ${esc(r.thesis)}</td>
           <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conv||'')}</td>
           <td>${v}</td><td>${btCell(r.btSupports, r.btPnl, r.btTrades)}</td></tr>`;
@@ -426,7 +426,7 @@
       "<table><tr><th>time</th><th>action</th><th>instr</th><th>qty</th><th>reason</th></tr>" +
       rows.map(a => {
         const isExit = a.kind === "EXIT";
-        return `<tr><td class="muted mono">${new Date(a.timestampMillis).toLocaleTimeString()}</td>
+        return `<tr><td class="muted mono">${fmtTimeET(a.timestampMillis)}</td>
           <td class="${a.side==='BUY'?'up':'down'}">${esc(a.side)}${isExit?'<span class="ktag">exit</span>':''}</td>
           <td class="cls">${esc(a.instrumentId)} <span class="muted" style="font-size:10px">${esc(a.book)}</span></td>
           <td class="mono">${esc(a.quantity)}</td>
@@ -567,7 +567,7 @@
       document.getElementById("obpage").textContent = `page ${r.page + 1} / ${r.totalPages}`;
       document.getElementById("oblotter").outerHTML = '<div id="oblotter">' + (r.orders.length ?
         "<table><tr><th>time</th><th>order id</th><th>instr</th><th>book</th><th>side</th><th>qty</th><th>status</th></tr>" +
-        r.orders.map(o => `<tr><td class="muted mono">${new Date(o.createdAtMillis).toLocaleTimeString()}</td>
+        r.orders.map(o => `<tr><td class="muted mono">${fmtTimeET(o.createdAtMillis)}</td>
           <td class="mono muted" style="font-size:11px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.orderId)}">${esc(o.orderId)}</td>
           <td class="cls">${esc(o.instrumentId)}</td><td class="muted">${esc(o.bookId)}</td>
           <td class="${esc(o.side)}">${esc(o.side)}</td><td class="mono">${esc(o.quantity)}</td>

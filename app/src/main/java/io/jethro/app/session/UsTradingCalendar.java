@@ -2,6 +2,8 @@ package io.jethro.app.session;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZonedDateTime;
 import java.time.temporal.TemporalAdjusters;
 import java.util.HashMap;
 import java.util.Map;
@@ -22,12 +24,32 @@ public final class UsTradingCalendar {
     private UsTradingCalendar() {
     }
 
+    /** NYSE regular session hours, exchange-local (ET). Source: NYSE — regular trading 09:30–16:00 ET.
+     *  Half-day early closes (13:00) are NOT modelled (disclosed convention): for a trading gate that
+     *  is the safe error — it would at most allow a little extra on ~2 days/year, never block a real
+     *  session. */
+    public static final LocalTime REGULAR_OPEN = LocalTime.of(9, 30);
+    public static final LocalTime REGULAR_CLOSE = LocalTime.of(16, 0);
+
     public static boolean isTradingDay(LocalDate date) {
         DayOfWeek dow = date.getDayOfWeek();
         if (dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY) {
             return false;
         }
         return !holidays(date.getYear()).contains(date);
+    }
+
+    /**
+     * True iff {@code nowInExchangeZone} falls inside the US equity REGULAR session: a trading day
+     * (weekday, not a full-closure holiday), at or after 09:30 and strictly before 16:00 ET. The
+     * argument must already be in the exchange zone. Used by the pre-trade session gate (ADR-0115).
+     */
+    public static boolean isRegularSessionOpen(ZonedDateTime nowInExchangeZone) {
+        if (!isTradingDay(nowInExchangeZone.toLocalDate())) {
+            return false;
+        }
+        LocalTime t = nowInExchangeZone.toLocalTime();
+        return !t.isBefore(REGULAR_OPEN) && t.isBefore(REGULAR_CLOSE);
     }
 
     /** The next trading day at or after {@code date}. */

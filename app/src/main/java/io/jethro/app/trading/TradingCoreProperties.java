@@ -43,8 +43,9 @@ public record TradingCoreProperties(
          *  regimes play out in minutes). */
         Double simSecondsPerDay,
         long simTickIntervalMillis,
-        /** Market-data provider: "sim" (default), "yahoo" (ADR-0023), or "finnhub" (ADR-0024,
-         *  real-time equities over WebSocket — needs finnhub-token). Dev/demo only. */
+        /** Market-data provider: "sim" (default), "yahoo" (ADR-0023), "finnhub" (ADR-0024) or
+         *  "alpaca" (ADR-0056) — the last two real-time equities over WebSocket (need a token/key).
+         *  All non-sim providers are LIVE (see ProvenanceConfig.feedModeFor). Dev/demo only. */
         String provider,
         /** Gap between individual Yahoo symbol requests, in ms (spread, not burst — avoids
          *  429s). Default 700; each symbol then refreshes every ~spacing×instrumentCount. */

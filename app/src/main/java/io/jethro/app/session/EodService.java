@@ -138,13 +138,17 @@ public final class EodService implements AutoCloseable {
         ConsolidatedRisk snapshot = closeSnapshot;
         BigDecimal closeTotal = snapshot != null ? snapshot.total().comprehensivePnl() : previousCloseTotal;
         if (jdbc != null) {
-            for (MarkSource.Mark mark : closeMarks) {
-                jdbc.update("""
-                        insert into daily_close (day, instrument, close) values (?, ?, ?)
-                        on conflict (day, instrument) do update set close = excluded.close
-                        """, ended, mark.instrumentId(), mark.price());
-            }
             String mode = io.jethro.messaging.Provenance.mode().name();
+            for (MarkSource.Mark mark : closeMarks) {
+                // ADR-0073: stamped with the running feed mode, exactly like firm_equity/book_equity
+                // below. Without it a LIVE close and a SIM close for the same name/day overwrote each
+                // other in one series, and the "return" across the boundary was a phantom that VaR and
+                // the per-name vol estimator both measured as a market move (invariant 8).
+                jdbc.update("""
+                        insert into daily_close (day, instrument, close, feed_mode) values (?, ?, ?, ?)
+                        on conflict (day, instrument, feed_mode) do update set close = excluded.close
+                        """, ended, mark.instrumentId(), mark.price(), mode);
+            }
             jdbc.update("""
                     insert into firm_equity (day, total_pnl, feed_mode) values (?, ?, ?)
                     on conflict (day, feed_mode) do update set total_pnl = excluded.total_pnl

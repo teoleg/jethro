@@ -2,7 +2,7 @@
 # One-shot setup + enable for the Jethro continuous-improvement loop (ADR-0063).
 #
 # Bundles every step into one run: pull latest -> preflight checks -> (optional) one dry-run cycle
-# -> install the every-2-hours cron. Safe to re-run; it just re-checks and re-installs the cron line.
+# -> install the every-30-minutes cron. Safe to re-run; it just re-checks and re-installs the cron line.
 #
 # Usage:
 #   JETHRO_DEPLOY_CMD='<your build+restart>' ops/enable-loop.sh            # check, then enable
@@ -13,7 +13,8 @@
 # Env:
 #   JETHRO_DEPLOY_CMD   how YOU rebuild + restart Jethro after a verified commit. If empty, changes
 #                       still commit+push but the app won't restart (review-before-live mode).
-#                       Example: './gradlew :app:bootJar -x test && sudo systemctl restart jethro'
+#                       Use: 'scripts/svc.sh deploy app' (stops the JVM, THEN rebuilds + starts — never
+#                       rebuilds under a live app, which corrupts its classloader).
 #   JETHRO_URL          where the live app answers (default http://localhost:8080). The scorer + report
 #                       read /api/attribution and /api/risk here.
 set -euo pipefail
@@ -99,13 +100,13 @@ if [ "$DRY_RUN" -eq 1 ]; then
   LOG="logs/improve-$(date +%F).log"
   say "Last 40 lines of $LOG"
   tail -n 40 "$LOG" 2>/dev/null || warn "no log yet"
-  say "Dry run complete. Re-run without --dry-run to install the every-2-hours cron."
+  say "Dry run complete. Re-run without --dry-run to install the every-30-minutes cron."
   exit 0
 fi
 
 # --- 4. Confirm + enable ---
 if [ "$ASSUME_YES" -eq 0 ]; then
-  printf '\n\033[1mInstall the every-2-hours cron now? [y/N] \033[0m'
+  printf '\n\033[1mInstall the every-30-minutes cron now? [y/N] \033[0m'
   read -r reply || reply=""
   case "$reply" in
     y|Y|yes|YES) ;;

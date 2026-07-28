@@ -84,14 +84,23 @@ public class KafkaConfig {
      * window survives a restart and reads fast, no full broker replay on boot. Shares the same
      * on-disk root as the trading-core warm-restart cache (its own subdirectory), so one data
      * volume covers both. Falls back to an in-memory ring if no path is set.
+     *
+     * <p><b>Namespaced by feed mode</b> (invariant 8 / ADR-0029): sim, live and replay prices are never
+     * aggregated, and a mode switch starts a new namespace rather than continuing the old one. This
+     * matters more now that the store is not only drawn on a chart but replayed into the forecast
+     * sensors on boot (ADR-0071) — a seed built from the other mode's prices would be exactly the
+     * cross-mode aggregation the invariant forbids. Losing a namespace costs a warm-up, never data: the
+     * {@code md.marks} boot replay refills the window within seconds of start-up.
      */
     @Bean(destroyMethod = "close")
+    @org.springframework.context.annotation.DependsOn("provenanceConfig")
     LmdbMarkHistory markHistory(
             @org.springframework.beans.factory.annotation.Value("${jethro.ui.history-hours:12}") long historyHours,
             @org.springframework.beans.factory.annotation.Value("${jethro.ui.history-path:data/ui-history}") String historyPath,
             @org.springframework.beans.factory.annotation.Value("${jethro.ui.history-max-size-mb:256}") long maxSizeMb) {
-        return LmdbMarkHistory.open(java.nio.file.Path.of(historyPath),
-                maxSizeMb * 1024 * 1024, historyHours * 3_600_000L);
+        java.nio.file.Path path = java.nio.file.Path.of(historyPath)
+                .resolve(io.jethro.messaging.Provenance.mode().name().toLowerCase(java.util.Locale.ROOT));
+        return LmdbMarkHistory.open(path, maxSizeMb * 1024 * 1024, historyHours * 3_600_000L);
     }
 
     @Bean

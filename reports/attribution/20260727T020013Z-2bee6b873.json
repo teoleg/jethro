@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T02:00:13Z",
+    "fees": "233.780299",
+    "gross": "184776.57670295",
+    "net": "-76006.03756931",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "184776.57670295",
+      "hedgePnl": "-46.15616794",
+      "netExposure": "-76006.03756931",
+      "realizedPnl": "-564.76780194",
+      "strategyAlpha": "-640.75855078",
+      "totalFees": "233.780299",
+      "totalPnl": "-686.91471872",
+      "unrealizedPnl": "-122.14691678"
+    },
+    "total_pnl": "-686.91471872"
+  },
+  "before": {
+    "at": "2026-07-27T01:47:26Z",
+    "gross": "10686.59624810",
+    "net": "-1481.17560010",
+    "total_pnl": "-622.46026780"
+  },
+  "commit": "2bee6b87386d910c2c74a64e6af31499cfd5e8a6",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "174089.98045485",
+    "net": "-74524.86196921",
+    "total_pnl": "-64.45445092"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj (PnL/$1 gross) improved -0.05825\u2192-0.00372",
+  "revert": true,
+  "scoredAt": "2026-07-27T02:00:13Z",
+  "summary": "the fused conviction each name is sized on is averaged over the same measured horizon the position is held for \u2014 one EWMA per instrument at alpha = 1 - exp(-dt/h), the ADR-0080 identity applied to the signal instead of the trade, so a view that reverses faster than the desk can be graded on it is averaged down instead of dragging the book through full-speed round trips; a constant forecast is its own average and sizes exactly as before, an oscillating one falls under the never-triggered conviction floor, and the average can never exceed the peak reading (ADR-0088)",
+  "verdict": "\u274c BAD"
+}

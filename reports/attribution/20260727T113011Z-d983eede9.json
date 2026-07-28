@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T11:30:11Z",
+    "fees": "459.590778",
+    "gross": "7181.05366793",
+    "net": "-1551.67074207",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "7181.05366793",
+      "hedgePnl": "-699.68199701",
+      "netExposure": "-1551.67074207",
+      "realizedPnl": "890.40997922",
+      "strategyAlpha": "1587.18238126",
+      "totalFees": "459.590778",
+      "totalPnl": "887.50038425",
+      "unrealizedPnl": "-2.90959497"
+    },
+    "total_pnl": "887.50038425"
+  },
+  "before": {
+    "at": "2026-07-27T11:17:52Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "891.36206752"
+  },
+  "commit": "d983eede9164b07a4928dae9586522e83db3c20d",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "7181.05366793",
+    "net": "-1551.67074207",
+    "total_pnl": "-3.86168327"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj n/a (zero gross)",
+  "revert": true,
+  "scoredAt": "2026-07-27T11:30:11Z",
+  "summary": "the equity overlay wears only the share of its sized hedge that covers net exposure above the level the desk habitually carries, so it hedges back to the edge of its own measured band instead of to flat (ADR-0105)",
+  "verdict": "\u274c BAD"
+}

@@ -28,4 +28,28 @@
       maximumFractionDigits: g.priceDecimals(id)
     });
   };
+
+  // Times. The platform runs on US market hours, so every timestamp is rendered in US Eastern (ET)
+  // with an explicit label — independent of the viewer's browser timezone (which is what made the raw
+  // UTC/local strings hard to read). Accepts epoch millis, an ISO string ('Z' or offset), or a Date;
+  // blank/invalid -> "—". ET tracks EST/EDT automatically via the IANA zone.
+  const ET_ZONE = "America/New_York";
+  function toDate(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const d = (v instanceof Date) ? v : new Date(typeof v === "number" ? v : String(v));
+    return isNaN(d.getTime()) ? null : d;
+  }
+  // "18:25:54 ET"
+  g.fmtTimeET = function (v) {
+    const d = toDate(v);
+    return d ? d.toLocaleTimeString("en-US", { timeZone: ET_ZONE, hour12: false }) + " ET" : "—";
+  };
+  // "Jul 27, 18:25:54 ET"
+  g.fmtDateTimeET = function (v) {
+    const d = toDate(v);
+    return d ? d.toLocaleString("en-US", {
+      timeZone: ET_ZONE, month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+    }) + " ET" : "—";
+  };
 })(window);

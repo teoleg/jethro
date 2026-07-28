@@ -80,7 +80,7 @@
   function ctl(k, v) { return `<div><div class="k">${k}</div><div class="v mono">${esc(v)}</div></div>`; }
 
   function render(v) {
-    document.getElementById("asof").textContent = v.lastRunMillis ? "· last cycle " + new Date(v.lastRunMillis).toLocaleTimeString() : "· measuring…";
+    document.getElementById("asof").textContent = v.lastRunMillis ? "· last cycle " + fmtTimeET(v.lastRunMillis) : "· measuring…";
 
     const sources = v.sources || [];
     document.getElementById("sources").outerHTML = '<div id="sources">' + (sources.length ?
@@ -91,7 +91,7 @@
         return `<tr>
           <td class="mono">${esc(s.name)}</td>
           <td><span class="led ${cls}"></span>${label}</td>
-          <td class="dim mono">${s.lastPollMillis ? new Date(s.lastPollMillis).toLocaleTimeString() : "—"}</td>
+          <td class="dim mono">${s.lastPollMillis ? fmtTimeET(s.lastPollMillis) : "—"}</td>
           <td class="mono">${s.lastCount}</td>
           <td class="dim">${esc(s.detail)}</td>
         </tr>`;

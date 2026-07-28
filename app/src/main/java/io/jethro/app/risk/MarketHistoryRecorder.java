@@ -63,16 +63,20 @@ public final class MarketHistoryRecorder implements AutoCloseable {
                 return;
             }
             LocalDate today = sessionDay.get();
+            String mode = io.jethro.messaging.Provenance.mode().name();
             for (var mark : runtime.markCache().snapshot()) {
+                // ADR-0073: stamped with the running feed mode, like the firm_equity row below. The
+                // close series is what VaR and the per-name vol estimator measure risk from, so two
+                // feeds sharing a row made the level gap between them look like a market move.
                 jdbc.update("""
-                        insert into daily_close (day, instrument, close) values (?, ?, ?)
-                        on conflict (day, instrument) do update set close = excluded.close
-                        """, today, mark.instrumentId(), mark.price());
+                        insert into daily_close (day, instrument, close, feed_mode) values (?, ?, ?, ?)
+                        on conflict (day, instrument, feed_mode) do update set close = excluded.close
+                        """, today, mark.instrumentId(), mark.price(), mode);
             }
             jdbc.update("""
                     insert into firm_equity (day, total_pnl, feed_mode) values (?, ?, ?)
                     on conflict (day, feed_mode) do update set total_pnl = excluded.total_pnl
-                    """, today, risk.firmTotalPnl(), io.jethro.messaging.Provenance.mode().name());
+                    """, today, risk.firmTotalPnl(), mode);
         } catch (Exception e) {
             log.warn("market-history pass failed (retrying next cycle): {}", e.toString());
         }

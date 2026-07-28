@@ -1,31 +1,20 @@
 {
-  "alpha_pnl": "-7011.80814732",
-  "commit": "f2f79b3f6aca011b87e4d60907dd811d775fb76a",
-  "fees": "1926.815974",
-  "gross_exposure": "345623.40913314",
-  "net_exposure": "-30395.29000914",
+  "commit": "c5cd7e8beeb01193d473789691a25a66814b1f1d",
+  "fees": "481.442117",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
   "source": {
-    "alphaBooks": [
-      {
-        "book": "MACRO",
-        "gross": "238361.54283500",
-        "net": "-17456.82683500"
-      },
-      {
-        "book": "ALPHA",
-        "gross": "107261.86629814",
-        "net": "-12938.46317414"
-      }
-    ],
     "feedMode": "SIM",
-    "firmTotal": "-6492.41480092",
-    "hedgeBooks": [
-      "HEDGE"
-    ],
-    "hedgePnl": "519.39334640",
-    "strategyAlpha": "-7011.80814732",
-    "totalFees": "1926.815974"
+    "grossExposure": "0.00000000",
+    "hedgePnl": "-3093.30503794",
+    "netExposure": "0.00000000",
+    "realizedPnl": "5654.20784226",
+    "strategyAlpha": "8747.51288020",
+    "totalFees": "481.442117",
+    "totalPnl": "5654.20784226",
+    "unrealizedPnl": "0.00000000"
   },
-  "summary": "fusion target book spans held positions \u2014 a name with no fresh forecast is planned flat and worked down; risk-reducing deltas skip the conviction floor and the backtest-support veto (ADR-0065)",
-  "ts": "2026-07-25T20:59:08Z"
+  "summary": "the warm-start seed's lookback and hole tolerance are counted in the step at which the live sensor actually consumes a name \u2014 the slower of our poll cadence and that name's own median inter-print gap \u2014 so an instrument whose ordinary print interval exceeds our poll interval stops having every one of those intervals read as an outage, and can seed and warm at all (ADR-0114)",
+  "total_pnl": "5654.20784226",
+  "ts": "2026-07-27T23:14:26Z"
 }

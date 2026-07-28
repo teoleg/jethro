@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T17:45:06Z",
+    "fees": "131.078386",
+    "gross": "786.02927637",
+    "net": "56.81432837",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "786.02927637",
+      "hedgePnl": "96.01974767",
+      "netExposure": "56.81432837",
+      "realizedPnl": "-866.92141141",
+      "strategyAlpha": "-963.34226912",
+      "totalFees": "131.078386",
+      "totalPnl": "-867.32252145",
+      "unrealizedPnl": "-0.40111004"
+    },
+    "total_pnl": "-867.32252145"
+  },
+  "before": {
+    "at": "2026-07-26T17:30:00Z",
+    "gross": "785.65717361",
+    "net": "56.99025161",
+    "total_pnl": "-867.14659821"
+  },
+  "commit": "392171a4e9a90ac96ef7fe66c2a8fc90a2bb8135",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0.37210276",
+    "net": "-0.17592324",
+    "total_pnl": "-0.17592324"
+  },
+  "note": "no material change (within noise band); risk-adj (PnL/$1 gross) improved -1.10372\u2192-1.10342",
+  "revert": false,
+  "scoredAt": "2026-07-26T17:45:06Z",
+  "summary": "sensor warm restart: replay the durable LMDB mark history into the trend and reversion sensors on first sight of a name, so a sensor whose warm-up exceeds the redeploy interval stops cold-starting forever and can finally be measured by the edge gate (ADR-0071)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

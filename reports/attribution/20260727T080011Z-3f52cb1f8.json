@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T08:00:11Z",
+    "fees": "392.486898",
+    "gross": "58864.45781212",
+    "net": "-896.88054166",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "58864.45781212",
+      "hedgePnl": "-553.62275567",
+      "netExposure": "-896.88054166",
+      "realizedPnl": "421.40139191",
+      "strategyAlpha": "1023.36059099",
+      "totalFees": "392.486898",
+      "totalPnl": "469.73783532",
+      "unrealizedPnl": "48.33644341"
+    },
+    "total_pnl": "469.73783532"
+  },
+  "before": {
+    "at": "2026-07-27T07:35:31Z",
+    "gross": "61795.00823189",
+    "net": "4924.80587589",
+    "total_pnl": "331.07664479"
+  },
+  "commit": "3f52cb1f8e5d9672218a05ebf0e58a6dfdd7e8d5",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-2930.55041977",
+    "net": "-5821.68641755",
+    "total_pnl": "138.66119053"
+  },
+  "note": "PnL up, exposure not up; risk-adj (PnL/$1 gross) improved 0.00536\u21920.00798",
+  "revert": false,
+  "scoredAt": "2026-07-27T08:00:11Z",
+  "summary": "the hedge neutralizes only the systematic exposure that stands clear of its own churn \u2014 the target is shrunk toward flat by one standard deviation of its own step between the moments the hedge can act, measured on the stream, strictly one-way (ADR-0098)",
+  "verdict": "\u2705 GOOD"
+}

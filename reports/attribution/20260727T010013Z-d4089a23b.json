@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T01:00:13Z",
+    "fees": "163.105393",
+    "gross": "130.69487230",
+    "net": "130.69487230",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "130.69487230",
+      "hedgePnl": "68.88307330",
+      "netExposure": "130.69487230",
+      "realizedPnl": "-787.13213045",
+      "strategyAlpha": "-855.94691876",
+      "totalFees": "163.105393",
+      "totalPnl": "-787.06384546",
+      "unrealizedPnl": "0.06828499"
+    },
+    "total_pnl": "-787.06384546"
+  },
+  "before": {
+    "at": "2026-07-27T00:52:56Z",
+    "gross": "6495.70557686",
+    "net": "372.33205514",
+    "total_pnl": "-788.43184313"
+  },
+  "commit": "d4089a23bf3406f121c2f641e9e3ea166e506169",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-6365.01070456",
+    "net": "-241.63718284",
+    "total_pnl": "1.36799767"
+  },
+  "note": "risk-adj (PnL/$1 gross) worsened -0.12138\u2192-6.02215",
+  "revert": false,
+  "scoredAt": "2026-07-27T01:00:13Z",
+  "summary": "the fusion desk cuts a position to flat once its mark retraces from the best level seen since that position was opened by more than three times the name's own measured volatility over the desk's own derived holding horizon \u2014 a chandelier exit keyed on a mark-stream sigma, because the daily-close sigma every other risk control uses covers none of the names actually held; it can only ever set a target flat, never raise one (ADR-0086)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

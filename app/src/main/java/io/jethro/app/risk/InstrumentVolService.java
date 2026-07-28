@@ -55,25 +55,31 @@ public final class InstrumentVolService implements InstrumentVolSource {
 
     private Map<String, BigDecimal> compute() {
         try {
-            // instrument → (day → close), days ascending, over the trailing window.
-            Map<String, TreeMap<LocalDate, Double>> closes = new LinkedHashMap<>();
+            // instrument → (day → close), days ascending, over the trailing window. Restricted to the
+            // streams this session may measure and carrying the stream tag, so a handover between the
+            // seed and the session — or between two feed modes — never becomes a return (ADR-0073).
+            List<String> modes = DailyCloseSeries.admissibleModes();
+            Map<String, TreeMap<LocalDate, DailyCloseSeries.Close>> closes = new LinkedHashMap<>();
             jdbc.query("""
-                    select day, instrument, close from daily_close
-                    where day >= (select coalesce(max(day), current_date) from daily_close) - ?::int
+                    select day, instrument, close, feed_mode from daily_close
+                    where feed_mode in (?, ?)
+                      and day >= (select coalesce(max(day), current_date) from daily_close
+                                  where feed_mode in (?, ?)) - ?::int
                     order by day
                     """, rs -> {
-                closes.computeIfAbsent(rs.getString("instrument"), i -> new TreeMap<>())
-                        .put(rs.getObject("day", LocalDate.class), rs.getBigDecimal("close").doubleValue());
-            }, WINDOW_DAYS + 30);
+                LocalDate day = rs.getObject("day", LocalDate.class);
+                var byDay = closes.computeIfAbsent(rs.getString("instrument"), i -> new TreeMap<>());
+                var candidate = new DailyCloseSeries.Close(day, rs.getString("feed_mode"),
+                        rs.getBigDecimal("close").doubleValue());
+                var held = byDay.get(day);
+                if (held == null || DailyCloseSeries.preferOver(held.feedMode(), candidate.feedMode())) {
+                    byDay.put(day, candidate);
+                }
+            }, modes.get(0), modes.get(1), modes.get(0), modes.get(1), WINDOW_DAYS + 30);
 
             Map<String, BigDecimal> out = new LinkedHashMap<>();
             closes.forEach((instrument, byDay) -> {
-                List<Double> series = new ArrayList<>(byDay.values());
-                double[] returns = new double[Math.max(0, series.size() - 1)];
-                for (int i = 1; i < series.size(); i++) {
-                    double prev = series.get(i - 1);
-                    returns[i - 1] = prev > 0 ? series.get(i) / prev - 1.0 : 0.0;
-                }
+                double[] returns = DailyCloseSeries.returns(new ArrayList<>(byDay.values()));
                 VolMath.ewmaDailyVol(returns, MIN_OBSERVATIONS)
                         .ifPresent(v -> out.put(instrument, BigDecimal.valueOf(v)));
             });

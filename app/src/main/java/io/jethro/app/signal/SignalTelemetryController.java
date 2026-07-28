@@ -24,4 +24,15 @@ public final class SignalTelemetryController {
         SignalTelemetry t = telemetry.getIfAvailable();
         return t == null ? List.of() : t.stats();
     }
+
+    /**
+     * Observations the bad-print exclusion kept out of the expectancy above (ADR-0109) — evidence
+     * removed from the gate that governs exposure, counted rather than dropped in silence. Empty is the
+     * healthy state; a rising count says the mark stream changed, not the alpha.
+     */
+    @GetMapping("/api/signals/discards")
+    public List<SignalTelemetry.Discard> discards() {
+        SignalTelemetry t = telemetry.getIfAvailable();
+        return t == null ? List.of() : t.discards();
+    }
 }

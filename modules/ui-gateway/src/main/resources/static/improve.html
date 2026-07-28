@@ -38,6 +38,17 @@
   .pillv.good{color:var(--up);border-color:var(--up)} .pillv.bad{color:var(--alert);border-color:var(--alert)} .pillv.mixed{color:var(--warn);border-color:var(--warn)}
   .act { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
   .act.changed{color:var(--brand)} .act.reverted{color:var(--alert)} .act.nochange{color:var(--dim)}
+  .act.noanalysis{color:var(--alert); font-weight:700}
+  .reasoning { padding:6px 16px 12px; color:var(--txt); font-size:12.5px; line-height:1.6; white-space:pre-wrap; }
+  .reasoning.warn { color:var(--alert); }
+  td details summary { cursor:pointer; color:var(--dim); }
+  td details summary:hover { color:var(--txt); }
+  td details[open] summary { color:var(--txt); font-weight:600; }
+  .rowreason { white-space:pre-wrap; font-size:11.5px; color:var(--txt); margin:6px 0 2px; padding:8px 10px;
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px; max-width:700px; }
+  .alert { margin:8px 8px 0; padding:9px 13px; border-radius:9px; font-size:12.5px; font-weight:600; }
+  .alert.bad { background:rgba(240,85,63,.12); border:1px solid var(--alert); color:var(--alert); }
+  .alert.good { background:rgba(53,192,122,.10); border:1px solid var(--up); color:var(--up); }
 </style>
 </head>
 <body>
@@ -65,14 +76,26 @@
 </div></div>
 <main>
   <div class="panel">
+    <div class="alert" id="hAlert" style="display:none"></div>
     <div class="hero">
-      <div class="metric"><span class="k">Goal</span><span class="goal">PnL&nbsp;↑ &nbsp;·&nbsp; Exposure&nbsp;↓</span></div>
-      <div class="metric"><span class="k">Alpha PnL</span><span class="v mono" id="hPnl">—</span></div>
+      <div class="metric"><span class="k">Goal</span><span class="goal">Total&nbsp;PnL&nbsp;↑&nbsp;≥1%&nbsp;/&nbsp;3&nbsp;iter &nbsp;·&nbsp; Exposure&nbsp;↓</span></div>
+      <div class="metric"><span class="k">Total PnL</span><span class="v mono" id="hPnl">—</span></div>
+      <div class="metric"><span class="k">PnL growth · 3-iter</span><span class="v mono" id="hGrowth">—</span></div>
       <div class="metric"><span class="k">Gross exposure</span><span class="v mono" id="hGross">—</span></div>
       <div class="metric"><span class="k">Net exposure</span><span class="v mono" id="hNet">—</span></div>
-      <div class="metric"><span class="k">Last run (UTC)</span><span class="v mono" id="hTime" style="font-size:15px">—</span></div>
+      <div class="metric"><span class="k">Cost (fees)</span><span class="v mono" id="hFees">—</span></div>
+      <div class="metric"><span class="k">As of run (UTC)</span><span class="v mono" id="hTime" style="font-size:15px">—</span></div>
     </div>
     <div class="decision" id="hDecision">waiting for the first cycle…</div>
+    <div class="reasoning" id="hReason"></div>
+  </div>
+
+  <div class="note" style="font-size:11.5px; padding:2px 8px; line-height:1.65; border:1px solid var(--line-2); border-radius:10px; background:var(--surface)">
+    <b>Firm total — the real money made and the real money at risk, all books incl. the hedge.</b>
+    Same figures as the <a href="/">Overview</a> headline (<span class="mono">/api/risk .total</span>): Total&nbsp;PnL is
+    net of every cost, Gross/Net exposure is the whole book. The only reason a row can differ from Overview
+    is <b>time</b> — each row is frozen <b>as of that run</b>, while Overview is live. Numbers computed by
+    <span class="mono">score-change.py</span> in exact decimal (invariant&nbsp;7 — no model-authored numbers).
   </div>
 
   <div class="section-h">Per-run history — one line per cycle, change or not</div>
@@ -80,12 +103,12 @@
     <table>
       <thead><tr>
         <th>Time (UTC)</th>
-        <th class="num">Alpha PnL</th><th class="num">Δ vs prev</th>
+        <th class="num">Total PnL</th><th class="num">Δ vs prev</th>
         <th class="num">Gross exp</th><th class="num">Δ</th>
-        <th class="num">Net exp</th>
+        <th class="num">Net exp</th><th class="num">Cost</th>
         <th>Action</th><th>Prev verdict</th><th>Decision</th>
       </tr></thead>
-      <tbody id="rows"><tr><td colspan="9" class="empty">waiting for the first cycle…</td></tr></tbody>
+      <tbody id="rows"><tr><td colspan="10" class="empty">waiting for the first cycle…</td></tr></tbody>
     </table>
   </div>
 
@@ -115,7 +138,7 @@
   function verdictClass(v) { if (!v) return ""; if (v.indexOf("GOOD") >= 0) return "good"; if (v.indexOf("BAD") >= 0) return "bad"; return "mixed"; }
   function actClass(a) { return (a || "").replace(/[^a-z]/g, ""); }  // "no-change" -> "nochange"
   function esc(s) { return (s === null || s === undefined ? "" : String(s)).replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
-  function fmtTs(ts) { return ts ? String(ts).replace("T", " ").replace("Z", "") : "—"; }
+  function fmtTs(ts) { return ts ? fmtDateTimeET(ts) : "—"; }  // render the UTC ts in US Eastern (ET)
 
   function render(list) {
     var rows = document.getElementById("rows");
@@ -124,26 +147,59 @@
       return;
     }
     var top = list[0];
-    document.getElementById("hPnl").textContent = money(top.alpha_pnl);
+    var topPnl = (top.total_pnl != null ? top.total_pnl : top.alpha_pnl);
+    document.getElementById("hPnl").textContent = money(topPnl);
     document.getElementById("hGross").textContent = money(top.gross);
     document.getElementById("hNet").textContent = money(top.net);
+    document.getElementById("hFees").textContent = money(top.fees);
+    var gEl = document.getElementById("hGrowth");
+    gEl.textContent = (top.pnl_growth_pct == null) ? "—" : pctText(top.pnl_growth_pct);
+    gEl.className = "v mono " + (top.pnl_growth_pct == null ? "" : (top.on_track ? "up" : "down"));
     document.getElementById("hTime").textContent = fmtTs(top.ts);
+
+    var alertEl = document.getElementById("hAlert");
+    var tgt = (top.pnl_target_pct != null ? top.pnl_target_pct : 1) + "% / " + (top.pnl_growth_window || 3) + " iters";
+    if (top.brain_ran === false) {
+      alertEl.style.display = ""; alertEl.className = "alert bad";
+      alertEl.textContent = "⚠️ Analysis step is NOT running — Claude isn't being invoked, so nothing is being improved. Fix the loop PATH.";
+    } else if (top.stale) {
+      alertEl.style.display = ""; alertEl.className = "alert bad";
+      alertEl.textContent = "⚠️ STALE — total PnL is " + (top.underwater ? "negative and " : "") + "not growing to target ("
+        + tgt + "). The loop should be attacking this; if it keeps failing here, the sim likely has no edge → consider a live feed.";
+    } else if (top.on_track) {
+      alertEl.style.display = ""; alertEl.className = "alert good";
+      alertEl.textContent = "✅ On track — PnL growth meets the target (" + tgt + ").";
+    } else {
+      alertEl.style.display = "none";
+    }
     document.getElementById("hDecision").innerHTML = '<b>Latest decision:</b> ' + esc(top.decision || "—");
+    var reasonEl = document.getElementById("hReason");
+    if (top.brain_ran === false) {
+      reasonEl.className = "reasoning warn";
+      reasonEl.textContent = "The analysis step did not run this cycle — Claude was not invoked, so no reasoning was produced. (Usually a PATH/setup issue on the box.)";
+    } else {
+      reasonEl.className = "reasoning";
+      reasonEl.textContent = top.reasoning || "";
+    }
 
     rows.innerHTML = list.map(function (e) {
+      var pnl = (e.total_pnl != null ? e.total_pnl : e.alpha_pnl);   // fallback for old-format rows
       var verdict = e.last_verdict
         ? '<span class="pillv ' + verdictClass(e.last_verdict) + '">' + esc(e.last_verdict) + '</span>'
         : '<span class="dim">—</span>';
       return '<tr>'
         + '<td class="mono">' + esc(fmtTs(e.ts)) + '</td>'
-        + '<td class="num mono">' + money(e.alpha_pnl) + '</td>'
+        + '<td class="num mono">' + money(pnl) + '</td>'
         + '<td class="num mono ' + pctClass(e.pnl_pct, false) + '">' + esc(pctText(e.pnl_pct)) + '</td>'
         + '<td class="num mono">' + money(e.gross) + '</td>'
         + '<td class="num mono ' + pctClass(e.gross_pct, true) + '">' + esc(pctText(e.gross_pct)) + '</td>'
         + '<td class="num mono">' + money(e.net) + '</td>'
+        + '<td class="num mono dim">' + money(e.fees) + '</td>'
         + '<td><span class="act ' + actClass(e.action) + '">' + esc(e.action || "") + '</span></td>'
         + '<td>' + verdict + '</td>'
-        + '<td class="dim">' + esc(e.decision || "") + '</td>'
+        + '<td class="dim">' + (e.reasoning
+            ? '<details><summary>' + esc(e.decision || "") + '</summary><pre class="rowreason">' + esc(e.reasoning) + '</pre></details>'
+            : esc(e.decision || "")) + '</td>'
         + '</tr>';
     }).join("");
   }

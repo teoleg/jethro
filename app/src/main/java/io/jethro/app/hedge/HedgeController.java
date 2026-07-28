@@ -30,18 +30,21 @@ import java.util.function.Predicate;
 public final class HedgeController {
 
     private final HedgeAdvisor advisor;
+    private final HedgeTargetChurn churn;
     private final ObjectProvider<VarService> varService;
     private final ObjectProvider<InstrumentRefSource> refs;
     private final ObjectProvider<LastPriceCache> prices;
     private final ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection;
     private final String hedgeBook;
 
-    public HedgeController(HedgeAdvisor advisor, ObjectProvider<VarService> varService,
+    public HedgeController(HedgeAdvisor advisor, HedgeTargetChurn churn,
+                           ObjectProvider<VarService> varService,
                            ObjectProvider<InstrumentRefSource> refs, ObjectProvider<LastPriceCache> prices,
                            ObjectProvider<io.jethro.trading.riskpnl.RiskProjection> projection,
                            @org.springframework.beans.factory.annotation.Value("${jethro.hedge.book:HEDGE}")
                            String hedgeBook) {
         this.advisor = advisor;
+        this.churn = churn;
         this.varService = varService;
         this.refs = refs;
         this.prices = prices;
@@ -79,8 +82,11 @@ public final class HedgeController {
         }
 
         // The panel is read-only, so the price gate suffices here; the executing lifecycle also
-        // applies the quarantine gate (ADR-0042).
-        return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf, held, id -> true);
+        // applies the quarantine gate (ADR-0042). The ADR-0098 churn σ and the ADR-0100 efficiency
+        // are READ here and never sampled — polling this endpoint must not shorten the step the
+        // estimator measures.
+        return advisor.evaluate(cov, exposures, isEquity, priceOf, betaOf, held, id -> true,
+                churn::sigmaUsd, churn::efficiencyRatio);
     }
 
     public record ModeRequest(String mode) {

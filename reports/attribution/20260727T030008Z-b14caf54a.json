@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T03:00:08Z",
+    "fees": "275.574957",
+    "gross": "64654.49724485",
+    "net": "-14737.95652645",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "64654.49724485",
+      "hedgePnl": "-241.89667715",
+      "netExposure": "-14737.95652645",
+      "realizedPnl": "-255.10033347",
+      "strategyAlpha": "13.05786402",
+      "totalFees": "275.574957",
+      "totalPnl": "-228.83881313",
+      "unrealizedPnl": "26.26152034"
+    },
+    "total_pnl": "-228.83881313"
+  },
+  "before": {
+    "at": "2026-07-27T02:44:17Z",
+    "gross": "30661.78855600",
+    "net": "11196.27621574",
+    "total_pnl": "-316.88195796"
+  },
+  "commit": "b14caf54ab86cd1cf5662c36fc3c3b97287616ef",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "33992.70868885",
+    "net": "-25934.23274219",
+    "total_pnl": "88.04314483"
+  },
+  "note": "risk-adj (PnL/$1 gross) improved -0.01033\u2192-0.00354",
+  "revert": false,
+  "scoredAt": "2026-07-27T03:00:08Z",
+  "summary": "only a flat target is worked at full speed \u2014 a change of view is now a rebalance at the derived rate in both directions, so a mean-reverting forecast can no longer round-trip the whole book each time it crosses the position (ADR-0090)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

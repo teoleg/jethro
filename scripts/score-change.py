@@ -28,11 +28,11 @@ Subcommands
       PnL/exposure, % change vs the previous run, and this cycle's decision (changed / no-change /
       reverted). Every number is computed here; the wrapper passes only the two booleans.
 
-Objective vector (ADR-0063 — measured on STRATEGY ALPHA, never the hedge-masked firm total)
-  alpha_pnl  = /api/attribution .strategyAlpha
-  gross,net  = Sigma /api/risk .byBook[grossExposure|netExposure] over books whose /api/attribution
-               role != "hedge"   (the hedge book is read FROM the app, not hardcoded here)
-  fees       = /api/attribution .totalFees   (transaction-cost drag; informational)
+Objective vector (ADR-0063 — the FIRM TOTAL: total money made, total money at risk, ALL books incl.
+the hedge; this is exactly the Overview headline, /api/risk .total)
+  pnl        = /api/risk .total.totalPnl        (total realized+unrealized, net of all costs incl. fees)
+  gross,net  = /api/risk .total.grossExposure | .netExposure   (total exposure — all books)
+  fees       = /api/attribution .totalFees      (cumulative fees paid — money spent trading; context)
 
 Env: JETHRO_URL (default http://localhost:8080).
 """
@@ -52,6 +52,7 @@ LEDGER = os.path.join(REPO, "reports", "improvement-ledger.md")
 SNAP_DIR = os.path.join(REPO, "reports", "attribution")
 STATUS = os.path.join(REPO, "reports", "run-status.json")  # per-cycle heartbeat the UI reads
 STATUS_CAP = 300
+ANALYSIS = os.path.join(REPO, "reports", "last-analysis.md")  # Claude's own reasoning, written each run
 
 # --- Deadbands: below these a move is treated as market noise, not an effect of the change. They
 # gate the GOOD/BAD/revert decision, so per CLAUDE.md they carry provenance and are NOT silent
@@ -61,6 +62,14 @@ STATUS_CAP = 300
 #   gross-exposure drift. Override either via env without editing code.
 PNL_DEADBAND = Decimal(os.environ.get("JETHRO_SCORE_PNL_DEADBAND_USD", "50"))
 EXP_DEADBAND_FRAC = Decimal(os.environ.get("JETHRO_SCORE_EXPOSURE_DEADBAND_FRAC", "0.01"))
+
+# --- Owner-set PERFORMANCE TARGET (2026-07-26): total PnL must grow at least PNL_TARGET_PCT percent
+# every PNL_TARGET_WINDOW iterations. This is a KPI the loop is measured against and must actively
+# pursue — NOT a market/risk dial that gates a trade. Staleness (PnL flat/negative and not on track,
+# especially with exposure still high) is a monitored FAILURE state, not an acceptable "flat". Both
+# owner-set, env-overridable.
+PNL_TARGET_PCT = Decimal(os.environ.get("JETHRO_LOOP_PNL_TARGET_PCT", "1.0"))
+PNL_TARGET_WINDOW = int(os.environ.get("JETHRO_LOOP_PNL_TARGET_WINDOW", "3"))
 
 
 def fetch_json(path):
@@ -75,40 +84,40 @@ def dec(x):
 
 
 def current_vector():
-    """The objective vector, computed entirely from live endpoints. Returns (vector, raw) or raises."""
-    attr = fetch_json("/api/attribution")
-    if not attr.get("available", False):
-        raise ValueError("attribution not available (projection empty) — cannot score")
+    """The objective vector — the FIRM TOTAL: total money made and total money at risk, ALL books
+    including the hedge (the hedge costs real money and carries real exposure, so it counts). This is
+    exactly what the Overview headline shows (/api/risk .total). Returns (vector, raw) or raises.
+    Attribution (strategy vs hedge split, fees) is fetched best-effort for context/diagnostics only —
+    it never changes the totals."""
     risk = fetch_json("/api/risk")
-
-    hedge_books = {b["book"] for b in attr.get("books", []) if b.get("role") == "hedge"}
-    gross = Decimal(0)
-    net = Decimal(0)
-    per_book = []
-    for g in risk.get("byBook", []):
-        if g["key"] in hedge_books:
-            continue
-        gexp = dec(g["grossExposure"])
-        nexp = dec(g["netExposure"])
-        gross += gexp
-        net += nexp
-        per_book.append({"book": g["key"], "gross": str(gexp), "net": str(nexp)})
+    total = risk.get("total")
+    if not total:
+        raise ValueError("risk totals unavailable — cannot score")
 
     vec = {
-        "alpha_pnl": dec(attr["strategyAlpha"]),
-        "gross": gross,
-        "net": net,
-        "fees": dec(attr["totalFees"]),
+        "pnl": dec(total["totalPnl"]),           # total realized+unrealized, net of all costs (fees inside)
+        "gross": dec(total["grossExposure"]),    # total gross exposure — all books incl. hedge
+        "net": dec(total["netExposure"]),        # total net exposure
+        "fees": Decimal(0),                       # cumulative fees paid (money spent trading); filled below
     }
     raw = {
-        "feedMode": attr.get("feedMode"),
-        "strategyAlpha": attr["strategyAlpha"],
-        "hedgePnl": attr.get("hedgePnl"),
-        "firmTotal": attr.get("firmTotal"),
-        "totalFees": attr["totalFees"],
-        "hedgeBooks": sorted(hedge_books),
-        "alphaBooks": per_book,
+        "totalPnl": total["totalPnl"],
+        "realizedPnl": total.get("realizedPnl"),
+        "unrealizedPnl": total.get("unrealizedPnl"),
+        "grossExposure": total["grossExposure"],
+        "netExposure": total["netExposure"],
     }
+    # Best-effort context: feed mode, cumulative fees, and the alpha/hedge split (diagnostic only).
+    try:
+        attr = fetch_json("/api/attribution")
+        if attr.get("available"):
+            vec["fees"] = dec(attr.get("totalFees", "0"))
+            raw["feedMode"] = attr.get("feedMode")
+            raw["totalFees"] = attr.get("totalFees")
+            raw["strategyAlpha"] = attr.get("strategyAlpha")
+            raw["hedgePnl"] = attr.get("hedgePnl")
+    except Exception:
+        pass
     return vec, raw
 
 
@@ -133,7 +142,7 @@ def pair(before, after):
 
 def classify(before, after):
     """Pure function of the two vectors. Returns (verdict, revert:bool, note)."""
-    d_pnl = after["alpha_pnl"] - before["alpha_pnl"]
+    d_pnl = after["pnl"] - before["pnl"]
     d_gross = after["gross"] - before["gross"]
     gross_band = abs(before["gross"]) * EXP_DEADBAND_FRAC
 
@@ -141,8 +150,8 @@ def classify(before, after):
     gross_up = d_gross > gross_band
     gross_down = d_gross < -gross_band
 
-    ra_before = (before["alpha_pnl"] / before["gross"]) if before["gross"] != 0 else None
-    ra_after = (after["alpha_pnl"] / after["gross"]) if after["gross"] != 0 else None
+    ra_before = (before["pnl"] / before["gross"]) if before["gross"] != 0 else None
+    ra_after = (after["pnl"] / after["gross"]) if after["gross"] != 0 else None
     if ra_before is not None and ra_after is not None:
         ra_dir = "improved" if ra_after > ra_before else ("worsened" if ra_after < ra_before else "unchanged")
         ra_note = f"risk-adj (PnL/$1 gross) {ra_dir} {float(ra_before):.5f}→{float(ra_after):.5f}"
@@ -206,8 +215,24 @@ def cmd_score():
         print(f"score: cannot measure current vector ({e}); leaving pending baseline for next run")
         return 0
 
+    # Invariant 8 (ADR-0029): sim / live / replay are NEVER aggregated across modes. A sim↔live switch
+    # starts a new epoch, so a baseline recorded in one mode must not be scored against a vector measured
+    # in another — the delta would be meaningless and could auto-revert a good commit on garbage. If the
+    # feed mode changed since the baseline, discard it (unscored) rather than compare across the boundary.
+    base_mode = (base.get("source") or {}).get("feedMode")
+    cur_mode = raw_after.get("feedMode")
+    if base_mode and cur_mode and base_mode != cur_mode:
+        os.remove(PENDING)
+        git("add", "reports/.pending-baseline.json", check=False)
+        git("commit", "-m",
+            f"chore(ledger): feed mode {base_mode}->{cur_mode} — prior baseline discarded, not scored "
+            f"across modes (invariant 8)", check=False)
+        print(f"score: feed mode changed {base_mode} -> {cur_mode}; discarded the {base_mode} baseline "
+              f"for {base.get('commit', 'unknown')[:9]} unscored (invariant 8 — no cross-mode aggregation)")
+        return 0
+
     before = {
-        "alpha_pnl": dec(base["alpha_pnl"]),
+        "pnl": dec(base.get("total_pnl", base.get("alpha_pnl", "0"))),  # fallback: score an old-format baseline
         "gross": dec(base["gross_exposure"]),
         "net": dec(base["net_exposure"]),
     }
@@ -223,11 +248,11 @@ def cmd_score():
         "scoredAt": ts, "commit": sha, "summary": summary,
         "verdict": verdict, "revert": revert, "note": note,
         "deadbands": {"pnlUsd": str(PNL_DEADBAND), "exposureFrac": str(EXP_DEADBAND_FRAC)},
-        "before": {"alpha_pnl": base["alpha_pnl"], "gross": base["gross_exposure"], "net": base["net_exposure"],
-                   "at": base.get("ts")},
-        "after": {"alpha_pnl": str(after["alpha_pnl"]), "gross": str(after["gross"]), "net": str(after["net"]),
+        "before": {"total_pnl": base.get("total_pnl", base.get("alpha_pnl")),
+                   "gross": base["gross_exposure"], "net": base["net_exposure"], "at": base.get("ts")},
+        "after": {"total_pnl": str(after["pnl"]), "gross": str(after["gross"]), "net": str(after["net"]),
                   "fees": str(after["fees"]), "at": ts, "source": raw_after},
-        "delta": {"alpha_pnl": str(after["alpha_pnl"] - before["alpha_pnl"]),
+        "delta": {"total_pnl": str(after["pnl"] - before["pnl"]),
                   "gross": str(after["gross"] - before["gross"]),
                   "net": str(after["net"] - before["net"])},
     }
@@ -235,7 +260,7 @@ def cmd_score():
 
     row = "| {ts} | `{short}` | {what} | {pnl} | {gross} | {net} | {verdict} | {note} |".format(
         ts=ts, short=short, what=(summary or "—").replace("|", "/"),
-        pnl=pair(before["alpha_pnl"], after["alpha_pnl"]),
+        pnl=pair(before["pnl"], after["pnl"]),
         gross=pair(before["gross"], after["gross"]),
         net=pair(before["net"], after["net"]),
         verdict=verdict, note=note.replace("|", "/"))
@@ -257,7 +282,7 @@ def cmd_score():
     msg = f"chore(ledger): score {short} — {verdict}\n\n{note}\n\nSnapshot: {os.path.relpath(snap_path, REPO)}"
     git("commit", "-m", msg, check=False)
 
-    print(f"score: {verdict} for {short} | ΔPnL {delta(after['alpha_pnl'] - before['alpha_pnl'])} "
+    print(f"score: {verdict} for {short} | ΔPnL {delta(after['pnl'] - before['pnl'])} "
           f"| Δgross {delta(after['gross'] - before['gross'])} | {note}")
     if reverted_ok is False:
         return 3
@@ -279,7 +304,7 @@ def cmd_baseline(argv):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "commit": sha, "ts": ts, "summary": summary,
-        "alpha_pnl": str(vec["alpha_pnl"]),
+        "total_pnl": str(vec["pnl"]),
         "gross_exposure": str(vec["gross"]),
         "net_exposure": str(vec["net"]),
         "fees": str(vec["fees"]),
@@ -290,7 +315,7 @@ def cmd_baseline(argv):
         json.dump(payload, f, indent=2, sort_keys=True)
     git("add", "reports/.pending-baseline.json", check=False)
     git("commit", "-m", f"chore(ledger): baseline for {sha[:9]} — {summary}"[:200], check=False)
-    print(f"baseline: recorded for {sha[:9]} | alpha_pnl {money2(vec['alpha_pnl'])} "
+    print(f"baseline: recorded for {sha[:9]} | total_pnl {money2(vec['pnl'])} "
           f"| gross {money2(vec['gross'])} | net {money2(vec['net'])}")
     return 0
 
@@ -310,16 +335,25 @@ def cmd_status(argv):
 
     Every number (current vector + % change vs the previous run) is computed here, in exact decimal —
     never by the model. The wrapper passes only two booleans about what happened this cycle:
-      --scored 0|1   a pending change was scored this cycle (so a fresh snapshot verdict exists)
-      --changed 0|1  the agent recorded a NEW change this cycle (a new pending baseline)
+      --scored 0|1     a pending change was scored this cycle (so a fresh snapshot verdict exists)
+      --changed 0|1    the agent recorded a NEW change this cycle (a new pending baseline)
+      --brain-ran 0|1  did the Claude analysis step actually run? (0 = it was skipped, e.g. claude
+                       not found) — surfaced so a silent brain-down never masquerades as "no change"
     """
-    scored = changed = False
+    scored = changed = market_closed = False
+    brain_ran = True  # default true for backward compat if the flag isn't passed
     it = iter(argv)
     for a in it:
         if a == "--scored":
             scored = next(it, "0") == "1"
         elif a == "--changed":
             changed = next(it, "0") == "1"
+        elif a == "--brain-ran":
+            brain_ran = next(it, "1") == "1"
+        elif a == "--market-closed":
+            market_closed = next(it, "0") == "1"
+    if market_closed:
+        brain_ran = False  # the market-closed cycle skips the analysis entirely — no model call
 
     available = True
     vec = raw = None
@@ -338,14 +372,56 @@ def cmd_status(argv):
         except Exception:
             entries = []
     prev = entries[0] if entries else None
+    cur_mode = raw.get("feedMode") if raw else None
 
-    def pct(cur, prev_key):
-        if not prev or prev.get(prev_key) in (None, ""):
+    def comparable(entry):
+        # Invariant 8 (ADR-0029): never compute a delta / growth across feed modes. If either side's
+        # mode is unknown we can't tell, so we don't block; a KNOWN mismatch (e.g. this run is LIVE, the
+        # entry we'd compare to is SIM) is not comparable and yields no number until same-mode history
+        # accumulates.
+        if not entry:
+            return False
+        em = entry.get("feedMode")
+        if em is None or cur_mode is None:
+            return True
+        return em == cur_mode
+
+    def pct(cur, *prev_keys):
+        if not comparable(prev):
             return None
-        p = Decimal(str(prev[prev_key]))
+        pv = None
+        for k in prev_keys:  # try new key first, fall back to any old-format key
+            if prev and prev.get(k) not in (None, ""):
+                pv = prev.get(k)
+                break
+        if pv is None:
+            return None
+        p = Decimal(str(pv))
         if p == 0:
             return None
         return round(float((cur - p) / abs(p) * 100), 2)
+
+    # Owner target: total PnL up >= PNL_TARGET_PCT every PNL_TARGET_WINDOW iterations. Measured vs the
+    # entry WINDOW iterations back (positive = improvement, even climbing out of a loss). Staleness — a
+    # flat/negative PnL not on track — is a failure the loop must act on, surfaced here for the UI + prompt.
+    def growth_over(window):
+        if not available or len(entries) < window:
+            return None
+        if not comparable(entries[window - 1]):  # invariant 8: don't measure growth across a mode switch
+            return None
+        ov = entries[window - 1].get("total_pnl", entries[window - 1].get("alpha_pnl"))
+        if ov in (None, ""):
+            return None
+        o = Decimal(str(ov))
+        if o == 0:
+            return None
+        return round(float((vec["pnl"] - o) / abs(o) * 100), 2)
+
+    pnl_growth = growth_over(PNL_TARGET_WINDOW)
+    on_track = pnl_growth is not None and Decimal(str(pnl_growth)) >= PNL_TARGET_PCT
+    underwater = available and vec["pnl"] <= 0
+    # A closed-market cycle is expected to be flat — never flag it as a staleness FAILURE (ADR-0063).
+    stale = (not market_closed) and available and pnl_growth is not None and not on_track
 
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     head = git("rev-parse", "--short", "HEAD", check=False).stdout.strip()
@@ -353,9 +429,32 @@ def cmd_status(argv):
     last_verdict = snap.get("verdict") if snap else None
     reverted = bool(snap and snap.get("revert"))
 
-    action = "reverted" if reverted else ("changed" if changed else "no-change")
+    # Claude's own reasoning for this cycle, if it wrote one (reports/last-analysis.md). Only trust it
+    # when the brain actually ran this cycle — a stale file from a prior run must not look current.
+    reasoning = ""
+    if brain_ran and os.path.exists(ANALYSIS):
+        try:
+            with open(ANALYSIS, "r", encoding="utf-8") as f:
+                reasoning = f.read().strip()
+        except Exception:
+            reasoning = ""
+    analysis_line = reasoning.splitlines()[0].strip() if reasoning else ""
 
-    if not available:
+    if market_closed:
+        action = "market-closed"
+    elif not brain_ran:
+        action = "no-analysis"
+    else:
+        action = "reverted" if reverted else ("changed" if changed else "no-change")
+
+    if market_closed:
+        decision = ("🌙 Market closed — analysis skipped this cycle (no Claude call). The US session is "
+                    "closed, so the tape is frozen and there is nothing to analyse; the loop resumes at "
+                    "the next open. Flat/unchanged here is expected, not a failure.")
+    elif not brain_ran:
+        decision = ("⚠️ ANALYSIS STEP DID NOT RUN this cycle — `claude` was not invoked (not found on "
+                    "PATH?). No diagnosis was made; the heartbeat/score still ran. Fix the loop's PATH.")
+    elif not available:
         decision = f"app unreachable — not measured ({err})"
     elif reverted:
         short = (snap.get("commit") or "")[:9]
@@ -368,22 +467,32 @@ def cmd_status(argv):
                     summ = json.load(f).get("summary", "")
             except Exception:
                 pass
-        decision = f"made a change: {summ}" + (f" · prev {last_verdict}" if last_verdict else "")
+        decision = f"made a change: {summ or analysis_line}" + (f" · prev {last_verdict}" if last_verdict else "")
     else:
-        decision = "no change this cycle" + (f" · prev {last_verdict}" if last_verdict else "")
+        # no change — show Claude's actual stated reason, not a generic placeholder
+        decision = (analysis_line or "no change this cycle") + (f" · prev {last_verdict}" if last_verdict else "")
 
     entry = {
         "ts": ts,
         "feedMode": (raw.get("feedMode") if raw else None),
         "available": available,
-        "alpha_pnl": (str(vec["alpha_pnl"]) if available else None),
+        "brain_ran": brain_ran,
+        "total_pnl": (str(vec["pnl"]) if available else None),
         "gross": (str(vec["gross"]) if available else None),
         "net": (str(vec["net"]) if available else None),
-        "pnl_pct": (pct(vec["alpha_pnl"], "alpha_pnl") if available else None),
+        "fees": (str(vec["fees"]) if available else None),
+        "pnl_pct": (pct(vec["pnl"], "total_pnl", "alpha_pnl") if available else None),
         "gross_pct": (pct(vec["gross"], "gross") if available else None),
+        "pnl_growth_pct": pnl_growth,                 # % PnL change vs WINDOW iterations ago
+        "pnl_growth_window": PNL_TARGET_WINDOW,
+        "pnl_target_pct": float(PNL_TARGET_PCT),      # owner target: >= this every WINDOW iters
+        "on_track": on_track,
+        "stale": stale,
+        "underwater": underwater,
         "action": action,
         "last_verdict": last_verdict,
         "decision": decision,
+        "reasoning": reasoning,
         "commit": head,
     }
     entries.insert(0, entry)
@@ -393,7 +502,7 @@ def cmd_status(argv):
         json.dump(entries, f, indent=2)
     git("add", "reports/run-status.json", check=False)
     git("commit", "-m", f"chore(status): run {ts} — {action}", check=False)
-    print(f"status: {action} | pnl {entry['alpha_pnl']} ({entry['pnl_pct']}%) "
+    print(f"status: {action} | total_pnl {entry['total_pnl']} ({entry['pnl_pct']}%) "
           f"| gross {entry['gross']} ({entry['gross_pct']}%) | {decision}")
     return 0
 

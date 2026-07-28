@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T11:00:13Z",
+    "fees": "454.171837",
+    "gross": "9572.53601658",
+    "net": "-7612.48422742",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "9572.53601658",
+      "hedgePnl": "-690.53275089",
+      "netExposure": "-7612.48422742",
+      "realizedPnl": "872.88995527",
+      "strategyAlpha": "1555.99516724",
+      "totalFees": "454.171837",
+      "totalPnl": "865.46241635",
+      "unrealizedPnl": "-7.42753892"
+    },
+    "total_pnl": "865.46241635"
+  },
+  "before": {
+    "at": "2026-07-27T10:47:32Z",
+    "gross": "22062.26490465",
+    "net": "2400.73632335",
+    "total_pnl": "857.53548735"
+  },
+  "commit": "2c6d4f0f77c57f7fe1820f7ecaa8eaabac869a73",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-12489.72888807",
+    "net": "-10013.22055077",
+    "total_pnl": "7.92692900"
+  },
+  "note": "risk-adj (PnL/$1 gross) improved 0.03887\u21920.09041",
+  "revert": false,
+  "scoredAt": "2026-07-27T11:00:13Z",
+  "summary": "the fused book's measured ex-ante volatility is capped at the median of its own planned volatility, so the desk's risk level is a decision rather than an accident of the cross-section (ADR-0104)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

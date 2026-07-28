@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T08:30:13Z",
+    "fees": "403.415988",
+    "gross": "19417.47555793",
+    "net": "7678.48668237",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "19417.47555793",
+      "hedgePnl": "-598.78982256",
+      "netExposure": "7678.48668237",
+      "realizedPnl": "546.30475445",
+      "strategyAlpha": "1171.14294399",
+      "totalFees": "403.415988",
+      "totalPnl": "572.35312143",
+      "unrealizedPnl": "26.04836698"
+    },
+    "total_pnl": "572.35312143"
+  },
+  "before": {
+    "at": "2026-07-27T08:19:22Z",
+    "gross": "35186.92550368",
+    "net": "8220.46997368",
+    "total_pnl": "508.83209491"
+  },
+  "commit": "1f1152361691a9281e82c4e079daf281b31601b7",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-15769.44994575",
+    "net": "-541.98329131",
+    "total_pnl": "63.52102652"
+  },
+  "note": "PnL up, exposure not up; risk-adj (PnL/$1 gross) improved 0.01446\u21920.02948",
+  "revert": false,
+  "scoredAt": "2026-07-27T08:30:13Z",
+  "summary": "a name with no measured round trip is charged the one its own live quote implies, floored at the desk blend \u2014 so the edge gate stops discovering an expensive name out of PnL (ADR-0099)",
+  "verdict": "\u2705 GOOD"
+}

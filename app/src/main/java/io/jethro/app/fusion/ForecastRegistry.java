@@ -30,16 +30,29 @@ public final class ForecastRegistry {
     private final Map<String, Entry> latest = new ConcurrentHashMap<>(); // "source|instrument" → latest
     private final Params params;
     private final long freshnessMillis;
+    /** ADR-0092: each continuous source's claimed scale, measured on its own stream of readings. */
+    private final ForecastScalars scalars;
 
     public ForecastRegistry(Params params, long freshnessMillis) {
+        this(params, freshnessMillis, new ForecastScalars(false, 30));
+    }
+
+    public ForecastRegistry(Params params, long freshnessMillis, ForecastScalars scalars) {
         this.params = params;
         this.freshnessMillis = Math.max(1_000, freshnessMillis);
+        this.scalars = scalars == null ? new ForecastScalars(false, 30) : scalars;
+    }
+
+    /** Per-source measured scale and the scalar it implies (ADR-0092) — operator disclosure. */
+    public Map<String, ForecastScalars.Measurement> scalarSnapshot() {
+        return scalars.snapshot();
     }
 
     // ---- source push points (called where each source already records telemetry) ----
 
     public void submitStrategy(TradeSignal signal) {
-        put(SourceForecasts.fromStrategy(signal, params.expectedAbsZ()));
+        putScaled(signal.kind(), signal.instrumentId(),
+                SourceForecasts.strategyClaim(signal, params.expectedAbsZ()));
     }
 
     public void submitHypothesis(String instrument, Side direction, Hypothesis.Conviction conviction) {
@@ -50,8 +63,31 @@ public final class ForecastRegistry {
         put(SourceForecasts.fromSocial(signal, params.socialPerChannel()));
     }
 
+    /** Price-derived EWMAC trend reading (ADR-0066); {@code score} is the self-normalised forecast. */
+    public void submitTrend(String instrument, double score) {
+        putScaled(SourceForecasts.TREND, instrument,
+                SourceForecasts.trendClaim(score, Forecast.TARGET_ABS));
+    }
+
+    /** Price-derived range-position reversion reading (ADR-0070); {@code score} is self-normalised. */
+    public void submitReversion(String instrument, double score) {
+        putScaled(SourceForecasts.REVERSION, instrument,
+                SourceForecasts.reversionClaim(score, Forecast.TARGET_ABS));
+    }
+
     public void submitLearned(String instrument, double pUp, double pDown, boolean ships) {
-        put(SourceForecasts.fromLearned(instrument, pUp, pDown, ships, params.learnedScale()));
+        putScaled(SourceForecasts.LEARNED, instrument,
+                SourceForecasts.learnedClaim(pUp, pDown, ships, params.learnedScale()));
+    }
+
+    /**
+     * Publish a CONTINUOUS source's uncapped claim, rescaled to that source's measured scale and then
+     * capped (ADR-0092). The ordinal sources — hypothesis (a conviction category) and social (a count
+     * of corroborating channels) — do not come through here: their magnitudes are a declared category
+     * scale, not an estimated one, so there is no claimed E|reading| to hold them to.
+     */
+    private void putScaled(String source, String instrument, double claim) {
+        put(Forecast.of(source, instrument, scalars.rescale(source, claim)));
     }
 
     private void put(Forecast forecast) {

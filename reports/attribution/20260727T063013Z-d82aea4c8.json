@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T06:30:13Z",
+    "fees": "357.018047",
+    "gross": "56047.46972741",
+    "net": "7699.75401541",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "56047.46972741",
+      "hedgePnl": "-448.22005395",
+      "netExposure": "7699.75401541",
+      "realizedPnl": "222.92736222",
+      "strategyAlpha": "708.45418681",
+      "totalFees": "357.018047",
+      "totalPnl": "260.23413286",
+      "unrealizedPnl": "37.30677064"
+    },
+    "total_pnl": "260.23413286"
+  },
+  "before": {
+    "at": "2026-07-27T06:17:52Z",
+    "gross": "14470.86127222",
+    "net": "2594.63454222",
+    "total_pnl": "235.44814450"
+  },
+  "commit": "d82aea4c8852bfeeb86862005a023f2580d65013",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "41576.60845519",
+    "net": "5105.11947319",
+    "total_pnl": "24.78598836"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj (PnL/$1 gross) worsened 0.01627\u21920.00464",
+  "revert": true,
+  "scoredAt": "2026-07-27T06:30:13Z",
+  "summary": "the fused target book spans only the names the desk may actually put risk on plus the names it already holds, so the book-level volatility budget and diversification multiplier measure the book that can exist instead of one three-quarters unreachable (ADR-0096)",
+  "verdict": "\u274c BAD"
+}

@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T00:00:13Z",
+    "fees": "158.453066",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "69.88228362",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-826.05938139",
+      "strategyAlpha": "-895.94166501",
+      "totalFees": "158.453066",
+      "totalPnl": "-826.05938139",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-826.05938139"
+  },
+  "before": {
+    "at": "2026-07-26T23:49:49Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-826.05938139"
+  },
+  "commit": "006606fdff18c46912f76124b6203818a0f95adb",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-27T00:00:13Z",
+  "summary": "route risk-increasing fusion entries as passive DAY LIMIT orders at the instrument's own arrival mark while exits still cross as MARKET, so the desk stops paying the full spread on every entry \u2014 the measured round trip was the binding constraint on the edge gate, not the evidence, and no hurdle or control was loosened (ADR-0084)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

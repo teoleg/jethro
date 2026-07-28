@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T10:00:11Z",
+    "fees": "431.435148",
+    "gross": "7.90278475",
+    "net": "7.90278475",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "7.90278475",
+      "hedgePnl": "-645.63607855",
+      "netExposure": "7.90278475",
+      "realizedPnl": "787.04318267",
+      "strategyAlpha": "1432.68024215",
+      "totalFees": "431.435148",
+      "totalPnl": "787.04416360",
+      "unrealizedPnl": "0.00098093"
+    },
+    "total_pnl": "787.04416360"
+  },
+  "before": {
+    "at": "2026-07-27T09:50:02Z",
+    "gross": "26684.11265347",
+    "net": "3506.14306815",
+    "total_pnl": "767.36208803"
+  },
+  "commit": "58e2c53b0487b206fb63bf07f688a07e185fff0a",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-26676.20986872",
+    "net": "-3498.24028340",
+    "total_pnl": "19.68207557"
+  },
+  "note": "risk-adj (PnL/$1 gross) improved 0.02876\u219299.59074",
+  "revert": false,
+  "scoredAt": "2026-07-27T10:00:11Z",
+  "summary": "the fusion aim is clamped into the closed interval between flat and this cycle's target, so the desk can no longer intend more risk than its forecast asks for, nor a position on the side its forecast opposes (ADR-0102)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

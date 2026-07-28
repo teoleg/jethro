@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T03:30:10Z",
+    "fees": "297.132360",
+    "gross": "17678.16942703",
+    "net": "1114.08513783",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "17678.16942703",
+      "hedgePnl": "-284.49720982",
+      "netExposure": "1114.08513783",
+      "realizedPnl": "-99.84001177",
+      "strategyAlpha": "192.89414013",
+      "totalFees": "297.132360",
+      "totalPnl": "-91.60306969",
+      "unrealizedPnl": "8.23694208"
+    },
+    "total_pnl": "-91.60306969"
+  },
+  "before": {
+    "at": "2026-07-27T03:15:15Z",
+    "gross": "55603.40319869",
+    "net": "22881.36296893",
+    "total_pnl": "-138.47695440"
+  },
+  "commit": "39a30344c873964319b410a4ea937d05ec91e9a2",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-37925.23377166",
+    "net": "-21767.27783110",
+    "total_pnl": "46.87388471"
+  },
+  "note": "risk-adj (PnL/$1 gross) worsened -0.00249\u2192-0.00518",
+  "revert": false,
+  "scoredAt": "2026-07-27T03:30:10Z",
+  "summary": "the fusion planner nets against the books it routes into rather than against the hedge overlay, so a contract the hedger buys is no longer answered by an equal short opened in a strategy book (ADR-0091)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

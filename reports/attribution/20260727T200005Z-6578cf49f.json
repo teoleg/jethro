@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T20:00:05Z",
+    "fees": "481.442117",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "-3093.30503794",
+      "netExposure": "0.00000000",
+      "realizedPnl": "5654.22493394",
+      "strategyAlpha": "8747.52997188",
+      "totalFees": "481.442117",
+      "totalPnl": "5654.22493394",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "5654.22493394"
+  },
+  "before": {
+    "at": "2026-07-27T19:08:38Z",
+    "gross": "10401.12000000",
+    "net": "10401.12000000",
+    "total_pnl": "5726.96704425"
+  },
+  "commit": "6578cf49f05e1fb8450ef4b1c0cc9bc5b31d6e9b",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-10401.12000000",
+    "net": "-10401.12000000",
+    "total_pnl": "-72.74211031"
+  },
+  "note": "risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-27T20:00:05Z",
+  "summary": "the loop's deploy is accepted only when the running JVM reports a boot time at or after the deploy began, restored after a merge silently dropped it and reconciled with the stop-before-rebuild ordering that displaced it (ADR-0110)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

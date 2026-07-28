@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T20:30:05Z",
+    "fees": "158.453066",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "69.88228362",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-826.05938139",
+      "strategyAlpha": "-895.94166501",
+      "totalFees": "158.453066",
+      "totalPnl": "-826.05938139",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-826.05938139"
+  },
+  "before": {
+    "at": "2026-07-26T20:14:59Z",
+    "gross": "37284.69944897",
+    "net": "-20274.60712703",
+    "total_pnl": "-802.33374057"
+  },
+  "commit": "b746e693b392c84da09587e1639ada34db880806",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-37284.69944897",
+    "net": "20274.60712703",
+    "total_pnl": "-23.72564082"
+  },
+  "note": "risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T20:30:05Z",
+  "summary": "the expectancy standard error behind every risk decision is taken across emission cohorts rather than across observations (Fama-MacBeth): sources emit their whole cross-section in one burst, so 23 simultaneous calls are one draw of the market and not 23 independent ones \u2014 the point estimate is the mean of cohort means, the standard error is sd(cohort means)/sqrt(B), and it is zero below two cohorts; measured 2.23x understatement on the live trend cohorts and reversion's entire positive reading is a single cross-section, so the gate no longer opens on evidence that does not exist (ADR-0077)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T21:15:04Z",
+    "fees": "158.453066",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "69.88228362",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-826.05938139",
+      "strategyAlpha": "-895.94166501",
+      "totalFees": "158.453066",
+      "totalPnl": "-826.05938139",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-826.05938139"
+  },
+  "before": {
+    "at": "2026-07-26T21:13:08Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-826.05938139"
+  },
+  "commit": "fee6ef5371f86719e24ef216626fa8ae4116d6da",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T21:15:04Z",
+  "summary": "the fused target book is scaled by its measured portfolio diversification: a cross-section that is really one bet can no longer carry a full per-name budget on every name \u2014 PDM = min(1, sigma_indep/sigma_actual) over the EWMA daily-return covariance that already prices VaR and the hedge advisor, so uncorrelated names are untouched, N perfectly correlated names collapse to one budget of risk, an internally-hedged book is never levered up, and an uncovered name is neither summed nor scaled (ADR-0079)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

@@ -22,10 +22,19 @@ public final class ForecastScaler {
 
     /** Continuous: rescale {@code rawSigned} so E|reading| ≈ TARGET_ABS, then cap. */
     public static double scale(double rawSigned, double expectedAbsRaw) {
+        return Forecast.clamp(claim(rawSigned, expectedAbsRaw));
+    }
+
+    /**
+     * The same rescaling WITHOUT the cap — what the source claims before clipping. {@link ForecastScalars}
+     * measures the claim rather than the capped forecast (ADR-0092): a clipped reading has already lost
+     * the magnitude the measurement needs. Unbounded by design; callers cap after rescaling.
+     */
+    public static double claim(double rawSigned, double expectedAbsRaw) {
         if (!(expectedAbsRaw > 0) || !Double.isFinite(rawSigned)) {
             return 0.0;
         }
-        return Forecast.clamp(rawSigned * (Forecast.TARGET_ABS / expectedAbsRaw));
+        return rawSigned * (Forecast.TARGET_ABS / expectedAbsRaw);
     }
 
     /** Ordinal: a signed level (…,-2,-1,0,+1,+2,…) × {@code stepPerLevel}, capped. */

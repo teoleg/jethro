@@ -24,6 +24,8 @@ public final class SimSocialFeed implements SocialFeed {
     private static final String[] CREDIBLE = {"wire:Reuters", "wire:Bloomberg", "st:AnalystJane", "st:MacroMike"};
     private static final String[] BULL = {"breakout", "buy", "rally", "squeeze", "calls"};
     private static final String[] BEAR = {"dump", "short", "fade", "puts", "tank"};
+    /** Copypasta variants for the pump burst — distinct normalised text, same obvious shill. */
+    private static final String[] SHILL = {"dont miss this", "loading up", "next 10x", "all in", "free money"};
 
     private final Random rnd;
     private long seq;
@@ -53,14 +55,21 @@ public final class SimSocialFeed implements SocialFeed {
             out.add(credible(ch, "$" + t1 + " " + word(bull) + " — desk sees follow-through", now));
         }
         // 2) A pump on a DIFFERENT ticker: many untrusted throwaways, varied copypasta, bullish.
+        // The ticker MUST differ from the corroborated event's: landing both on one name makes the
+        // fixture untestable — the credible channels corroborate it and the burst is read as part of
+        // the same (legitimate) story, so nothing is flagged. One retry was not enough; keep drawing.
         String t2 = pick(universe);
-        if (t2.equals(t1)) {
+        for (int guard = 0; t2.equals(t1) && guard < universe.size() * 4; guard++) {
             t2 = pick(universe);
         }
         int pumpN = 5 + rnd.nextInt(4);
         for (int i = 0; i < pumpN; i++) {
-            String rockets = "🚀".repeat(1 + rnd.nextInt(4)); // varied so it's a burst, not exact dup
-            out.add(throwaway("tg:pump" + i, "$" + t2 + " to the moon " + rockets + " buy now!!", now));
+            // Varied in WORDS, not just emoji: the spam filter fingerprints on normalised text
+            // (lower-cased, non-alphanumerics stripped), so emoji-only variation is an exact duplicate
+            // and the burst would be shed by the copypasta control before the gate could ever see it.
+            // A real pump is copypasta *variants* — that is what must reach the corroboration gate.
+            out.add(throwaway("tg:pump" + i, "$" + t2 + " to the moon " + SHILL[i % SHILL.length]
+                    + " " + i + " buy now", now));
         }
         // 3) Noise: one lone credible post (cannot corroborate alone).
         out.add(credible(CREDIBLE[rnd.nextInt(CREDIBLE.length)],

@@ -7,7 +7,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Persistence for ADR-0055 phase-1 signal telemetry. Records a source's directional call, resolves it
@@ -30,13 +32,19 @@ public final class SignalTelemetryStore {
     public record Open(String id, String source, String instrument, int direction, BigDecimal entryMark) {
     }
 
-    /** True when this source already has an unresolved call open on this instrument (this mode). */
-    public boolean hasOpen(String source, String instrument) {
+    /**
+     * True when this source already has an unresolved call open on this instrument <b>at this
+     * horizon</b> (this mode). The horizon is part of the key (ADR-0082): the same call measured over
+     * an hour and over four minutes is two observations of two different quantities, and holding only
+     * one open per (source, instrument) would let the longest rung starve every shorter one.
+     */
+    public boolean hasOpen(String source, String instrument, int horizonSeconds) {
         try {
             Long n = jdbc.queryForObject("""
                     select count(*) from signal_observations
-                    where source = ? and instrument = ? and resolved = false and feed_mode = ?
-                    """, Long.class, source, instrument, mode());
+                    where source = ? and instrument = ? and horizon_seconds = ?
+                      and resolved = false and feed_mode = ?
+                    """, Long.class, source, instrument, horizonSeconds, mode());
             return n != null && n > 0;
         } catch (Exception e) {
             return true; // on doubt, don't record a possible duplicate
@@ -87,19 +95,154 @@ public final class SignalTelemetryStore {
         }
     }
 
-    /** Resolved directional returns for one source since {@code since} (this mode), newest first. */
-    public List<Double> resolvedReturns(String source, Instant since, int limit) {
+    /**
+     * The most recent {@code cohortLimit} emission cohorts for one source at one horizon (this mode),
+     * each already reduced to the sufficient statistics {@link SignalScoring} needs (ADR-0108).
+     *
+     * <p><b>Why the bound counts cohorts.</b> Since ADR-0077 the expectancy's standard error is
+     * estimated ACROSS emission cohorts, so cohorts — not rows — are the estimator's sample. Bounding
+     * the read at a row count therefore bounded the statistics in the wrong unit: a source that emits
+     * its whole cross-section at once spends the budget at its own width, so a 23-name source was
+     * pinned at ~22 independent draws forever while a one-name-at-a-time source got the full count.
+     * The edge gate's power was capped by cross-section width instead of by accumulated evidence, and
+     * no amount of running could lift it. Counting the bound in cohorts fixes that and — because each
+     * cohort comes back as one row rather than its whole cross-section — reads LESS from the database
+     * than the row-bounded query it replaces.
+     *
+     * <p>The bound is applied PER HORIZON deliberately (ADR-0082). A short rung resolves many times
+     * more often than a long one — sixteen times, at a 4× ladder ratio two steps down — so a single
+     * newest-first window across all rungs would fill with the fastest rung and silently starve the
+     * slowest of the very history the desk has waited hours to accumulate.
+     *
+     * <p>Cohorts are cut by the same rule {@link SignalScoring} applies in memory: observations ordered
+     * by entry instant, and a new cohort wherever the gap to the previous one exceeds
+     * {@code cohortWindowMillis}. Doing it in SQL is what keeps the transfer constant; the definition
+     * is unchanged, and {@code SignalScoringTest} pins the two groupings to the same answer.
+     *
+     * <p>{@code flatThresholdBps} classifies each observation WIN/LOSS/FLAT exactly as
+     * {@link SignalScoring#outcome(double, double)} does — a move counts only if it clears the
+     * threshold — so the hit-rate is the same statistic wherever it is computed.
+     *
+     * <p><b>Bad prints are not evidence (ADR-0109).</b> An observation whose realised move exceeds the
+     * desk's own corporate-action / bad-print threshold for that instrument's asset class
+     * ({@code jethro.trading.mark-jump-bps}, via reference data) is excluded. The jump guard already
+     * says such a price never reaches P&amp;L, orders, sizing or history; letting it reach the
+     * expectancy — whose standard error is the denominator of every gate above it — is the same bad
+     * print arriving by another door. See {@link #discardedCount} for the count that goes with it.
+     */
+    public List<SignalScoring.Cohort> resolvedCohorts(String source, int horizonSeconds, Instant since,
+                                                      long cohortWindowMillis, double flatThresholdBps,
+                                                      int cohortLimit,
+                                                      Map<String, Integer> badPrintBpsByAssetClass) {
+        BigDecimal threshold = BigDecimal.valueOf(Math.abs(flatThresholdBps) / 1e4);
+        String[] caps = capArrays(badPrintBpsByAssetClass);
         try {
             return jdbc.query("""
-                    select realized_return from signal_observations
-                    where source = ? and resolved = true and feed_mode = ? and resolved_at >= ?
-                    order by resolved_at desc limit ?
-                    """, (rs, i) -> rs.getBigDecimal("realized_return").doubleValue(),
-                    source, mode(), Timestamp.from(since), limit);
+                    with caps as (
+                        select cls, bps from unnest(string_to_array(?, ','),
+                                                    string_to_array(?, ',')::int[]) as t(cls, bps)
+                    ), resolved_obs as (
+                        select o.entry_at, o.realized_return,
+                               case when extract(epoch from
+                                        o.entry_at - lag(o.entry_at) over (order by o.entry_at)) * 1000 > ?
+                                    then 1 else 0 end as cohort_break
+                        from signal_observations o
+                        left join instrument i on i.instrument_id = o.instrument
+                        left join caps c on c.cls = i.asset_class
+                        left join caps d on d.cls = 'DEFAULT'
+                        where o.source = ? and o.horizon_seconds = ? and o.resolved = true
+                          and o.feed_mode = ? and o.resolved_at >= ? and o.realized_return is not null
+                          and not (coalesce(c.bps, d.bps, 0) > 0
+                                   and abs(o.realized_return) >= coalesce(c.bps, d.bps) / 10000.0)
+                    ), cohorted as (
+                        select realized_return, entry_at,
+                               sum(cohort_break) over (order by entry_at) as cohort_id
+                        from resolved_obs
+                    )
+                    select count(*) as n,
+                           sum(realized_return) as sum_return,
+                           sum(realized_return * realized_return) as sum_squared_return,
+                           count(*) filter (where realized_return > ?) as wins,
+                           count(*) filter (where realized_return < ?) as losses
+                    from cohorted
+                    group by cohort_id
+                    order by max(entry_at) desc
+                    limit ?
+                    """, (rs, i) -> new SignalScoring.Cohort(
+                            rs.getLong("n"),
+                            rs.getBigDecimal("sum_return").doubleValue(),
+                            rs.getBigDecimal("sum_squared_return").doubleValue(),
+                            rs.getLong("wins"),
+                            rs.getLong("losses")),
+                    caps[0], caps[1], cohortWindowMillis, source, horizonSeconds, mode(),
+                    Timestamp.from(since), threshold, threshold.negate(), cohortLimit);
         } catch (Exception e) {
+            log.debug("cohort read failed for {}@{}s: {}", source, horizonSeconds, e.toString());
             return List.of();
         }
     }
+
+    /**
+     * How many resolved observations the bad-print exclusion kept out of one source's expectancy at one
+     * horizon (ADR-0109) — the same predicate {@link #resolvedCohorts} applies, counted rather than
+     * dropped in silence. Evidence removed from a gate that governs exposure is not a detail: it is
+     * shown on {@code /api/signals/discards} and in the loop report, and a rising count is the desk
+     * telling the operator that its mark stream, not its alpha, is what changed.
+     */
+    public long discardedCount(String source, int horizonSeconds, Instant since,
+                               Map<String, Integer> badPrintBpsByAssetClass) {
+        String[] caps = capArrays(badPrintBpsByAssetClass);
+        try {
+            Long n = jdbc.queryForObject("""
+                    with caps as (
+                        select cls, bps from unnest(string_to_array(?, ','),
+                                                    string_to_array(?, ',')::int[]) as t(cls, bps)
+                    )
+                    select count(*)
+                    from signal_observations o
+                    left join instrument i on i.instrument_id = o.instrument
+                    left join caps c on c.cls = i.asset_class
+                    left join caps d on d.cls = 'DEFAULT'
+                    where o.source = ? and o.horizon_seconds = ? and o.resolved = true
+                      and o.feed_mode = ? and o.resolved_at >= ? and o.realized_return is not null
+                      and coalesce(c.bps, d.bps, 0) > 0
+                      and abs(o.realized_return) >= coalesce(c.bps, d.bps) / 10000.0
+                    """, Long.class, caps[0], caps[1], source, horizonSeconds, mode(),
+                    Timestamp.from(since));
+            return n == null ? 0 : n;
+        } catch (Exception e) {
+            log.debug("discard count failed for {}@{}s: {}", source, horizonSeconds, e.toString());
+            return 0;
+        }
+    }
+
+    /**
+     * The per-asset-class bad-print thresholds as two parallel comma-joined lists, the shape the
+     * queries above {@code unnest} into a join table. Fails OPEN: an absent or unusable map becomes a
+     * single {@code DEFAULT=0} entry, and zero disables the exclusion for that class exactly as it
+     * disables the jump guard itself — a mis-wired threshold must never be able to delete the desk's
+     * evidence. Class keys are restricted to the reference-data alphabet, so nothing but a name can
+     * reach the array literal.
+     */
+    static String[] capArrays(Map<String, Integer> badPrintBpsByAssetClass) {
+        List<String> classes = new ArrayList<>();
+        List<String> bps = new ArrayList<>();
+        if (badPrintBpsByAssetClass != null) {
+            for (var e : badPrintBpsByAssetClass.entrySet()) {
+                if (e.getKey() == null || e.getValue() == null || !ASSET_CLASS_KEY.matcher(e.getKey()).matches()) {
+                    continue;
+                }
+                classes.add(e.getKey());
+                bps.add(Integer.toString(Math.max(0, e.getValue())));
+            }
+        }
+        if (classes.isEmpty()) {
+            return new String[] {"DEFAULT", "0"};
+        }
+        return new String[] {String.join(",", classes), String.join(",", bps)};
+    }
+
+    private static final java.util.regex.Pattern ASSET_CLASS_KEY = java.util.regex.Pattern.compile("[A-Z_]{1,16}");
 
     /** Distinct sources seen (this mode) — resolved or open — so the view lists every live source. */
     public List<String> sources() {
@@ -111,12 +254,13 @@ public final class SignalTelemetryStore {
         }
     }
 
-    public long openCount(String source) {
+    /** Unresolved calls this source has open at {@code horizonSeconds} (this mode). */
+    public long openCount(String source, int horizonSeconds) {
         try {
             Long n = jdbc.queryForObject("""
                     select count(*) from signal_observations
-                    where source = ? and resolved = false and feed_mode = ?
-                    """, Long.class, source, mode());
+                    where source = ? and horizon_seconds = ? and resolved = false and feed_mode = ?
+                    """, Long.class, source, horizonSeconds, mode());
             return n == null ? 0 : n;
         } catch (Exception e) {
             return 0;

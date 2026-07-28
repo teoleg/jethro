@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T19:45:05Z",
+    "fees": "131.123236",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "95.38694807",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-867.73313105",
+      "strategyAlpha": "-963.12007912",
+      "totalFees": "131.123236",
+      "totalPnl": "-867.73313105",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-867.73313105"
+  },
+  "before": {
+    "at": "2026-07-26T19:40:06Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-867.73313105"
+  },
+  "commit": "ccc6139e7d6bfe9b31f16f3234081b569f8a99fa",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "note": "no material change (within noise band); risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-26T19:45:05Z",
+  "summary": "the edge gate tests every name against its own measured round-trip cost on both sides: a name may increase when a source's measured expectancy survives that name's own cost at the same significance hurdle, the desk-wide verdict is the same test at the cheapest round trip the desk can actually pay, and an unfilled name is charged the measured blend rather than an invented cost (ADR-0075)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

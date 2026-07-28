@@ -48,6 +48,7 @@
     border-radius:10px; border:1px solid var(--line-2); color:var(--dim); vertical-align:middle; }
   .src-badge.live { color:var(--up); border-color:var(--up); }
 </style>
+  <script src="format.js"></script>
 </head>
 <body>
 <div class="topbar">
@@ -136,7 +137,7 @@
       const curve = await (await fetch("/api/curve")).json();
       const tsy = await fetch("/api/curve/tsy").then(r => r.json()).catch(() => []);
       if (curve.length) {
-        document.getElementById("asof").textContent = "· " + new Date().toLocaleTimeString();
+        document.getElementById("asof").textContent = "· " + fmtTimeET(Date.now());
         document.getElementById("curveChart").innerHTML = curveSvg(curve, tsy);
         const tsyBy = {}; (tsy||[]).forEach(p => tsyBy[p.tenorYears] = p.parYield);
         document.getElementById("curveTable").outerHTML = '<div id="curveTable"><table>' +

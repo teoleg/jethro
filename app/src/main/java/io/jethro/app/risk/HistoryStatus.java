@@ -49,9 +49,20 @@ public final class HistoryStatus {
 
     public Snapshot snapshot() {
         try {
-            Long days = jdbc.queryForObject("select count(distinct day) from daily_close", Long.class);
-            Long instruments = jdbc.queryForObject("select count(distinct instrument) from daily_close", Long.class);
-            String latest = jdbc.query("select max(day) as d from daily_close",
+            // ADR-0073: report the history this session can actually measure risk from — its own
+            // stream plus the seed — not the table's total across every feed mode ever run.
+            var modes = DailyCloseSeries.admissibleModes();
+            String scope = " where feed_mode in (?, ?)";
+            Object[] args = {modes.get(0), modes.get(1)};
+            Long days = jdbc.queryForObject("select count(distinct day) from daily_close" + scope,
+                    Long.class, args);
+            Long instruments = jdbc.queryForObject(
+                    "select count(distinct instrument) from daily_close" + scope, Long.class, args);
+            String latest = jdbc.query("select max(day) as d from daily_close" + scope,
+                    ps -> {
+                        ps.setString(1, modes.get(0));
+                        ps.setString(2, modes.get(1));
+                    },
                     rs -> rs.next() && rs.getDate("d") != null ? rs.getDate("d").toString() : null);
             long d = days != null ? days : 0;
             return new Snapshot(d, latest, instruments != null ? instruments : 0,

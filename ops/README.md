@@ -3,9 +3,10 @@
 Implementation of ADR-0063, run on your **Claude Max subscription** (no per-token API charge).
 It is inert until you turn it on with `ops/loop-control.sh on`.
 
-## One full cycle (every 2 hours), all local on the box
+## One full cycle (every 30 minutes), all local on the box
 ```
-report the live app  ->  Claude deep analysis  ->  (only if warranted) one code change
+report the live app  ->  build this run's prompt (contract + freshest situation/memory)
+   ->  Claude deep analysis  ->  (only if warranted) one code change
    ->  run tests (./gradlew -Pci test)  ->  commit to claude/auto-improve  ->  push
    ->  rebuild + restart the app  ->  done till next run
 ```
@@ -21,7 +22,7 @@ report the live app  ->  Claude deep analysis  ->  (only if warranted) one code 
 - `improve-loop.sh` runs `unset ANTHROPIC_API_KEY` so every cycle stays on Max. Don't put an API key
   in the cron environment.
 - Cost on Max is **plan usage, not dollars**; if you hit the cap the loop pauses until reset — no
-  runaway bill. Every-2-hours, mostly no-change cycles, is modest.
+  runaway bill. Every-30-minutes, mostly no-change cycles, is modest.
 
 ## One-time setup (on the Pi — needs a 64-bit OS)
 ```sh
@@ -40,7 +41,7 @@ answer), then asks before installing the cron. It finds the repo from its own lo
 wherever you cloned it.
 ```sh
 # Set your build+restart, then run. It confirms before enabling.
-JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' \
+JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' \
   ops/enable-loop.sh
 
 ops/enable-loop.sh --dry-run    # run ONE cycle now and STOP (don't install the cron) — great first test
@@ -50,8 +51,10 @@ ops/enable-loop.sh --yes        # skip the confirmation prompt
 
 ## Or the low-level switch directly
 ```sh
-# Tell it how to rebuild + restart YOUR app, then enable. Example (adjust to how you run Jethro):
-JETHRO_DEPLOY_CMD='./gradlew :app:bootJar -x test && sudo systemctl restart jethro' \
+# Tell it how to rebuild + restart YOUR app, then enable. `svc.sh deploy app` does it the safe way
+# (stop the JVM -> rebuild the jar -> start; never rebuild under a live app, which corrupts its
+# classloader). If you run Jethro some other way, use a command that STOPS before it rebuilds.
+JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' \
   ops/loop-control.sh on
 
 ops/loop-control.sh status     # ON / OFF
@@ -59,12 +62,29 @@ ops/loop-control.sh off        # disable — removes the cron line, nothing runs
 ```
 - `JETHRO_DEPLOY_CMD` is **your** build-and-restart command; the loop runs it only after a verified
   commit. If you leave it empty, changes still commit+push but the app won't restart (it warns you).
+  Left **unset** entirely, the loop uses the repo's own `scripts/svc.sh deploy app`.
+- The loop does not trust that command's exit status. After running it, it asks the app when it
+  booted (`/api/ops/jvm` uptime) and accepts the deploy only if a process that started *after* the
+  deploy began is answering; otherwise it falls back to `scripts/svc.sh deploy app` and, if that also
+  fails, writes a loud line saying the next cycle's verdict is void (ADR-0110). A verdict scored
+  against a binary that never contained the change is manufactured evidence, not a measurement.
 - `on`/`off` just add/remove one tagged crontab line, so it's safe to toggle anytime.
 
 ## The branch is the gate
 The box works on **`claude/auto-improve`** and runs whatever is committed there. For hands-off
 autonomy, leave it as-is. To review each change before it runs live, set `JETHRO_DEPLOY_CMD` empty
 (so it commits+pushes but doesn't restart) and rebuild/restart yourself after you've looked.
+
+**One branch — the loop and the maintainer share `claude/auto-improve`.** There is no second
+"upstream" branch and no auto-merge. (There used to be: the loop merged `origin/claude/new-session-smb8v6`
+into `auto-improve` every cycle. Both branches edited the same files, so that merge **conflict-aborted
+every cycle** — maintainer changes never landed and the system silently split into two diverging
+branches. Removed.) Each cycle the loop `git fetch`es and **fast-forwards** to any commits already on
+`origin/claude/auto-improve`, so a maintainer change lands the moment it is pushed there — no merge step
+to fail. To push a maintainer change: commit it to `claude/auto-improve` and push. If the box has
+un-pushed local commits (it commits its ledger/heartbeat every cycle), pull once when it is idle
+(`ops/loop-control.sh off` → `git pull --ff-only origin claude/auto-improve` → `ops/loop-control.sh on`)
+so both sides converge cleanly.
 
 ## Watch it in the UI — the Improve page
 Every cycle (change or not) writes one deterministic heartbeat line to `reports/run-status.json`, which

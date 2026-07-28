@@ -28,17 +28,34 @@ public final class PreTradeGuardrail {
 
     private static final long RESERVATION_MILLIS = 10_000;
 
+    /**
+     * Whether the market session currently permits OPENING (risk-adding) trades (ADR-0115). Injected
+     * from above (the app wires it to the wall-clock calendar); a continuous sim/replay tape passes
+     * {@code () -> true}. Deterministic — no model (invariant 7).
+     */
+    @FunctionalInterface
+    public interface SessionGate {
+        boolean riskAddingAllowed();
+    }
+
     private final RiskProjection projection;
     private final RiskLimitSource limits;
+    private final SessionGate sessionGate;
 
     private record Reservation(long expiresAt, String bookId, BigDecimal grossDelta, BigDecimal netDelta) {
     }
 
     private final Deque<Reservation> reservations = new ArrayDeque<>();
 
+    /** No session gate — risk-adding always permitted (sim/replay and tests). */
     public PreTradeGuardrail(RiskProjection projection, RiskLimitSource limits) {
+        this(projection, limits, () -> true);
+    }
+
+    public PreTradeGuardrail(RiskProjection projection, RiskLimitSource limits, SessionGate sessionGate) {
         this.projection = projection;
         this.limits = limits;
+        this.sessionGate = sessionGate;
     }
 
     /** Read-only check (no reservation) — used for suggestions. */
@@ -63,6 +80,14 @@ public final class PreTradeGuardrail {
         BigDecimal projGross = projected.gross().add(reservedGross(bookId));
         BigDecimal projNet = projected.net().add(reservedNet(bookId));
         boolean addsRisk = projected.gross().compareTo(current.gross()) > 0;
+
+        // Session gate (ADR-0115): outside the market session only risk-reducing (flattening) orders
+        // are allowed. A continuous tape (sim/replay) is always "open". This stops new exposure being
+        // opened after-hours/overnight/weekends on a thin or stale tape that then cannot be managed
+        // until the reopen — while a position can always be flattened.
+        if (addsRisk && !sessionGate.riskAddingAllowed()) {
+            return Optional.of("market session is closed — only risk-reducing orders allowed (ADR-0115)");
+        }
 
         // Loss gate: a book past its max loss may only reduce risk.
         if (RiskLimits.isSet(book.maxLossPnl()) && addsRisk) {

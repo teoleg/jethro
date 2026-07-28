@@ -46,10 +46,11 @@ class HedgeAdvisorTest {
 
     private static HedgeAdvisor advisor(HedgeAdvisor.Mode mode, String rebalanceFloorUsd,
                                         double switchMargin) {
-        // min-trade $10k (ADR-0039); min-covariance 40d (ADR-0041; fixture covs have 60 obs);
-        // candidates ES,NQ with refdata-style multipliers (ES 50, NQ 20); structural proxy ES.
+        // min-trade $10k (ADR-0039) with the 25%-of-scale relative leg (ADR-0069); min-covariance
+        // 40d (ADR-0041; fixture covs have 60 obs); candidates ES,NQ with refdata-style
+        // multipliers (ES 50, NQ 20); structural proxy ES.
         return new HedgeAdvisor(mode, new BigDecimal(rebalanceFloorUsd), new BigDecimal("10000"),
-                0.25, 40, List.of("ES", "NQ"), switchMargin, "ES", MULTIPLIERS);
+                new BigDecimal("0.25"), 0.25, 40, List.of("ES", "NQ"), switchMargin, "ES", MULTIPLIERS);
     }
 
     private static final Function<String, Optional<BigDecimal>> MULTIPLIERS = id -> switch (id) {
@@ -129,6 +130,48 @@ class HedgeAdvisorTest {
         var axis = eval(advisor(HedgeAdvisor.Mode.AUTO, "0"), Optional.of(cov2()),
                 LONG_1M, NO_BETA, Map.of("ES", new BigDecimal("-6.4")), ALL_TRADABLE);
         assertFalse(axis.hedging(), "an $8k trim is churn, not a hedge");
+        assertEquals("ON-TARGET", axis.status());
+    }
+
+    @Test
+    void smallBookResidualHedgeIsTrimmedNotStranded() {
+        // ADR-0069, the live 2026-07-26 defect: the equity book collapsed to a fraction of its
+        // former size, leaving a hedge far above its own target. β̂=1.8 on $2,800 net equity →
+        // target −0.018 ES ($5,040 at $280k/contract); held −0.045 ES ($12,600). The delta is
+        // 0.027 ES = $7,560 — under the $10k ABSOLUTE guard, so the pure-ADR-0039 rule held it
+        // forever and $7.6k of unwanted proxy exposure sat on the firm book. The relative leg is
+        // 25% × $12,600 = $3,150, and $7,560 clears it, so the excess is trimmed.
+        var axis = eval(advisor(HedgeAdvisor.Mode.AUTO, "0"), Optional.of(cov2()),
+                Map.of("STOCK", new BigDecimal("2800")), NO_BETA,
+                Map.of("ES", new BigDecimal("-0.045")), ALL_TRADABLE);
+        assertTrue(axis.hedging(), "a 150%-of-target excess is not churn: " + axis.rationale());
+        assertEquals("BUY", axis.hedgeSide(), "buying back part of a too-short hedge");
+        assertEquals(0, new BigDecimal("0.027").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void tinyResidualHedgeIsAlwaysUnwound() {
+        // ADR-0039 Decision 1 promises "no underlying, no hedge". Under a pure absolute guard that
+        // promise failed silently for any residual smaller than the guard: equities flat, held
+        // −0.02 ES = $5,600 < $10k, so the naked proxy leg lingered. With the band at 25% of the
+        // hedge's own scale ($1,400) a zero target is reachable at any size.
+        var axis = eval(advisor(HedgeAdvisor.Mode.AUTO, "0"), Optional.of(cov2()),
+                Map.of(), NO_BETA, Map.of("ES", new BigDecimal("-0.02")), ALL_TRADABLE);
+        assertTrue(axis.hedging());
+        assertEquals("UNWIND", axis.status());
+        assertEquals("BUY", axis.hedgeSide());
+        assertEquals(0, new BigDecimal("0.02").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void smallBookStillDampsSubBandChurn() {
+        // The relative leg must not turn into a churn machine: β̂=1.8 on $3,080 → target −0.0198
+        // ES, held −0.02 → a 0.0002 ES / $56 trim, which is 1% of the $5,600 hedge and far under
+        // the $1,400 band. Nothing trades.
+        var axis = eval(advisor(HedgeAdvisor.Mode.AUTO, "0"), Optional.of(cov2()),
+                Map.of("STOCK", new BigDecimal("3080")), NO_BETA,
+                Map.of("ES", new BigDecimal("-0.02")), ALL_TRADABLE);
+        assertFalse(axis.hedging(), "a 1% drift is churn at any book size: " + axis.rationale());
         assertEquals("ON-TARGET", axis.status());
     }
 
@@ -231,5 +274,163 @@ class HedgeAdvisorTest {
                 Map.of("STOCK", new BigDecimal("1000000"), "ES", new BigDecimal("9000000")),
                 Set.of("STOCK")::contains, PRICES, NO_BETA, NONE_HELD, ALL_TRADABLE);
         assertEquals(0, new BigDecimal("1000000.00").compareTo(snap.axes().get(0).netExposureUsd()));
+    }
+
+    // ---- ADR-0098: the hedge neutralizes only exposure that stands clear of its own churn ----
+
+    /** Advisor with the ADR-0098 shrinkage active at k σ (0 = the pre-ADR-0098 behaviour). */
+    private static HedgeAdvisor churnAdvisor(String churnSigmaMultiple) {
+        return new HedgeAdvisor(HedgeAdvisor.Mode.AUTO, BigDecimal.ZERO, new BigDecimal("10000"),
+                new BigDecimal("0.25"), 0.25, 40, List.of("ES", "NQ"), 0.10, "ES", MULTIPLIERS,
+                new BigDecimal(churnSigmaMultiple));
+    }
+
+    private static HedgeAdvisor.Axis evalChurn(HedgeAdvisor a, Map<String, BigDecimal> exposures,
+                                               Map<String, BigDecimal> held, String sigmaUsd) {
+        Function<String, Optional<BigDecimal>> churn = id ->
+                "EQUITY".equals(id) ? Optional.of(new BigDecimal(sigmaUsd)) : Optional.empty();
+        return a.evaluate(Optional.of(cov2()), exposures, IS_EQUITY, PRICES, NO_BETA, held,
+                ALL_TRADABLE, churn).axes().get(0);
+    }
+
+    @Test
+    void aPersistentHedgeIsShrunkByExactlyOneSigmaOfItsOwnStep() {
+        // $1m long STOCK, β̂ = 1.8 → target −6.428571 ES; at $280k/contract the RAW target notional
+        // is −6.428571 × 280,000 = −$1,799,999.88. With σ_step = $280,000 (one contract) and k = 1:
+        //   |−1,799,999.88| − 280,000 = 1,519,999.88  → shrunk −$1,519,999.88
+        //   → −1,519,999.88 / 280,000 = −5.428571 ES  (exactly one contract less)
+        // The sign is unchanged and the magnitude fell: a real hedge is trimmed, never reversed.
+        var axis = evalChurn(churnAdvisor("1.0"), LONG_1M, NONE_HELD, "280000");
+        assertEquals(0, new BigDecimal("-1799999.88").compareTo(axis.rawTargetNotionalUsd()));
+        assertEquals(0, new BigDecimal("280000").compareTo(axis.churnSigmaUsd()));
+        assertEquals(0, new BigDecimal("-5.428571").compareTo(axis.targetProxyQty()));
+        assertEquals("SELL", axis.hedgeSide(), "still short the proxy against a long book");
+        assertEquals(0, new BigDecimal("5.428571").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void aTargetInsideItsOwnChurnIsSetFlatAndTheResidualHedgeIsUnwound() {
+        // The live 2026-07-27 defect: the beta-weighted net is a rounding error next to the amount
+        // it moves between hedges, so the desk was taking a signed proxy position on noise.
+        // $2,800 long STOCK → β̂ = 1.8 → target −0.018 ES = −$5,040 raw. σ_step = $10,000 and k = 1:
+        //   |−5,040| − 10,000 < 0 → target flat. Held −0.045 ES ($12,600) → BUY 0.045 to unwind
+        //   ($12,600 clears the 25%-of-scale band of $3,150).
+        var axis = evalChurn(churnAdvisor("1.0"), Map.of("STOCK", new BigDecimal("2800")),
+                Map.of("ES", new BigDecimal("-0.045")), "10000");
+        assertEquals(0, new BigDecimal("-5040.00").compareTo(axis.rawTargetNotionalUsd()));
+        assertEquals(0, BigDecimal.ZERO.compareTo(axis.targetProxyQty()));
+        assertEquals("UNWIND", axis.status());
+        assertEquals("BUY", axis.hedgeSide());
+        assertEquals(0, new BigDecimal("0.045").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void theShrinkageIsOneWay_aHugeSigmaNeverFlipsTheHedgeLong() {
+        // σ ten times the target: the hedge goes flat, and NOT long. |T'| ≤ |T| by construction,
+        // so an over-estimated σ can only ever make the hedge smaller — never lever the book up.
+        var axis = evalChurn(churnAdvisor("1.0"), LONG_1M, NONE_HELD, "18000000");
+        assertEquals(0, BigDecimal.ZERO.compareTo(axis.targetProxyQty()));
+        assertFalse(axis.hedging(), "flat target, flat book — nothing to trade");
+    }
+
+    @Test
+    void aZeroMultipleRestoresTheHedgeToExactlyFlatBehaviour() {
+        var axis = evalChurn(churnAdvisor("0"), LONG_1M, NONE_HELD, "280000");
+        assertEquals(0, new BigDecimal("-6.428571").compareTo(axis.targetProxyQty()));
+        assertEquals(0, new BigDecimal("6.428571").compareTo(axis.hedgeQuantity()));
+    }
+
+    // ---- ADR-0100: the hedge closes the gap at its target's own directional efficiency ----
+
+    /** Evaluate with no churn σ (so ADR-0098 does not bind) and the ADR-0100 rate {@code a}. */
+    private static HedgeAdvisor.Axis evalTracked(Map<String, BigDecimal> exposures,
+                                                 Map<String, BigDecimal> held, String rate) {
+        Function<String, Optional<BigDecimal>> efficiency = id ->
+                "EQUITY".equals(id) ? Optional.of(new BigDecimal(rate)) : Optional.empty();
+        return churnAdvisor("1.0").evaluate(Optional.of(cov2()), exposures, IS_EQUITY, PRICES,
+                NO_BETA, held, ALL_TRADABLE, id -> Optional.empty(), efficiency).axes().get(0);
+    }
+
+    @Test
+    void growingTheOverlayClosesOnlyTheFractionTheTargetEarned() {
+        // $1m long STOCK, β̂ = 1.8 → target −6.428571 ES, held flat. At a = 0.25 the hedge takes a
+        // quarter of the gap: 0 + 0.25 × (−6.428571 − 0) = −1.60714275 → −1.607143 at 6dp.
+        // The delta is that same −1.607143 (held is flat) = $450,000.04, well clear of the band.
+        var axis = evalTracked(LONG_1M, NONE_HELD, "0.25");
+        assertEquals(0, new BigDecimal("0.25").compareTo(axis.trackingRate()));
+        assertEquals(0, new BigDecimal("-1.607143").compareTo(axis.targetProxyQty()));
+        assertEquals("SELL", axis.hedgeSide());
+        assertEquals(0, new BigDecimal("1.607143").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void reducingTheOverlayStillTradesInOneCycle() {
+        // Held −6.428571 ES against a book that has halved to $500k → target −3.214286 ES. The move
+        // SHRINKS the overlay, so the rate does not apply: the hedge buys the whole 3.214285 back.
+        var axis = evalTracked(Map.of("STOCK", new BigDecimal("500000")),
+                Map.of("ES", new BigDecimal("-6.428571")), "0.25");
+        assertEquals(0, new BigDecimal("-3.214286").compareTo(axis.targetProxyQty()));
+        assertEquals("BUY", axis.hedgeSide());
+        assertEquals(0, new BigDecimal("3.214285").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void aFullUnwindIsNeverSlowed() {
+        // Flat book → target zero. ADR-0069's promise is untouched at any rate: the residual hedge
+        // is unwound in one cycle, not decayed toward flat a fraction at a time.
+        var axis = evalTracked(Map.of("STOCK", BigDecimal.ZERO),
+                Map.of("ES", new BigDecimal("-0.045")), "0.02");
+        assertEquals(0, BigDecimal.ZERO.compareTo(axis.targetProxyQty()));
+        assertEquals("UNWIND", axis.status());
+        assertEquals("BUY", axis.hedgeSide());
+        assertEquals(0, new BigDecimal("0.045").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void crossingFlatCutsForFreeAndRebuildsSlowly() {
+        // Held +2 ES (a long overlay left by the previous view) against a target of −6.428571.
+        // The cut to flat is free; only the rebuild beyond zero is rated: q = 0.25 × −6.428571
+        // = −1.607143. The delta the desk sends is the whole 3.607143 — it just stops there
+        // instead of running on to −6.428571.
+        var axis = evalTracked(LONG_1M, Map.of("ES", new BigDecimal("2")), "0.25");
+        assertEquals(0, new BigDecimal("-1.607143").compareTo(axis.targetProxyQty()));
+        assertEquals("SELL", axis.hedgeSide());
+        assertEquals(0, new BigDecimal("3.607143").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void theRateIsOneWay_aChurningTargetIsNotChasedAtAll() {
+        // The live 2026-07-27 defect: a target that only oscillates earns E ≈ (1−λ)/(1+λ). Taken
+        // to its limit — E = 0 — the hedge does not grow at all, and it can NEVER grow past the
+        // ADR-0098 target: |q| ≤ |d| in every branch, so an estimated rate cannot lever the book.
+        var axis = evalTracked(LONG_1M, NONE_HELD, "0");
+        assertEquals(0, BigDecimal.ZERO.compareTo(axis.targetProxyQty()));
+        assertFalse(axis.hedging(), "flat target, flat book — nothing to trade");
+    }
+
+    @Test
+    void aRateOfOneReproducesThePreviousBehaviourExactly() {
+        var axis = evalTracked(LONG_1M, NONE_HELD, "1");
+        assertEquals(0, new BigDecimal("-6.428571").compareTo(axis.targetProxyQty()));
+        assertEquals(0, new BigDecimal("6.428571").compareTo(axis.hedgeQuantity()));
+    }
+
+    @Test
+    void aWarmingEfficiencyEstimatorTracksInFull() {
+        // Fewer than two steps → no rate → the advisor behaves exactly as it did before ADR-0100.
+        var axis = churnAdvisor("1.0").evaluate(Optional.of(cov2()), LONG_1M, IS_EQUITY, PRICES,
+                NO_BETA, NONE_HELD, ALL_TRADABLE, id -> Optional.empty(), id -> Optional.empty())
+                .axes().get(0);
+        assertNull(axis.trackingRate());
+        assertEquals(0, new BigDecimal("-6.428571").compareTo(axis.targetProxyQty()));
+    }
+
+    @Test
+    void aWarmingEstimatorShrinksNothing() {
+        // No σ yet (fewer than two steps) → the advisor behaves exactly as it did before ADR-0098.
+        var axis = churnAdvisor("1.0").evaluate(Optional.of(cov2()), LONG_1M, IS_EQUITY, PRICES,
+                NO_BETA, NONE_HELD, ALL_TRADABLE, id -> Optional.empty()).axes().get(0);
+        assertNull(axis.churnSigmaUsd());
+        assertEquals(0, new BigDecimal("-6.428571").compareTo(axis.targetProxyQty()));
     }
 }

@@ -33,7 +33,7 @@ class OrphanedPositionTest {
         // planner only ever saw the fresh cross-section the position was never revisited again.
         Map<String, List<Forecast>> noViews = Map.of();
         var targets = FusionPlanner.plan(noViews, List.of("GOOG"), s -> 1.0,
-                id -> BigDecimal.valueOf(178), id -> BigDecimal.valueOf(131), PLAN);
+                id -> BigDecimal.valueOf(178), id -> BigDecimal.ONE, id -> BigDecimal.valueOf(131), PLAN);
 
         assertEquals(1, targets.size(), "a held name is planned even with no fresh forecast");
         FusionPlanner.Target t = targets.get(0);
@@ -41,8 +41,9 @@ class OrphanedPositionTest {
         assertEquals(0, t.sources(), "no source has a view on it");
         assertEquals(0.0, t.combinedForecast());
         assertEquals(0, t.targetQty().signum(), "no view ⇒ target is flat");
-        // Partial adjustment toward zero at rate 0.5: 131 long → sell 65.5 this cycle.
-        assertEquals(qty("-65.5"), t.deltaQty());
+        // ADR-0080: the walk to flat is a reduction, and reductions are not rated — 131 long → sell
+        // all 131 this cycle rather than grinding it out at the partial-adjustment rate.
+        assertEquals(qty("-131"), t.deltaQty());
     }
 
     @Test
@@ -52,9 +53,9 @@ class OrphanedPositionTest {
         var forecasts = registry.byInstrument(System.currentTimeMillis());
 
         var withHeld = FusionPlanner.plan(forecasts, List.of("AAPL"), s -> 1.0,
-                id -> BigDecimal.valueOf(196), id -> BigDecimal.valueOf(119), PLAN);
+                id -> BigDecimal.valueOf(196), id -> BigDecimal.ONE, id -> BigDecimal.valueOf(119), PLAN);
         var withoutHeld = FusionPlanner.plan(forecasts, List.of(), s -> 1.0,
-                id -> BigDecimal.valueOf(196), id -> BigDecimal.valueOf(119), PLAN);
+                id -> BigDecimal.valueOf(196), id -> BigDecimal.ONE, id -> BigDecimal.valueOf(119), PLAN);
 
         assertEquals(1, withHeld.size());
         assertEquals(withoutHeld.get(0).targetQty(), withHeld.get(0).targetQty(),
@@ -67,7 +68,7 @@ class OrphanedPositionTest {
         // The edge gate being shut is exactly when unwinding matters most: it must not clamp the exit.
         BigDecimal current = BigDecimal.valueOf(131);
         BigDecimal delta = TargetPlanner.orderDelta(BigDecimal.ZERO, current, 0.2, 0.5);
-        assertEquals(qty("-65.5"), TargetPlanner.reduceOnly(delta, current),
+        assertEquals(qty("-131"), TargetPlanner.reduceOnly(delta, current),
                 "reduce-only passes a toward-flat delta through untouched");
     }
 
@@ -93,10 +94,11 @@ class OrphanedPositionTest {
             cycles++;
         }
         assertTrue(cycles < 50, "terminates rather than trading forever");
-        // Partial adjustment approaches flat asymptotically and the executor will not trade a
-        // sub-unit clip, so a whole-unit instrument settles one unit short of flat. That residual is
-        // bounded, never grows, and is a pre-existing property of the whole-unit order path.
-        assertEquals(BigDecimal.ONE, position, "settles at the smallest tradable residual");
+        // ADR-0080: the reducing part of a delta is not rated, so an unwind is not an asymptotic
+        // grind — it lands exactly flat on the first cycle and stops. The old asymptotic approach
+        // left a one-unit residual and paid a round trip on every step of the way down.
+        assertEquals(1, cycles, "an exit completes in a single cycle");
+        assertEquals(0, BigDecimal.ZERO.compareTo(position), "settles exactly flat");
     }
 
     @Test
@@ -120,7 +122,8 @@ class OrphanedPositionTest {
         // A stale/absent mark must not be a reason to keep an unsupported position: the target is
         // zero regardless of price, and the delta is pure quantity arithmetic.
         var targets = FusionPlanner.plan(Map.of(), List.of("SAP"), s -> 1.0,
-                id -> null, id -> BigDecimal.valueOf(-96), PLAN);
-        assertEquals(qty("48"), targets.get(0).deltaQty(), "short 96 with no view → buy back half");
+                id -> null, id -> BigDecimal.ONE, id -> BigDecimal.valueOf(-96), PLAN);
+        assertEquals(qty("96"), targets.get(0).deltaQty(),
+                "short 96 with no view → buy the whole thing back (ADR-0080: exits are not rated)");
     }
 }

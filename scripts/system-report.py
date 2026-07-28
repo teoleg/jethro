@@ -15,6 +15,7 @@ Produces  logs/jethro-report-<timestamp>.zip  containing:
 Dependency-free: Python 3 standard library only. Env: JETHRO_URL (default http://localhost:8080).
 """
 import datetime, json, os, subprocess, sys, urllib.request, zipfile
+from collections import deque
 
 BASE = os.environ.get("JETHRO_URL", "http://localhost:8080").rstrip("/")
 OUT_DIR = os.environ.get("JETHRO_OUT", "logs")
@@ -24,7 +25,8 @@ TS = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 ENDPOINTS = {
     "ops_jvm": "/api/ops/jvm", "traffic": "/api/traffic", "feeds": "/api/feeds",
     "marks": "/api/marks", "quarantined": "/api/marks/quarantined",
-    "signals_telemetry": "/api/signals/telemetry", "fusion_targets": "/api/fusion/targets",
+    "signals_telemetry": "/api/signals/telemetry", "signals_discards": "/api/signals/discards",
+    "fusion_targets": "/api/fusion/targets",
     "var": "/api/var", "breaker": "/api/breaker", "regime": "/api/market/regime",
     "hedging": "/api/hedging", "hypotheses_stats": "/api/hypotheses/stats",
     "hypotheses_balance": "/api/hypotheses/balance", "discovery": "/api/discovery",
@@ -39,15 +41,22 @@ DB_QUERIES = {
     "turnover_cost_by_name": "select instrument_id instrument, count(*) fills, sum(abs(qty)) shares, "
         "round(sum(fee)::numeric,2) total_fee from fills group by instrument_id order by fills desc",
     "orders_by_status": "select status, count(*) n from orders group by status order by n desc",
+    # Order-level lookback for the post-mortem: recent orders with the REASON that triggered each, so the
+    # model can attribute the window's PnL/exposure moves to specific triggers (bad ones to fix, good to keep).
+    "recent_orders": "select created_at, book_id book, instrument_id instrument, side, quantity qty, "
+        "status, reason from orders where feed_mode='SIM' order by created_at desc limit 60",
     "fills_by_day": "select date(executed_at) d, count(*) fills, round(sum(fee)::numeric,2) fee "
         "from fills group by 1 order by 1",
     "firm_equity_curve": "select * from firm_equity order by 1",
     "book_equity_curve": "select * from book_equity order by 1",
-    "signal_observations": "select source, feed_mode, count(*) n, count(*) filter (where resolved) resolved, "
+    # Grouped by horizon too (ADR-0082): a call is graded over every rung of the measurement ladder,
+    # so pooling them would average an hour of return with four minutes of it and read as one number.
+    "signal_observations": "select source, feed_mode, horizon_seconds, count(*) n, "
+        "count(*) filter (where resolved) resolved, "
         "round(avg(case when outcome='WIN' then 1.0 when outcome='LOSS' then 0.0 end),3) hit_rate "
-        "from signal_observations group by source, feed_mode order by n desc",
-    "daily_close_depth": "select count(distinct day) days, min(day) first, max(day) last, "
-        "count(distinct instrument) instruments from daily_close",
+        "from signal_observations group by source, feed_mode, horizon_seconds order by n desc",
+    "daily_close_depth": "select feed_mode, count(distinct day) days, min(day) first, max(day) last, "
+        "count(distinct instrument) instruments from daily_close group by feed_mode order by feed_mode",
     "mark_quarantine": "select * from mark_quarantine",
     "strategy_param_change": "select * from strategy_param_change order by changed_at desc limit 100",
 }
@@ -224,20 +233,43 @@ def write_xlsx(path, sheets):
             z.writestr("xl/worksheets/sheet%d.xml" % (i + 1), _sheet_xml(h, r))
 
 
+def _filter_log_lines(text):
+    return [ln for ln in text.splitlines()
+            if any(k in ln for k in ("WARN", "ERROR", "Exception", "Caused by")) or ln.strip().startswith("at ")]
+
+
 def capture_logs(max_lines=400):
-    """Best-effort recent WARN/ERROR/Exception + stack-frame lines from the compose stack.
+    """Best-effort recent WARN/ERROR/Exception + stack-frame lines from the whole stack.
     The code-level causes an auto-fix loop must act on often live only in a stack trace, not in
     the risk/P&L workbook (e.g. a NUMERIC->double ClassCastException surfaces as a blank sheet,
-    never a number). Never raises — a missing 'docker compose' just yields a note."""
+    never a number). Never raises — a missing 'docker compose' just yields a note.
+
+    Covers BOTH the compose services and the app's own log. The app runs on the host, not in
+    compose, so a docker-only capture omitted every warning the trading platform itself emits —
+    which is how a sensor that silently failed to warm on boot stayed invisible to the loop for
+    two cycles even though it logged the reason every time (ADR-0071 correction)."""
+    sections = []
     try:
         p = subprocess.run(["docker", "compose", "logs", "--no-color", "--tail", "1500"],
                            capture_output=True, text=True, timeout=45)
-        text = p.stdout or ""
+        compose = _filter_log_lines(p.stdout or "")
     except Exception as e:
-        return "log capture unavailable (%s: %s)" % (type(e).__name__, e)
-    keep = [ln for ln in text.splitlines()
-            if any(k in ln for k in ("WARN", "ERROR", "Exception", "Caused by")) or ln.strip().startswith("at ")]
-    return "\n".join(keep[-max_lines:]) if keep else "(no WARN/ERROR/Exception lines in recent logs)"
+        compose = ["compose log capture unavailable (%s: %s)" % (type(e).__name__, e)]
+    # The app's own log: split the budget so a chatty container can never crowd it out.
+    app = []
+    try:
+        app_log = os.path.join(OUT_DIR, "jethro-app.log")
+        if os.path.exists(app_log):
+            with open(app_log, "r", errors="replace") as fh:
+                app = _filter_log_lines("".join(deque(fh, maxlen=4000)))
+    except Exception as e:
+        app = ["app log capture unavailable (%s: %s)" % (type(e).__name__, e)]
+    half = max(1, max_lines // 2)
+    if app:
+        sections.append("--- jethro-app (host JVM) ---\n" + "\n".join(app[-half:]))
+    sections.append("--- compose services ---\n" + "\n".join(compose[-(max_lines - half):]))
+    body = "\n".join(sections).strip()
+    return body if body else "(no WARN/ERROR/Exception lines in recent logs)"
 
 
 def _esc_md(v):
@@ -254,14 +286,58 @@ def _md_table(headers, rows):
     return "\n".join(out) + "\n"
 
 
+def situation_block(ops_raw):
+    """A prioritised SITUATION header so the obvious money/risk state is never buried under the section
+    dump. Current PnL + exposure from the live risk endpoint, deltas vs the recent run-status heartbeats,
+    and explicit danger flags (bleeding + exposure rising). All from live data — nothing invented."""
+    total = (ops_raw.get("risk") or {}).get("total") or {}
+    try:
+        pnl = float(total["totalPnl"]); gross = float(total["grossExposure"]); net = float(total["netExposure"])
+    except (KeyError, TypeError, ValueError):
+        return "## SITUATION\n(risk endpoint unavailable — could not read live PnL/exposure.)"
+    hist = []
+    try:
+        with open("reports/run-status.json", encoding="utf-8") as f:
+            hist = json.load(f)
+    except Exception:
+        hist = []
+
+    def prev(i):
+        if len(hist) > i:
+            try:
+                return float(hist[i]["total_pnl"]), float(hist[i]["gross"])
+            except (KeyError, TypeError, ValueError):
+                return None
+        return None
+
+    lines = ["## ⚠ SITUATION — read this before anything else",
+             "Current (live): total PnL **$%.2f**, gross exposure **$%.2f**, net **$%.2f**." % (pnl, gross, net)]
+    p1, p3 = prev(0), prev(2)
+    dp1 = dg1 = 0.0
+    if p1:
+        dp1, dg1 = pnl - p1[0], gross - p1[1]
+        lines.append("Since last run: PnL **%+.2f**, gross **%+.2f**." % (dp1, dg1))
+    if p3:
+        lines.append("Over the last 3 runs: PnL **%+.2f**, gross **%+.2f**." % (pnl - p3[0], gross - p3[1]))
+    flags = []
+    if dp1 < 0: flags.append("BLEEDING (PnL falling)")
+    if dg1 > 0: flags.append("EXPOSURE RISING")
+    if pnl < 0: flags.append("UNDERWATER")
+    if dp1 < 0 and dg1 > 0:
+        flags.append("**DANGER — bleeding AND adding exposure; de-risk / revert the culprit is the priority this cycle**")
+    lines.append("Flags: " + ("; ".join(flags) if flags else "none (not bleeding, exposure not rising)") + ".")
+    return "\n".join(lines)
+
+
 def render_markdown(ops_raw, db_sheets, logs_text):
     """Compact, model-readable digest of the same data as the xlsx bundle — cheap to read every
     cycle (the .xlsx is binary and token-heavy). Row-level detail (positions, fills, TCA,
     hypotheses, strategy dials) stays in diagnostics.xlsx in the same zip for when it's needed."""
     L = ["# Jethro report %s" % TS, "",
-         "Model-readable digest of the live run for automated analysis. The objective is "
-         "risk-adjusted PnL — PnL up per unit of exposure, measured on strategy alpha, not the "
-         "hedge-masked firm total. Row-level detail is in `diagnostics.xlsx` in this bundle.", "",
+         "Model-readable digest of the live run for automated analysis. The objective is risk-adjusted "
+         "PnL on the **FIRM TOTAL** (all books incl. hedge) — total PnL up per unit of total exposure — "
+         "plus the owner target of **+1% PnL every 3 iterations**. Row-level detail is in `diagnostics.xlsx`.", "",
+         situation_block(ops_raw), "",
          "## Operational / runtime (live endpoints)"]
     for name, data in ops_raw.items():
         L.append("### %s" % name)

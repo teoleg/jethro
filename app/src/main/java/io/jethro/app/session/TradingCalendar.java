@@ -15,6 +15,16 @@ public interface TradingCalendar {
     /** The trading day the current instant belongs to. Monotonic non-decreasing. */
     LocalDate sessionDay();
 
+    /**
+     * Whether the market session currently permits OPENING (risk-adding) trades (ADR-0115). Default is
+     * always-open: a continuous tape ({@link SimSessionCalendar} sim/replay) trades around the clock,
+     * so only a real wall-clock calendar restricts to session hours. The pre-trade guardrail consults
+     * this to block new exposure outside the session while still letting positions flatten.
+     */
+    default boolean isTradingSessionOpen() {
+        return true;
+    }
+
     /** Human-readable description for logs and the API (which calendar, what cadence). */
     String description();
 }

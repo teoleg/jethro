@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-26T17:00:09Z",
+    "fees": "131.078386",
+    "gross": "785.01152513",
+    "net": "56.30099913",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "785.01152513",
+      "hedgePnl": "95.25420743",
+      "netExposure": "56.30099913",
+      "realizedPnl": "-866.92141141",
+      "strategyAlpha": "-963.09005812",
+      "totalFees": "131.078386",
+      "totalPnl": "-867.83585069",
+      "unrealizedPnl": "-0.91443928"
+    },
+    "total_pnl": "-867.83585069"
+  },
+  "before": {
+    "at": "2026-07-26T16:56:54Z",
+    "gross": "6145.14457224",
+    "net": "5417.62576824",
+    "total_pnl": "-876.86899208"
+  },
+  "commit": "9b6db1d492cb8241debdf17ae593bb6dd57930e8",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-5360.13304711",
+    "net": "-5361.32476911",
+    "total_pnl": "9.03314139"
+  },
+  "note": "risk-adj (PnL/$1 gross) worsened -0.14269\u2192-1.10551",
+  "revert": false,
+  "scoredAt": "2026-07-26T17:00:09Z",
+  "summary": "hedge no-trade band: trade the delta once it clears the SMALLER of the absolute $10k churn guard and 25% of the hedge's own scale, so an absolute guard can no longer strand a hedge smaller than itself and a zero target is always reachable (ADR-0069)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

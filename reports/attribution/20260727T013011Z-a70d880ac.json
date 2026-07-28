@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-27T01:30:11Z",
+    "fees": "172.085896",
+    "gross": "21150.78670493",
+    "net": "-1953.94947409",
+    "source": {
+      "feedMode": "SIM",
+      "grossExposure": "21150.78670493",
+      "hedgePnl": "41.70038348",
+      "netExposure": "-1953.94947409",
+      "realizedPnl": "-789.80480435",
+      "strategyAlpha": "-833.59057436",
+      "totalFees": "172.085896",
+      "totalPnl": "-791.89019088",
+      "unrealizedPnl": "-2.08538653"
+    },
+    "total_pnl": "-791.89019088"
+  },
+  "before": {
+    "at": "2026-07-27T01:18:22Z",
+    "gross": "4105.85827573",
+    "net": "4105.85827573",
+    "total_pnl": "-792.38290549"
+  },
+  "commit": "a70d880ac6d21003ef0c59e96847a383c1027e86",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "17044.92842920",
+    "net": "-6059.80774982",
+    "total_pnl": "0.49271461"
+  },
+  "note": "exposure grew with no PnL gain \u2014 reverted; risk-adj (PnL/$1 gross) improved -0.19299\u2192-0.03744",
+  "revert": true,
+  "scoredAt": "2026-07-27T01:30:11Z",
+  "summary": "the fusion source-weight MIN floor is removed, so a source measured significantly negative at every rung of the horizon ladder is weighted by its own evidence instead of being held up at several times it \u2014 the floor bound on exactly one live source, the desk's worst-measured, and since that source is a mirror of the only source measured positive, the over-trust was a partial cancellation of the desk's only edge; Buhlmann credibility is now the single continuous thin-sample defence, exactly as ADR-0074 established when it removed this floor's twin (ADR-0087)",
+  "verdict": "\u274c BAD"
+}
