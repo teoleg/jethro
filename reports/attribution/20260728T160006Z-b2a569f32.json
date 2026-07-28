@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-28T16:00:06Z",
+    "fees": "0.085756",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "0.95512117",
+      "netExposure": "0.00000000",
+      "realizedPnl": "0.61209817",
+      "strategyAlpha": "-0.34302300",
+      "totalFees": "0.085756",
+      "totalPnl": "0.61209817",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "0.61209817"
+  },
+  "before": {
+    "at": "2026-07-28T15:43:28Z",
+    "gross": "763.61580000",
+    "net": "84.09580000",
+    "total_pnl": "-0.58564732"
+  },
+  "commit": "b2a569f32bb3a31e5083e94c48458cc1c8db1209",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-763.61580000",
+    "net": "-84.09580000",
+    "total_pnl": "1.19774549"
+  },
+  "note": "risk-adj n/a (zero gross)",
+  "revert": false,
+  "scoredAt": "2026-07-28T16:00:06Z",
+  "summary": "a name's combined forecast is scaled by the agreement of the sources behind it \u2014 the share of their gross conviction that survives as a net view \u2014 so the desk stops taking a full-conviction position on the residual of two sensors fighting each other (ADR-0119)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}
