@@ -1,0 +1,20 @@
+{
+  "commit": "68ff73eb292dc8a4cbfdb190d82bc6eebcca28bf",
+  "fees": "0.085756",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "0.95512117",
+    "netExposure": "0.00000000",
+    "realizedPnl": "0.61209817",
+    "strategyAlpha": "-0.34302300",
+    "totalFees": "0.085756",
+    "totalPnl": "0.61209817",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "a fifth forecast source fades a name's return against its own peer group's median and robust dispersion \u2014 the idiosyncratic residual the reversal literature documents \u2014 instead of against the name's own past, so the market factor the desk hedges away stops being measured as alpha (ADR-0121)",
+  "total_pnl": "0.61209817",
+  "ts": "2026-07-28T19:17:20Z"
+}
