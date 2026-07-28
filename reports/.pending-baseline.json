@@ -1,20 +1,20 @@
 {
-  "commit": "c5cd7e8beeb01193d473789691a25a66814b1f1d",
-  "fees": "481.442117",
-  "gross_exposure": "0E-8",
-  "net_exposure": "0E-8",
+  "commit": "13db58cbbd8b5200b9e2021453c09c14b4702fb4",
+  "fees": "0.042361",
+  "gross_exposure": "760.67980000",
+  "net_exposure": "84.04980000",
   "source": {
-    "feedMode": "SIM",
-    "grossExposure": "0.00000000",
-    "hedgePnl": "-3093.30503794",
-    "netExposure": "0.00000000",
-    "realizedPnl": "5654.20784226",
-    "strategyAlpha": "8747.51288020",
-    "totalFees": "481.442117",
-    "totalPnl": "5654.20784226",
-    "unrealizedPnl": "0.00000000"
+    "feedMode": "LIVE",
+    "grossExposure": "760.67980000",
+    "hedgePnl": "-1.18275732",
+    "netExposure": "84.04980000",
+    "realizedPnl": "-0.04236100",
+    "strategyAlpha": "0.55111000",
+    "totalFees": "0.042361",
+    "totalPnl": "-0.63164732",
+    "unrealizedPnl": "-0.58928632"
   },
-  "summary": "the warm-start seed's lookback and hole tolerance are counted in the step at which the live sensor actually consumes a name \u2014 the slower of our poll cadence and that name's own median inter-print gap \u2014 so an instrument whose ordinary print interval exceeds our poll interval stops having every one of those intervals read as an outage, and can seed and warm at all (ADR-0114)",
-  "total_pnl": "5654.20784226",
-  "ts": "2026-07-27T23:14:26Z"
+  "summary": "the risk cut's per-name sigma advances on the market's own prints instead of on our planning cycle, so a republished mark can no longer decay the stop distance toward zero and cut every name held across a close on the first move of the next session (ADR-0116)",
+  "total_pnl": "-0.63164732",
+  "ts": "2026-07-28T13:50:29Z"
 }
