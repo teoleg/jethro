@@ -372,7 +372,12 @@ public final class FusionLifecycle implements AutoCloseable {
                 continue;
             }
             seedVolatility(t.instrument());
-            streamVol.update(t.instrument(), t.price());
+            // ADR-0116: the σ that sets the cut distance advances on the MARKET's clock, not on ours.
+            // The plan is made once per cycle from a last-value cache, so on a quiet tape the same price
+            // arrives here over and over; absorbing those as zero returns decays σ toward zero and puts
+            // the ADR-0086 trigger at ~0, cutting every name held across the close on the first genuine
+            // move of the next session. Same rule and same clock as ADR-0113 on the forecast sensors.
+            streamVol.update(t.instrument(), t.price(), markInstant(t.instrument()));
         }
         var result = riskCut.apply(targets, now, horizonSeconds, intervalSeconds, streamVol, cycleParams);
         for (TrailingRiskCut.Cut c : result.cuts()) {
@@ -481,6 +486,16 @@ public final class FusionLifecycle implements AutoCloseable {
             log.info("fusion covariance warmed {} of {} name(s) from {} synchronised snapshots (ADR-0089)",
                     measured, instruments.size(), samples.size());
         }
+    }
+
+    /**
+     * This name's mark as timestamped by the FEED (invariant 5), or null when no provider clock is
+     * wired — in which case {@link PrintClock} admits every sample and behaviour is exactly what it was
+     * before ADR-0116, which is what a test harness or a caller without a mark cache needs.
+     */
+    private java.time.Instant markInstant(String instrument) {
+        Long millis = markTimeFor == null ? null : markTimeFor.apply(instrument);
+        return millis == null || millis <= 0 ? null : java.time.Instant.ofEpochMilli(millis);
     }
 
     /** Replays this name's stored recent prices into the σ sensor the first time it is planned. */

@@ -1,62 +1,63 @@
-ADR-0113 changed the unit the sensors count in — prints, not cycles — and the warm-start seed was left counting in the old one, so no name whose tape prints slower than we poll can ever warm; ADR-0114 re-denominates the seed into each name's own print cadence.
+Fixed the risk cut's σ sensor: a republished mark was decaying the stop distance toward zero, so every name held across a close would be stopped out on the first genuine move of the next session (ADR-0116).
 
 *Every figure below is quoted from the live endpoints, `logs/report.md` or the ledger; none is authored
-here (invariant 7 / ADR-0016 — the scorer owns every number that gates money).*
+here (invariant 7 / ADR-0016 — the scorer owns every number that gates money). The worked σ example is
+arithmetic on the estimator's own formula, not a measurement of this book.*
 
-## Situation, in plain numbers
+## Situation — the four questions, in plain numbers
 
-**Money.** Total PnL **$5,665.94**, up **$11.81** on the run and **$11.72** across the last three. Not
-bleeding — but the growth flag reads **stale**: −1.27% over three iterations against the +1% target, and
-it reads stale for the obvious reason that the desk is inert.
+**1. Money.** Total PnL reads `$0.00`, flat against the last run and across the last three. That is not a
+loss and not staleness: the Alpaca feed was mis-tagged `SIM` and was corrected to `LIVE` overnight
+(commit `2c5b6d2`), which under invariant 8 / ADR-0029 starts a new epoch — the `$5,665.94` sitting in the
+SIM equity curve does not carry across, and must not. The desk is a **fresh live book, flat**, with no
+fills since `2026-07-27 19:54:38Z`.
 
-**Risk.** Gross **$0.00**, net **$0.00**. Every position row is flat, unrealized is zero, the drawdown
-breaker is nowhere in sight. Exposure is not rising. The problem this cycle is the opposite of danger.
+**2. Risk.** Gross `$0.00`, net `$0.00`, zero positions, zero fees. Nowhere near the drawdown breaker.
+There is no risk on at all — which is the actual problem, and the opposite of the danger state.
 
-**Cause.** Last cycle's ADR-0113 scored **⚠️ MIXED** and did reach the JVM (boot 22:26Z against a 22:25Z
-commit; `PrintClock` gating both sensors). It behaved exactly as predicted — it narrows the observed
-universe and lowers exposure by design. No culprit to name.
+**3. Cause.** The last *scored* change was ADR-0113 (⚠️ MIXED, inside the noise band). Four changes landed
+overnight while the market was closed and the loop was skipping cycles — the feedMode correction,
+ADR-0114 (the seed counted in prints), ADR-0049 (social out of sizing), ADR-0115 (the session-hours gate).
+None of them can be credited or blamed for a dollar: the book held nothing for the entire window.
 
-**Danger.** No. Not bleeding, zero exposure. The live danger state does not apply.
+**4. Danger.** No. Not bleeding, exposure not rising. No order was placed in the window (`orders_day` total
+`0`), so there is no losing trigger to attribute and no winner to strengthen.
 
-**Order-level post-mortem.** The last fill of any kind was 19:54Z, over three hours ago. Every ALPHA fill
-in the window was AAPL or JPM, each shadowed within 10–40 s by a HEDGE ES clip of 0.003–0.069 contracts.
-No trigger to blame for a loss, because no trigger fired at all after the cash close.
+**Change vs market — honestly, neither.** With zero positions all window the market's effect on the book is
+`$0.00` by construction, and no code change had a position to act on. I claim no credit and accept no blame
+for this window's number, and I have not tried to read a cause into it.
 
-**Attribution, honestly.** The $11.81 is on a book holding nothing — neither market nor change. ADR-0113
-earns credit and blame for nothing this window.
+## What I found instead, and why it was worth this cycle
 
-## Diagnosis
+Reading the live endpoints rather than the report narrative: `/api/fusion/targets` shows the desk holding a
+view on **one** name of 35 — the LIVE mark history is only hours old and the equity sensors are still
+warming. That self-heals as the session prints, so I left it alone. What does **not** self-heal is what
+ADR-0113's own deferred row already predicted. `StreamVolatility` — the per-name σ that ADR-0086's trailing
+risk cut measures its stop distance in — is fed once per 30 s planning cycle from a last-value mark cache.
+On a quiet tape the same price arrives over and over, and each one is absorbed as a return of `ln(p/p) = 0`.
+The class's own javadoc refuses to invent a return "because a fabricated zero return would bias the estimate
+toward *this name does not move*, which is the dangerous direction for a control that decides when to cut" —
+but that guard was written for a *null* price, and the republish walks straight past it.
 
-`/api/fusion/targets` publishes `instruments: 0`. `reversion` carries fusion weight 2.90 and is the only
-source with measured edge (t = 3.55); it publishes nothing, so the cross-section is empty. The WARN log
-names the mechanism on every name: *"reversion sensor still cold for ES after seeding 1 of 241 stored
-prices"* — ES, GBPUSD, NQ, and every equity.
+σ **is** the stop distance (`cut when e > k·σ_h`), so this is not a slightly wrong statistic. Worked at
+span 4 on a name warmed on ±1 % steps: σ_Δ = 0.995 %, and the 3σ trigger over a 3600 s horizon sits at
+**32.70 %**. Twenty republished marks later — ten minutes of quiet, not even an overnight — σ_Δ = 0.0060 %
+and the trigger sits at **0.198 %**, 165× tighter. The desk would stop itself out of a position on the noise
+it was sized to sit through, pay the spread, and then hold the name reduce-only for a full holding horizon.
+The warm-up counter fills with the same silence, so a name can start speaking a σ built from observations
+that never happened.
 
-Reading `/api/history` per name gives the reason. The median inter-print gap is **19.9 s** on the Treasury
-curve, **90 s** on NQ, **778 s** on GBPUSD and **1,199 s** on ES, against a 10 s reversion cadence. The
-ADR-0071 seed derives two quantities from the *poll* cadence — how far back to read history
-(`interval × samples × 2` = 80 min) and how large a break stops the walk (`interval × 30` = 300 s). Both
-assume the tape prints at least as often as we poll. That is exactly the assumption ADR-0113 removed from
-the live path, and it was left standing in the seed. So for ES every **ordinary** 20-minute print interval
-exceeds the 300 s tolerance and reads as an outage: the walk breaks at the first one, seed = 1 of 241. The
-Treasury curve fails the other way — its gaps clear the tolerance, but 241 prints at ~20 s need 80 minutes
-of history against a lookback asking for exactly 80, hence the observed 147 of 241.
+## The change
 
-Because the live path now accumulates at that same print rate, none of these names can ever warm — the
-ADR-0071 failure ("a sensor whose warm-up exceeds the process lifetime never speaks at all") re-entered
-through ADR-0113's own door.
+`StreamVolatility` now admits a sample only when the mark's **provider** timestamp is strictly newer than
+the last one it consumed — the same rule and the same `PrintClock` ADR-0113 established for the forecast
+sensors, applied at the boundary where `FusionLifecycle` already holds the provider clock for its seed. No
+dial and no number needing provenance; the gate is on the market's clock and never on price equality, so a
+name that genuinely reprints at the same price keeps that honest zero return. Proposed ADR-0116 ships in the
+same commit. The covariance half of the original register row stays deferred on purpose: a joint snapshot
+cannot drop a member without breaking the pairing that makes it a covariance.
 
-## What I changed
-
-ADR-0114 (Proposed, same commit): the seed's lookback and hole tolerance are counted in the step at which
-the **live sensor actually consumes that name** — `max(poll interval, that name's median inter-print
-gap)`, measured from its own stored series. The `×2` and `×30` constants are unchanged; only their unit
-moves, so no dial is added and nothing is configured. This is deliberately **not** the alternative
-ADR-0113 rejected ("widen the tolerance so the seed bridges the halt"): the tolerance is a multiple of the
-name's *own* typical interval, so a 12 s equity tape that stops for three hours at the cash close is still
-a hole and still truncates — pinned as a test, alongside one proving a fast tape is sampled bit-for-bit as
-before.
-
-Honest cost: this **raises** exposure by admitting names the desk currently cannot see, so if the
-reversion edge does not survive contact with them the loss is larger, not smaller. Expect NQ and the rates
-curve to reach a full seed and ES/GBPUSD/AUDUSD to seed from as much series as the 12 h retention holds.
+**The honest limit.** This cannot show up as PnL until the desk holds positions again, and it costs
+protection in the other direction — a slow name now warms at its own print rate, and until it does the risk
+cut makes no claim about it. I expect the next scored verdict to be MIXED on a still-flat book. The thing to
+check next cycle is not the P&L, it is whether σ survives the 20:00Z close with its pre-close value intact.

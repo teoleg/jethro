@@ -1557,3 +1557,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   the HEDGE book still holds `−$3,093.31` realised against ALPHA's `+$8,382.25` — note its fees are only
   `$49.79`, so that drag is **directional, not churn**: the overlay was short ES into a rising tape doing
   its job. Judging whether it is worth its cost needs the desk forming views again first.
+
+## 2026-07-28 13:30Z — the book didn't lose money, it was replaced; and the stop distance was decaying to zero
+
+- **The finding.** `total PnL $0.00, gross $0.00` is not a drawdown and not staleness. The Alpaca feed was
+  mis-tagged `SIM` and was corrected to `LIVE` overnight (`2c5b6d2`), so invariant 8 / ADR-0029 opened a new
+  epoch and the SIM `$5,665.94` correctly does not carry across. Fresh flat live book; last fill
+  `2026-07-27 19:54:38Z`; `orders_day: 0`. No trigger to post-mortem this window and no market effect on a
+  book holding nothing — **neither** market nor change, and I said so rather than inventing an attribution.
+- **What I shipped (ADR-0116).** `StreamVolatility`, the per-name σ that ADR-0086's risk cut measures its
+  stop distance in, was fed once per 30 s cycle from a last-value mark cache, absorbing every republished
+  price as `r = ln(p/p) = 0`. σ *is* the cut distance, so at span 4 a name warmed on ±1 % steps carries a 3σ
+  trigger of 32.70 % over an hour — and twenty republished marks (ten minutes of quiet) take that to 0.198 %.
+  Every name held across a close would be stopped out on the first genuine move of the next session, at full
+  spread, then held reduce-only for a holding horizon. Gated on the ADR-0113 `PrintClock`.
+- **Rule 31: a class that documents a rule it does not enforce is a bug, and the javadoc is the tell.**
+  `StreamVolatility` already said a fabricated zero return "would bias the estimate toward *this name does
+  not move*, which is the dangerous direction for a control that decides when to cut" — and then guarded only
+  the NULL price, while the real source of fabricated zeros walked past. When a class states its own
+  invariant, check the enumeration of cases it enforces it over before trusting it.
+- **Rule 32: a decayed statistic and an absent one are opposite failures — find which one the consumer
+  treats as safe.** `sigmaPerSample` is empty when variance is exactly 0, so a *long enough* freeze underflows
+  to silence and the cut correctly stands down. The danger band is the partial decay in between — minutes to
+  ~11 h — where σ is small, positive and believed. A weekend was safe by accident; a lunch lull, a halt and a
+  thin name were not. Do not reason about the extreme case and assume the middle is milder.
+- **Rule 33: `$0.00` means read the equity curve's `feed_mode` column before calling it a loss.** The whole
+  triage turned on `firm_equity_curve` carrying a `LIVE` row at `0.00` beside SIM rows at `5,665.94`. A
+  headline that resets to zero is an epoch boundary until proven otherwise.
+- **Still open, unchanged.** `turnover_cost_by_name` has errored for a **fourteenth** consecutive cycle.
+  `/api/market/regime` reads `volRatio 4.6e21` / `ELEVATED` on a calm CHOP tape — the SAME cycle-clock defect
+  in `VolatilityRegime`, made permanent by ADR-0051's deliberate freeze against upward baseline moves; it is
+  dormant only because fusion is the sole order origin, and it is now a register row (not a third fix in one
+  cycle). The desk holds a view on 1 name of 35 while the LIVE sensors warm — that self-heals with prints and
+  is the thing to re-check next cycle, along with whether σ survives the 20:00Z close.
+- **Predicted next, so it can be checked rather than re-derived.** A still-flat book scoring MIXED. The
+  check is the reopen, not the P&L.

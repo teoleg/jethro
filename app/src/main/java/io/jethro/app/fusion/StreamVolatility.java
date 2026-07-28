@@ -2,6 +2,7 @@ package io.jethro.app.fusion;
 
 import java.math.BigDecimal;
 import java.math.MathContext;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.OptionalDouble;
@@ -40,6 +41,15 @@ import java.util.OptionalDouble;
  * seed it from the durable mark history through {@link SensorWarmup} exactly as the sensors do
  * (ADR-0071) — otherwise this class would be permanently cold and the control above it dead code.
  *
+ * <p><b>A sample is a PRINT, not a cycle (ADR-0116).</b> The mark cache is a last-value conflation
+ * point, so a caller reading it on a fixed cadence sees the same price republished for as long as the
+ * tape is quiet. Absorbing those as returns is precisely the "fabricated zero return" this class already
+ * refuses for an absent price — it is the same bias, arriving through the door that is actually open —
+ * so {@link #update(String, BigDecimal, Instant)} admits a sample only when the market's own clock has
+ * advanced, on the {@link PrintClock} rule ADR-0113 established for the forecast sensors. The two-argument
+ * form treats every call as a print, which is what a replay of the durable series (one point per distinct
+ * print) or a backtest bar already is.
+ *
  * <p>Nothing here is money, a size or a price: σ is a dimensionless statistic and leaves as a
  * {@code double} at exactly the boundary {@link ReturnCovarianceSource} already draws (invariant 1 —
  * prices arrive as exact decimal and only the ratio becomes a double). It sizes nothing and gates
@@ -77,6 +87,8 @@ public final class StreamVolatility {
 
     private final Params params;
     private final Map<String, State> states = new HashMap<>();
+    /** ADR-0116: the market's own clock, so a republished mark cannot become a return. */
+    private final PrintClock printClock = new PrintClock();
 
     public StreamVolatility(Params params) {
         this.params = params == null ? new Params(120) : params;
@@ -88,10 +100,43 @@ public final class StreamVolatility {
     }
 
     /**
-     * Absorb one sample of this instrument's price, taken at the caller's fixed cadence. A missing or
-     * non-positive price is ignored entirely — it advances nothing, because a fabricated zero return
-     * would bias the estimate toward "this name does not move", which is the dangerous direction for a
-     * control that decides when to cut.
+     * Absorb one sample of this instrument's price <b>only if the tape has printed since the last one
+     * this sensor consumed</b> (ADR-0116) — the same rule, and the same clock, ADR-0113 applies to the
+     * forecast sensors.
+     *
+     * <p>Without it a quiet tape is read as a still one: the mark cache republishes the last price every
+     * cycle, each republish is absorbed as {@code r = ln(p/p) = 0}, and the EWMA variance decays
+     * geometrically toward zero while the warm-up counter fills with observations that never happened.
+     * The consequence is not a slightly wrong σ, it is a <em>manufactured</em> one, and it lands on the
+     * one control that stops a position out: {@link TrailingRiskCut} cuts when the adverse excursion from
+     * the peak exceeds {@code k·σ_h}, so a σ decayed to ~0 puts the trigger at ~0 and the first genuine
+     * move of the next session cuts the position on noise — every name the desk held across the close,
+     * at the reopen, at full spread. It also drives the reverse error while the name is still frozen: the
+     * counter reaches {@code span} on nothing, so the sensor starts speaking a number built from silence.
+     *
+     * @param providerTimestamp the mark's PROVIDER timestamp — the market's clock, never ingest time
+     *                          (invariant 5). {@code null} is admitted, per {@link PrintClock}: with no
+     *                          clock to judge by, declining to measure must not silence the sensor.
+     */
+    public void update(String instrumentId, BigDecimal price, Instant providerTimestamp) {
+        if (instrumentId == null || price == null || price.signum() <= 0) {
+            return; // nothing to consume, and nothing to record against the clock
+        }
+        if (!printClock.advanced(instrumentId, providerTimestamp)) {
+            return; // the tape has not printed since we last looked — there is no return to observe
+        }
+        update(instrumentId, price);
+    }
+
+    /**
+     * Absorb one sample of this instrument's price, taken at the caller's fixed cadence, treating the
+     * call itself as the print. Correct for a replay of the durable mark series (one point per distinct
+     * print, ADR-0071) and for a backtest bar; a caller reading the LIVE mark cache must use
+     * {@link #update(String, BigDecimal, Instant)} instead, because that cache republishes.
+     *
+     * <p>A missing or non-positive price is ignored entirely — it advances nothing, because a fabricated
+     * zero return would bias the estimate toward "this name does not move", which is the dangerous
+     * direction for a control that decides when to cut.
      */
     public void update(String instrumentId, BigDecimal price) {
         if (instrumentId == null || price == null || price.signum() <= 0) {
