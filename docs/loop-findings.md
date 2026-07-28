@@ -1901,3 +1901,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   admitted to the t-test; at `tStat -0.97` it fails and the gate holds for the right reason. **If any
   source is admitted and PASSES on single-digit cohorts before `9be1633` scores, the queued fix is what
   stands between the desk and exposure taken on two data points.**
+
+## 2026-07-28T18:00Z — held (4/6); the predicted bad admission ARRIVED — `trend`@3600s judged on 35 observations that are 9 sweeps
+
+- **No change: the evidence window is open.** `score` prints `9be1633c2 still accumulating evidence
+  (4/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120) at `16:17:48Z`.
+  Diagnosed, verified, stopped. Book flat: gross `$0.00`, net `$0.00`, both position rows at `quantity: 0`,
+  VaR `0.00` (`note: "no positions"`), breaker clear, feed live (`lastUpdateAgeMillis: 848`), PnL
+  `$0.61209817` unchanged for a third consecutive run. `orders_day` `total: 7`, newest `15:50:41Z` — zero
+  orders this window, so the PnL move is `+0.00` from market AND `+0.00` from code. Attribution is exact,
+  not estimated, this cycle.
+- **Prediction landed.** I said `trend`@3600s crosses `resolved: 30` at `cohorts` 8–9, is admitted, and
+  fails near `tStat -0.97`. It reads `resolved: 35`, `cohorts: 9`, `tStat: -0.9491041554975994`,
+  `pValue: 0.8148231827460571`, `passes: false`. Gate shut for the right reason.
+- **Rule 54 is now observed, not predicted.** A source was admitted to the significance test on 35
+  observations that are only 9 independent sweeps, then judged on 8 df. It failed ONLY because
+  `avgReturnBps: -6.333250868827161` is negative — the sample size was never the thing that stopped it.
+  `EdgeGate.clears` (`app/src/main/java/io/jethro/app/fusion/EdgeGate.java:171`) rejects on
+  `resolved < minSample` (observations) and then hands `cohorts - 1.0` to `studentTUpperTail`. ADR-0108
+  moved the evidence *budget* to cohorts and explicitly left `min-sample` in rows; that sentence is the bug.
+- **Rule 55: a gate that only holds because the sign came out wrong is not holding.** Do not read "gate
+  shut, no exposure" as evidence the gate is sound. Check WHICH clause rejected. If the rejecting clause is
+  the measured sign rather than the sample bound, the sample bound is untested and the next positive draw
+  is the one that spends money.
+- **Queued next (still NOT shipped — one change per run):** denominate the admission bound in cohorts.
+  Honest consequence to state when shipping: no 3600s row has `cohorts` ≥ 30 (best is `trend` at 9), so the
+  3600s rung shuts entirely until more sweeps accumulate; 225s (`trend` 81, `reversion` 68) is unaffected.
+- **Edge mission re-checked, still honestly negative.** Against `roundTripCostBps: 0.6278285714285714`:
+  `reversion` `p=0.3096`, `social` `p=0.4992`, `momentum` `p=0.6507`, `trend` `p=0.8148`. The two
+  best-sampled rows are the two with the worst net edge. `strategy_diag` reports `signals: 0`,
+  `executed: 0`, and 10 of 18 measured names carry `no positive OOS edge`.
+- **Predicted next, so it can be checked.** Gate shut, book flat, zero orders, PnL `$0.61209817`, scorer
+  `5/6`, still no ledger row, regime `CHOP`/`CALM`. `trend`@3600s stays admitted with `cohorts` 9–10 and
+  keeps failing on its negative mean; `reversion`@3600s (`resolved` 27, `cohorts` 7) is the row to watch —
+  it is the only positive-mean source with real sample, and it reaches `resolved: 30` on roughly
+  single-digit cohorts. **If `reversion` is admitted and PASSES on ~8 cohorts, the queued fix stops being
+  correctness housekeeping and becomes the thing standing between the desk and sized exposure.**
