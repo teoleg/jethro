@@ -100,6 +100,27 @@ public final class StreamVolatility {
     }
 
     /**
+     * How many stored PRICES a warm-restart replay must hand this sensor to complete that warm-up:
+     * {@code warmupSamples() + 1} (ADR-0117).
+     *
+     * <p>The two counts are not the same number and must not be used interchangeably. This sensor is
+     * denominated in <em>returns</em>, and a return needs two prices: {@link #update} says so itself —
+     * the first price of any series "is a price, not yet a return" — so replaying N prices yields N−1
+     * returns. Seeding with {@code warmupSamples()} prices therefore lands exactly one return short,
+     * for every name, at any depth of history, and the sensor stays silent while reporting a full seed
+     * ("seeded 120 of 120 … still cold"). Since ADR-0113/0116 the missing return can then only arrive
+     * on the tape's own clock, so on a name that prints every twenty minutes the ADR-0071 warm restart
+     * hands over a sensor that is still mute for most of a process lifetime — which is the precise
+     * failure ADR-0071 exists to prevent.
+     *
+     * <p>Arithmetic, not a dial: it is the count of returns derivable from a price series, so there is
+     * no number here needing provenance (invariant 7 / ADR-0016), and it sizes nothing.
+     */
+    public int warmupPrices() {
+        return warmupSamples() + 1;
+    }
+
+    /**
      * Absorb one sample of this instrument's price <b>only if the tape has printed since the last one
      * this sensor consumed</b> (ADR-0116) — the same rule, and the same clock, ADR-0113 applies to the
      * forecast sensors.

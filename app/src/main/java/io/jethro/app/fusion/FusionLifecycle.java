@@ -470,8 +470,10 @@ public final class FusionLifecycle implements AutoCloseable {
             }
         }
         long anchor = providerMillis != null ? providerMillis : System.currentTimeMillis();
+        // Snapshots, not joint returns: N snapshots yield N−1 returns for a pair present throughout,
+        // so the replay must be one longer than the estimator's warm-up (ADR-0117).
         var samples = SensorWarmup.jointSeedSamples(markHistory, instruments, anchor,
-                intervalSeconds * 1_000L, streamCov.warmupSamples());
+                intervalSeconds * 1_000L, streamCov.warmupSnapshots());
         for (var s : samples) {
             streamCov.update(s);
         }
@@ -505,14 +507,17 @@ public final class FusionLifecycle implements AutoCloseable {
         }
         Long providerMillis = markTimeFor == null ? null : markTimeFor.apply(instrument);
         long anchor = providerMillis != null && providerMillis > 0 ? providerMillis : System.currentTimeMillis();
+        // The seed is counted in PRICES, the sensor in RETURNS, and a return needs two prices
+        // (ADR-0117) — asking for warmupSamples() prices lands the replay one return short every time.
         int n = SensorWarmup.warm(markHistory, instrument, anchor, intervalSeconds * 1_000L,
-                streamVol.warmupSamples(), price -> streamVol.update(instrument, price));
+                streamVol.warmupPrices(), price -> streamVol.update(instrument, price));
         if (streamVol.sigmaPerSample(instrument).isEmpty()) {
             // WARN, not INFO: an unmeasured name is one the risk cut can never protect, and that has
-            // to be loud enough to reach the report (the ADR-0071 correction's lesson).
+            // to be loud enough to reach the report (the ADR-0071 correction's lesson). Quoted against
+            // what the seed ASKED FOR, so "n of n, still cold" can only ever mean a genuine cold start.
             log.warn("risk-cut σ sensor still cold for {} after seeding {} of {} stored prices — this "
                     + "name cannot be stopped out until its mark history has accumulated", instrument, n,
-                    streamVol.warmupSamples());
+                    streamVol.warmupPrices());
         } else {
             log.info("risk-cut σ sensor warmed {} from {} stored prices (ADR-0086)", instrument, n);
         }

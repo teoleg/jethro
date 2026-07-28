@@ -192,6 +192,35 @@ class StreamVolatilityTest {
         assertThat(vol.measuredNames()).isZero();
     }
 
+    /**
+     * ADR-0117. The seed is counted in prices, the sensor in returns, and a return needs two prices.
+     * Worked at span 4, so it is arithmetic anyone can redo: the replay 100, 101, 100, 101 is FOUR
+     * prices and only THREE returns — one short — while a fifth price completes the fourth return.
+     * Hence {@code warmupPrices() == warmupSamples() + 1}, and a seed sized on the former is the only
+     * one that can ever hand over a warm sensor.
+     */
+    @Test
+    void theSeedNeedsOneMorePriceThanTheSensorCountsReturns() {
+        assertThat(SPAN_4.span()).isEqualTo(4);
+
+        var short1 = new StreamVolatility(SPAN_4);
+        replayAlternating(short1, short1.warmupSamples()); // 4 prices → 3 returns
+        assertThat(short1.sigmaPerSample("X")).isEmpty();
+
+        var seeded = new StreamVolatility(SPAN_4);
+        assertThat(seeded.warmupPrices()).isEqualTo(seeded.warmupSamples() + 1);
+        replayAlternating(seeded, seeded.warmupPrices()); // 5 prices → 4 returns
+        assertThat(seeded.sigmaPerSample("X")).isPresent();
+        assertThat(seeded.measuredNames()).isEqualTo(1);
+    }
+
+    /** {@code count} prices alternating 100/101 — the shape a durable-history replay hands the sensor. */
+    private static void replayAlternating(StreamVolatility vol, int count) {
+        for (int i = 0; i < count; i++) {
+            vol.update("X", new BigDecimal(i % 2 == 0 ? "100" : "101"));
+        }
+    }
+
     @Test
     void withNoProviderClockEverySampleIsAdmitted() {
         // A caller with no mark cache (a harness, a replay of the durable series) must behave exactly as

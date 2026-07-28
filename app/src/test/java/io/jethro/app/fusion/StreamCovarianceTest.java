@@ -148,6 +148,28 @@ class StreamCovarianceTest {
                 PortfolioRiskNormaliser.multiplier(names, notionals, perDay), 1e-12);
     }
 
+    /**
+     * ADR-0117 — the same off-by-one, one dimension up. At span 2 the estimator needs two JOINT
+     * returns, and the three-snapshot replay of the worked example above is what produces them: two
+     * snapshots give one return and leave every pair cold simultaneously, which is the ADR-0089
+     * concentration control silent on the whole book.
+     */
+    @Test
+    void theJointSeedNeedsOneMoreSnapshotThanTheEstimatorCountsReturns() {
+        StreamCovariance shortOne = new StreamCovariance(new StreamCovariance.Params(2));
+        assertEquals(3, shortOne.warmupSnapshots());
+        assertEquals(shortOne.warmupSamples() + 1, shortOne.warmupSnapshots());
+
+        shortOne.update(sample("A", "100", "B", "100"));
+        shortOne.update(sample("A", "110", "B", "110")); // 2 snapshots → 1 joint return
+        assertTrue(shortOne.covariance("A", "B").isEmpty());
+        assertEquals(0, shortOne.measuredNames(List.of("A", "B")));
+
+        shortOne.update(sample("A", "99", "B", "99")); // the 3rd snapshot completes the 2nd return
+        assertTrue(shortOne.covariance("A", "B").isPresent());
+        assertEquals(2, shortOne.measuredNames(List.of("A", "B")));
+    }
+
     /** One-way by construction: an internally hedged book is never levered UP on an estimated ρ. */
     @Test
     void anAntiCorrelatedBookIsNeverLeveredUp() {

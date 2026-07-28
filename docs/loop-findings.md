@@ -1592,3 +1592,44 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   is the thing to re-check next cycle, along with whether σ survives the 20:00Z close.
 - **Predicted next, so it can be checked rather than re-derived.** A still-flat book scoring MIXED. The
   check is the reopen, not the P&L.
+
+## 2026-07-28 14:00Z — the desk reopened, traded twice, and shut itself; the seed that could never finish
+
+- **The window.** First LIVE positions of the epoch: `ALPHA AAPL SELL 1` at 13:40:44Z and `HEDGE ES BUY
+  0.001136` ten seconds behind it. AAPL is the **winner** (`+$1.28` unrealized), the ES hedge leg is
+  `-$1.44`; both names fell almost the same percentage, so a `hedge_beta 1.25` overlay (refdata, ADR-0040)
+  necessarily lost a shade more than the short made. **Market, not change** — nothing I shipped opened,
+  closed or resized either leg, and one hour of two co-moving names says nothing about the hedge ratio. PnL
+  `-$0.21` (up `+$0.42`), gross `$759.72` and falling, breaker clear. No danger state.
+- **Why it then stopped, and why that is correct.** `mayIncrease: false`. The edge gate went ACTIVE the
+  moment the first fill gave it a measured cost — before that it was open only for want of one
+  (`roundTripCostBps == null` ⇒ "gate inactive"). Now `resolved` is 0–5 against `minSample 30` and trend's
+  expectancy is negative, so it refuses to pay. It self-heals: observations accrue from published
+  forecasts, not from fills. I did not touch it.
+- **Rule 34: the desk's one free trading window is the one before its first fill.** A fresh epoch's gate is
+  open because nothing has been measured, not because something was proven. Whatever the desk puts on in
+  that window is what it holds until it earns 30 resolved observations. Read `orders_day` against
+  `edgeGate.sources[].resolved` before concluding the desk "decided" anything.
+- **What I shipped (ADR-0117).** `StreamVolatility` and `StreamCovariance` count **returns**; the ADR-0071
+  seed replays `warmupSamples()` **prices**; N prices are N−1 returns. The seed therefore landed exactly one
+  return short — every time, every name, any depth of history, since `seedPrices` caps the walk at the count
+  it is handed. Both now expose `warmupPrices()` / `warmupSnapshots()` = `warmupSamples() + 1`.
+- **Rule 35: a log line reading "n of n, and still not ready" is an off-by-one until proven otherwise.**
+  `still cold for NQ after seeding 120 of 120 stored prices` and `still cold after seeding 120 synchronised
+  snapshots` were the bug printing its own diagnosis. Every *other* cold name was history-bound (62, 71, 99
+  of 120) and looked identical in the log — the two that got everything they asked for were the tell. When
+  scanning warm-up warnings, sort by whether the supply met the demand, not by how many are cold.
+- **Rule 36: a one-sample error is only harmless while samples are cheap.** This was invisible while a
+  cycle produced a sample every 30 s. ADR-0113/0116 re-denominated both estimators in PRINTS, and the same
+  one sample became ~90 s on NQ, ~13 min on GBPUSD, ~20 min on ES — against a 30-minute process life. When
+  a change re-bases a unit, re-audit the ±1s that were rounding errors in the old unit.
+- **Still open, unchanged.** `turnover_cost_by_name` has errored for a **fifteenth** consecutive cycle
+  (`column "qty" does not exist`) — the cost/turnover lens the loop contract names as its order post-mortem
+  source has been dark since 2026-07-26; it is a report-SQL fix, not a money change, and it is now the
+  strongest candidate for a cycle where nothing better presents itself. `/api/market/regime` reads
+  `volRatio 0.65 / CALM` this run, so the `4.6e21` reading has cleared on its own — the `VolatilityRegime`
+  cycle-clock defect behind it is still register-only and still dormant.
+- **Predicted next, so it can be checked rather than re-derived.** MIXED again on a reduce-only book. The
+  check is the **WARN log at the next boot**: the σ and covariance seeds should log *warmed* rather than
+  cold, and `streamVolMeasuredNames` should rise off 1 toward `covarianceCoveredNames: 6`. If they do not,
+  the remaining cold names are genuinely history-bound and ADR-0117 is done its part.

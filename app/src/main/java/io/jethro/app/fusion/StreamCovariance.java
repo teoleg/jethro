@@ -117,6 +117,24 @@ public final class StreamCovariance {
     }
 
     /**
+     * How many synchronised SNAPSHOTS a warm-restart replay must hand this estimator to complete that
+     * warm-up: {@code warmupSamples() + 1} (ADR-0117).
+     *
+     * <p>Same distinction as {@link StreamVolatility#warmupPrices()}, one dimension up. A joint sample
+     * here is a joint <em>return</em>, and {@link #update} states the rule — a name's first appearance
+     * in the replay "is a price, not yet a return" — so N snapshots produce N−1 joint returns for a
+     * pair present throughout, and fewer for a pair that joins late. Seeding with
+     * {@code warmupSamples()} snapshots is therefore one short for <b>every</b> pair simultaneously,
+     * which leaves the ADR-0089 concentration control with no covered name at all ("seeded 120
+     * synchronised snapshots … still cold") and the book unscaled for correlation.
+     *
+     * <p>Arithmetic, not a dial (invariant 7 / ADR-0016): it sizes nothing and prices nothing.
+     */
+    public int warmupSnapshots() {
+        return warmupSamples() + 1;
+    }
+
+    /**
      * Absorb ONE synchronised sample: every name's mark at a single instant, taken at the caller's
      * fixed cadence. Only names present in both this sample and the previous one produce a return, and
      * only pairs of such names are updated — so a name that joins late, drops out for a cycle, or
