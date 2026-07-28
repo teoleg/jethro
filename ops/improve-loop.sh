@@ -93,9 +93,14 @@ python3 scripts/system-report.py >> "$LOG" 2>&1 || {
 #    commits below get pushed and reconciled — so a maintainer push never wedges the cycle.
 git fetch origin >> "$LOG" 2>&1 || true
 git checkout -B "$BRANCH" >> "$LOG" 2>&1
+# Capture BEFORE the fast-forward so maintainer commits pulled in here ALSO count as this cycle's change
+# and are rebuilt+restarted by the deploy step (§4b). A code/config fix pushed to the branch then deploys
+# itself on the next (open-market) cycle — no manual pull/restart. (Bug fixed 2026-07-28: BEFORE used to
+# be taken AFTER the ff, so a pulled maintainer change was invisible to CODE_CHANGED and the app kept
+# running the old jar until the loop happened to make its own code change.)
+BEFORE=$(git rev-parse HEAD)
 git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 && echo "fast-forwarded to origin/$BRANCH" >> "$LOG" \
   || echo "no fast-forward from origin/$BRANCH (local has un-pushed commits, or already current)" >> "$LOG"
-BEFORE=$(git rev-parse HEAD)
 
 # Was a prior change awaiting its score at cycle start? Drives the run-status "scored/reverted" state.
 HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
