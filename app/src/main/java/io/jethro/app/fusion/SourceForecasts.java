@@ -17,6 +17,7 @@ public final class SourceForecasts {
     /** Source names for the price-derived sensors — shared so the registry and mappers cannot drift. */
     public static final String TREND = "trend";
     public static final String REVERSION = "reversion";
+    public static final String XS_REVERSION = "xsreversion";
     public static final String LEARNED = "learned";
 
     private SourceForecasts() {
@@ -109,6 +110,22 @@ public final class SourceForecasts {
 
     /** Uncapped reversion claim — see {@link #strategyClaim} for why the claim is what gets measured. */
     public static double reversionClaim(double score, double targetAbs) {
+        return Double.isFinite(score) ? score * targetAbs : 0.0;
+    }
+
+    /**
+     * Price-derived cross-sectional residual reversion sensor (ADR-0121). {@code score} is the
+     * forecaster's robust residual z against the name's peer group, sign already the traded direction
+     * (it fades, so a name that has out-run its peers reads negative). Multiplying by {@code targetAbs}
+     * puts it on the desk's shared convention exactly as {@link #fromTrend} and {@link #fromReversion}
+     * do, so the sizing dials keep their meaning across sources; this mapper only changes units.
+     */
+    public static Forecast fromCrossSectionalReversion(String instrument, double score, double targetAbs) {
+        return Forecast.of(XS_REVERSION, instrument, crossSectionalReversionClaim(score, targetAbs));
+    }
+
+    /** Uncapped residual-reversion claim — see {@link #strategyClaim} for why the claim is measured. */
+    public static double crossSectionalReversionClaim(double score, double targetAbs) {
         return Double.isFinite(score) ? score * targetAbs : 0.0;
     }
 

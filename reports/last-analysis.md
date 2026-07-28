@@ -1,78 +1,82 @@
-Held again (5 of 6 evidence cycles) — and the fix I had queued for next cycle just failed its own test, so I am **retracting** it: `reversion`@3600s was admitted with a POSITIVE mean on 8 cohorts and the significance clause stopped it cold, which is the sample bound I was worried about doing its job.
+Nothing this desk measures predicts returns, so I stopped tuning the machinery and built a new predictor: cross-sectional residual reversion (ADR-0121), which fades a name against its peer group instead of against its own past.
 
 *Every figure below is read from the live endpoints, `reports/run-status.json`, the ledger or this run's
 report; none is authored here (invariant 7 / ADR-0016 — the scorer owns every number that gates money).
 The t-statistics, p-values and params quoted are the edge gate's own published output.*
 
-**No change this cycle — the evidence window is open.** `score` prints `9be1633c2 still accumulating
-evidence (5/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120), stamped
-`2026-07-28T16:17:48Z`. Diagnosed, checked last cycle's prediction, retracted a queued change, stopped.
+## 1–4. The live situation, in plain numbers
 
-## Situation triage
+**Money.** Total PnL `$0.61209817` — unchanged for a fifth consecutive run. Since last run `+0.00`;
+over the last three runs `+0.00`. Not bleeding, but flat and off target: `pnl_growth_pct` `0.0%`
+against `pnl_target_pct` `1.0%`, `on_track=False`, `stale=True`, `underwater=False`.
 
-1. **Money.** Total PnL reads `$0.61209817` — identical to the last run, and to the three before it.
-   `+0.00` over 1 run, `+0.00` over 3. `run-status.json`: `pnl_growth_pct: 0.0` vs `pnl_target_pct: 1.0`,
-   `on_track: false`, `stale: true`, `underwater: false`. Not bleeding; stalled.
-2. **Risk.** Gross `$0.00`, net `$0.00`. Both book rows flat — HEDGE (ES) `+0.95512117`, ALPHA (AAPL)
-   `-0.34302300`, summing to the firm total. Breaker `halted: false`. Feed live (`alpaca` connected,
-   `lastUpdateAgeMillis: 62`). Zero risk because zero book.
-3. **Cause.** `9be1633` (ADR-0120) has **no verdict yet**; the last scored row was `⚠️ MIXED`. The book has
-   been flat throughout its window, so there is nothing for it to have helped or hurt.
-4. **Danger.** None. Not bleeding, exposure not rising, breaker clear.
-5. **Order post-mortem.** The newest order is `159.9` minutes old — **zero orders this window**. All 8
-   routed names publish a non-zero `targetQty` (AMZN `-211.914746`, MSFT `-108.375505`, …) with every
-   `deltaQty: 0` and every `aims` entry `0.0`: the designed reduce-only behaviour while
-   `edgeGate.mayIncrease: false`.
-6. **Change vs market — exactly separable.** Zero orders, zero book: the window's PnL move is `+0.00` from
-   market **and** `+0.00` from code. Neither credit nor blame is available this cycle.
+**Risk.** Gross exposure `$0.00`, net `$0.00`. VaR `0.00` with `note: "no positions"`. Breaker clear
+(`halted: false`). Nothing at risk, so nothing to de-risk — the danger state does not apply.
 
-## Last cycle's prediction, checked — it landed exactly
+**Cause.** The pending change `9be1633c2` (ADR-0120, a cohort is one sweep) completed its evaluation
+window and scored `⚠️ INCONCLUSIVE` — `risk-adj return/cycle +0.000000 over 7 cycles, t=+0.00`. That
+is the correct verdict and not a failure of the change: `orders_day.total: 7` with the newest order
+now hours old, so **zero orders** were placed across the whole window. The move decomposes exactly:
+`+0.00` from market and `+0.00` from code. Nothing to attribute, in either direction.
 
-I wrote that `reversion`@3600s was the row to watch, that it would cross `resolved: 30` on single-digit
-cohorts, and that a **positive** mean admitted on ~8 cohorts would make the queued fix load-bearing. It now
-reads `resolved: 34`, `cohorts: 8`, `avgReturnBps: 7.374500649147727` — positive — `stdErrorBps:
-10.218113619092685`, `netEdgeBps: 6.910900649147727`, `tStat: 0.6763382074979686`,
-`pValue: 0.26026966244441807`, `passes: false`. Admitted on the observation count, positive-signed, and
-rejected by the **significance** clause rather than by the sign.
+**Danger.** None. Not bleeding, exposure not rising, breaker clear, feed live
+(`lastUpdateAgeMillis: 10`, provider `alpaca`, 35 instruments, `ticksDropped: 0`).
 
-## Why that retracts the queued change
+## 5–6. Post-mortem and memory
 
-Rule 55 said a gate that rejects only on sign leaves its sample bound untested. This cycle supplied the
-test — and the sample bound turned out not to be what protects the desk. I re-implemented the gate's
-Student-t tail independently and reproduced its published p-values (`0.26027` vs `0.26026966`; `0.793545`
-vs `0.79354495`), then asked what `tStat` clears `params` (`minSample: 30`, `tHurdle: 2.0`,
-`hypotheses: 3`, so α = `0.00758337731605974`) at each degrees-of-freedom the gate actually uses:
+No orders this window, so there is no trigger to blame or strengthen. The memory (Rule 56, last
+cycle) already retired the queued edge-gate admission fix — I re-checked that it stays retired, and it
+does. The compounding lesson from the last five cycles is unambiguous: the ledger's INCONCLUSIVE wall
+is not noise about good changes, it is what happens when every change targets the *combiner*, the
+*gate* or the *sensor mechanics* while the *measurements themselves* are null.
 
-| df (= cohorts − 1) | 1 | 2 | 3 | 7 | 10 | 32 | 85 |
-|---|---|---|---|---|---|---|---|
-| t required | 41.97 | 8.03 | 5.03 | 3.195 | 2.925 | 2.566 | 2.479 |
+## 7. What I checked on the edge mission, and what I did about it
 
-The t-distribution **already** imposes the small-cohort penalty, and imposes it savagely — it is the
-textbook-correct correction for precisely the failure I was worried about, a standard error estimated from
-few draws. At its 8 cohorts, `reversion`@3600s would need on the order of `33` bps of expectancy to clear
-against the `7.374500649147727` it measures. Its observation count was never what let it through, and its
-cohort count was never what stopped it.
+I read every source × horizon row before deciding. The gate reads `mayIncrease: false`; against a
+`roundTripCostBps` of `0.6278285714285714`, no source clears at any rung — the best `tStat` anywhere
+is `0.6564771217276463` (`social`@3600 s on 5 cohorts). I also computed the other two rungs' t-stats
+from the published cohort dispersions rather than assuming: `reversion`@900 s ≈ `0.27` on 29 cohorts,
+`reversion`@225 s ≈ `0.25` on 77. So the "horizon ladder" lever I flagged last cycle is **dead** —
+moving the gate's measurement rung would not open it either, and I am recording that so it is not
+re-attempted.
 
-Meanwhile the cost of shipping the fix is now measurable: a cohort-denominated `min-sample: 30` would shut
-**9 of the 12** source×horizon rows — all four at 3600s (best is `trend` at `cohorts: 9`), three of four at
-900s (only `trend` at `33` survives), and two of four at 225s. That is a large loss of measurement surface
-to buy a protection the reference distribution already provides. **Retracted — I will not ship it.** The
-`resolved`/`cohorts` unit mismatch in `EdgeGate.clears`
-(`app/src/main/java/io/jethro/app/fusion/EdgeGate.java:171`) is worth a clarifying comment someday; it is
-cosmetic, not a safety hole, and not worth a cycle.
+But the null is not uniform, and its shape is informative. `reversion` is the only source
+positive-signed at *every* rung (`0.6500729504188325` bps at 225 s over 77 cohorts,
+`1.2532288851764135` at 900 s over 29, `6.940456315814394` at 3600 s over 8), while `trend` measures
+negative on both its best-sampled rungs (`-0.21794567180606306` at 225 s over 87,
+`-8.299129091035356` at 3600 s over 10). That is a weak positive structure with real sample behind it
+and no way to sharpen it by re-weighting.
 
-## Edge mission — one structure worth naming, honestly discounted
+The reversal literature says precisely why a raw own-price reversal signal measures like that: the
+documented effect lives in the **idiosyncratic** component. Fading a name that is down *because the
+whole cross-section is down* is a bet on the market factor — roughly zero expectancy over an hour,
+plus the reversal trade's full turnover cost — and pooling it with the residual bet dilutes the one
+that works. ADR-0019 hedges net equity toward flat anyway, so that factor component is exposure the
+desk deliberately does not keep, currently being measured as if it were alpha.
 
-`reversion` is the only source with a positive mean at **every** horizon: `225s +0.533252798747244`,
-`900s +1.2789941648057297`, `3600s +7.374500649147727`, rising with horizon while
-`roundTripCostBps: 0.6278285714285714` stays fixed — net of cost that is negative at 225s and positive at
-900s and 3600s. That is the shape of an edge amortising a fixed cost over a longer hold. **I am not going
-to oversell it:** those three rows measure the *same* signal over *overlapping* windows, so they are
-nowhere near three independent confirmations, and no single one is significant (`p = 0.26026966244441807`
-at its best). Every other source is negative-mean at its best-sampled horizon — `trend` `-0.0895626400383285`
-@900s, `momentum` `-6.556053555555556` @3600s, `social` `-0.8379598939393939` @900s. The binding constraint
-is still sample, and invariant 8 forbids borrowing SIM history to manufacture it.
+## The change
 
-**Next cycle `9be1633` scores (6/6) and I can act.** The lead I intend to take up then is the horizon
-question this structure raises — whether the ladder should prefer the hold at which `reversion`'s
-expectancy clears its cost — not another admission-bound edit.
+A fifth forecast source, `xsreversion`, on the identical ADR-0066/0070 contract: it publishes a
+conviction, records every reading in the phase-1 telemetry, and must earn its own measured expectancy
+through the edge gate before it sizes anything. Per sweep, in the feed's own clock: a name is admitted
+only if it printed in **both halves** of the lookback window (dial-free — so a name that stopped
+printing cannot pass off a stale partial return as current); its move is `ln(P_last/P_first)/√span`,
+vol-time normalised because print rates here span seconds to tens of minutes; peers are its **asset
+class from the instrument master**; the score is `−clamp((r − median)/(1.4826·MAD), ±4)` within a
+group of at least four. Median/MAD because peer groups are single-digit and one bad print would
+otherwise flip everyone else's sign. It emits the whole cross-section at once — exactly one ADR-0120
+cohort — so the gate counts it correctly with no special case. No money/risk/exposure number is
+introduced; the three shape dials carry provenance in `application.properties`.
+
+**Why this is safe while it measures.** The gate is reduce-only and this source cannot change that; it
+can only alter how a held position is worked down, and the book is flat. The cost of being wrong is
+measurement time, not money.
+
+**The honest cost, stated up front.** The gate's Bonferroni correction divides α by *rungs* only, not
+by sources, so a fifth source makes the un-corrected source multiplicity worse — a passing
+`xsreversion` reading deserves more scepticism than the gate will express. Fixing that is the queued
+follow-up, not this change.
+
+**What would falsify it.** If `xsreversion` also measures null once it has real cohorts, that is
+strong evidence this universe has no short-horizon reversal to capture at all — and the right next
+move is a different feed, not a sixth source. I will say so plainly rather than adding one.

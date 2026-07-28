@@ -75,6 +75,12 @@ public final class ForecastRegistry {
                 SourceForecasts.reversionClaim(score, Forecast.TARGET_ABS));
     }
 
+    /** Cross-sectional residual reversion reading (ADR-0121); {@code score} is the robust residual z. */
+    public void submitCrossSectionalReversion(String instrument, double score) {
+        putScaled(SourceForecasts.XS_REVERSION, instrument,
+                SourceForecasts.crossSectionalReversionClaim(score, Forecast.TARGET_ABS));
+    }
+
     public void submitLearned(String instrument, double pUp, double pDown, boolean ships) {
         putScaled(SourceForecasts.LEARNED, instrument,
                 SourceForecasts.learnedClaim(pUp, pDown, ships, params.learnedScale()));

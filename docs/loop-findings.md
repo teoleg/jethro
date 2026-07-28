@@ -1974,3 +1974,47 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   stays `$0.61209817` absent orders. `reversion`@3600s stays admitted, `cohorts` 8–10, still failing on
   significance. **The lever I intend to take up once scored is the horizon ladder** — whether the desk
   should prefer the hold at which `reversion`'s expectancy clears its cost — not another admission-bound edit.
+
+## 2026-07-28T19:00Z — the pending change SCORED, so I shipped a new SIGNAL instead of another mechanic: cross-sectional residual reversion (ADR-0121)
+
+- **Window attribution is exact, not estimated.** `9be1633c2` (ADR-0120) scored `⚠️ INCONCLUSIVE`
+  (`+0.000000 risk-adj/cycle over 7 cycles, t=+0.00`), `reports/.pending-baseline.json` is gone, so the
+  evidence window is closed and a new change is allowed. Book flat: gross `$0.00`, net `$0.00`, VaR
+  `0.00` (`note: "no positions"`), breaker clear, feed live (`lastUpdateAgeMillis: 10`), PnL
+  `$0.61209817` for a fifth consecutive run. `orders_day.total: 7`, newest hours old — **zero orders**,
+  so the move is `+0.00` from market AND `+0.00` from code.
+- **Rule 57: the horizon-ladder lever is DEAD — do not take it up.** I said last cycle I would pursue
+  whether the desk should prefer the rung where `reversion`'s expectancy clears its cost. Before
+  building it I computed all three rungs' t-stats from the published cohort dispersions
+  (`stdCohortMeanBps / √cohorts`) rather than assuming: `reversion`@900s ≈ `0.27` on 29 cohorts,
+  @225s ≈ `0.25` on 77, against the gate's own `0.6344345168075892` at 3600s. **No rung is close**, and
+  the best t anywhere on the desk is `0.6564771217276463` (`social`@3600s, 5 cohorts). Switching the
+  gate's measurement rung would not open it. Second cycle running that a queued lever failed a
+  quantitative pre-check before becoming a commit — that check is now the habit, not the exception.
+- **Rule 58: when every measurement is null, the only honest lever is a NEW MEASUREMENT.** Five
+  consecutive cycles of `INCONCLUSIVE` came from tuning the combiner, the gate and the sensor mechanics
+  while the underlying expectancies stayed indistinguishable from zero. Re-weighting sources with no
+  edge cannot create edge. Spend the change on a predictor, not on the plumbing that ranks predictors.
+- **The structure I acted on, and why it is not a fishing trip.** `reversion` is the ONLY source
+  positive-signed at every rung (`0.6500729504188325` bps @225s/77 cohorts, `1.2532288851764135`
+  @900s/29, `6.940456315814394` @3600s/8); `trend` is negative on both its best-sampled rungs
+  (`-0.21794567180606306` @225s/87, `-8.299129091035356` @3600s/10). The reversal literature's reading
+  of exactly that shape is that the documented effect is **idiosyncratic** (Lehmann 1990, Lo–MacKinlay
+  1990, Khandani–Lo 2007): fading a name that is down because the whole cross-section is down is a bet
+  on the market factor — ~zero expectancy over an hour plus full turnover cost — and ADR-0019 hedges
+  that factor toward flat anyway, so it is exposure the desk does not keep, measured as if it were alpha.
+- **Shipped:** `xsreversion`, a fifth forecast source that fades `(r − peer median)/(1.4826·MAD)` where
+  `r = ln(P_last/P_first)/√span`, peers = asset class from the instrument master, admission = the name
+  printed in **both halves** of the window (dial-free). One sweep = one ADR-0120 cohort. It cannot add
+  exposure while the gate is reduce-only; the cost of being wrong is measurement time, not money.
+- **Predicted next, so it can be checked.** Scorer at `1/6`; expect no ledger row for six cycles and PnL
+  to stay `$0.61209817` absent orders. `xsreversion` should appear in `signals_telemetry` within a cycle
+  or two with `cohorts` in the low single digits at 225s and nothing yet at 3600s; the EQUITY group
+  should be the only one clearing `min-peers: 4` on this universe (18 measured / 8 tradable), so FX and
+  futures rows may stay absent — **if `xsreversion` never appears at all, the peer groups are too thin
+  and the diagnosis is `min-peers`, not the signal.** Gate stays shut. **If it measures null once it has
+  real cohorts, that is evidence this universe has no short-horizon reversal to capture, and the honest
+  next move is a different feed — not a sixth source.**
+- **Queued follow-up (NOT this change):** the gate's Bonferroni divides α by RUNGS only
+  (`hypotheses: 3`), not by sources. A fifth source makes the un-corrected source multiplicity worse, so
+  a passing `xsreversion` reading deserves more scepticism than the gate expresses.

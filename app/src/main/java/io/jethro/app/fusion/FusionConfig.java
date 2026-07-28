@@ -473,6 +473,38 @@ public class FusionConfig {
     }
 
     /**
+     * The ADR-0121 cross-sectional residual reversion sensor — the peer-relative counterpart of the two
+     * per-name sensors above, on the identical contract (a forecast source that must earn its measured
+     * expectancy before the edge gate lets it size anything). It publishes the whole cross-section in one
+     * sweep, which is exactly one ADR-0120 cohort, and records every reading in the phase-1 telemetry so
+     * it is judged on its own realised edge. It cannot place an order and cannot relax a gate; while the
+     * gate is reduce-only it can only change how a held position is worked down.
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.fusion.xs-reversion", name = "enabled", havingValue = "true",
+            matchIfMissing = true)
+    CrossSectionalReversionLifecycle crossSectionalReversionLifecycle(
+            ForecastRegistry registry,
+            ObjectProvider<TradingCoreLifecycle> tradingCore,
+            ObjectProvider<io.jethro.trading.riskpnl.InstrumentRefSource> refs,
+            ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
+            @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
+            @Value("${jethro.fusion.xs-reversion.lookback-seconds:900}") long lookbackSeconds,
+            @Value("${jethro.fusion.xs-reversion.min-peers:4}") int minPeers,
+            @Value("${jethro.fusion.xs-reversion.max-abs-z:4.0}") double maxAbsZ,
+            ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
+            @Value("${jethro.fusion.xs-reversion.interval-seconds:10}") long intervalSeconds) {
+        var forecaster = new CrossSectionalReversionForecaster(
+                new CrossSectionalReversionForecaster.Params(
+                        Math.max(1, lookbackSeconds) * 1_000L, minPeers, maxAbsZ));
+        var lifecycle = new CrossSectionalReversionLifecycle(forecaster, registry,
+                tradingCore.getIfAvailable(), refs.getIfAvailable(), telemetry.getIfAvailable(),
+                storedPrices(markHistory), scheduler, intervalSeconds);
+        lifecycle.start();
+        return lifecycle;
+    }
+
+    /**
      * The desk's MEASURED round-trip execution cost per instrument (ADR-0072): twice the
      * implementation-shortfall slippage its own fills in this feed mode actually incurred, which is the
      * same construction the desk-wide hurdle uses — only not blended across names that cost two orders
