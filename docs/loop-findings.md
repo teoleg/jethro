@@ -1830,3 +1830,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   accumulating evidence (n/6)` for several cycles and **no ledger row until ~6 heartbeats past
   16:17:48Z**. If a row appears sooner, or PnL moves off `$0.61209817` with no order in
   `recent_orders`, something outside the loop touched the book.
+
+## 2026-07-28T17:00Z — held (2/6); the flagged "gate is one draw from opening" reading self-destructed, which proves the units bug rather than retiring it
+
+- **No change: the evidence window is open.** `reports/.pending-baseline.json` still exists for
+  `9be1633` (ADR-0120) at `16:17:48Z`; two heartbeats accrued (`16:18:09Z`, `16:33:45Z`) against
+  `MIN_CYCLES=6`; newest attribution snapshot is still `160006Z-b2a569f32.json`. Diagnosed, verified,
+  stopped. Book flat: gross `$0.00`, net `$0.00`, VaR95 `$0.00`, breaker clear, PnL `$0.61209817`
+  unchanged. Zero orders — nothing attributable to market OR to code.
+- **Every prediction from last cycle landed.** Gate shut (`mayIncrease: false`), book flat, zero
+  orders, PnL pinned to the cent, scorer at `2/6`, no ledger row, cohorts growing as observations
+  resolve (`trend` 7 / 27 / 71 → **8 / 28 / 75**). Nothing outside the loop touched the book.
+- **Rule 52: a t-statistic built on 2 cohorts is not a finding in either direction — do not escalate
+  on one, and do not stand down when one evaporates.** Last cycle I reported `momentum`@3600s at
+  `resolved: 5`, `cohorts: 2`, `tStat: 18.151`, `pValue: 0.0175` — significance PASSING, held out only
+  by `minSample: 30`. One observation later the same row reads `resolved: 6`, `cohorts: 2`,
+  `avgReturnBps: 6.386`, `stdErrorBps: 12.154`, `tStat: 0.487`, `pValue: 0.356`. **t fell 18.15 → 0.49
+  on a single draw.** My urgency framing was wrong; the diagnosis is now *demonstrated* instead of
+  argued. A two-cohort standard error is where two means happened to land, and it crosses the hurdle
+  freely in both directions. It landed harmlessly this time; nothing in the gate makes that general.
+- **Rule 53: check whether a latent unit bug is about to become live, and date it.** `resolved`/`cohorts`
+  runs ~3.4× on every row (`trend`@3600s 27/8, `reversion`@3600s 20/6, `trend`@225s 386/75), so
+  `resolved` crosses `minSample: 30` while `cohorts` is still ~9. `trend`@3600s is at `resolved: 27`
+  after ~4h of LIVE session — admission on single-digit cohorts is a cycle or two away, not hypothetical.
+- **Queued next (still NOT shipped — one change per run):** denominate the edge gate's admission test
+  in **cohorts**, the unit its standard error and Student-t df already use (ADR-0108's bound, defeated
+  by the one test never converted). Ship only once `9be1633` has a ledger row.
+- **Edge mission re-checked, still honestly negative.** All four sources fail the confidence demand:
+  `reversion` `p=0.243`, `momentum` `p=0.356`, `social` `p=0.468`, `trend` `p=0.829`, against a
+  `0.628` bps round trip. None is close. The binding constraint is sample — 27 resolved 3600s
+  observations in this LIVE epoch, and invariant 8 forbids borrowing SIM history. A fifth signal into a
+  measurement that cannot separate four from zero would grow the INCONCLUSIVE wall, not escape it.
+- **Predicted next, so it can be checked.** Gate shut, book flat, zero orders, PnL `$0.61209817`,
+  scorer `3/6`. `trend`@3600s `resolved` crosses 30 with `cohorts` 8–10 and is admitted to the t-test;
+  its `tStat` is `-1.02` so it still fails and the gate stays shut for the right reason. **If it is
+  admitted and PASSES on single-digit cohorts, the queued fix is urgent, not merely correct.**
