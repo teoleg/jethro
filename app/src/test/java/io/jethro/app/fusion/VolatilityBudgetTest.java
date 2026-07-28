@@ -53,7 +53,7 @@ class VolatilityBudgetTest {
 
     private static FusionPlanner.Target target(String instrument, String qty) {
         BigDecimal q = new BigDecimal(qty);
-        return new FusionPlanner.Target(instrument, 10.0, 2, 1.0, PRICE, q, BigDecimal.ZERO, q, List.of());
+        return new FusionPlanner.Target(instrument, 10.0, 2, 1.0, 1.0, PRICE, q, BigDecimal.ZERO, q, List.of());
     }
 
     private static FusionPlanner.Target find(List<FusionPlanner.Target> targets, String instrument) {
@@ -217,7 +217,7 @@ class VolatilityBudgetTest {
     @Test
     void preservesEverySignSoNoNameFlipsSide() {
         var longName = target("A", "100.000000");
-        var shortName = new FusionPlanner.Target("B", -10.0, 2, 1.0, PRICE,
+        var shortName = new FusionPlanner.Target("B", -10.0, 2, 1.0, 1.0, PRICE,
                 new BigDecimal("-100.000000"), BigDecimal.ZERO, new BigDecimal("-100.000000"), List.of());
         var cov = diagonal(Map.of("A", 0.02, "B", 0.005));
 

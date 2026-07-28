@@ -45,7 +45,7 @@ class PortfolioRiskNormaliserTest {
     }
 
     private static FusionPlanner.Target target(String instrument, BigDecimal qty) {
-        return new FusionPlanner.Target(instrument, -18.0, 2, 1.0, PRICE, qty,
+        return new FusionPlanner.Target(instrument, -18.0, 2, 1.0, 1.0, PRICE, qty,
                 BigDecimal.ZERO, qty, List.of());
     }
 

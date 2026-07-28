@@ -1697,3 +1697,49 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   the round trip. Likely scored ⚠️ MIXED with "risk-adj n/a (zero gross)". The check is
   `recent_orders`: a LIVE `ALPHA / AAPL / BUY 1` followed by a `HEDGE / ES / SELL`. If AAPL is still short
   1 with `deltaQty: 0` next cycle, the branch did not fire and the diagnosis is wrong.
+
+## 2026-07-28 15:30Z — the desk's only position was the one name its sensors disagreed about
+
+- **The window.** Zero orders again; `orders_day.total: 2`, both from 13:40:54Z. PnL `$-0.05`
+  (up `+$1.32`), gross `$763.08` (up `+$1.12`) — mark drift on two unchanged legs. **100% market, 0%
+  change.** Not bleeding, but underwater and off the growth target.
+- **Last cycle's prediction FAILED, and the failure was informative.** I predicted ADR-0118 would buy
+  back 1 AAPL and go flat. It did not fire — and correctly so: AAPL's aim had flipped from `+6.031064`
+  LONG to `−14.915227` SHORT in one thirty-minute cycle, so the aim was no longer wrong-side. The branch
+  is sound; its *input* was unstable.
+- **Rule 41: when an aim flips sign between cycles, do not fix the control that reads the aim — go look
+  at what the aim is made of.** Two cycles were spent on the machinery downstream of a number whose sign
+  was noise.
+- **What I found.** AAPL's combined forecast is the residual of two sensors fighting: trend `+11.222357`
+  against reversion `−10.408273`, netting `−1.522972`. Every other name in the cross-section had its
+  sources pointing the same way. The desk sized `−14.915227` shares off that residual and hedged it with
+  ES — gross exposure on both legs for a view that did not exist.
+- **Rule 42: a mean is not a conviction.** Two sources agreeing on +1.5 and two sources fighting to a net
+  +1.5 give the same mean and, until now, the same position — with nothing like the same confidence about
+  the sign. Averaging shrinks the posterior mean under conflict but nothing was widening the posterior
+  variance, so sizing off the mean alone over-sizes worst exactly where the desk knows least. Whenever
+  a control consumes a combination of estimates, ask what it does when they *disagree*, not just what it
+  does on average.
+- **Rule 43: a diversification multiplier must not be applied to a residual.** ADR-0076's DM restores
+  scale removed by averaging *correlated* forecasts. Under disagreement the averaging revealed a
+  contradiction, not a rescaling, and multiplying the survivor back up is leverage the data contradicts.
+  Note the trap in the tempting fix: `DM = 1/√(h + (1−h)ρ)` is *increasing* as ρ falls, so feeding it a
+  measured anti-correlation makes it LARGER. Breadth and confidence are different terms.
+- **Rule 44: derivable is not seen.** `agreement` was computable from the `contributions` already
+  published on `/api/fusion/targets` for every one of these cycles, and neither I nor the owner computed
+  it — which is why the AAPL diagnosis was wrong twice. A number that decides position size gets its own
+  field.
+- **What I shipped (ADR-0119).** `combined ×= |Σwᵢfᵢ| / Σwᵢ|fᵢ|` — the ADR-0113/0100 efficiency ratio
+  read across sources instead of over time. No dial, no threshold. One-way by the triangle inequality and
+  exactly `1` when the sources share a sign, so agreeing names are byte-identical. Composes with
+  ADR-0118: as sources converge on cancellation the aim goes flat and that exit branch finally becomes
+  reachable.
+- **Honest cost, recorded.** Trend and reversion are structurally opposed at different horizons, so a
+  genuine trend fighting a genuine reversion is sized down even when one was right. Correct while LIVE
+  expectancy is negative; revisit if the edge gate opens and the book is systematically under-sized.
+- **Predicted next, so it can be checked rather than re-derived.** AAPL's target falls to about an eighth
+  (`agreement 0.12321282549722257` on this cycle's readings) — still same-side and still above the 1 share
+  held, so **no order and likely ⚠️ MIXED again**. The check is `/api/fusion/targets`: an `agreement` field
+  near `1.0` on AMZN/NVDA/JNJ and far below it on AAPL, with `targetQty` an order of magnitude smaller
+  than `−14.915227`. If AAPL reads `agreement: 1.0`, the sensors stopped disagreeing and this diagnosis
+  has expired.

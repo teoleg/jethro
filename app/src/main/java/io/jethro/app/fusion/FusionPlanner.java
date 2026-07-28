@@ -26,8 +26,12 @@ public final class FusionPlanner {
     public record Contribution(String source, double forecast, double weight) {
     }
 
-    /** The fused plan for one instrument. All quantities signed (+ long / − short). */
+    /** The fused plan for one instrument. All quantities signed (+ long / − short). {@code agreement}
+     *  is the ADR-0119 scalar already applied to {@code combinedForecast} — 1 when the sources share a
+     *  sign, toward 0 as they cancel — surfaced so a name sized off a residual of fighting sensors is
+     *  visible rather than merely derivable from {@code contributions}. */
     public record Target(String instrument, double combinedForecast, int sources, double diversificationMultiplier,
+                        double agreement,
                         BigDecimal price, BigDecimal targetQty, BigDecimal currentQty, BigDecimal deltaQty,
                         List<Contribution> contributions) {
     }
@@ -110,7 +114,8 @@ public final class FusionPlanner {
                     price, multiplier);
             BigDecimal delta = TargetPlanner.orderDelta(target, current, params.bufferFraction(), params.adjustmentRate());
             out.add(new Target(instrument, combined.value(), combined.activeSources(),
-                    combined.diversificationMultiplier(), price, target, current, delta, contributions));
+                    combined.diversificationMultiplier(), combined.agreement(),
+                    price, target, current, delta, contributions));
         }
         out.sort((a, b) -> Double.compare(Math.abs(b.combinedForecast()), Math.abs(a.combinedForecast())));
         return out;

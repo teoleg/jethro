@@ -25,12 +25,15 @@ class FusionEngineTest {
         assertEquals(dm, c.diversificationMultiplier(), 1e-9);
         assertEquals(10.0 * dm, c.value(), 1e-9);
         assertEquals(2, c.activeSources());
+        // ADR-0119: sources of one mind earn agreement 1 exactly, so this path is untouched by it.
+        assertEquals(1.0, c.agreement(), 1e-12);
     }
 
     @Test
     void disagreementCancels() {
         var c = ForecastCombiner.combine("AAPL", List.of(wf("a", 12, 1), wf("b", -12, 1)), 0.5);
         assertEquals(0.0, c.value(), 1e-12, "equal-and-opposite forecasts net to no view");
+        assertEquals(0.0, c.agreement(), 1e-12, "…which is agreement zero, the ADR-0119 limit");
     }
 
     @Test
@@ -40,9 +43,57 @@ class FusionEngineTest {
         // variance = 0.625 + (1 − 0.625)·0.5 = 0.8125 ⇒ DM = 1/√0.8125 = 1.1094003924504583.
         var c = ForecastCombiner.combine("AAPL", List.of(wf("a", 20, 3), wf("b", -20, 1)), 0.5);
         assertEquals(1.1094003924504583, c.diversificationMultiplier(), 1e-12);
-        assertEquals(11.094003924504583, c.value(), 1e-12);
+        // ADR-0119: net view |60 − 20| = 40 against gross view 60 + 20 = 80 ⇒ agreement = 0.5. Half of
+        // the conviction on the table cancelled, so half the position — the mean alone hid that.
+        assertEquals(0.5, c.agreement(), 1e-12);
+        assertEquals(5.547001962252292, c.value(), 1e-12);
         // Strictly below the count rule's 1/√0.75 = 1.1547…: two views held 3:1 are not two equal views.
         assertTrue(c.diversificationMultiplier() < 1.0 / Math.sqrt(0.75));
+    }
+
+    @Test
+    void agreementIsOneWayAndNeverTouchesSourcesThatShareASign() {
+        // The ADR-0119 safety property, over the whole forecast grid: the scalar is in [0,1], it is
+        // EXACTLY 1 whenever the contributing forecasts share a sign (so those names are byte-identical
+        // to the pre-ADR-0119 desk), and it never flips a sign.
+        for (double a = -20; a <= 20; a += 2.5) {
+            for (double b = -20; b <= 20; b += 2.5) {
+                var c = ForecastCombiner.combine("AAPL", List.of(wf("x", a, 1.7), wf("y", b, 0.4)), 0.5);
+                assertTrue(c.agreement() >= 0.0 && c.agreement() <= 1.0, "a=" + a + " b=" + b);
+                if (a >= 0 == b >= 0) {
+                    assertEquals(1.0, c.agreement(), 1e-12, "same sign ⇒ no shrinkage: " + a + "," + b);
+                }
+                double unscaled = (1.7 * a + 0.4 * b) / 2.1 * c.diversificationMultiplier();
+                assertTrue(Math.abs(c.value()) <= Math.abs(unscaled) + 1e-12, "can only shrink");
+                assertTrue(c.value() == 0.0 || Math.signum(c.value()) == Math.signum(unscaled),
+                        "sign is never flipped");
+            }
+        }
+    }
+
+    @Test
+    void aResidualOfTwoFightingSensorsIsNotAFullConvictionPosition() {
+        // The live shape this change targets (2026-07-28): the ONE name the desk held was the one whose
+        // sensors flatly contradicted each other — trend +11.22 against reversion −10.41 — and the desk
+        // sized off the small residual as if it were a settled view, then hedged that position too.
+        var c = ForecastCombiner.combine("AAPL",
+                List.of(wf("trend", 11.222357223010645, 0.7940890068032261),
+                        wf("reversion", -10.408272759827817, 1.0968379620104083)), 0.5);
+        // Net view |8.911… − 11.416…| = 2.504638180726456 against gross 20.327739183149525.
+        assertEquals(2.504638180726456 / 20.327739183149525, c.agreement(), 1e-12);
+        assertEquals(0.12321282549722257, c.agreement(), 1e-12, "≈ 12% of the conviction survived");
+        // The two sensors still net short, but at an eighth of the size the mean alone claimed.
+        assertTrue(c.value() < 0, "the sign the average found is kept");
+        assertTrue(Math.abs(c.value()) < 0.13 * 1.5229724354072096,
+                "…at a fraction of the conviction the desk was sizing off");
+        // Contrast: the SAME net view from sources that agree is untouched.
+        var agreeing = ForecastCombiner.combine("AAPL",
+                List.of(wf("trend", -1.3245557454277905, 0.7940890068032261),
+                        wf("reversion", -1.3245557454277905, 1.0968379620104083)), 0.5);
+        assertEquals(1.0, agreeing.agreement(), 1e-12);
+        // Same weighted mean, same DM — the ONLY difference is that these sources agree, and the whole
+        // of that difference is the agreement scalar: the fighting pair gets 12% of the position.
+        assertEquals(c.agreement(), c.value() / agreeing.value(), 1e-9);
     }
 
     @Test

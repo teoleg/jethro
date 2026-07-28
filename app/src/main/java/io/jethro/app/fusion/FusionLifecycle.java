@@ -538,7 +538,7 @@ public final class FusionLifecycle implements AutoCloseable {
                     : TargetPlanner.reduceOnly(t.deltaQty(), t.currentQty());
             out.add(clamped.compareTo(t.deltaQty()) == 0 ? t
                     : new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
-                            t.diversificationMultiplier(), t.price(), t.targetQty(), t.currentQty(),
+                            t.diversificationMultiplier(), t.agreement(), t.price(), t.targetQty(), t.currentQty(),
                             clamped, t.contributions()));
         }
         return out;

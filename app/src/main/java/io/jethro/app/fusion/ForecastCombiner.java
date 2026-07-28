@@ -32,6 +32,29 @@ import java.util.List;
  * supports. This replaces the ADR-0067 property "re-weighting cannot scale the book" with the strictly
  * safer "re-weighting cannot GROW the book"; equal weights remain the maximum.
  *
+ * <p><b>Then the sources' AGREEMENT scales it back down (ADR-0119).</b> The weighted average is the
+ * desk's NET view; {@code Σwᵢ|fᵢ|/Σwᵢ} is its GROSS view, the conviction actually on the table. Their
+ * ratio
+ * <pre>
+ *   agreement = |Σ wᵢ fᵢ| / Σ wᵢ |fᵢ|     ∈ [0, 1]
+ * </pre>
+ * is the fraction of the sources' total conviction that survives as net displacement rather than
+ * cancelling — the same efficiency ratio the desk already uses over TIME for a trend (ADR-0113) and for
+ * the hedge's own path (ADR-0100), read here ACROSS sources. It multiplies the combined value.
+ *
+ * <p>Why: sizing reads only the posterior MEAN, and two sources fighting to a small residual produce
+ * the same mean as two quiet sources agreeing on it — while carrying far more uncertainty about the
+ * sign. Averaging shrinks the mean; nothing was widening the uncertainty, so the desk took a full-
+ * conviction position on a number that was the difference of two large opposing estimates. Worse, the
+ * DM above then MULTIPLIED that residual up, on a diversification assumption the disagreement itself
+ * contradicts.
+ *
+ * <p>Strictly one-way, by the triangle inequality: {@code agreement ≤ 1} always, so the combined value
+ * can only ever SHRINK, and {@code agreement = 1} EXACTLY whenever every contributing forecast shares a
+ * sign (or only one contributes) — so a name whose sources agree is byte-identical to before. The sign
+ * is never touched. This is the third rule in the same family as ADR-0076 (re-weighting cannot grow the
+ * book) and ADR-0098 (churn shrinkage is one-way).
+ *
  * <p>Pure and dimensionless — the combined value is a conviction, never a size or a price (ADR-0016 /
  * invariant 7); {@link TargetPlanner} turns it into a target position deterministically downstream.
  */
@@ -47,8 +70,11 @@ public final class ForecastCombiner {
     public record Weighted(Forecast forecast, double weight) {
     }
 
-    /** The fused view: the combined forecast plus how many sources contributed and the DM applied. */
-    public record Combined(String instrument, double value, int activeSources, double diversificationMultiplier) {
+    /** The fused view: the combined forecast plus how many sources contributed, the DM applied, and
+     *  the ADR-0119 agreement scalar those sources earned (1 = unanimous sign, 0 = perfect
+     *  cancellation). */
+    public record Combined(String instrument, double value, int activeSources,
+                           double diversificationMultiplier, double agreement) {
     }
 
     /**
@@ -59,6 +85,7 @@ public final class ForecastCombiner {
     public static Combined combine(String instrument, List<Weighted> forecasts, double assumedAvgCorrelation) {
         double weightSum = 0;
         double weighted = 0;
+        double weightedGross = 0;
         double weightSqSum = 0;
         int active = 0;
         for (Weighted w : forecasts) {
@@ -67,18 +94,38 @@ public final class ForecastCombiner {
             }
             weightSum += w.weight();
             weighted += w.weight() * w.forecast().value();
+            weightedGross += w.weight() * Math.abs(w.forecast().value());
             weightSqSum += w.weight() * w.weight();
             active++;
         }
         if (weightSum <= 0 || active == 0) {
-            return new Combined(instrument, 0.0, 0, 1.0);
+            return new Combined(instrument, 0.0, 0, 1.0, 1.0);
         }
         double average = weighted / weightSum;
         // Σwᵢ² over NORMALISED weights: Σ(wᵢ/Σw)² = Σwᵢ²/(Σw)². Formed from the running sums so the
         // weight vector is never materialised (ADR-0076).
         double normalisedSumSq = weightSqSum / (weightSum * weightSum);
         double dm = diversificationMultiplierForConcentration(normalisedSumSq, assumedAvgCorrelation);
-        return new Combined(instrument, Forecast.clamp(average * dm), active, dm);
+        double agreement = agreement(weighted, weightedGross);
+        return new Combined(instrument, Forecast.clamp(average * dm * agreement), active, dm, agreement);
+    }
+
+    /**
+     * ADR-0119 — the share of the sources' gross conviction that survives as a net view:
+     * {@code |Σwᵢfᵢ| / Σwᵢ|fᵢ|}. The Σw normalisation is common to both sums and cancels, so this is
+     * formed from the same running sums the average is.
+     *
+     * <p>By the triangle inequality {@code |Σwᵢfᵢ| ≤ Σwᵢ|fᵢ|}, with EQUALITY exactly when every
+     * contributing forecast shares a sign — so unanimous sources (and the single-source case) return 1
+     * and change nothing, and the result never exceeds 1. All forecasts zero is the 0/0 case: the net
+     * view is already zero, so the scalar is irrelevant and 1 is returned rather than a NaN. The
+     * min/max clamp is defensive against floating-point residue only.
+     */
+    private static double agreement(double weightedNet, double weightedGross) {
+        if (!(weightedGross > 0)) {
+            return 1.0;
+        }
+        return Math.max(0.0, Math.min(1.0, Math.abs(weightedNet) / weightedGross));
     }
 
     /**
