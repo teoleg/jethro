@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-28T04:00:03Z",
+    "feedMode": "LIVE",
+    "available": true,
+    "brain_ran": false,
+    "total_pnl": "-761.00902282",
+    "gross": "16171.68000000",
+    "net": "0E-8",
+    "fees": "22.446401",
+    "pnl_pct": null,
+    "gross_pct": null,
+    "pnl_growth_pct": null,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": false,
+    "stale": false,
+    "underwater": true,
+    "action": "market-closed",
+    "last_verdict": null,
+    "decision": "\ud83c\udf19 Market closed \u2014 analysis skipped this cycle (no Claude call). The US session is closed, so the tape is frozen and there is nothing to analyse; the loop resumes at the next open. Flat/unchanged here is expected, not a failure.",
+    "reasoning": "",
+    "commit": "2b8c724"
+  },
+  {
     "ts": "2026-07-27T23:14:45Z",
     "feedMode": "SIM",
     "available": true,
