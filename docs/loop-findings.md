@@ -1792,3 +1792,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   OBSERVATIONS while ADR-0108 deliberately moved the estimator's sample bound to COHORTS. Both units
   block today's readings, so it changes nothing now — but it is a unit mismatch in the gate's own
   admission test and worth a look once evidence accumulates.
+
+## 2026-07-28T16:30Z — held under evaluation; ADR-0120 confirmed; the min-sample unit mismatch is now load-bearing
+
+- **No change: the evidence window is open.** `reports/.pending-baseline.json` exists for `9be1633`
+  (ADR-0120) at `16:17:48Z`, one heartbeat accrued against `MIN_CYCLES=6`, no ledger row. Diagnosed,
+  verified, stopped. Book flat: gross `$0.00`, net `$0.00`, VaR95 `$0.00`, breaker clear, PnL
+  `$0.61209817` unchanged on the run. Zero orders — nothing attributable to market OR to code.
+- **Rule 49: with a flat book, PnL is frozen at realized — a `+0.00` window is not stability, it is
+  absence.** No positions ⇒ no marks to drift ⇒ the number cannot move until the gate reopens. Do not
+  read a flat delta on a flat book as evidence about anything.
+- **Rule 50: state the prediction with a number so the next cycle can CHECK it, not re-derive it.**
+  Last cycle's check fired perfectly. Predicted `trend` cohorts ≈7 / ≈25 / ≈68 at 3600s / 900s / 225s;
+  live reads **7 / 27 / 71**. The decisive one: pre-ship SQL said `trend`@3600s → 7 cohorts at `-8.40`
+  bps, and the gate now publishes `cohorts: 7`, `avgReturnBps: -8.40379205357143`. A cohort-weighted
+  mean lands on a pre-computed value only if the grouping changed and nothing else did. ADR-0120 is
+  confirmed in production, and the gate is honestly harder.
+- **Rule 51: a bound you dismissed as inert can be ARMED by your own next change — re-check the
+  dismissals.** I logged `min-sample=30` last cycle as a units bug that "changes nothing now". ADR-0120
+  coarsened the cohorts and made it load-bearing. `momentum`@3600s: `resolved: 5`, `cohorts: 2`,
+  `stdErrorBps: 0.944` against `stdReturnBps: 95.96` — two cohort means that happened to land close
+  together, not precision. `tStat: 18.15` against `tHurdle: 2.0`, `pValue: 0.0175` (exactly df=1).
+  **The significance test PASSES.** The sole thing keeping the desk out is `minSample: 30` vs
+  `resolved: 5` — a bound in observations standing in for a bound in cohorts.
+- **Why that is dangerous, precisely.** `resolved` grows ~3–4× faster than `cohorts` here (trend@225s:
+  332 vs 71). So `resolved` crosses 30 while `cohorts` is still single digits — the exact regime where
+  a degenerate 2–3-cohort standard error clears a t-hurdle on noise and the gate opens on nothing.
+  It is ADR-0108's cohort-denominated sample bound defeated by the one test that never got converted.
+- **Queued next (NOT shipped — one change per run, and the window is open):** denominate the edge
+  gate's admission test in **cohorts**, the unit its standard error and Student-t degrees of freedom
+  already use. Ship only once `9be1633` has a ledger row.
+- **Deliberately still deferred:** cross-sectional demeaning of cohort returns. Its precondition —
+  cohorts genuinely merging — is now confirmed, so it is askable at last, but the units bug sits on the
+  admission test that gates exposure and outranks it.
+- **Predicted next, so it can be checked rather than re-derived.** Gate stays shut, book stays flat,
+  zero orders, PnL pinned at `$0.61209817` barring a fill. Expect the scorer to keep printing `still
+  accumulating evidence (n/6)` for several cycles and **no ledger row until ~6 heartbeats past
+  16:17:48Z**. If a row appears sooner, or PnL moves off `$0.61209817` with no order in
+  `recent_orders`, something outside the loop touched the book.

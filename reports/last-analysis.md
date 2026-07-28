@@ -1,72 +1,76 @@
-The book went flat and profitable, so I fixed the measurement that decides when it may trade again: a cohort is now one sweep of the cross-section, not a 60-second clock gap (ADR-0120).
+Held: last cycle's cohort re-specification is 1 of 6 evidence cycles in, and its exact pre-ship prediction landed — but checking it surfaced that `min-sample` is now the ONLY thing keeping the desk out of a 2-cohort momentum reading with a degenerate standard error.
 
-*Every figure below is read from this run's `logs/report.md`, the live endpoints, the ledger, or a
-read-only query against the live database; none is authored here (invariant 7 / ADR-0016 — the scorer
-owns every number that gates money). The cohort counts quoted are returned by the SQL itself.*
+*Every figure below is read from this run's `logs/report.md`, the live endpoints, the ledger or
+`reports/run-status.json`; none is authored here (invariant 7 / ADR-0016 — the scorer owns every number
+that gates money). The p-value arithmetic quoted at the end is the gate's own published output.*
+
+## No change this cycle — and why that is the rule, not a judgement call
+
+`reports/.pending-baseline.json` exists for `9be1633` (ADR-0120), stamped `16:17:48Z`. Exactly one
+heartbeat has accrued since (`16:18:09Z`) against `MIN_CYCLES=6`, and no ledger row or
+`reports/attribution/` snapshot has been written for it. Under ADR-0116 that is `still accumulating
+evidence`, and the contract is unambiguous: piling a new change on top destroys the evidence for the
+one being measured. So I diagnosed, verified last cycle's prediction, and stopped.
 
 ## Situation — the four questions, in plain numbers
 
-**1. Money.** Total PnL `$0.61`, **up** `+$1.12` on the last run and `+$1.78` across the last three.
-All of it realized — the first positive print of this LIVE session. Not bleeding.
+**1. Money.** Total PnL `$0.61209817`, **unchanged** on the run (`+0.00`), **up** `+$1.98` across the
+last three. All of it realized; unrealized is `$0.00`. Not bleeding.
 
-**2. Risk.** Gross `$0.00`, net `$0.00` — down `-$763.54` on the run. VaR95 `$0.00`, ES95 `$0.00`,
-breaker `halted: false`. The book is **flat**. There is no exposure to be close to any limit.
+**2. Risk.** Gross `$0.00`, net `$0.00`. VaR95 `$0.00`, ES95 `$0.00` (`note: "no positions"`), breaker
+`halted: false`. Both legs show `quantity: "0"`. The book is **flat** — there is no exposure to sit
+near any limit.
 
-**3. Cause — my last change did this, and it worked better than I predicted.** ADR-0119 (agreement
-scaling) scored ⚠️ MIXED. I predicted AAPL's target would fall to about an eighth and sit above the 1
-share held, so no order. Wrong in the right direction: the collapse took the target *below* the
-wrong-side holding, which made ADR-0118's flat-aim-under-a-shut-gate exit reachable for the first
-time. `recent_orders` shows it firing — `ALPHA / AAPL / BUY 1` at 15:50:37, then `HEDGE / ES / SELL` at
-15:50:41 unwinding the hedge behind it. Attribution splits the round trip as ALPHA `-$0.34302300`,
-HEDGE `+$0.95512117`, firm `+$0.61209817`. The two ADRs composed exactly as ADR-0119 said they would.
+**3. Cause.** The pending change is unscored, so it has no verdict yet. The one before it
+(`b2a569f32`, ADR-0119) scored ⚠️ MIXED, and it is what put the desk here: composed with ADR-0118 it
+drove the AAPL round trip that closed both legs. The window's PnL move is `0.00` for a mechanical
+reason worth naming — **with zero positions there are no marks to drift**, so total PnL is frozen at
+realized and will not move by a cent until the gate lets the desk trade again.
 
 **4. Danger.** None. Flat book, zero VaR, breaker clear.
 
-**Change vs market.** Essentially **100% change, 0% market**. This is not a mark-drift window: it is a
-realized round trip on the two legs my change closed, four seconds apart. The market decided what the
-exit *cost*; the change decided that the desk stopped carrying a position its own sensors contradicted.
+**5. Order post-mortem.** No orders this window. `recent_orders` ends at `15:50:41` with the ES hedge
+unwind; `turnover_cost_by_name` shows the whole LIVE session as 7 fills, `$0.0857` of fees.
 
-## Why I did not put risk back on
+**7. Change vs market — attribution.** **Neither.** Zero orders and zero positions, so nothing in the
+window is attributable to the market *or* to my code. There is nothing here to claim or be blamed for.
 
-The edge gate is `mayIncrease: false`. That is correct, and I checked it rather than assumed it: at
-every horizon with real sample size the measured expectancy does not survive the round trip — trend
-`-0.21` bps and reversion `+0.39` bps at 225 s against a cheapest round trip of `0.46` bps. The
-long-horizon readings look better but carry single-digit degrees of freedom. Forcing trades here would
-lose money, and the contract is explicit that chasing the target must not mean that. Flat with `$0.61`
-banked and zero exposure is the correct state on this evidence.
+**A flag I want to contradict out loud.** `run-status.json` reads `on_track: true` with
+`pnl_growth_pct: 152.37`. That is arithmetically correct and economically misleading: it measures one
+step off a negative base, not ongoing earning. The desk is currently earning **nothing**. I am not
+treating the green flag as permission to rest — I am barred from acting by the evidence window, which
+is a different thing, and I have queued the next change below.
 
-So the binding constraint on ever making money again is not a strategy — it is the **power and honesty
-of the measurement that gates trading**. That is what I went after.
+## ADR-0120 verified — the prediction landed, including the exact number
 
-## The finding
+I wrote the check into last cycle's finding so it could be confirmed rather than re-derived. It was:
+`cohorts` roughly halves at every source/horizon while the observation set is unchanged. Live
+`signals_telemetry` now reads `trend` at 7 / 27 / 71 cohorts across 3600s / 900s / 225s, against
+predictions of ≈7 / ≈25 / ≈68. The decisive one: the pre-ship SQL said `trend`@3600s would move from
+16 cohorts at `-2.41` bps to 7 at `-8.40` bps, and the live gate now publishes `cohorts: 7`,
+`avgReturnBps: -8.40379205357143`. A cohort-weighted mean can only land on a pre-computed value if the
+grouping changed and nothing else did. The re-specification took effect exactly as designed, and it
+made the gate honestly harder. The gate stayed shut and the book stayed flat, as predicted.
 
-I first hypothesised that the gate's standard error was dominated by the market factor the desk hedges
-away, and that cohorts should be cross-sectionally demeaned. **The live data falsified that in one
-query**: cohorts are almost all singletons, so there is no cross-section inside one to demean.
+## What verifying it surfaced — the real defect, queued not shipped
 
-The reason is the actual defect. ADR-0077 makes one *pass over the cross-section* the estimator's unit,
-and identifies it by a 60-second clock gap — on an assumption written into the code and the dial's own
-comment, that a source emits "23 names in one ~200ms burst". This desk's sensors do not: they publish
-per name as each mark updates, so one pass takes **minutes**. Live `trend`@3600s: 13:34:36 NQ through
-14:02:32 JPM is one 28-minute pass, and the gap rule cut it and the next into eleven cohorts. Across
-every source and horizon the rule reports **≈2.2× more cohorts than there were passes**.
+Last cycle I noted that `min-sample=30` is expressed in **observations** while ADR-0108 moved the
+estimator's sample bound to **cohorts**, and dismissed it as changing nothing today. Coarsening the
+cohorts has made that dismissal wrong.
 
-That is the anti-conservative direction on a control that governs exposure: it narrows the standard
-error *and* inflates the Student-t degrees of freedom that ADR-0081 exists to get right. It is the
-√(1+(n−1)ρ̄) understatement ADR-0077 was written to prevent, readmitted through the grouping rule.
-Worse in principle: a gap rule measures how fast the scheduler walks the universe, not how often the
-market was drawn — tune a sensor to publish faster and the gate's apparent evidence multiplies.
+`momentum`@3600s now reads `resolved: 5`, `cohorts: 2`, `avgReturnBps: 17.5960475`,
+`stdErrorBps: 0.9438605000000002`, `tStat: 18.151461471266142`, `pValue: 0.017518613305248686`. The
+`stdReturnBps` on the same row is `95.96` — the tiny standard error is not precision, it is two cohort
+means that happened to land close together. The gate is doing its Student-t correctly: that p-value is
+exactly df=1. But `tHurdle` is `2.0` and `t` is `18.15`, so **the significance test passes**. The only
+thing holding this back is `minSample: 30` compared against `resolved: 5`.
 
-## The change (ADR-0120)
+That is a bound in the wrong unit standing in for the bound that matters. `resolved` will cross 30 on
+observation count while `cohorts` is still in single digits — precisely the regime where a degenerate
+two-or-three-cohort standard error can clear a t-hurdle on noise. The fix is to denominate the gate's
+admission test in cohorts, the same unit its standard error and degrees of freedom already use. It is
+the next change, and it waits for the pending row to score.
 
-A cohort is one **sweep**: a name appears at most once per cohort. Equivalently, the cohort index is
-the running maximum of each name's occurrence count — the coarsest partition satisfying that rule.
-**No dial**: `cohort-window-seconds` is retired, not retuned, and its plumbing removed. It is
-retroactive, so the whole rolling history re-scores at once. Late joiners and lone repeaters fall out
-correctly without a special case.
-
-It makes the gate **harder**, not easier — `trend`@3600s goes from 16 cohorts at `-2.41` bps to 7 at
-`-8.40` bps, an honest downgrade. It does **not** open the gate: the one reading whose t rises sharply
-is momentum on 2 sweeps, which `min-sample=30` blocks outright. The mean moves in both directions
-across sources, which is what makes this a re-specification rather than a loosened hurdle. The SQL was
-executed against the live schema before shipping; its failure mode is fail-**shut**.
+I did **not** attempt the cross-sectional demeaning I flagged as ADR-0120's natural successor. Its
+precondition — cohorts genuinely merging — is now confirmed, so it remains askable, but this unit
+mismatch is the more urgent of the two: it sits on the admission test that gates exposure.
