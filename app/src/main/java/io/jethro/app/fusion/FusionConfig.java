@@ -52,12 +52,14 @@ public class FusionConfig {
                                   io.jethro.trading.riskpnl.PreTradeGuardrail guardrail,
                                   io.jethro.app.risk.TradingHaltSwitch halt,
                                   ObjectProvider<io.jethro.order.OrderService> orderService,
-                                  ObjectProvider<io.jethro.app.strategy.StrategySelector> selector) {
+                                  ObjectProvider<io.jethro.app.strategy.StrategySelector> selector,
+                                  @Value("${jethro.fusion.require-backtest-support:true}")
+                                  boolean requireBacktestSupport) {
         io.jethro.order.OrderService os = orderService.getIfAvailable();
         if (os == null) {
             return null; // no order path — the lifecycle falls back to shadow
         }
-        return new FusionExecutor(props, refs, guardrail, halt, os, selector);
+        return new FusionExecutor(props, refs, guardrail, halt, os, selector, requireBacktestSupport);
     }
 
     @Bean(destroyMethod = "close")

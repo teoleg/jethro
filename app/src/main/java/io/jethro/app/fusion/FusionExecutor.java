@@ -65,16 +65,34 @@ public final class FusionExecutor {
     private final TradingHaltSwitch halt;
     private final OrderService orderService;
     private final ObjectProvider<StrategySelector> selector;
+    private final boolean requireBacktestSupport;
 
+    /** Back-compat / default: the ADR-0049 backtest-support veto is REQUIRED (the strict, real-capital shape). */
     public FusionExecutor(StrategyProperties props, InstrumentRefSource refs,
                           PreTradeGuardrail guardrail, TradingHaltSwitch halt,
                           OrderService orderService, ObjectProvider<StrategySelector> selector) {
+        this(props, refs, guardrail, halt, orderService, selector, true);
+    }
+
+    /**
+     * @param requireBacktestSupport when false (ADR-0122 exploration mode, paper book only), the
+     *   ADR-0049/0059 backtest-support veto is FAIL-OPEN: a name the OOS selector has not approved is
+     *   NOT vetoed, so the desk may act on the combined forecast alone. Every deterministic floor still
+     *   stands — firm breaker, per-book/firm exposure caps and the pre-trade guardrail below, the
+     *   conviction floor above — so this removes a VALIDATION discipline, never a risk floor. Default
+     *   true restores the strict shape exactly.
+     */
+    public FusionExecutor(StrategyProperties props, InstrumentRefSource refs,
+                          PreTradeGuardrail guardrail, TradingHaltSwitch halt,
+                          OrderService orderService, ObjectProvider<StrategySelector> selector,
+                          boolean requireBacktestSupport) {
         this.props = props;
         this.refs = refs;
         this.guardrail = guardrail;
         this.halt = halt;
         this.orderService = orderService;
         this.selector = selector;
+        this.requireBacktestSupport = requireBacktestSupport;
     }
 
     /** Routes one instrument's fused delta through the gates; returns what happened (never throws). */
@@ -211,6 +229,9 @@ public final class FusionExecutor {
      * fusion is higher-stakes.) No selector wired (persistence off) → the sim-gate + guardrail still protect.
      */
     private boolean backtestSupported(String instrument) {
+        if (!requireBacktestSupport) {
+            return true; // ADR-0122 exploration mode: fail-open on the OOS veto (paper book only)
+        }
         StrategySelector s = selector.getIfAvailable();
         if (s == null) {
             return true;

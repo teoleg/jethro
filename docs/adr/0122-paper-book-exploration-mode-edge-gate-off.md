@@ -29,9 +29,20 @@ there is nothing to watch, measure, or improve.
 
 ## Decision
 
-**Set `jethro.fusion.edge-gate.enabled=false`** (exploration mode). The combined forecast now drives
-positions directly. The code path supports this cleanly — `gateSupplier=null` leaves **every
-deterministic floor standing**:
+Two suppressors sit between the models' views and a fill, and **both** must be off for a paper book to
+act — turning off only the first leaves the book flat behind the second:
+
+**1. `jethro.fusion.edge-gate.enabled=false`** — the ADR-0064 significance gate (above).
+
+**2. `jethro.fusion.require-backtest-support=false`** — fail-OPEN on the ADR-0049/0059 backtest-support
+veto. The strict shape lets fusion put risk only on a name the OOS selector has approved with a
+positive-edge algo; an empty or NO_TRADE selection vetoes. If the daily-bar history has not accrued (e.g.
+the bars file isn't on the host), the selector approves nothing and **every** name stays vetoed even with
+the edge gate off. Fail-open lets the desk act on the combined forecast alone. `FusionExecutor` takes an
+explicit `requireBacktestSupport` flag (default true keeps the strict shape byte-for-byte).
+
+The combined forecast now drives positions directly. Both switches leave **every deterministic floor
+standing**:
 
 - **Conviction floor** (`jethro.fusion.min-forecast-to-route=5.0`) — only meaningful model views trade,
   not every wiggle, so this is high-conviction exploration, not noise-churn.
@@ -60,7 +71,8 @@ weights via `TelemetryWeights`) for when the gate is re-enabled.
 - **The durable fix still stands:** build a signal with real, OOS-validated edge (diversified daily
   cross-sectional / time-series momentum through the ADR-0049 backtest) so the actions become *justified*
   rather than exploratory. Exploration mode buys visible activity now; validated edge is what earns it.
-- **Possible next blocker:** with the edge gate off, `FusionExecutor.backtestSupported` (ADR-0049/0059)
-  is the next gate a risk-adding order meets — a name the OOS selector marks NO-TRADE is still vetoed.
-  If the book stays flat after this change, that gate (and the daily-history it needs) is the next target.
-- **Fully reversible:** `jethro.fusion.edge-gate.enabled=true` restores ADR-0064 discipline exactly.
+- **Both validation gates are now off**, so the remaining constraints on opening a position are the
+  deterministic floors above plus the ADR-0115 session gate (no opening on a closed tape — so the book
+  starts acting at the next US market **open**, which is correct, not a delay).
+- **Fully reversible:** set `jethro.fusion.edge-gate.enabled=true` and
+  `jethro.fusion.require-backtest-support=true` to restore ADR-0064/0049 discipline exactly.
