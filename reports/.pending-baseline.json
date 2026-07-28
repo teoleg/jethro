@@ -1,0 +1,20 @@
+{
+  "commit": "d08fd2ece8f40852cf729caea9925ee262f903fd",
+  "fees": "0.042361",
+  "gross_exposure": "759.89260000",
+  "net_exposure": "83.67260000",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "759.89260000",
+    "hedgePnl": "-1.76495732",
+    "netExposure": "83.67260000",
+    "realizedPnl": "-0.04236100",
+    "strategyAlpha": "0.75611000",
+    "totalFees": "0.042361",
+    "totalPnl": "-1.00884732",
+    "unrealizedPnl": "-0.96648632"
+  },
+  "summary": "the report's order/cost post-mortem lens is scoped to the current epoch, denominated in money via the contract multiplier, and no longer errors on a column that does not exist",
+  "total_pnl": "-1.00884732",
+  "ts": "2026-07-28T14:36:10Z"
+}
