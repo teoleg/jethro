@@ -59,7 +59,7 @@ class BadPrintExclusionTest {
     void discardsAreEmptyWhenTheExclusionIsDisabled() {
         var telemetry = new SignalTelemetry(new SignalTelemetryStore(null),
                 instrument -> java.util.Optional.empty(), java.util.List.of(3600),
-                10.0, 7, 500, 60, Map.of());
+                10.0, 7, 500, Map.of());
         assertThat(telemetry.discards()).isEmpty();
     }
 }

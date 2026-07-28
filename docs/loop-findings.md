@@ -1743,3 +1743,52 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   near `1.0` on AMZN/NVDA/JNJ and far below it on AAPL, with `targetQty` an order of magnitude smaller
   than `−14.915227`. If AAPL reads `agreement: 1.0`, the sensors stopped disagreeing and this diagnosis
   has expired.
+
+## 2026-07-28 16:00Z — the desk went flat and profitable; the gate that keeps it flat was miscounting its own evidence
+
+- **The window.** ADR-0119 fired and composed with ADR-0118 exactly as designed: AAPL's agreement
+  collapsed its target BELOW the wrong-side holding, which made the flat-aim-under-a-shut-gate exit
+  reachable for the first time. `ALPHA / AAPL / BUY 1` at 15:50:37, `HEDGE / ES / SELL` at 15:50:41.
+  Book flat: gross `$763.54` → `$0.00`, PnL `-$0.51` → `+$0.61`, all realized. **~100% change, 0% market**
+  — a realized round trip on the two legs the change closed, seconds apart, not mark drift.
+- **Rule 45: a prediction that fails in the RIGHT direction still falsifies the model, and you must say
+  which.** I predicted "target falls to an eighth, stays above the holding, no order". The target fell
+  FURTHER than that and tripped the exit. The mechanism was right; my estimate of its magnitude was not.
+- **Rule 46: check the hypothesis against the data BEFORE building on it.** I was one edit away from
+  shipping cross-sectional demeaning of cohort returns — on the thesis that the gate's standard error is
+  dominated by the market factor the desk hedges away. One read-only query killed it: **cohorts are almost
+  all singletons**, so there is no cross-section inside a cohort to demean. Ten minutes of SQL beat a
+  well-argued but wrong ADR.
+- **What that query actually found (the real defect, ADR-0120).** ADR-0077 makes one PASS over the
+  cross-section the estimator's unit, but identifies it by a 60-second CLOCK GAP — on the assumption,
+  written into the javadoc and the dial's own comment, that a source emits its cross-section "in one
+  ~200ms burst". This desk's sensors publish per name as each mark updates, so a pass takes MINUTES:
+  live `trend`@3600s, 13:34:36 NQ → 14:02:32 JPM is ONE 28-minute pass, and the gap rule cut it and the
+  next into eleven cohorts. Every source and horizon: **≈2.2× more cohorts than passes.**
+- **Rule 47: a heuristic that stands in for a concept will eventually measure something else.** The gap
+  rule was measuring how fast the scheduler walks the universe, not how often the market was drawn. Tune
+  a sensor to publish faster and the gate's apparent evidence multiplies with zero new observations. When
+  a proxy gates money, periodically re-derive it from the thing it is proxying for.
+- **Rule 48: check which DIRECTION a measurement error runs before calling it harmless.** This one ran
+  anti-conservative — more cohorts narrows the standard error AND inflates the Student-t degrees of
+  freedom ADR-0081 was installed to get right. It was the exact √(1+(n−1)ρ̄) understatement ADR-0077
+  exists to prevent, readmitted through the grouping instead of the averaging.
+- **The fix is dial-free.** A name appears at most once per cohort ⇒ cohort index = running maximum of
+  each name's occurrence count. `cohort-window-seconds` RETIRED, not retuned. Retroactive (re-scores
+  stored history, no migration). Late joiners and lone repeaters fall out with no special case.
+- **Honest cost, recorded.** It makes the gate HARDER: `trend`@3600s goes 16 cohorts @ `-2.41` bps → 7 @
+  `-8.40` bps. The desk looks worse because it now counts each draw once. Correct, and free to do while
+  the book is flat — which is exactly when to fix a measurement, not when it is gating a live position.
+- **Predicted next, so it can be checked rather than re-derived.** The gate stays SHUT and the book stays
+  flat, so expect **no orders and likely ⚠️ MIXED with "risk-adj n/a (zero gross)"**. The check is
+  `signals_telemetry` in the next report: `cohorts` should roughly HALVE at every source/horizon (trend
+  @3600s ≈7 not 15, @900s ≈25 not 59, @225s ≈68 not 131) while `resolved` is unchanged. If `cohorts` is
+  unchanged, the SQL did not take effect; if `resolved` moved too, something other than grouping changed.
+- **The natural successor, deliberately NOT done here.** Now that a cohort really holds ~8 names from one
+  interval, the demeaning question becomes askable: is a source's expectancy skill, or the market factor
+  times its net directional tilt? The desk hedges net equity toward flat (ADR-0019), so beta is not P&L
+  it keeps. Do NOT attempt this until the next report confirms cohorts actually merged.
+- **Also seen, not fixed (one change per run).** `jethro.fusion.edge-gate.min-sample=30` is expressed in
+  OBSERVATIONS while ADR-0108 deliberately moved the estimator's sample bound to COHORTS. Both units
+  block today's readings, so it changes nothing now — but it is a unit mismatch in the gate's own
+  admission test and worth a look once evidence accumulates.

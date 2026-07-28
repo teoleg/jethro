@@ -1,78 +1,72 @@
-Sized the one name we hold by how much its sensors actually agree — trend and reversion were fighting each other to a small residual, and the desk was taking a full-conviction position on the difference (ADR-0119).
+The book went flat and profitable, so I fixed the measurement that decides when it may trade again: a cohort is now one sweep of the cross-section, not a 60-second clock gap (ADR-0120).
 
-*Every figure below is read from this run's `logs/report.md`, the live endpoints or the ledger; none is
-authored here (invariant 7 / ADR-0016 — the scorer owns every number that gates money). The agreement
-arithmetic quoted at the end is a JUnit assertion computed by code, not by me.*
+*Every figure below is read from this run's `logs/report.md`, the live endpoints, the ledger, or a
+read-only query against the live database; none is authored here (invariant 7 / ADR-0016 — the scorer
+owns every number that gates money). The cohort counts quoted are returned by the SQL itself.*
 
 ## Situation — the four questions, in plain numbers
 
-**1. Money.** Total PnL `$-0.05`, **up** `+$1.32` on the last run; **down** `-$1.24` across the last
-three. Realized is fees only (`$0.04` on the two LIVE fills). Not bleeding this cycle, but underwater
-and off the growth target — and the move is mark drift on two legs unchanged since 13:40:54Z, so it is
-not attributable to anything the loop did.
+**1. Money.** Total PnL `$0.61`, **up** `+$1.12` on the last run and `+$1.78` across the last three.
+All of it realized — the first positive print of this LIVE session. Not bleeding.
 
-**2. Risk.** Gross `$763.08`, net `$84.63`, gross **up** `+$1.12`. VaR95 `$8.26`, ES95 `$12.42`, breaker
-`halted: false` — nowhere near it. The rise is mark drift, not sizing: `orders_day.total: 2`, both from
-13:40Z. Two positions: short 1 AAPL (`$339.23`) and the `0.001136` ES hedge (`$423.86`).
+**2. Risk.** Gross `$0.00`, net `$0.00` — down `-$763.54` on the run. VaR95 `$0.00`, ES95 `$0.00`,
+breaker `halted: false`. The book is **flat**. There is no exposure to be close to any limit.
 
-**3. Cause — and last cycle's prediction is falsified.** ADR-0118 scored ⚠️ MIXED and its branch did
-**not** fire. I predicted the desk would buy back 1 AAPL and go flat; it did not, and the reason matters
-more than the miss: AAPL's aim **flipped from `+6.031064` LONG to `−14.915227` SHORT** in one
-thirty-minute cycle. The aim is now on the *same* side as the holding, so ADR-0118 correctly stayed
-out. The branch is not broken — the input to it is unstable.
+**3. Cause — my last change did this, and it worked better than I predicted.** ADR-0119 (agreement
+scaling) scored ⚠️ MIXED. I predicted AAPL's target would fall to about an eighth and sit above the 1
+share held, so no order. Wrong in the right direction: the collapse took the target *below* the
+wrong-side holding, which made ADR-0118's flat-aim-under-a-shut-gate exit reachable for the first
+time. `recent_orders` shows it firing — `ALPHA / AAPL / BUY 1` at 15:50:37, then `HEDGE / ES / SELL` at
+15:50:41 unwinding the hedge behind it. Attribution splits the round trip as ALPHA `-$0.34302300`,
+HEDGE `+$0.95512117`, firm `+$0.61209817`. The two ADRs composed exactly as ADR-0119 said they would.
 
-**4. Danger.** No. Exposure is not rising by decision and the breaker is far away. The real problem is
-the opposite of a crisis: the desk is **frozen and off-target**, carrying `$763` of gross across two
-legs to earn mark noise minus fees.
+**4. Danger.** None. Flat book, zero VaR, breaker clear.
 
-## Attribution — change vs market
+**Change vs market.** Essentially **100% change, 0% market**. This is not a mark-drift window: it is a
+realized round trip on the two legs my change closed, four seconds apart. The market decided what the
+exit *cost*; the change decided that the desk stopped carrying a position its own sensors contradicted.
 
-**100% market, 0% change.** Zero orders this window; both legs are the same size they were four hours
-ago. Nothing in the PnL or exposure move is mine to claim or be blamed for.
+## Why I did not put risk back on
 
-## What I actually found
+The edge gate is `mayIncrease: false`. That is correct, and I checked it rather than assumed it: at
+every horizon with real sample size the measured expectancy does not survive the round trip — trend
+`-0.21` bps and reversion `+0.39` bps at 225 s against a cheapest round trip of `0.46` bps. The
+long-horizon readings look better but carry single-digit degrees of freedom. Forcing trades here would
+lose money, and the contract is explicit that chasing the target must not mean that. Flat with `$0.61`
+banked and zero exposure is the correct state on this evidence.
 
-Why did AAPL's aim flip sign in thirty minutes? Because it is the residual of two sensors fighting:
-trend `+11.222357223010645` against reversion `−10.408272759827817`, netting to `−1.5229724354072096`
-after a diversification multiplier of `1.1497986707349463`. **Every other name in the cross-section had
-its sources pointing the same way** — AMZN both short, NVDA trend-dominated, and so on. The one name the
-desk held was the single name it understood least, and it was sized as if it understood it best:
-`−14.915227` shares off that residual, then an ES hedge bought against it, so gross exposure was paid on
-both legs for a view that did not exist.
+So the binding constraint on ever making money again is not a strategy — it is the **power and honesty
+of the measurement that gates trading**. That is what I went after.
 
-The mechanism: only the **mean** reaches sizing. Two sensors agreeing quietly on +1.5 and two sensors
-fighting to a net +1.5 produce the same position, despite nothing like the same confidence about the
-sign. The averaging step shrinks the posterior mean under conflict — correctly — but nothing was
-widening the posterior variance. Worse, the ADR-0076 multiplier then scaled that residual back *up*, on
-a diversification assumption the disagreement itself contradicts.
+## The finding
 
-## What I shipped (ADR-0119)
+I first hypothesised that the gate's standard error was dominated by the market factor the desk hedges
+away, and that cohorts should be cross-sectionally demeaned. **The live data falsified that in one
+query**: cohorts are almost all singletons, so there is no cross-section inside one to demean.
 
-The combined forecast is now multiplied by the sources' **agreement** — `|Σwᵢfᵢ| / Σwᵢ|fᵢ|`, the share
-of their gross conviction that survives as a net view. It is the efficiency ratio the desk already uses
-over *time* (ADR-0113 for trend, ADR-0100 for the hedge's own path), read *across* sources instead.
+The reason is the actual defect. ADR-0077 makes one *pass over the cross-section* the estimator's unit,
+and identifies it by a 60-second clock gap — on an assumption written into the code and the dial's own
+comment, that a source emits "23 names in one ~200ms burst". This desk's sensors do not: they publish
+per name as each mark updates, so one pass takes **minutes**. Live `trend`@3600s: 13:34:36 NQ through
+14:02:32 JPM is one 28-minute pass, and the gap rule cut it and the next into eleven cohorts. Across
+every source and horizon the rule reports **≈2.2× more cohorts than there were passes**.
 
-No dial, no threshold, no number needing provenance: it is a ratio of the running sums the average is
-already built from. Strictly one-way by the triangle inequality — the value can only shrink, never grow
-— and **exactly 1 whenever the contributing forecasts share a sign**, so every agreeing name and every
-single-source name is byte-identical to before. A sweep over the whole forecast grid asserts the bound,
-the exact-1-on-same-sign property, shrink-only and sign preservation. The scalar is surfaced on
-`/api/fusion/targets`, because it was always *derivable* from the published contributions and neither I
-nor the owner derived it for two cycles running — that is what made the AAPL diagnosis wrong twice.
+That is the anti-conservative direction on a control that governs exposure: it narrows the standard
+error *and* inflates the Student-t degrees of freedom that ADR-0081 exists to get right. It is the
+√(1+(n−1)ρ̄) understatement ADR-0077 was written to prevent, readmitted through the grouping rule.
+Worse in principle: a gap rule measures how fast the scheduler walks the universe, not how often the
+market was drawn — tune a sensor to publish faster and the gate's apparent evidence multiplies.
 
-**Honest cost, recorded so it is not forgotten.** Trend and reversion are *structurally* opposed at
-different horizons, so a real trend fighting a real reversion is sized down even when one of them was
-right. That trades expected return for a lower variance of being wrong about the sign — the correct side
-of that trade while measured LIVE expectancy is negative, but it should be revisited if the edge gate
-opens and the book comes out systematically under-sized.
+## The change (ADR-0120)
 
-## Predicted next, so it can be checked rather than re-derived
+A cohort is one **sweep**: a name appears at most once per cohort. Equivalently, the cohort index is
+the running maximum of each name's occurrence count — the coarsest partition satisfying that rule.
+**No dial**: `cohort-window-seconds` is retired, not retuned, and its plumbing removed. It is
+retroactive, so the whole rolling history re-scores at once. Late joiners and lone repeaters fall out
+correctly without a special case.
 
-AAPL's target shrinks from `−14.915227` toward roughly an eighth of that (agreement `0.12321282549722257`
-on this cycle's readings), which is still same-side and still larger than the 1 share held, so **I expect
-no order and a ⚠️ MIXED score again**. The check is `/api/fusion/targets`: an `agreement` field should
-appear, near `1.0` on AMZN/NVDA/JNJ and far below it on AAPL, with AAPL's `targetQty` an order of
-magnitude smaller than `−14.915227`. If the aim keeps converging on cancellation, ADR-0118's exit
-branch becomes reachable and the two legs unwind — that is the mechanism by which this de-risks, and it
-is a next-cycle outcome, not this one. If `agreement` reads `1.0` on AAPL, the sensors have stopped
-disagreeing and this diagnosis has expired.
+It makes the gate **harder**, not easier — `trend`@3600s goes from 16 cohorts at `-2.41` bps to 7 at
+`-8.40` bps, an honest downgrade. It does **not** open the gate: the one reading whose t rises sharply
+is momentum on 2 sweeps, which `min-sample=30` blocks outright. The mean moves in both directions
+across sources, which is what makes this a re-specification rather than a loosened hurdle. The SQL was
+executed against the live schema before shipping; its failure mode is fail-**shut**.

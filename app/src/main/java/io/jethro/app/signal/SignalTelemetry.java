@@ -40,12 +40,10 @@ public final class SignalTelemetry {
     private final double flatThresholdBps;
     private final int rollingDays;
     private final int cohortLimit;
-    private final long cohortWindowMillis;
     private final java.util.Map<String, Integer> badPrintBpsByAssetClass;
 
     public SignalTelemetry(SignalTelemetryStore store, MarkSource marks, List<Integer> horizons,
                            double flatThresholdBps, int rollingDays, int cohortLimit,
-                           int cohortWindowSeconds,
                            java.util.Map<String, Integer> badPrintBpsByAssetClass) {
         this.store = store;
         this.marks = marks;
@@ -53,25 +51,21 @@ public final class SignalTelemetry {
         this.flatThresholdBps = flatThresholdBps;
         this.rollingDays = Math.max(1, rollingDays);
         this.cohortLimit = Math.max(2, cohortLimit); // a standard error needs two independent draws
-        this.cohortWindowMillis = Math.max(0, cohortWindowSeconds) * 1000L;
         this.badPrintBpsByAssetClass = badPrintBpsByAssetClass == null
                 ? java.util.Map.of() : java.util.Map.copyOf(badPrintBpsByAssetClass);
     }
 
     /** No bad-print thresholds to hand — every resolved observation counts (pre-ADR-0109 behaviour). */
     public SignalTelemetry(SignalTelemetryStore store, MarkSource marks, List<Integer> horizons,
-                           double flatThresholdBps, int rollingDays, int cohortLimit,
-                           int cohortWindowSeconds) {
-        this(store, marks, horizons, flatThresholdBps, rollingDays, cohortLimit, cohortWindowSeconds,
+                           double flatThresholdBps, int rollingDays, int cohortLimit) {
+        this(store, marks, horizons, flatThresholdBps, rollingDays, cohortLimit,
                 java.util.Map.of());
     }
 
     /** Single-horizon telemetry — the pre-ADR-0082 shape, kept for callers with one horizon to measure. */
     public SignalTelemetry(SignalTelemetryStore store, MarkSource marks, int horizonSeconds,
-                           double flatThresholdBps, int rollingDays, int cohortLimit,
-                           int cohortWindowSeconds) {
-        this(store, marks, List.of(horizonSeconds), flatThresholdBps, rollingDays, cohortLimit,
-                cohortWindowSeconds);
+                           double flatThresholdBps, int rollingDays, int cohortLimit) {
+        this(store, marks, List.of(horizonSeconds), flatThresholdBps, rollingDays, cohortLimit);
     }
 
     /** Distinct, positive, longest-first — the order the ladder is reported and defaulted in. */
@@ -174,7 +168,7 @@ public final class SignalTelemetry {
                 // estimated in — and grouped where the rows live, so a wide cross-section no longer
                 // spends the budget faster than a narrow one and the gate's power tracks evidence.
                 List<SignalScoring.Cohort> cohorts = store.resolvedCohorts(
-                        source, horizon, since, cohortWindowMillis, flatThresholdBps, cohortLimit,
+                        source, horizon, since, flatThresholdBps, cohortLimit,
                         badPrintBpsByAssetClass);
                 perSource.add(SignalScoring.aggregate(source, cohorts,
                         store.openCount(source, horizon)).atHorizon(horizon));
