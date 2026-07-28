@@ -1,6 +1,6 @@
 [
   {
-    "ts": "2026-07-28T04:30:03Z",
+    "ts": "2026-07-28T05:00:03Z",
     "feedMode": "LIVE",
     "available": true,
     "brain_ran": false,
@@ -20,6 +20,6 @@
     "last_verdict": null,
     "decision": "\ud83c\udf19 Market closed \u2014 analysis skipped this cycle (no Claude call). The US session is closed, so the tape is frozen and there is nothing to analyse; the loop resumes at the next open. Flat/unchanged here is expected, not a failure.",
     "reasoning": "",
-    "commit": "43204cb"
+    "commit": "dacdd72"
   }
 ]
