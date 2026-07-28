@@ -38,15 +38,34 @@ ENDPOINTS = {
 
 # ---- durable DB aggregates (behaviour over the run; complements the diagnostics fills/tca sheets) ----
 DB_QUERIES = {
-    "turnover_cost_by_name": "select instrument_id instrument, count(*) fills, sum(abs(qty)) shares, "
-        "round(sum(fee)::numeric,2) total_fee from fills group by instrument_id order by fills desc",
+    # Cost/turnover post-mortem, per name, for the CURRENT epoch only. Three things this has to get
+    # right and previously did not:
+    #  - `fills` has no `qty` column (it is `quantity`), so this query errored out and the lens was dark.
+    #  - Turnover is money, not share count: quantity x price x the instrument's contract multiplier
+    #    (a futures fill of 0.001136 lots is not 0.001136 dollars of risk). The multiplier is reference
+    #    data — joined from `instrument`, never assumed.
+    #  - Never pool feed modes (invariant 8): scope to the mode of the most recent fill, so a live epoch
+    #    is not averaged with thousands of sim fills. fee_bps is the explicit commission against that
+    #    turnover; slippage/impact is the separate `tca` lens.
+    "turnover_cost_by_name": "with epoch as (select feed_mode from fills order by executed_at desc limit 1) "
+        "select f.feed_mode, f.instrument_id instrument, count(*) fills, round(sum(f.quantity),6) qty, "
+        "round(sum(f.quantity*f.price*coalesce(i.contract_multiplier,1)),2) turnover_usd, "
+        "round(sum(f.fee),4) fee_usd, "
+        "round(sum(f.fee)*10000/nullif(sum(f.quantity*f.price*coalesce(i.contract_multiplier,1)),0),2) fee_bps "
+        "from fills f join epoch e on f.feed_mode=e.feed_mode "
+        "left join instrument i on i.instrument_id=f.instrument_id "
+        "group by 1,2 order by turnover_usd desc",
     "orders_by_status": "select status, count(*) n from orders group by status order by n desc",
     # Order-level lookback for the post-mortem: recent orders with the REASON that triggered each, so the
     # model can attribute the window's PnL/exposure moves to specific triggers (bad ones to fix, good to keep).
-    "recent_orders": "select created_at, book_id book, instrument_id instrument, side, quantity qty, "
-        "status, reason from orders where feed_mode='SIM' order by created_at desc limit 60",
-    "fills_by_day": "select date(executed_at) d, count(*) fills, round(sum(fee)::numeric,2) fee "
-        "from fills group by 1 order by 1",
+    # Scoped to the current epoch's feed mode (invariant 8) rather than a hardcoded one — a hardcoded 'SIM'
+    # showed the previous sim epoch's orders and hid every order the live desk actually placed.
+    "recent_orders": "with epoch as (select feed_mode from orders order by created_at desc limit 1) "
+        "select o.created_at, o.feed_mode, o.book_id book, o.instrument_id instrument, o.side, "
+        "o.quantity qty, o.status, o.reason from orders o join epoch e on o.feed_mode=e.feed_mode "
+        "order by o.created_at desc limit 60",
+    "fills_by_day": "select feed_mode, date(executed_at) d, count(*) fills, round(sum(fee)::numeric,2) fee "
+        "from fills group by 1,2 order by 2,1",
     "firm_equity_curve": "select * from firm_equity order by 1",
     "book_equity_curve": "select * from book_equity order by 1",
     # Grouped by horizon too (ADR-0082): a call is graded over every rung of the measurement ladder,

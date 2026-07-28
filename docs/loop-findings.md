@@ -1633,3 +1633,34 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   check is the **WARN log at the next boot**: the σ and covariance seeds should log *warmed* rather than
   cold, and `streamVolMeasuredNames` should rise off 1 toward `covarianceCoveredNames: 6`. If they do not,
   the remaining cold names are genuinely history-bound and ADR-0117 is done its part.
+
+## 2026-07-28 14:30Z — the post-mortem lens was reading yesterday's epoch
+
+- **The window.** Zero orders. PnL `-$0.88` (down `-$2.07`), gross `$759.76` (up `+$1.25`) — both moves are
+  mark drift on two legs that have not changed size since 13:40:54Z. AAPL short `+$0.92`, ES hedge leg
+  `-$1.76`; the names co-moved and a beta-1.25 overlay necessarily lost a shade more than the short made.
+  **100% market, 0% change.** The header's DANGER flag (bleeding + exposure rising) was a **false positive**:
+  the desk added no risk, so cutting here would only crystallise a loss and pay the spread.
+- **Rule 37: "exposure rising" with zero orders is a mark, not a decision.** Check `orders_day.total`
+  before you believe an exposure delta. Only a delta with an order behind it is a risk decision you can
+  attack; the rest is the tape moving under a position you already hold.
+- **ADR-0117 verified as predicted.** Every risk-cut σ WARN now demands `121` and is met with less
+  (`109/121`, `86/121`, `104/121`, `73/121`) — remaining cold names are genuinely history-bound, and the
+  `n of n, and still cold` lines are gone, covariance included. Rule 35 held.
+- **What I shipped.** The cost/turnover post-mortem lens in `scripts/system-report.py`, dark for sixteen
+  cycles. Three faults, one lens: `sum(abs(qty))` on a table whose column is `quantity` (the error row);
+  share count published under a header saying *turnover cost* (now `quantity × price × contract_multiplier`,
+  the multiplier joined from `instrument` refdata, plus `fee_bps`); and `recent_orders` **hardcoded to
+  `feed_mode='SIM'`**. All three are now scoped to the mode of the most recent row.
+- **Rule 38: a hardcoded `feed_mode` in a diagnostic is a time bomb that goes off at the epoch boundary.**
+  It fails silently and in the worst direction — the lens kept returning 60 confident rows of the *previous*
+  sim epoch while the two orders that built the live book were invisible in it. When a report filters on
+  mode, derive the mode from the data (`order by created_at desc limit 1`), never spell it out. Same rule
+  for any aggregate: `fills_by_day` was pooling 2,770 sim fills with 2 live ones on one date row —
+  invariant 8 applies to the *report*, not only to the platform.
+- **Why not a money change.** The desk is reduce-only and correctly so: on LIVE data trend@225s is `118`
+  resolved at `-1.11` avg bps and reversion@225s is `58` at `-0.60` — negative expectancy *before* cost.
+  Forcing the edge gate open is the one move here that reliably loses money.
+- **Predicted next, so it can be checked rather than re-derived.** MIXED (report-only change; the scorer
+  reads live endpoints and cannot see it). The check is that `turnover_cost_by_name` and `recent_orders` in
+  `logs/report.md` show **LIVE** rows — at which point per-name cost becomes a loop input for the first time.

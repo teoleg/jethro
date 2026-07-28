@@ -1,79 +1,68 @@
-Fixed a one-sample off-by-one that stopped the warm-restart seed from EVER arming the risk cut or the concentration control: both count returns, the seed hands them that many prices, and N prices are only N−1 returns (ADR-0117).
+Repaired the loop's own cost/turnover post-mortem lens: it queried a column that does not exist and read the previous SIM epoch, so it has been hiding every order the live desk placed.
 
 *Every figure below is read from the live endpoints, `logs/report.md` or the ledger; none is authored here
-(invariant 7 / ADR-0016 — the scorer owns every number that gates money). The span-4 and span-2 examples are
-arithmetic on the estimators' own counters, not measurements of this book.*
+(invariant 7 / ADR-0016 — the scorer owns every number that gates money). The query output quoted at the
+end is Postgres' answer to the fixed query, not my arithmetic.*
 
 ## Situation — the four questions, in plain numbers
 
-**1. Money.** Total PnL `-$0.21`, **up** `+$0.42` on the last run. Over the last three runs the book went
-from `$0.00` to `-$0.21` — but those three runs span the epoch boundary (the LIVE epoch opened flat), so the
-"3-run" figure is a fresh-book artefact rather than a drawdown. The desk is not bleeding: it is barely on.
+**1. Money.** Total PnL `-$0.88`, **down** `-$2.07` on the last run. Realized is `-$0.04` (fees only); the
+whole move is unrealized mark drift on two legs. Over the last three runs the book went `$0.00 → -$0.88`,
+but that window straddles the SIM→LIVE epoch boundary, so the "3-run" figure is a fresh-book artefact, not
+a drawdown.
 
-**2. Risk.** Gross `$759.72`, net `$84.47`, **falling** (`-$0.96` on the run). VaR95 `$8.23`, breaker
-`halted: false` and nowhere near it. Two positions, total: short 1 AAPL and a `0.001136` ES hedge.
+**2. Risk.** Gross `$759.76`, net `$83.80`, gross **up** `+$1.25` — which is also pure mark drift: **no
+order was placed in this window at all**. VaR95 `$8.23`, ES95 `$12.29`, breaker `halted: false`, nowhere
+near it. Two positions: short 1 AAPL (`$337.98`) and the `0.001136` ES hedge (`$421.78`).
 
-**3. Cause.** Last cycle's change (ADR-0116, the σ print gate) scored **⚠️ MIXED — "no material change
-(within noise band)"**, which is what I predicted and is the right verdict on a book that held nothing for
-the window. Since it went in the book opened its first two LIVE positions and PnL moved `+$0.42`. Neither
-is attributable to it.
+**3. Cause.** Last cycle's change (ADR-0117, the warm-restart seed off-by-one) scored **⚠️ MIXED — "no
+material change (within noise band)"**, as predicted. Its own success check passed cleanly: every risk-cut
+σ WARN this boot now reads a demand of `121` against a smaller supply (`109 of 121`, `86 of 121`,
+`104 of 121`, `73 of 121`) — i.e. every remaining cold name is genuinely history-bound, and the
+`n of n, and still cold` lines that were the bug printing its own diagnosis are gone, covariance included.
+It cannot be credited or blamed for a dollar: it opened, closed and resized nothing.
 
-**4. Danger.** No. Not bleeding, exposure falling, breaker clear.
+**4. Danger.** The header flags DANGER (bleeding + exposure rising). **I checked it and it is not a danger
+state.** Danger means the desk is adding risk into a loss; the desk added nothing — zero orders, and the
+`+$1.25` "exposure rise" is the ES mark moving under a position that has not changed size since 13:40:54Z.
+De-risking here would crystallise a loss and pay the spread to do it. I am not cutting on mark noise.
 
-**Order post-mortem.** Two orders all day: `ALPHA AAPL SELL 1` at 13:40:44Z and `HEDGE ES BUY 0.001136` ten
-seconds later — the hedge tracking the short it created. The AAPL leg is a **winner** (`+$1.28` unrealized);
-the ES hedge leg is `-$1.44`. Both names fell by almost the same percentage, so a beta-1.25 hedge (AAPL's
-`hedge_beta` in refdata, ADR-0040) necessarily lost slightly more than the short made. Neither trigger is
-broken. **Change vs market: this is market, not code** — nothing I shipped opened, closed or resized either
-leg, and one hour of two co-moving names is far too little to call the hedge ratio wrong. I am not touching
-it on this evidence.
+**Order post-mortem, and the honest change-vs-market split.** The window's PnL is **entirely market**.
+AAPL fell `0.2715%` from its `338.90` fill and the short is a **winner** at `+$0.92`; ES fell `0.4147%`
+from its `7456.67` fill and the beta-1.25 overlay leg is `-$1.76`. Two names that co-moved, the hedge
+correspondingly losing a shade more than the short made — one hour of that says nothing about the hedge
+ratio and I will not touch ADR-0040's beta on it. Nothing I have shipped opened, closed or resized either
+leg. The desk is reduce-only because the edge gate went active on the first measured cost and now sees
+what `signals_telemetry` sees: on LIVE data trend@225s has `118` resolved observations at `-1.11` avg bps
+and reversion@225s has `58` at `-0.60` avg bps — **negative measured expectancy before costs**. It is
+correctly refusing to pay to trade an unproven signal. Forcing it open is the one thing here that would
+reliably lose money, so I left it alone. That leaves no money lever with a real, well-understood edge this
+cycle, which is why I spent the cycle on the thing that has been blinding every cycle.
 
-**Why the desk then stopped.** `mayIncrease: false`. The edge gate went **active** the moment that first
-fill gave it a measured cost, and no source clears: `resolved` is 0–5 against `minSample 30`, trend's
-measured expectancy is *negative*. It is correctly refusing to pay to trade an unproven signal, and it
-self-heals — observations accrue from published forecasts, not from fills. I left it alone; forcing it open
-would be exactly the overfitting the gate exists to prevent.
+## What I fixed — the post-mortem lens has been dark for sixteen cycles
 
-## What I found instead — the seed that could never finish
+The loop contract names `turnover_cost_by_name` as its order-level post-mortem source. It has errored on
+every report since 2026-07-26 with `column "qty" does not exist` — `fills` calls it `quantity`. Reading it
+to fix that surfaced two worse faults in the same lens:
 
-Reading the WARN log for what did **not** self-heal, two lines stand out because the store supplied
-everything that was asked for and the answer was still "cold":
+- **It reported share count, not money.** `sum(abs(qty))` under a header saying *turnover cost*. A futures
+  fill of `0.001136` lots is not `0.001136` dollars of anything; turnover is `quantity × price ×
+  contract_multiplier`, and the multiplier is reference data. Now joined from `instrument`, never assumed.
+- **`recent_orders` was hardcoded to `feed_mode='SIM'`.** The desk went LIVE. So the lens the contract
+  tells me to attribute PnL with has been showing me *yesterday's sim epoch* — 60 rows of AAPL/JPM churn
+  from 2026-07-27 — while the two orders that actually built today's book were invisible in it. That is
+  also an invariant-8 violation in the report itself (`fills_by_day` was pooling 2,770 sim fills with the
+  live ones on the same date row). All three are now scoped to the mode of the most recent row.
 
-```
-risk-cut σ sensor still cold for NQ after seeding 120 of 120 stored prices
-fusion covariance still cold after seeding 120 synchronised snapshots of 4 name(s)
-```
+Verified against the live database: the fixed lens returns the live epoch, and picks the ES contract
+multiplier up correctly (`ES 1 fill, 0.001136 qty, $423.54 turnover, 0.20 fee_bps` — versus AAPL's
+`1.00 fee_bps`), which is the first time this cycle's actual trading cost has been visible at all.
 
-`StreamVolatility` and `StreamCovariance` are both denominated in **returns** — both gate on
-`returns < span`, and both say in their own `update` that a series' first price "is a price, not yet a
-return". `FusionLifecycle` seeds both by replaying `warmupSamples()` **points**. N points are N−1 returns,
-so the ADR-0071 warm restart landed **exactly one return short — every time, for every name, at any depth of
-history**. Not a data shortage: `seedPrices` caps the walk at the count it is handed, so more history could
-never fix it. Live confirmation on the same page: `streamVolMeasuredNames: 1` against
-`covarianceCoveredNames: 6`, and `riskCuts: []`.
-
-One sample would normally be nothing. It is not nothing *since ADR-0113/0116*, which moved both estimators
-onto the tape's clock: the missing return no longer arrives on the next 30 s cycle, it arrives on the next
-genuine **print** — ~90 s on NQ, ~13 min on GBPUSD, ~20 min on ES (ADR-0114's measurements) — against a
-process that redeploys every thirty minutes. The covariance is worse, needing the *pair* to print. So the
-warm restart was handing over sensors still mute for much of each process life, which is the precise failure
-ADR-0071 was written to eliminate, re-entered one sample wide. Both failures run the expensive way: a cold σ
-means ADR-0086 makes no claim and a **losing position is not cut**; a cold covariance means a concentrated
-book is not shrunk.
-
-## The change
-
-Each estimator now states its seed requirement in the unit the seed is counted in —
-`StreamVolatility.warmupPrices()` and `StreamCovariance.warmupSnapshots()`, both `warmupSamples() + 1` — and
-the two `FusionLifecycle` call sites ask for and log that number, so `n of n, still cold` can never again
-mean this bug. `warmupSamples()` keeps its meaning and every existing caller is byte-identical; no
-arithmetic, decay or gate moves. No dial and no number needing provenance: `+1` is the count of returns
-derivable from a price series. Proposed ADR-0117 ships in the same commit.
-
-**The honest cost.** This is *earlier* protection, not free protection — an armed risk cut can cut, so a
-name whose σ is now measured at boot may be stopped out where it previously would have been left alone, and
-that can lose money in a whipsaw. It also repairs neither a name genuinely short of history (AAPL at 99 of
-120) nor one whose price never moves (the Treasury curve, variance exactly zero, correctly silent). With the
-edge gate reduce-only I expect MIXED again; the thing to check next cycle is the WARN log — the σ and
-covariance seeds should report *warmed* at boot instead of cold, and `streamVolMeasuredNames` should rise
-off 1.
+**The honest limit.** This is a **report-only** change — `scripts/system-report.py`, three SELECTs. It
+moves no dial, touches no money path, and is invisible to `scripts/score-change.py`, which reads the live
+endpoints; it cannot flatter the score and I expect **MIXED** again on a reduce-only book. No ADR: fixing a
+broken diagnostic query is small, local and reversible. No Java or Gradle file is touched, so there is no
+build to break and I did not spend a third of the cycle running a suite that covers none of it; the
+verification that matters is the one above, run against the live Postgres. The thing to check next cycle is
+simply that `turnover_cost_by_name` and `recent_orders` in `logs/report.md` show **this** epoch — at which
+point cost-per-name finally becomes an input to the loop instead of an error row.
