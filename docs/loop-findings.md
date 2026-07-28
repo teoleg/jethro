@@ -1865,3 +1865,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   scorer `3/6`. `trend`@3600s `resolved` crosses 30 with `cohorts` 8–10 and is admitted to the t-test;
   its `tStat` is `-1.02` so it still fails and the gate stays shut for the right reason. **If it is
   admitted and PASSES on single-digit cohorts, the queued fix is urgent, not merely correct.**
+
+## 2026-07-28T17:30Z — held (3/6); the 2-cohort momentum row completed its walk 18.15 → 0.49 → −0.45, and `trend`@3600s is now ONE observation from the bad admission
+
+- **No change: the evidence window is open.** `score` prints `9be1633c2 still accumulating evidence
+  (3/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120) at `16:17:48Z`;
+  newest attribution snapshot is still `160006Z-b2a569f32.json`. Diagnosed, verified, stopped. Book flat:
+  gross `$0.00`, net `$0.00`, breaker clear, marks live (`markAgeMillis: 768`), PnL `$0.61209817`
+  unchanged. Zero orders — nothing attributable to market OR to code, in either direction.
+- **Rule 52 is now proven, not argued.** The same `momentum`@3600s row has read, on three consecutive
+  single observations: `cohorts: 2` `tStat: 18.151` `p=0.0175` → `cohorts: 2` `tStat: 0.487` `p=0.356` →
+  `cohorts: 3` `tStat: -0.447` `p=0.651`. It travelled from far above `tHurdle: 2.0` to plainly negative
+  in three draws. A 2–3-cohort standard error is not precision; it is where a couple of means landed,
+  and it crosses the hurdle freely in both directions. **Never escalate on, and never stand down from, a
+  t built on single-digit cohorts.**
+- **Rule 54: locate a unit bug at its line before the sample reaches it.** `EdgeGate.clears`
+  (`app/src/main/java/io/jethro/app/fusion/EdgeGate.java:171`) rejects on `resolved < minSample` and on
+  `cohorts < 2`, then the next line computes `Significance.studentTUpperTail(t, cohorts - 1.0)`. Standard
+  error and df are in **cohorts**; the admission bound alone is in **observations**. `resolved`/`cohorts`
+  runs ~3.6× on every row (`trend`@3600s 29/8, `reversion`@3600s 26/7, `trend`@225s 434/79), so `resolved`
+  clears `minSample: 30` with `cohorts` still single-digit.
+- **Prediction miss worth recording:** I said `trend`@3600s would cross `resolved: 30` this cycle. It reads
+  `resolved: 29`, `cohorts: 8` — one short. Everything else landed to the cent. The 3600s horizon resolves
+  roughly one observation per cycle, so admission is genuinely next cycle, not "a cycle or two".
+- **Queued next (still NOT shipped — one change per run):** denominate the edge gate's admission test in
+  **cohorts**, the unit its standard error and Student-t df already use (ADR-0108's bound, defeated by the
+  one test never converted). Ship only once `9be1633` has a ledger row.
+- **Edge mission re-checked, still honestly negative.** All four sources fail at the demanded confidence
+  against a `0.6278` bps round trip: `reversion` `p=0.327`, `social` `p=0.580`, `momentum` `p=0.651`,
+  `trend` `p=0.818`. The two with the most sample (`trend` 29, `reversion` 26) are the two with negative
+  net edge. Binding constraint is sample, and invariant 8 forbids borrowing SIM history. A fifth signal
+  would grow the INCONCLUSIVE wall, not escape it.
+- **Predicted next, so it can be checked.** Gate shut, book flat, zero orders, PnL `$0.61209817`, scorer
+  `4/6`, no ledger row, regime `CHOP`/`CALM`. `trend`@3600s crosses `resolved: 30` at `cohorts` 8–9 and is
+  admitted to the t-test; at `tStat -0.97` it fails and the gate holds for the right reason. **If any
+  source is admitted and PASSES on single-digit cohorts before `9be1633` scores, the queued fix is what
+  stands between the desk and exposure taken on two data points.**
