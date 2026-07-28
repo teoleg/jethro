@@ -188,8 +188,10 @@ echo "code changed:" >> "$LOG"; printf '%s\n' "$CODE_CHANGED" >> "$LOG"
 #    come back identical rather than reverting to run-local.sh's defaults — a silent feed switch is an
 #    invariant-8 event, not a restart. Set JETHRO_DEPLOY_CMD=none for review-before-live.
 DEPLOY_FALLBACK_CMD="scripts/svc.sh deploy app"
-DEPLOY_CMD="${JETHRO_DEPLOY_CMD-$DEPLOY_FALLBACK_CMD}"
-if [ -z "$DEPLOY_CMD" ]; then DEPLOY_CMD="none"; fi
+# `:-` so EMPTY behaves like UNSET → the safe default (a cron line baking JETHRO_DEPLOY_CMD='' must not
+# silently mean "never deploy", the footgun that scored changes against a binary that never ran them).
+# Explicit review-before-live is JETHRO_DEPLOY_CMD=none.
+DEPLOY_CMD="${JETHRO_DEPLOY_CMD:-$DEPLOY_FALLBACK_CMD}"
 
 # Epoch second the running app booted, or empty if it isn't answering. Uses the same JETHRO_URL the
 # scorer and the report read, so "the app" means the app the ledger's numbers come from.

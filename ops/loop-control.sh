@@ -16,7 +16,10 @@ set -euo pipefail
 
 REPO="${JETHRO_REPO:-$HOME/kernel-code/jethro}"
 TAG="# jethro-improve-loop"
-DEPLOY="${JETHRO_DEPLOY_CMD:-}"
+# Default to the repo's safe deploy when not given (empty OR unset), so a bare `loop-control.sh on`
+# never bakes a no-deploy line (the footgun: the loop then commits+pushes but never restarts). Set
+# JETHRO_DEPLOY_CMD=none explicitly for review-before-live (commit+push, no auto-restart).
+DEPLOY="${JETHRO_DEPLOY_CMD:-scripts/svc.sh deploy app}"
 SCHED="${JETHRO_LOOP_CRON:-*/30 * * * *}"
 # The cron line carries JETHRO_DEPLOY_CMD (and JETHRO_URL if set) so it survives independent of your
 # interactive shell.
@@ -35,7 +38,11 @@ case "$cmd" in
     # Replace any existing loop line, then append the current one (picks up JETHRO_DEPLOY_CMD).
     { printf '%s\n' "$current" | grep -vF "$TAG"; printf '%s\n' "$LINE"; } | grep -v '^$' | crontab -
     echo "improvement loop ON — schedule: $SCHED"
-    [ -z "$DEPLOY" ] && echo "NOTE: JETHRO_DEPLOY_CMD is empty — changes will commit+push but the app won't restart. Re-run with it set."
+    if [ "$DEPLOY" = "none" ]; then
+      echo "NOTE: JETHRO_DEPLOY_CMD=none — changes commit+push but the app is NOT auto-restarted (review-before-live)."
+    else
+      echo "deploy on each verified change: $DEPLOY"
+    fi
     ;;
   off)
     printf '%s\n' "$current" | grep -vF "$TAG" | grep -v '^$' | crontab - || true
