@@ -1,66 +1,78 @@
-Held again (4 of 6 evidence cycles) — and the predicted bad admission arrived: `trend`@3600s was let into the significance test on 35 observations that are only **9 independent sweeps**, and only its negative sign kept the desk out of a position.
+Held again (5 of 6 evidence cycles) — and the fix I had queued for next cycle just failed its own test, so I am **retracting** it: `reversion`@3600s was admitted with a POSITIVE mean on 8 cohorts and the significance clause stopped it cold, which is the sample bound I was worried about doing its job.
 
-*Every figure below is read from this run's `logs/report.md`, the live endpoints, the ledger or
-`reports/run-status.json`; none is authored here (invariant 7 / ADR-0016 — the scorer owns every number
-that gates money). The t-statistics and p-values quoted are the edge gate's own published output.*
+*Every figure below is read from the live endpoints, `reports/run-status.json`, the ledger or this run's
+report; none is authored here (invariant 7 / ADR-0016 — the scorer owns every number that gates money).
+The t-statistics, p-values and params quoted are the edge gate's own published output.*
 
 **No change this cycle — the evidence window is open.** `score` prints `9be1633c2 still accumulating
-evidence (4/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120), stamped
-`2026-07-28T16:17:48Z`. Per the contract I diagnosed, checked last cycle's prediction, and stopped without
-touching code. A new change committed on top would destroy the measurement of the one already live.
+evidence (5/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120), stamped
+`2026-07-28T16:17:48Z`. Diagnosed, checked last cycle's prediction, retracted a queued change, stopped.
 
 ## Situation triage
 
-1. **Money.** Total PnL reads `$0.61209817`, identical to the last run and to the run before it — `+0.00`
-   over 1 run and `+0.00` over 3. `run-status.json` has `pnl_growth_pct: 0.0` against `pnl_target_pct: 1.0`,
-   so `on_track: false`, `stale: true`, `underwater: false`. Not bleeding; stalled.
-2. **Risk.** Gross `$0.00`, net `$0.00`. HEDGE (ES) and ALPHA (AAPL) each still carry a position row, both
-   at `quantity: 0`. `var95`/`es95`/`var99` all `0.00` with `note: "no positions"`. Breaker
-   `halted: false`. Feed live — `alpaca` connected, `lastUpdateAgeMillis: 848`. Zero risk because zero book.
-3. **Cause.** The change under measurement is `9be1633` (ADR-0120 — a cohort is one sweep of the
-   cross-section). It has **no verdict yet**; the last scored row was `⚠️ MIXED`. Since it went in, the book
-   has been flat and PnL has not moved a cent, so there is nothing for it to have helped or hurt.
-4. **Danger.** None. Not bleeding, exposure not rising, breaker clear, no stale-mark exposure.
-5. **Order post-mortem.** `orders_day` shows `total: 7`, all `FILLED`, newest at `15:50:41Z` — hours before
-   this window opened. **Zero orders this cycle.** `edgeGate.mayIncrease: false`, so `fusion_targets`
-   publishes non-zero `targetQty` on all 8 routed names (NVDA `+68.44`, MSFT `−48.19`, …) while every
-   `deltaQty` is `0`. The desk is forming views and declining to act on them — the designed reduce-only
-   behaviour when no source clears cost.
-6. **Change vs market — cleanly separable this cycle.** With zero orders and a zero book, the window's PnL
-   move is `+0.00` from market conditions and `+0.00` from my last change. Neither credit nor blame is
-   available. This is the rare cycle where the attribution question has an exact answer rather than an
-   estimate.
+1. **Money.** Total PnL reads `$0.61209817` — identical to the last run, and to the three before it.
+   `+0.00` over 1 run, `+0.00` over 3. `run-status.json`: `pnl_growth_pct: 0.0` vs `pnl_target_pct: 1.0`,
+   `on_track: false`, `stale: true`, `underwater: false`. Not bleeding; stalled.
+2. **Risk.** Gross `$0.00`, net `$0.00`. Both book rows flat — HEDGE (ES) `+0.95512117`, ALPHA (AAPL)
+   `-0.34302300`, summing to the firm total. Breaker `halted: false`. Feed live (`alpaca` connected,
+   `lastUpdateAgeMillis: 62`). Zero risk because zero book.
+3. **Cause.** `9be1633` (ADR-0120) has **no verdict yet**; the last scored row was `⚠️ MIXED`. The book has
+   been flat throughout its window, so there is nothing for it to have helped or hurt.
+4. **Danger.** None. Not bleeding, exposure not rising, breaker clear.
+5. **Order post-mortem.** The newest order is `159.9` minutes old — **zero orders this window**. All 8
+   routed names publish a non-zero `targetQty` (AMZN `-211.914746`, MSFT `-108.375505`, …) with every
+   `deltaQty: 0` and every `aims` entry `0.0`: the designed reduce-only behaviour while
+   `edgeGate.mayIncrease: false`.
+6. **Change vs market — exactly separable.** Zero orders, zero book: the window's PnL move is `+0.00` from
+   market **and** `+0.00` from code. Neither credit nor blame is available this cycle.
 
-## The prediction I logged last cycle, checked
+## Last cycle's prediction, checked — it landed exactly
 
-I wrote that `trend`@3600s would cross `resolved: 30` at `cohorts` 8–9, be admitted to the t-test, and fail
-at roughly `tStat −0.97`. It reads `resolved: 35`, `cohorts: 9`, `tStat: -0.9491041554975994`,
-`pValue: 0.8148231827460571`, `passes: false`. The gate holds, and it holds for the right reason.
+I wrote that `reversion`@3600s was the row to watch, that it would cross `resolved: 30` on single-digit
+cohorts, and that a **positive** mean admitted on ~8 cohorts would make the queued fix load-bearing. It now
+reads `resolved: 34`, `cohorts: 8`, `avgReturnBps: 7.374500649147727` — positive — `stdErrorBps:
+10.218113619092685`, `netEdgeBps: 6.910900649147727`, `tStat: 0.6763382074979686`,
+`pValue: 0.26026966244441807`, `passes: false`. Admitted on the observation count, positive-signed, and
+rejected by the **significance** clause rather than by the sign.
 
-**But note what just happened.** Rule 54 said the admission bound (`resolved < params.minSample`) is
-counted in observations while the standard error and the Student-t degrees of freedom are counted in
-cohorts — `app/src/main/java/io/jethro/app/fusion/EdgeGate.java:171`, whose very next lines divide by
-`stdErrorBps` and call `Significance.studentTUpperTail(t, cohorts - 1.0)`. Until now that was an argument.
-This cycle it is a fact on the tape: a source was admitted to the significance test on **35 observations
-that are only 9 independent sweeps**, and its verdict was then decided on 8 degrees of freedom. It failed
-only because its measured expectancy happens to be negative (`avgReturnBps: -6.333250868827161`). Had those
-same 9 cohort means landed positive, the desk would have sized on them. ADR-0108 moved the evidence
-*budget* to cohorts and stated in as many words that `min-sample` does not move; that leftover is precisely
-the hole ADR-0108's own table was written to close.
+## Why that retracts the queued change
 
-## Edge mission — re-checked, still honestly negative
+Rule 55 said a gate that rejects only on sign leaves its sample bound untested. This cycle supplied the
+test — and the sample bound turned out not to be what protects the desk. I re-implemented the gate's
+Student-t tail independently and reproduced its published p-values (`0.26027` vs `0.26026966`; `0.793545`
+vs `0.79354495`), then asked what `tStat` clears `params` (`minSample: 30`, `tHurdle: 2.0`,
+`hypotheses: 3`, so α = `0.00758337731605974`) at each degrees-of-freedom the gate actually uses:
 
-Against a measured round trip of `roundTripCostBps: 0.6278285714285714`, no source clears at 3600s:
-`reversion` `p=0.3096`, `social` `p=0.4992`, `momentum` `p=0.6507`, `trend` `p=0.8148`. The two rows with
-the most sample (`trend` 35 resolved / 9 cohorts, `reversion` 27 / 7) are the two whose net edge is worst.
-The per-name OOS gate agrees independently — 10 of the 18 measured names carry `no positive OOS edge`
-notes, and `strategy_diag` reports `signals: 0`, `executed: 0`. The binding constraint remains sample, and
-invariant 8 forbids borrowing SIM history to manufacture it. A fifth signal would lengthen the
-INCONCLUSIVE wall, not escape it.
+| df (= cohorts − 1) | 1 | 2 | 3 | 7 | 10 | 32 | 85 |
+|---|---|---|---|---|---|---|---|
+| t required | 41.97 | 8.03 | 5.03 | 3.195 | 2.925 | 2.566 | 2.479 |
 
-**Queued for the cycle after `9be1633` scores (deliberately not shipped — one change per run):**
-denominate the gate's admission bound in cohorts, the unit its standard error and df already use. One
-honest consequence to state before shipping: at 3600s the best row has `cohorts: 9`, so a
-cohort-denominated `min-sample` would shut that horizon entirely until far more sweeps accumulate, while
-225s (`trend` 81, `reversion` 68) stays admitted. That is stricter — and it is the strictness the statistic
-has been claiming all along.
+The t-distribution **already** imposes the small-cohort penalty, and imposes it savagely — it is the
+textbook-correct correction for precisely the failure I was worried about, a standard error estimated from
+few draws. At its 8 cohorts, `reversion`@3600s would need on the order of `33` bps of expectancy to clear
+against the `7.374500649147727` it measures. Its observation count was never what let it through, and its
+cohort count was never what stopped it.
+
+Meanwhile the cost of shipping the fix is now measurable: a cohort-denominated `min-sample: 30` would shut
+**9 of the 12** source×horizon rows — all four at 3600s (best is `trend` at `cohorts: 9`), three of four at
+900s (only `trend` at `33` survives), and two of four at 225s. That is a large loss of measurement surface
+to buy a protection the reference distribution already provides. **Retracted — I will not ship it.** The
+`resolved`/`cohorts` unit mismatch in `EdgeGate.clears`
+(`app/src/main/java/io/jethro/app/fusion/EdgeGate.java:171`) is worth a clarifying comment someday; it is
+cosmetic, not a safety hole, and not worth a cycle.
+
+## Edge mission — one structure worth naming, honestly discounted
+
+`reversion` is the only source with a positive mean at **every** horizon: `225s +0.533252798747244`,
+`900s +1.2789941648057297`, `3600s +7.374500649147727`, rising with horizon while
+`roundTripCostBps: 0.6278285714285714` stays fixed — net of cost that is negative at 225s and positive at
+900s and 3600s. That is the shape of an edge amortising a fixed cost over a longer hold. **I am not going
+to oversell it:** those three rows measure the *same* signal over *overlapping* windows, so they are
+nowhere near three independent confirmations, and no single one is significant (`p = 0.26026966244441807`
+at its best). Every other source is negative-mean at its best-sampled horizon — `trend` `-0.0895626400383285`
+@900s, `momentum` `-6.556053555555556` @3600s, `social` `-0.8379598939393939` @900s. The binding constraint
+is still sample, and invariant 8 forbids borrowing SIM history to manufacture it.
+
+**Next cycle `9be1633` scores (6/6) and I can act.** The lead I intend to take up then is the horizon
+question this structure raises — whether the ladder should prefer the hold at which `reversion`'s
+expectancy clears its cost — not another admission-bound edit.

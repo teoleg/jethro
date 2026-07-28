@@ -1937,3 +1937,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   it is the only positive-mean source with real sample, and it reaches `resolved: 30` on roughly
   single-digit cohorts. **If `reversion` is admitted and PASSES on ~8 cohorts, the queued fix stops being
   correctness housekeeping and becomes the thing standing between the desk and sized exposure.**
+
+## 2026-07-28T18:30Z — held (5/6); the queued fix failed its own test — **retracted**, and Rule 55 corrected
+
+- **No change: the evidence window is open.** `score` prints `9be1633c2 still accumulating evidence
+  (5/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120) at `16:17:48Z`.
+  Book flat: gross `$0.00`, net `$0.00`, HEDGE `+0.95512117` / ALPHA `-0.34302300`, breaker clear, feed live
+  (`lastUpdateAgeMillis: 62`), PnL `$0.61209817` unchanged for a fourth consecutive run. Newest order is
+  `159.9` minutes old — zero orders this window, so the move is `+0.00` from market AND `+0.00` from code.
+- **Prediction landed exactly.** I named `reversion`@3600s as the row to watch and said it would cross
+  `resolved: 30` on single-digit cohorts with a positive mean. It reads `resolved: 34`, `cohorts: 8`,
+  `avgReturnBps: 7.374500649147727`, `tStat: 0.6763382074979686`, `pValue: 0.26026966244441807`,
+  `passes: false` — admitted on observations, positive-signed, and stopped by the **significance** clause.
+- **Rule 56 (supersedes the alarm in Rule 55): before "fixing" a sample bound, compute what the reference
+  distribution already demands at that df.** Re-implementing the gate's Student-t tail reproduced its
+  published p-values (`0.26027` vs `0.26026966`; `0.793545` vs `0.79354495`), so the required `tStat` at
+  α = `0.00758337731605974` (`tHurdle: 2.0`, `hypotheses: 3`) is: df 1 → `41.97`, 2 → `8.03`, 3 → `5.03`,
+  7 → `3.195`, 32 → `2.566`, 85 → `2.479`. The t-distribution already punishes small cohorts savagely — it
+  IS the textbook correction for a standard error estimated from few draws. `reversion`@3600s would need
+  ~`33` bps against the `7.37` it measures. The `resolved < minSample` unit mismatch is **cosmetic, not a
+  safety hole**.
+- **Queued change RETRACTED — do not ship it, and do not re-propose it.** A cohort-denominated
+  `min-sample: 30` would shut **9 of 12** source×horizon rows (all four at 3600s, best `cohorts: 9`; three
+  of four at 900s, only `trend` at `33` surviving; two of four at 225s) to buy protection the reference
+  distribution already provides. Rule 55 was right that "which clause rejected" matters; it was wrong to
+  infer the bound was dangerous. **A two-cycle-old alarm still has to pass a quantitative check before it
+  becomes a commit.**
+- **Edge mission — one real structure, honestly discounted.** `reversion` is the only source positive at
+  every horizon: `225s +0.533252798747244`, `900s +1.2789941648057297`, `3600s +7.374500649147727`, rising
+  with horizon while `roundTripCostBps: 0.6278285714285714` is fixed — net of cost negative at 225s,
+  positive at 900s and 3600s. That is cost amortisation over a longer hold. **But the three rows measure the
+  same signal over overlapping windows — not three independent confirmations** — and none is significant.
+  Every other source is negative-mean at its best-sampled horizon.
+- **Predicted next, so it can be checked.** `9be1633` reaches 6/6 and **scores** — expect the first ledger
+  row in six cycles, most likely `⚠️ INCONCLUSIVE` on a flat book with zero orders. Gate stays shut, PnL
+  stays `$0.61209817` absent orders. `reversion`@3600s stays admitted, `cohorts` 8–10, still failing on
+  significance. **The lever I intend to take up once scored is the horizon ladder** — whether the desk
+  should prefer the hold at which `reversion`'s expectancy clears its cost — not another admission-bound edit.
