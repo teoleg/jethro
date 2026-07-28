@@ -155,16 +155,20 @@ Open every cycle by stating the live money situation in plain numbers — mandat
 of `reports/last-analysis.md`. Do not jump to a clever code fix before you have answered:
 1. **Money** — is total PnL higher or lower than the last run, and across the last 3? By how many dollars?
    Is the book **bleeding** (PnL falling run-over-run)?
-2. **Risk** — is gross / net exposure **rising or falling**? Within the firm risk budget? How close to the
-   drawdown breaker?
+2. **Risk** — read the SITUATION headroom line: what **%** of the firm gross / net cap is used, and how
+   many dollars of headroom remain? Exposure **rising is the GOAL** when the book is coming off dormant —
+   it is only a concern when it **approaches the cap** (the `NEAR FIRM …CAP` flag) or the drawdown breaker.
+   A **DORMANT** (flat) book is a FAILURE to fix, not a safe rest state.
 3. **Cause** — did the change deployed **last cycle help or hurt**? State its scored verdict AND the live
    PnL/exposure move since it went in. Name the culprit if there is one.
-4. **Danger** — are we **bleeding AND exposure rising** (or near the breaker)? If yes, that is a live
-   danger state and it **overrides everything else**: the right move this cycle is to **de-risk / cut /
-   revert the culprit**, NOT ship a new signal. Cutting risk that is losing money is always a valid change.
+4. **Danger** — are we **bleeding while near the exposure cap or the drawdown breaker**? THAT is the live
+   danger state (the `DANGER` flag), and it **overrides everything else**: de-risk / cut / revert the
+   culprit, NOT ship a new signal. But note the inverse is NOT danger: adding exposure with room to spare
+   under the cap is exactly what a book off dormant should do — do not de-risk merely because gross rose.
 Only after answering 1–4 in words do you diagnose further. **Trust the numbers over the report narrative**
 — if the live endpoints show deterioration the report did not foreground, *that* is your target. A book
-that is bleeding while adding exposure is the single most important thing to see; never miss it.
+**bleeding while near its exposure cap** is the single most important danger to see; an idle **DORMANT**
+book is the single most important *opportunity* to see. Never miss either.
 
 5. **Order-level post-mortem.** Look back at the window's orders (`recent_orders` in the report — each
    carries the `reason` that triggered it). Attribute the PnL/exposure move to specific triggers: which
