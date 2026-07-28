@@ -1664,3 +1664,36 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Predicted next, so it can be checked rather than re-derived.** MIXED (report-only change; the scorer
   reads live endpoints and cannot see it). The check is that `turnover_cost_by_name` and `recent_orders` in
   `logs/report.md` show **LIVE** rows — at which point per-name cost becomes a loop input for the first time.
+
+## 2026-07-28 15:00Z — the desk held a short its own model wanted long, and could not close it
+
+- **The window.** Zero orders again. PnL `$0.87` (up `+$2.04`), gross `$759.71` (down `-$0.34`) — mark
+  drift on the same two legs, unchanged since 13:40:54Z. **100% market, 0% change.** Rule 37 applied
+  cleanly: `orders_day.total: 2` means no exposure delta here is a decision.
+- **Last cycle's prediction verified.** `turnover_cost_by_name` and `recent_orders` now carry LIVE rows.
+  Per-name cost is a loop input for the first time, exactly as forecast.
+- **What I found.** `/api/fusion/targets`: AAPL `targetQty +6.031064`, `currentQty -1.0`, `deltaQty 0`.
+  The desk was SHORT a name its own combined forecast wanted LONG, forbidden by the shut edge gate to
+  rebuild it, and frozen out of closing it — then hedging that unwanted short with ES, so it paid gross
+  exposure on BOTH legs for a position no control wanted.
+- **Rule 39: `deltaQty: 0` is ambiguous, and one of its meanings is a trap.** It reads identically whether
+  a position is inside its buffer by design or stuck in it forever. When intent (`aim`) and holding are on
+  opposite sides and the delta is zero, the desk is not winding down — it is frozen. Check the *aim*
+  against the *holding*, not just the delta, before believing a book is being managed.
+- **Rule 40: a no-trade band must be scaled by a position the desk is PERMITTED to hold.** ADR-0094 sizes
+  the band from the target's implied average position; under a reduce-only gate that target is
+  unreachable, so the band was a no-trade region derived from a position the gate forbids. Any wrong-side
+  holding smaller than it never traded. Whenever a control's threshold is scaled by a quantity another
+  control has vetoed, expect exactly this class of freeze.
+- **What I shipped (ADR-0118).** A flat aim in a gate-shut name is an EXIT, worked in full. Conjunctive on
+  purpose: reduce-only alone must not liquidate a book merely on hold, and a flat aim alone is ADR-0090's
+  churn case — which needs the ability to REBUILD, and a shut gate removes it. A test pins that an OPEN
+  gate is byte-identical. Band 13.813752 vs gap 1.000000 asserted as exact decimals.
+- **Honest cost, recorded so it is not forgotten.** The exit crystallises the short's unrealised PnL, and
+  on a wrong-side position that is most likely a loss. Accepted: carrying $760 of gross across two legs to
+  earn mark noise is worse risk-adjusted PnL than being flat.
+- **Predicted next, so it can be checked rather than re-derived.** The desk buys back 1 AAPL, goes flat,
+  and the ES hedge unwinds behind it — gross exposure falls on both legs toward zero, PnL moves only by
+  the round trip. Likely scored ⚠️ MIXED with "risk-adj n/a (zero gross)". The check is
+  `recent_orders`: a LIVE `ALPHA / AAPL / BUY 1` followed by a `HEDGE / ES / SELL`. If AAPL is still short
+  1 with `deltaQty: 0` next cycle, the branch did not fire and the diagnosis is wrong.

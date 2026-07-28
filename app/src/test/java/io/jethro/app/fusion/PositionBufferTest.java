@@ -132,6 +132,83 @@ class PositionBufferTest {
         assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("90.468000"));
     }
 
+    // --- ADR-0118: a wrong-side holding under a shut gate is an exit, not a rebalance ---------------
+
+    /** 30 s cycle against the 3600 s base horizon — the rung the live gate reported. a = 0.008298755… */
+    private static final double HOUR_RATE = TargetPlanner.adjustmentRateFor(30, 3600);
+
+    private static EdgeGate.Decision shutGate() {
+        return new EdgeGate.Decision(false, 0.2334, "no measured edge", List.of(),
+                java.util.Map.of(), new EdgeGate.Params(30, 2.0, 3), 3600L);
+    }
+
+    /**
+     * The live AAPL plan of 2026-07-28, worked by hand:
+     * <pre>
+     *   averagePosition = 6.031064 x 10 / 0.436598559661783 = 138.137520
+     *   band            = 0.10 x 138.137520                 =  13.813752
+     *   a               = 1 - e^(-30/3600)                  =   0.008298755…
+     *   aim (raw)       = -1 + a x (6.031064 + 1)           =  -0.941652   (opposes the target)
+     *   aim (ADR-0102)  = 0                                  the desk intends to hold nothing
+     *   gap             = 0 - (-1)                          =  +1.000000
+     *   |gap| = 1.000000 <= 13.813752  =>  delta 0 — every cycle, indefinitely
+     * </pre>
+     * The desk was short a name its own forecast wanted long, could not rebuild it (gate shut) and could
+     * not close it either. The exit is now worked in full: +1.000000, i.e. flat.
+     */
+    @Test
+    void aWrongSideHoldingUnderAShutGateIsExitedNotFrozen() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        assertThat(buffer.band(new BigDecimal("6.031064"), 0.436598559661783, new BigDecimal("-1")))
+                .isEqualByComparingTo(new BigDecimal("13.813752"));
+        var result = buffer.apply(List.of(target("AAPL", 0.436598559661783, "6.031064", "-1")),
+                shutGate(), HOUR_RATE);
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("1.000000"));
+        // Intent and book agree at flat, so the next cycle has nothing left to do.
+        assertThat(result.aims().get("AAPL")).isEqualByComparingTo("0");
+    }
+
+    /** Having exited, the desk stays flat — the shut gate forbids rebuilding, so there is no round trip. */
+    @Test
+    void theExitIsNotReopenedWhileTheGateStaysShut() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        buffer.apply(List.of(target("AAPL", 0.436598559661783, "6.031064", "-1")), shutGate(), HOUR_RATE);
+        var next = buffer.apply(List.of(target("AAPL", 0.436598559661783, "6.031064", "0")),
+                shutGate(), HOUR_RATE);
+        assertThat(next.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+    }
+
+    /**
+     * The ADR-0090 churn case is untouched: with the gate OPEN the desk can rebuild, so a forecast that
+     * has flipped against the holding is still a rebalance — buffered and rated, never liquidated.
+     */
+    @Test
+    void anOpenGateStillRebalancesAWrongSideHoldingRatherThanLiquidatingIt() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        var open = gateAt(8.0, 5.0, java.util.Map.of("AAPL", 2.0));
+        var result = buffer.apply(List.of(target("AAPL", 0.436598559661783, "6.031064", "-1")),
+                open, HOUR_RATE);
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+    }
+
+    /** Strictly one-way: the branch resolves to flat, so it can only ever take exposure off. */
+    @Test
+    void theTrappedExitOnlyEverReducesExposure() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        // Long 3 against a target of -20: the intent is clamped flat, and the exit sells exactly 3.
+        var result = buffer.apply(List.of(target("JNJ", -1.5, "-20.000000", "3")), shutGate(), HOUR_RATE);
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-3.000000"));
+        assertThat(result.aims().get("JNJ")).isEqualByComparingTo("0");
+    }
+
+    /** A name the desk does not hold is still never opened by a shut gate. */
+    @Test
+    void aShutGateStillOpensNothingWhenFlat() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        var result = buffer.apply(List.of(target("GOOG", -5.85, "-77.409630", "0")), shutGate(), HOUR_RATE);
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+    }
+
     // ---------------------------------------------------------------------------------------------
     // ADR-0102 — the aim is a convex combination of PAST targets, so it can outgrow or invert the
     // CURRENT one. Clamp it into the closed interval between flat and this cycle's target.

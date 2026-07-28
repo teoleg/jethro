@@ -132,7 +132,12 @@ public final class PositionBuffer {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
                 // accumulate into one large order the moment the gate reopens.
-                delta = TargetPlanner.reduceOnly(delta, held);
+                // ADR-0118: an intent of FLAT in a name the gate forbids rebuilding is an EXIT, and an
+                // exit is not buffered (ADR-0090). Otherwise the desk holds a position its own forecast
+                // is on the other side of, at a band scaled by a target it may never reach.
+                delta = isTrappedExit(aim, held)
+                        ? held.negate().setScale(QTY_SCALE, RoundingMode.HALF_EVEN)
+                        : TargetPlanner.reduceOnly(delta, held);
                 aim = held.add(delta).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
             }
             aims.put(t.instrument(), aim);
@@ -149,6 +154,46 @@ public final class PositionBuffer {
         }
         aims.keySet().retainAll(snapshot.keySet()); // a name that left the book leaves no intent behind
         return new Result(out, Collections.unmodifiableMap(snapshot), inside, traded);
+    }
+
+    /**
+     * ADR-0118 — is this name's position an exit the buffer would otherwise trap? True when the desk's
+     * settled intent is FLAT while it still holds something, <em>in a name the edge gate has put
+     * reduce-only</em> (the caller's branch).
+     *
+     * <h3>How the trap forms</h3>
+     * A flat aim arises two ways. Either a control planned the name flat — {@link #nextAim} snaps the aim
+     * to zero and {@link #bufferedDelta} already works that in full — or ADR-0102's {@code withinTarget}
+     * clamped it, which happens for exactly one reason: <b>the held position is on the side the current
+     * forecast opposes</b>, so no position between flat and the target contains it and the intent is held
+     * at flat. The second case reaches the buffer as an ordinary rebalance and is measured against a band
+     * scaled by {@code |target| × TARGET_ABS / |forecast|} — the average position at the TARGET. Under a
+     * shut gate the desk may never take that target, so the band is a no-trade region sized by a position
+     * it is forbidden to hold, and any wrong-side holding smaller than it is frozen: the delta is exactly
+     * zero every cycle, indefinitely, and the position is not being wound down — it is stuck.
+     *
+     * <p>Diagnosed on the live book: short 1 AAPL against a target of +6.031064 at forecast +0.436599,
+     * giving an average position of 138.137520 and a band of 13.813752 against a gap of 1.000000. The
+     * desk carried a short its own model wanted long, hedged it with ES — so it paid gross exposure on
+     * BOTH legs — and had no path to closing either.
+     *
+     * <h3>Why this is not ADR-0080's mistake again</h3>
+     * ADR-0090 narrowed "work every reduction in full" because a mean-reverting forecast crosses the held
+     * position many times inside one horizon, and liquidating on each crossing paid a full round trip per
+     * wobble while never reaching size. That failure needs the desk to be able to REBUILD. This branch
+     * fires only where the gate has taken rebuilding away: the sole trade available in the name is a cut,
+     * so there is no round trip to churn — the position can be closed once and not reopened until measured
+     * evidence reopens the gate, which moves on the gate's timescale (hours of accumulated cohorts), not
+     * the forecast's. A gate that is OPEN leaves every path here byte-identical.
+     *
+     * <h3>What it can never do</h3>
+     * It resolves to flat and nothing else, so {@code |held + delta| = 0 < |held|}: strictly
+     * risk-reducing, never opening, never enlarging, never flipping a position onto a new side. Exact
+     * decimal, no number introduced (invariant 1, invariant 7 / ADR-0016), and it sits above the
+     * deterministic floor — the pre-trade guardrail and the firm breaker still have the last word.
+     */
+    private static boolean isTrappedExit(BigDecimal aim, BigDecimal held) {
+        return aim.signum() == 0 && held.signum() != 0;
     }
 
     /**
