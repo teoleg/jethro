@@ -54,6 +54,25 @@ Kelly sizing, ATR/chandelier stops, regime switching, TCA) — reason from the r
 **build it, test it**, and if the postmortem (the ledger verdict) says it didn't work, revert and try a
 different approach. You are **not** limited to the existing two strategies — add new ones freely.
 
+### Work on EDGE, not the combiner (2026-07-28 — the standing priority)
+The plumbing is now solid and the honest problem is in plain sight: **no source has demonstrated positive
+out-of-sample edge** — trend, reversion, momentum, social all measure insignificant on the edge gate, so
+the desk holds almost nothing and the ledger is a wall of INCONCLUSIVE. **Re-weighting or re-tuning
+sources that have no edge cannot create edge.** So spend your one change on the thing that actually gates
+the money:
+1. **First, ask whether ANY signal predicts returns here.** Read `/api/signals/telemetry` and
+   `signal_observations` (per source, per horizon): is any source's measured expectancy positive and
+   significant net of cost? If yes, the work is to *let it size* (why is the edge gate holding it back?).
+2. **If nothing has edge, build and validate a NEW signal** — a genuinely different predictor (a new
+   feature, a regime filter, a cross-sectional selector), taken through the OOS backtest gate (ADR-0049),
+   not another fusion weight. A new source with real measured edge is worth more than any amount of
+   combiner tuning.
+3. **Only tune the fusion/hedge/sensor mechanics when a measured edge exists to be shaped.** Absent edge,
+   that tuning is what produced the INCONCLUSIVE wall — do not add to it.
+If, after genuinely checking, no signal in this universe has edge, **say so plainly** in
+`reports/last-analysis.md` (what you checked, the measured expectancies, why none is actionable) and stop
+with no change — that is the honest, correct answer, not a failure to paper over with a parameter tweak.
+
 **Feed-agnostic by design:** sim or live is just a stream of numbers. Compute signals that
 **self-calibrate to the stream** — z-scores, rolling percentiles, vol-relative thresholds, never
 hardcoded price levels — so the same strategy adapts to any feed's quality and volatility. Never
@@ -110,13 +129,26 @@ than a checklist would. Two conditions on that freedom:
   (mandatory — do not hand-derive money math); **`adr`** when authoring or superseding an ADR;
   **`design-review`** before shipping an architecturally-significant change.
 
-## Scoring is already done for you (by code) before you start
-The loop wrapper runs `scripts/score-change.py score` **before** it invokes you: that script measures
-the previous cycle's change against its recorded baseline, writes the ledger row + snapshot, and
-reverts the change if the verdict was ❌ BAD — all in exact decimal, none of it yours to do. So when
-you start, the ledger (`reports/improvement-ledger.md`) already reflects last cycle. **Read it** — a
-BAD/MIXED verdict on your last idea tells you what NOT to repeat (try a *different* lever). Do not
-touch the ledger, the snapshots, or `reports/.pending-baseline.json` by hand.
+## Scoring is evidence-based and takes several cycles (ADR-0116) — so HOLD a change while it measures
+The loop wrapper runs `scripts/score-change.py score` **before** it invokes you. A single 30-minute PnL
+delta on this book is almost all market noise, so a change is no longer judged on one cycle. Instead it
+is **held live for an evaluation window** (`MIN_CYCLES`, ~6 cycles) and then judged by the **sign and
+statistical significance** of its per-cycle *risk-adjusted* PnL over that window:
+- **✅ GOOD** — significantly positive risk-adjusted return, exposure not grown.
+- **❌ BAD** — significantly negative, or exposure grew for no return → auto-reverted.
+- **⚠️ INCONCLUSIVE** — not enough evidence to distinguish it from noise. **Kept, not reverted.** This is
+  the honest verdict for most micro-changes, and it is telling you the change had *no measurable effect*.
+
+**The rule this creates — read it carefully:** if a pending change is still under measurement, the scorer
+prints `still accumulating evidence (n/MIN_CYCLES)` and **`reports/.pending-baseline.json` still exists**.
+When that is the case you **must NOT make a new code change** this cycle — the previous one is being
+measured, and piling a new change on top destroys the evidence. Write your `reports/last-analysis.md`
+(note it's under evaluation, and what you're watching), append a finding if warranted, and **stop with no
+change**. Only propose a new change once the pending one has been **scored** (a fresh ledger row appears).
+
+Read the ledger every cycle: a repeated **INCONCLUSIVE** streak means you are tuning things that don't
+move the number — change *what* you're working on (see the thesis), not just the parameter. A BAD verdict
+tells you what not to repeat. Never touch the ledger, snapshots, or `.pending-baseline.json` by hand.
 
 ## Situation triage — answer these PRECISELY, first, every cycle (before any diagnosis)
 Open every cycle by stating the live money situation in plain numbers — mandatory, and it goes at the TOP
