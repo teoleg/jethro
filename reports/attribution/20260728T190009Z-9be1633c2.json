@@ -1,0 +1,52 @@
+{
+  "after": {
+    "at": "2026-07-28T19:00:09Z",
+    "fees": "0.085756",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "0.95512117",
+      "netExposure": "0.00000000",
+      "realizedPnl": "0.61209817",
+      "strategyAlpha": "-0.34302300",
+      "totalFees": "0.085756",
+      "totalPnl": "0.61209817",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "0.61209817"
+  },
+  "before": {
+    "at": "2026-07-28T16:17:48Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0.61209817"
+  },
+  "commit": "9be1633c29edbbc36255dca118159c894a8601f0",
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle +0.000000 over 7 cycles, t=+0.00 (hurdle 1.5); gross 0\u21920",
+  "revert": false,
+  "scoredAt": "2026-07-28T19:00:09Z",
+  "summary": "a signal cohort is one SWEEP of the cross-section \u2014 a name appears at most once in it \u2014 instead of a 60-second clock gap that cut each slow pass into several 'independent' draws and inflated the edge gate's degrees of freedom (ADR-0120)",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 0.0,
+    "gross_start": 0.0,
+    "mean_ret_per_cycle": 0.0,
+    "n": 7,
+    "scale": 1000.0,
+    "t": 0.0
+  }
+}
