@@ -15,6 +15,88 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-29 18:30Z (ADR-0124 at 4/6 cycles — held, no code change made)
+
+**ADR-0124 → ✅ VERIFIED for a fourth consecutive cycle**, read live from `/api/fusion/targets`.
+Deployment proven behaviourally, not from `git log` (rule 84): `uptimeSeconds` **1206** against a
+`traffic.timestampMillis` of **1785349802582** puts the JVM start at **18:10:02Z**, and the endpoint
+reads `sources=1 → agreement 0.000` — a value only the ADR-0124 code produces.
+
+- **TSLA / META / GOOGL / ORCL** all read `sources=1, agreement 0.0, combinedForecast 0.0/−0.0,
+  targetQty 0`. ORCL is a *new* fourth instance this cycle, so the rule is holding on names it had not
+  yet seen.
+- Corroborated names still carry the conviction: **GOOG `sources=3, agreement 0.796, fc −6.322`**,
+  **AAPL `sources=3, agreement 0.838, fc +4.942`**. No `sources=1` name carries any.
+
+Its scored verdict remains the scorer's: `score-change.py score` prints
+**`3e7817e4f still accumulating evidence (4/6 cycles)`**, and `reports/.pending-baseline.json` is present
+— so **no code change was made this cycle**.
+
+### 🎯 Item #1 (NEW, and it displaces the closed execution item) — the desk's two weight-discipline rules are structurally INERT in the configuration it actually runs
+
+**The defect.** `TelemetryWeights.compute` classifies each source three ways — ADMITTED, UNPROVEN
+(ADR-0097 → held at `weights.min`) and CONTRADICTED (ADR-0111 → stood down to 0). But both demotions are
+guarded by `if (!anyAdmitted) return out;` — *"nothing has earned the right to steer — leave the weights
+as measured"*. With the edge gate **disabled** by ADR-0122 (owner-directed exploration mode) nothing ever
+clears admission, so `anyAdmitted` is permanently **false** and **neither rule has ever fired on this
+book**. The rules were written for a desk whose gate is ON; in exploration mode they switch themselves off
+at precisely the moment discrimination is worth most.
+
+**Proven live, not inferred.** `/api/fusion/targets` `weights` reads
+`reversion 2.2992, social 1.1056, momentum 0.6265, xsreversion 0.5275, trend 0.4412` (Σ = 5.0000). No
+source sits at the `jethro.fusion.weights.min=0.25` floor and none is stood down to 0 — the exact
+signature of `anyAdmitted == false`.
+
+**What it costs.** Read against the same `/api/signals/telemetry`, cohort-clustered
+(`t = avgReturnBps ÷ (stdCohortMeanBps ÷ √cohorts)`, the gate's own ADR-0077 construction):
+
+| source | 225 s | 900 s | 3600 s | live weight | share of Σ |
+|---|---|---|---|---|---|
+| **reversion** | **+0.488** | **+1.611** | **+1.239** | 2.2992 | **45.98%** |
+| social | −0.000 | −0.482 | −0.200 | 1.1056 | 22.11% |
+| momentum | −0.039 | +0.309 | −1.446 | 0.6265 | 12.53% |
+| xsreversion | −0.926 | +0.190 | −1.074 | 0.5275 | 10.55% |
+| trend | −0.099 | −0.038 | −1.140 | 0.4412 | 8.82% |
+
+**54.02% of the combiner's vote sits on the four sources that are non-positive at the selected rung**,
+against **45.98%** on reversion — the only source positive at *all three* rungs, with expectancy scaling
+in horizon the way a real signal does and noise does not (**+0.174 → +2.708 → +8.614 bps**). The desk is
+diluting its one candidate edge with a measured-negative majority, and the code written to stop exactly
+that is unreachable.
+
+**Why this is edge work, not the combiner tuning the standing priority forbids.** It is not a re-weight of
+sources that have no edge; it is a *designed safety rule that never executes* in the live configuration.
+And reversion has now cleared the raw 1.5 hurdle at its best rung (**t +1.611 on 103 cohorts**), so there
+is a measured edge to shape — the precondition the standing priority sets.
+
+**VERIFY-BY (next run, from `/api/fusion/targets` `weights`):** with the gate disabled, the
+UNPROVEN/CONTRADICTED classification must be reachable on its own evidence rather than gated on an
+admission that can never happen — so at least one measured-non-positive source must read **at the 0.25
+floor or 0**, and **reversion's share of Σweights must rise above 0.4598**. If the shares are unchanged,
+the fix did not land.
+
+**Known interaction to handle in the change (do not ignore):** demoting sources lowers each name's
+`sources` count and its ADR-0076 diversification multiplier, and ADR-0124 silences any name left with
+`sources=1`. A demotion to `weights.min` (which the combiner still counts) preserves breadth; a
+stand-down to 0 does not. Prefer the ADR-0097 floor over the ADR-0111 zero unless the source is
+significantly negative on its own test.
+
+### Item #2 — nothing else is ranked above noise this cycle
+
+Checked and deliberately **not** promoted (recorded so a later cycle does not re-chase them):
+
+- **"The gate is measuring the wrong horizon"** → **FALSIFIED**. `HorizonLadder` (ADR-0082) already
+  evaluates all three rungs (3600 / 900 / 225, `jethro.signals.horizon-rungs=3`) and selects by best
+  p-value. The horizon lever already exists and is already exercised.
+- **"Bonferroni over 3 nested rungs is over-conservative"** → true in the literature, but it is a change
+  to a *significance floor* whose only effect while ADR-0122 holds the gate off is cosmetic — the gate is
+  not what is sizing this book. Not actionable now; revisit if exploration mode is ever turned off.
+- **JPM** was bought **0 → +16** this window on `agreement 0.527` with `reversion +11.288` fighting
+  `trend −13.392`, and is the worst realized name at **−$25.43**. Suggestive of exactly the dilution in
+  item #1, but **n = 1 name** — rule 77: log, don't chase.
+
+---
+
 ## Verification block — 2026-07-29 18:00Z (ADR-0124 at 3/6 cycles — held, no code change made)
 
 **ADR-0124 → ✅ VERIFIED for a third consecutive cycle** on its decisive VERIFY-BY, read live from

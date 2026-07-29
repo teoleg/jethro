@@ -1,77 +1,84 @@
-Re-measured must-fix #1 with code and it is dead: the "one-sided execution costs −11.6 bps" figure was an n=65 artifact — at n=186 the cohort is +1.68 bps, statistically zero — so I closed it instead of spending the next change superseding ADR-0084, and the real #1 is what it has always been: no source has edge.
+The desk's two weight-discipline rules have never once fired on this book — both are gated on `anyAdmitted`, which the disabled edge gate makes permanently false — so 54% of the combiner's vote sits on four measured-negative sources while reversion, the only one positive at every horizon and now clearing the raw hurdle, carries 46%.
 
-*(Every figure below is read live from `/api/risk`, `/api/fusion/targets`, `/api/attribution`,
-`/api/signals/telemetry`, or the tables in `logs/report.md`, or computed by the FIFO reconstruction
-described below. None is authored here — invariant 7 / ADR-0016. The PnL verdict stays the scorer's.)*
+*(Every figure below is read live from `/api/risk`, `/api/fusion/targets`, `/api/var`, `/api/hedging`,
+`/api/attribution` or `/api/signals/telemetry`, or computed from those endpoints by the script quoted in
+the commit. None is authored here — invariant 7 / ADR-0016. The PnL verdict stays the scorer's.)*
 
 ## Situation
 
-Total PnL **−$68.86**, gross **$20,547.61**, net **$379.75**. Since last run PnL **−31.16**, gross
-**+2,530.03**; over the last 3 runs PnL **−46.50**, gross **−7,785.02**. Gross is **1.4%** of the
-$1,500,000 firm cap (**$1,479,452** headroom), net **0.0%** of the $1,000,000 net cap. Breaker
-`halted: false`; regime CALM, trend CHOP, volRatio 1.33. The flag is **UNDERWATER** only — this is **not**
-the DANGER state, because the book is nowhere near a cap or the breaker. Nothing here calls for de-risking.
+1. **Money.** Underwater and drifting down. Total PnL **−$107.91**, **−$4.47** on the window, **−$55.42**
+   over the last 3 runs. `pnl_growth_pct` **−362.61%** against the **+1.0%** target — `on_track=false`,
+   `stale=true`, `underwater=true`. Not bleeding hard, but off target.
+2. **Risk.** Not the problem. Gross **$25,582.39 = 1.7%** of the $1,500,000 firm cap (headroom
+   **$1,474,418**); net **$98.00 = 0.0%** of the $1,000,000 net cap. Gross fell **−$1,634.51** on the
+   window. VaR95 **$238.62**, ES95 **$315.28** on **$25,582.39** covered with `skippedExposure 0.00`.
+   Breaker `halted: false`. Regime `CALM` / `CHOP`, `volRatio 1.01`.
+3. **Cause.** ADR-0124 is at **4/6** and unscored. Its live footprint is confined to the four names it
+   silences — TSLA, META, GOOGL and now ORCL — all at `targetQty 0`, none of which traded this window.
+4. **Danger.** **No.** UNDERWATER is the only flag; 98.3% of the gross ceiling is unused and the breaker
+   is clear. This is not the DANGER state and nothing here calls for de-risking.
 
-**No code change this cycle.** `reports/.pending-baseline.json` is present and the scorer prints
-`3e7817e4f still accumulating evidence (3/6 cycles)`. Piling a change on top would destroy the evidence.
+## Step 0 — ADR-0124 → ✅ VERIFIED, fourth consecutive cycle
 
-## Step 0 — verdict 1: ADR-0124 → ✅ VERIFIED, third consecutive cycle
+Deployment proven behaviourally rather than from `git log` (rule 84): `uptimeSeconds` **1206** against
+`traffic.timestampMillis` **1785349802582** puts the JVM start at **18:10:02Z**, and `/api/fusion/targets`
+reads `sources=1 → agreement 0.0, combinedForecast 0.0, targetQty 0` for **TSLA, META, GOOGL and ORCL** —
+a value only the ADR-0124 code produces, and ORCL is a name it had not yet seen. Corroborated names still
+carry all the conviction (**GOOG `sources=3, agreement 0.796, fc −6.322`**; **AAPL `sources=3,
+agreement 0.838, fc +4.942`**).
 
-Deployment proven behaviourally, not from `git log`: `uptimeSeconds` **1430** at a report stamped
-**18:00:01.608Z** puts the JVM start at **17:36:11Z**, and `/api/fusion/targets` reads TSLA / META / GOOGL
-`sources=1 → agreement 0.000, fc 0.000, targetQty 0.00` — a value only the ADR-0124 code produces. The
-book's largest conviction is corroborated: NVDA `sources=3, agreement 0.798, fc −5.544`.
+**No code change this cycle.** `reports/.pending-baseline.json` is present and `score-change.py score`
+prints `3e7817e4f still accumulating evidence (4/6 cycles)`. Stacking a change on a measurement in
+progress destroys the evidence.
 
-## Step 0 — verdict 2: must-fix #1 → ✅ VERIFIED *as falsified*, and closed
+## What I found instead — and it is the new must-fix #1
 
-Its VERIFY-BY was *"aggregate round-trip bps moves toward zero from −11.6, on a count materially above
-65."* I re-measured it with code — FIFO round-trip reconstruction over all **276** LIVE fills joined to
-`orders.order_type`, in exact `Decimal`, with each instrument's `contract_multiplier` applied. The
-reconstruction **reconciles to live**: it returns MACRO **−$35.82** against `/api/risk`
-`MACRO.realizedPnl` **−35.82347655**.
+`TelemetryWeights.compute` sorts every source into ADMITTED, UNPROVEN (ADR-0097 → held at
+`weights.min`) or CONTRADICTED (ADR-0111 → stood down to 0). Both demotions sit behind
+`if (!anyAdmitted) return out;`. Since ADR-0122 disabled the edge gate on this paper book, **nothing ever
+clears admission, so `anyAdmitted` is permanently false and neither rule has ever fired.** They were
+written for a desk whose gate is ON; in exploration mode they switch themselves off at exactly the moment
+discrimination is worth most.
 
-| cohort | round-trips | closed notional | net PnL | net bps |
-|---|---|---|---|---|
-| LIMIT-in → MARKET-out | **186** (was 65) | $104,394.11 | **+$17.49** | **+1.68** (was **−11.6**) |
-| ALPHA (all equities) | 189 | $106,291.89 | +$20.30 | +1.91 |
-| HEDGE (ES) | 5 | $8,521.60 | −$9.31 | −10.92 |
-| MACRO (NQ) | 2 | $4,263.64 | −$35.82 | −84.02 |
+Proven live, not inferred: `/api/fusion/targets` `weights` reads `reversion 2.2992, social 1.1056,
+momentum 0.6265, xsreversion 0.5275, trend 0.4412` (Σ = 5.0000) — **no source at the
+`jethro.fusion.weights.min=0.25` floor and none stood down to 0**, the exact signature of
+`anyAdmitted == false`.
 
-Clustered by instrument (9 clusters), ALPHA's round-trip net bps is **+1.220 mean, t = +0.13** —
-indistinguishable from zero. The one-sidedness is structurally real (**186 of 196** round-trips are
-LIMIT-in → MARKET-out) but it is **not costing money**; the **−11.6 bps was an n=65 artifact**. I closed
-the item rather than spend the desk's next change writing an ADR to supersede ADR-0084 against a cost that
-is not there.
+Cohort-clustered on `/api/signals/telemetry` (`t = avgReturnBps ÷ (stdCohortMeanBps ÷ √cohorts)`, the
+gate's own ADR-0077 construction):
 
-## What that leaves as #1 — the standing priority, now with direct proof
+| source | 225 s | 900 s | 3600 s | weight | share |
+|---|---|---|---|---|---|
+| **reversion** | **+0.488** | **+1.611** | **+1.239** | 2.2992 | **45.98%** |
+| social | −0.000 | −0.482 | −0.200 | 1.1056 | 22.11% |
+| momentum | −0.039 | +0.309 | −1.446 | 0.6265 | 12.53% |
+| xsreversion | −0.926 | +0.190 | −1.074 | 0.5275 | 10.55% |
+| trend | −0.099 | −0.038 | −1.140 | 0.4412 | 8.82% |
 
-The desk turns over **$106,291.89** of closed equity notional across **189** round-trips to earn
-**+$20.30**. Execution is essentially free and the result is essentially zero, because the signal being
-executed has no measured edge. **Reversion is the one live candidate and the only source positive at every
-horizon**, with expectancy scaling in horizon the way a real signal does and noise does not: **225 s
-+0.144 bps (266 cohorts, t +0.40) → 900 s +2.300 bps (101 cohorts, t +1.38) → 3600 s +9.066 bps (29
-cohorts, t +1.26)**. Every other source is negative at the long horizons — trend **−8.634 / t −1.25**,
-xsreversion **−8.887 / t −0.87**, momentum **−13.257 / t −1.45**, social **−2.111 / t −0.20**. It needs
-**cohorts, not tuning**.
-
-## Attribution this window — honest split
-
-ADR-0124 silences TSLA, META and GOOGL; all three sat at `targetQty 0.00` and did not trade. Every name
-that did trade (GOOG, AAPL, AMZN, NVDA, JNJ, JPM, MSFT, ES) is a multi-source name the change does not
-touch. So **none** of the **−$31.16** is attributable to ADR-0124. Decomposed by book, the firm's realized
-loss is **entirely** two NQ round-trips (MACRO **−$35.82**, closed and flat) against ALPHA equities at
-**+$20.30**; the rest is **−$31.54** of unrealized mark on 9 open equity shorts — market, not change. The
-gross rise is the hedge: EQUITY gross **$11,433.45** at net **−$8,734.41** against a **$9,114.16** long ES
-leg, firm net **$379.75**.
+**54.02% of the vote is carried by the four sources that are non-positive at the selected rung.**
+Reversion is the only source positive at *all three* rungs, and its expectancy scales in horizon the way a
+real signal does and noise does not — **+0.174 → +2.708 → +8.614 bps** — now clearing the raw 1.5 hurdle
+at its best rung (**t +1.611 on 103 cohorts**, up from +1.406 on 102 last cycle). So there is finally a
+measured edge to shape, which is the precondition the standing priority sets before touching the
+combiner; and this is not a re-weight of edgeless sources, it is a designed safety rule that is
+unreachable in the configuration the desk actually runs.
 
 ## Checked and deliberately not promoted
 
-- **NQ is 100% of the realized loss.** Hypothesis *"fusion sizes futures without the contract multiplier,
-  so NQ is 20× oversized"* → **falsified**: `TargetPlanner` sizes on `price × contractMultiplier`. n=2, so
-  log, don't chase.
-- **GOOG `targetQty −73.22` vs `currentQty +4.00` at `deltaQty −0.010`** is not a freeze — ADR-0102
-  `withinTarget` clamps the aim to flat because the holding opposes the current target, and
-  `bufferedDelta` then trades to the near edge of the band. Working as designed.
-- **`fusion re-plan` churn is unchanged** at **9 of 20** post-restart orders, with GOOG the third named
-  ramp after ORCL and AAPL. Loud, but it lives in the cohort that just measured **+1.68 bps**, so it is
-  not where the money goes.
+- **"The gate measures the wrong horizon"** → **falsified**: `HorizonLadder` (ADR-0082) already evaluates
+  3600 / 900 / 225 (`jethro.signals.horizon-rungs=3`) and selects by best p-value.
+- **"Bonferroni across 3 nested rungs is over-conservative"** → true in the literature, but with the gate
+  off it changes nothing about what sizes this book. Revisit only if exploration mode is turned off.
+- **JPM** was bought **0 → +16** this window on `agreement 0.527` with `reversion +11.288` against
+  `trend −13.392`, and is the worst realized name at **−$25.43** — suggestive of exactly that dilution,
+  but n = 1 name. Rule 77: log, don't chase.
+
+## Attribution this window — honest split
+
+Every name ADR-0124 touches sat at `targetQty 0` and did not trade, so **none** of the **−$4.47** is the
+change's. It is market: ALPHA carries **−$71.91** of unrealized mark against **−$10.42** realized, on four
+equity shorts (MSFT, AAPL, GOOG, AMZN) and two longs (JPM, NVDA). The **−$1,634.51** gross fall is the
+hedge tracking down — EQUITY net **−$6,409.26** against one ES leg at **+$6,507.25**, firm net **$98.00**,
+`/api/hedging` `status: ON-TARGET` — not a de-risking (rule 91). MACRO's **−$35.82** is frozen:
+`positionCount 1` at `grossExposure 0.00`, a closed historical NQ loss, not an ongoing bleed.

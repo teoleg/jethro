@@ -2415,3 +2415,33 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **none** of the **−$31.16** is attributable to the change. It is **−$31.54** of unrealized mark on 9 open
   equity shorts — market. The gross rise is the hedge leg (EQUITY net **−$8,734.41** against ES
   **+$9,114.16**, firm net **$379.75**), not added risk (rule 91).
+
+## 2026-07-29 18:30Z — no-change (ADR-0124 at 4/6): the desk's weight-discipline rules have never fired
+
+- **Rule 96 — a rule guarded by `if (!anyAdmitted) return` is OFF, not conservative, once the gate that
+  sets `anyAdmitted` is disabled.** `TelemetryWeights.compute` classifies sources ADMITTED / UNPROVEN
+  (ADR-0097 → held at `weights.min`) / CONTRADICTED (ADR-0111 → stood down to 0), and both demotions sit
+  behind that guard. ADR-0122 disabled the edge gate on this paper book, so nothing ever clears admission,
+  `anyAdmitted` is permanently **false**, and **neither rule has ever fired here**. Proven live rather
+  than inferred: `/api/fusion/targets` `weights` = `reversion 2.2992, social 1.1056, momentum 0.6265,
+  xsreversion 0.5275, trend 0.4412` (Σ 5.0000) — **no source at the `weights.min=0.25` floor, none at 0**.
+  When you disable a gate, audit every rule downstream that reads its verdict.
+- **Rule 97 — check WHICH SIDE of the vote the weight actually sits on before calling the combiner tuned.**
+  Cohort-clustered t on `/api/signals/telemetry`: reversion **+0.488 / +1.611 / +1.239** at 225 / 900 /
+  3600 s is the only source positive at every rung, yet it carries **45.98%** of Σweights while the four
+  sources non-positive at the selected rung carry **54.02%**. The Φ(t) statistic down-weights losers but
+  never removes them, and removal is what the two inert rules were for.
+- **Rule 98 — expectancy that SCALES with horizon is the signature that separates a signal from noise.**
+  Reversion reads **+0.174 → +2.708 → +8.614 bps** across the three rungs, roughly in proportion to the
+  period, and its best-rung t has risen **+1.406 (102 cohorts) → +1.611 (103)** in one cycle. Noise does
+  not scale that way. This is the first cycle where the standing priority's precondition — *a measured
+  edge exists to be shaped* — is actually met, which is what licenses touching the combiner at all.
+- **Falsified this cycle, do not re-chase:** *"the edge gate measures the wrong horizon"* — `HorizonLadder`
+  (ADR-0082) already evaluates 3600 / 900 / 225 (`jethro.signals.horizon-rungs=3`) and selects by best
+  p-value; the lever exists and is exercised. And *"Bonferroni across 3 nested rungs is over-conservative"*
+  is true in the literature but changes nothing about what sizes this book while ADR-0122 holds the gate off.
+- **Attribution this window (honest split):** the four names ADR-0124 silences (TSLA, META, GOOGL, and
+  newly ORCL) all sat at `targetQty 0` and did not trade, so **none** of the **−$4.47** is the change's.
+  It is **−$71.91** of unrealized mark on four equity shorts against **−$10.42** realized — market. The
+  **−$1,634.51** gross fall is the hedge tracking down (EQUITY net **−$6,409.26** vs one ES leg at
+  **+$6,507.25**, firm net **$98.00**, `status: ON-TARGET`), not a de-risking (rule 91).
