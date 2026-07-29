@@ -2202,3 +2202,48 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   double-digit-bps loss, that is the fourth instance and rule 68 is confirmed. If it fills and holds
   profitably, the mechanism is wrong and holding-period discipline against the 30s re-plan is the target
   instead.
+
+## 2026-07-29T15:30Z — the loss is a FEED split: 82% of it is in the 15-min-delayed cohort (no change — pending at 4/6)
+
+- **No change permitted.** `scripts/score-change.py score` → `d9f8969cc still accumulating evidence
+  (4/6 cycles)`, `.pending-baseline.json` present. Analysis + memory only, per contract.
+- **Rule 69 — split the book by MARKET-DATA FEED before blaming the signal. It is the sharpest cut yet.**
+  Script over `/api/risk` `.positions`, cohorts from `instrument_symbology`: names with real-time `alpaca`
+  symbology (AAPL, AMZN, GOOG, JNJ, JPM, MSFT, NVDA) realized **+$11.13**, total **−$12.60**, **+1.81 bps**
+  of $61,481 turnover. Names priced only by the delayed `yahoo` poll (GOOGL, NQ, TSLA, ES) realized
+  **−$56.67**, total **−$56.44**, **−23.04 bps** of $24,592 turnover. They reconcile exactly to firm
+  **−$69.04**. **29% of turnover, 82% of the loss** — and it is almost all *realized*, so it is trading
+  logic, not market drift on untouched inventory.
+- **Rule 70 — the limit price IS the last mark, with no age check, so a delayed feed posts orders at a
+  price the market left 15 minutes ago.** `FusionExecutor.passiveLimitPrice` (`FusionExecutor.java:180-190`)
+  = `LastPriceCache` mid (`LastPriceCache.java:21-37`, a last-value map, no TTL). Decisive statistic —
+  distinct limit prices vs reposts over 3h: **GOOGL 19 orders → 1 price, ORCL 16 → 1, NFLX 5 → 1, META 29
+  over 52.9 min → 2**, fill rates 5/0/0/0%; versus **NVDA 11 → 11, JPM 18 → 18, MSFT 22 → 21, AAPL 13 → 11**,
+  fill rates 100/83/77/77%. Same market, same 30s cadence — that is a feed property, not a market property.
+  `distinct_px == reposts` ⇒ 56–100% fill; frozen price ⇒ 0–9%. A stale limit only trades when the market
+  comes **back** to it — i.e. when the move went against the view — so **fills are adversely selected by
+  construction**. This is why `MarkPublisher` republishing at 1 Hz makes `/api/marks` `ageMillis` read
+  fresh (~700ms) for META while its price steps once per ~15 min: staleness is invisible in the endpoint.
+- **Rule 71 — this supersedes rule 68's explanation.** The newly-promoted names are not primarily losing
+  because they are `sources:1` and un-stoppable; they are losing because
+  `UniversePromotionService.java:67-73` **deliberately writes yahoo-only symbology**, so every
+  discovery-promoted name (GOOGL, META, ORCL, NFLX, TSLA) lands in the delayed cohort **by design**.
+  Corroboration was the symptom; feed latency is the cause. Do not spend the next change on agreement.
+- **Rule 72 — the edge gate is being fed frozen non-observations, so "no source has edge" is partly a
+  data artifact.** `signal_observations` LIVE, 6h: **29.7%** of resolved rows on delayed names have
+  `exit_mark = entry_mark` **exactly** (70 of 236) vs **3.7%** on real-time names (40 of 1080). A third of
+  the evidence on those names is a frozen price booked as a flat return — it drags expectancy toward zero
+  and inflates the gate's degrees of freedom. You cannot measure a 225–3600s expectancy on a price that
+  steps every 15 min. TCA is blind too: `arrival_price` is written from the same stale mark, so measured
+  slippage on those names is ~0 **by construction** while the true adverse selection goes unmeasured.
+- **Last cycle's falsifiable check on META resolved — and it FALSIFIED the predicted mechanism.** META did
+  not round-trip at a double-digit-bps loss; it **never filled at all** (29 orders, 0 fills, 100% cancelled,
+  all at 588.51 while the mark is now 591.18 — a bid 45 bps below the market). ORCL likewise: 16 offers at
+  120.325 against a 117.69 mark, 224 bps above the market, 0 fills. Both views were *right* and captured
+  nothing. That non-fill is the evidence that produced rules 69–72.
+- **Next change (queued, needs an ADR — architecturally significant):** gate tradability on **price age** —
+  a name whose mark is older than the horizon the desk plans on goes reduce-only, and/or a discovery-promoted
+  name must earn real-time symbology before it becomes tradable; and discard zero-move resolutions on stale
+  feeds from the edge evidence. **Falsifiable check:** if the delayed cohort is made reduce-only, firm
+  realized bps should move toward the real-time cohort's +1.81 bps. If it does not, the feed thesis is wrong
+  and the target reverts to holding-period discipline against the 30s re-plan.
