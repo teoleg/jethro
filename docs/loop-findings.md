@@ -2054,3 +2054,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   at `$0.61209817` absent orders. `xsreversion`@900s should resolve its first cohorts within a cycle or
   two, 3600s later. If it measures null once it has real cohorts, the honest next move is a different
   feed — not a sixth source.
+
+## 2026-07-29T13:30Z — the dormancy was never a signal problem: the owner's directive never reached the JVM (ADR-0123)
+
+- **Scorer cleared** (`68ff73eb2` → ⚠️ INCONCLUSIVE, 38 cycles, `$0.61209817` → `$0.61209817`, gross
+  `0` → `0`), no `.pending-baseline.json`, so a change was permitted. Book `DORMANT`: gross `$0.00` =
+  0.0% of the $1,500,000 firm cap, VaR `no positions`, breaker clear. **Zero orders** in the window
+  (7 LIVE orders ever, newest `2026-07-28 15:50:41Z`) ⇒ the move is `+$0.00` from market AND `+$0.00`
+  from code. That INCONCLUSIVE verdict is about a book that placed no trades — it is not evidence
+  about ADR-0121.
+- **Rule 61: before diagnosing a signal, prove the JVM is running the code you are reading.** The repo
+  said `jethro.fusion.edge-gate.enabled=false` (ADR-0122, owner-directed, committed 22:24Z 2026-07-28).
+  The live app said `edgeGate.mayIncrease:false` **with a populated `sources` list** — which only
+  happens when `gateSupplier != null`, i.e. the gate ENABLED. `ps` gave the process start as
+  `Tue Jul 28 15:35:00 2026`, seven hours before the commit. Ten minutes into the open session every
+  `deltaQty` was exactly `0` against non-zero targets. Two cycles of reading fusion telemetry would
+  have been wasted chasing a combiner that was never the constraint.
+- **The trigger, and why it was permanent not merely slow.** `ops/improve-loop.sh`'s ADR-0115
+  market-closed branch fetches, fast-forwards to origin — so the change lands in the tree — then
+  `exit 0`s before any deploy, having taken its `BEFORE` sha AFTER the merge. By the next open cycle
+  the commit is already an ancestor of HEAD, so `git diff BEFORE AFTER` can never see it and
+  `CODE_CHANGED` is empty forever. **A change pushed after the close was undeployable in principle.**
+  Same bug §2 of the open path fixed for itself on 2026-07-28, left standing in the closed path.
+- **Shipped:** ADR-0123 — closed branch takes `BEFORE` before the fast-forward and calls the same
+  deploy; the deploy block is now one shared `deploy_if_code_changed` used by both paths. Tests green.
+- **Rule 62: name the conflation BEFORE the window opens, not after the verdict.** This commit triggers
+  a deploy that also brings ADR-0122 live for the first time. The next scored row therefore contains
+  TWO deployments and exploration mode will dominate it. **Credit/blame belongs to ADR-0122, not to
+  this plumbing fix** — do not read that row as evidence about either alone.
+- **Predicted next, so it can be checked.** After the restart the running app should report
+  `edgeGate` absent-or-inactive on `/api/fusion/targets` (`gateSupplier=null`), and `deltaQty` should
+  go non-zero on the names clearing `min-forecast-to-route=5.0` (MSFT/AAPL/NVDA at the 13:30Z reading).
+  Gross should leave `$0.00` within a cycle or two. **If it does NOT** — if deltas stay 0 with the gate
+  demonstrably off — the next suspects are, in order: whole-share truncation in
+  `TargetPlanner.tradableQuantity` against a per-cycle delta of `a·gap` at `a = 1 − e^(−30/3600) =
+  0.0083`, and the ADR-0094 buffer measured against an aim that `aims.clear()` resets to flat every
+  time the book goes stale overnight. Both are arithmetic, both are checkable before they are commits.
+- **Deferred row 76 has FIRED** (`docs/deferred-register.md`): a ledger verdict was found to describe
+  undeployed code. ADR-0123 makes stranding rarer; teaching `scripts/score-change.py` to refuse to
+  score a commit it cannot prove was deployed is what makes the verdicts honest, and is now the
+  higher-priority half.

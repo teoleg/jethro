@@ -51,6 +51,118 @@ push_branch() {
   return 1
 }
 
+# ---------------------------------------------------------------------------------------------
+# Deploy (steps 4b + 5), as ONE function both cycle shapes call — open-market and market-closed.
+#
+# It used to be inline at the tail of the open-market path only, which made a code change that
+# arrived while the market was CLOSED undeployable in principle (ADR-0123): the closed branch
+# fast-forwards the working tree to origin and exits before any deploy, and it captured its BEFORE
+# sha AFTER that fast-forward — so the commit was already in HEAD by the time the next open cycle
+# took its own BEFORE, and `git diff BEFORE AFTER` could never see it again. A change pulled in
+# overnight was therefore in the repo, in every later diff's PAST, and never in the JVM. That is
+# exactly the failure §5 below exists to prevent, arriving through the one door §5 did not watch.
+# ---------------------------------------------------------------------------------------------
+
+# 5. Rebuild the binary + restart the app — and VERIFY the running process actually turned over.
+#
+#    A change that never reached the JVM is not a change (ADR-0110). The loop's whole feedback circuit
+#    assumes the app the scorer measures next cycle is running the commit it is scoring; when the
+#    deploy silently fails that assumption breaks and the ledger records a verdict for code that never
+#    ran. It happened: a crontab carrying the systemd EXAMPLE from ops/README.md on a box that runs the
+#    app via scripts/svc.sh failed every cycle ("Unit jethro.service not found"), two commits were
+#    scored against a binary that predated them, and the `./gradlew :app:bootJar` half of that command
+#    kept succeeding — overwriting app-0.1.0-SNAPSHOT.jar underneath the LIVE JVM, which then threw
+#    ClassNotFoundException on every lazily-loaded class.
+#
+#    So: run the deploy, then ask the app itself when it started. Reading uptime off the running
+#    process works for any deploy mechanism (systemd, svc.sh, container) — no pidfile convention
+#    assumed, and unlike an exit status it cannot report success for a process that never turned over.
+#
+#    This is YOUR command — set JETHRO_DEPLOY_CMD in the crontab or environment. Unset, the repo's own
+#    `scripts/svc.sh deploy app` is the default rather than doing nothing; it is also the fallback when
+#    verification fails, and it is always correct on this box: it STOPS the running JVM before it
+#    rebuilds the jar (the Spring Boot loader reads classes lazily from app/build/libs, so rebuilding
+#    under a live process corrupts its classloader) and it re-reads local.env, so provider/keys/profile
+#    come back identical rather than reverting to run-local.sh's defaults — a silent feed switch is an
+#    invariant-8 event, not a restart. Set JETHRO_DEPLOY_CMD=none for review-before-live.
+DEPLOY_FALLBACK_CMD="scripts/svc.sh deploy app"
+# `:-` so EMPTY behaves like UNSET → the safe default (a cron line baking JETHRO_DEPLOY_CMD='' must not
+# silently mean "never deploy", the footgun that scored changes against a binary that never ran them).
+# Explicit review-before-live is JETHRO_DEPLOY_CMD=none.
+DEPLOY_CMD="${JETHRO_DEPLOY_CMD:-$DEPLOY_FALLBACK_CMD}"
+
+# Epoch second the running app booted, or empty if it isn't answering. Uses the same JETHRO_URL the
+# scorer and the report read, so "the app" means the app the ledger's numbers come from.
+app_start_epoch() {
+  python3 - <<'PY' 2>/dev/null || true
+import json, os, time, urllib.request
+base = os.environ.get("JETHRO_URL", "http://localhost:8080").rstrip("/")
+try:
+    with urllib.request.urlopen(base + "/api/ops/jvm", timeout=5) as r:
+        print(int(time.time() - float(json.load(r)["uptimeSeconds"])))
+except Exception:
+    pass
+PY
+}
+
+# True once the app answers AND the process behind it started at/after $1 — i.e. this deploy restarted
+# it. Polls rather than sleeping blind: a cold start on this box takes a couple of minutes. Strict
+# `>=`: a false negative only costs a redundant restart, a false positive is the bug we are fixing.
+wait_for_restart() {
+  local since="$1" deadline started
+  deadline=$(( $(date +%s) + ${JETHRO_DEPLOY_TIMEOUT:-300} ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    started="$(app_start_epoch)"
+    if [ -n "$started" ] && [ "$started" -ge "$since" ]; then return 0; fi
+    sleep 5
+  done
+  return 1
+}
+
+# 9>&- as above: the deploy starts the long-lived app (and may spawn Gradle); neither must inherit
+# the single-flight lock, or it stays held for the life of the app and every later cycle skips.
+run_deploy() {
+  echo "deploy: $1" >> "$LOG"
+  bash -c "$1" >> "$LOG" 2>&1 9>&- || echo "deploy command exited non-zero: $1" >> "$LOG"
+}
+
+# 4b. Rebuild+restart ONLY if code outside reports/ changed between $1 and $2. A ledger-only or
+#     heartbeat-only commit (scoring the previous change, or a market-closed status write) must not
+#     bounce the app. Returns 0 either way — a deploy result is logged, never a cycle-killing status.
+deploy_if_code_changed() {
+  local before="$1" after="$2" changed deploy_started
+  changed=$(git diff --name-only "$before" "$after" | grep -v '^reports/' || true)
+  if [ -z "$changed" ]; then
+    echo "no code change $before -> $after — no rebuild/restart" >> "$LOG"
+    return 0
+  fi
+  echo "code changed:" >> "$LOG"; printf '%s\n' "$changed" >> "$LOG"
+  if [ "$DEPLOY_CMD" = "none" ]; then
+    echo "JETHRO_DEPLOY_CMD=none — change is committed+pushed but the app was NOT rebuilt/restarted." \
+         "The next cycle will score this commit against a binary that does NOT contain it." >> "$LOG"
+    return 0
+  fi
+  deploy_started=$(date +%s)
+  run_deploy "$DEPLOY_CMD"
+  if wait_for_restart "$deploy_started"; then
+    echo "deploy VERIFIED — app is serving on a process that started after the deploy began" >> "$LOG"
+  elif [ "$DEPLOY_CMD" != "$DEPLOY_FALLBACK_CMD" ]; then
+    echo "deploy NOT verified (no restarted process answering /api/ops/jvm) — falling back to the repo's own restart" >> "$LOG"
+    deploy_started=$(date +%s)
+    run_deploy "$DEPLOY_FALLBACK_CMD"
+    if wait_for_restart "$deploy_started"; then
+      echo "deploy VERIFIED via fallback" >> "$LOG"
+    else
+      echo "deploy FAILED — app did NOT turn over after the fallback either. The next cycle would" \
+           "score this commit against a binary that does NOT contain it; treat that verdict as void." >> "$LOG"
+    fi
+  else
+    echo "deploy FAILED — app did NOT turn over. The next cycle would score this commit against a" \
+         "binary that does NOT contain it; treat that verdict as void." >> "$LOG"
+  fi
+  return 0
+}
+
 # Single-flight: with a short interval, a slow gradle test could still be running when the next cron
 # fires. Take a non-blocking lock and skip this fire rather than stacking overlapping cycles.
 exec 9>"$REPO/.improve-loop.lock"
@@ -63,21 +175,35 @@ echo "==== $(date -Is) cycle start ====" >> "$LOG"
 
 # 0. Market-hours gate. On a LIVE feed outside the US session, the tape is frozen — there is nothing
 #    to analyse, so spending an Opus cycle on it is pure waste (and the frozen book reads as false
-#    "staleness"). Skip the whole cycle — no report, NO Claude/Opus call, no deploy — and write one
-#    distinct "market closed" heartbeat so the Improve page shows why. SIM/REPLAY never skip (their
-#    tape runs continuously). Cron still fires every time; this only gates the expensive work.
+#    "staleness"). Skip the ANALYSIS — no report, no Claude/Opus call — and write one distinct
+#    "market closed" heartbeat so the Improve page shows why. SIM/REPLAY never skip (their tape runs
+#    continuously). Cron still fires every time; this only gates the expensive work.
 #    Override with JETHRO_LOOP_IGNORE_MARKET_HOURS=1.
+#
+#    A closed market skips the ANALYSIS, never the DEPLOY (ADR-0123). This branch still fast-forwards
+#    to origin, so a code/config change pushed to the branch overnight lands in the working tree here
+#    — and BEFORE must be taken BEFORE that fast-forward, exactly as §2 does, or the change is
+#    swallowed: it is already in HEAD when the next open-market cycle takes its own BEFORE, so no
+#    later `git diff BEFORE AFTER` can ever see it and the app runs the old jar forever. That is not
+#    hypothetical — it stranded the owner's ADR-0122 exploration-mode directive (committed after the
+#    close) through a full overnight and into the next session, leaving the book dormant at zero gross
+#    against a config the repo said was live.
 if ! python3 scripts/market-open.py >> "$LOG" 2>&1; then
   echo "market CLOSED — skipping report + analysis this cycle (no Claude call)" >> "$LOG"
   git fetch origin >> "$LOG" 2>&1 || true
   git checkout -B "$BRANCH" >> "$LOG" 2>&1
-  git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 || true
   BEFORE=$(git rev-parse HEAD)
+  git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 || true
   # Deterministic heartbeat only (reads live PnL for the page; no model call). --market-closed labels it.
   python3 scripts/score-change.py status --market-closed 1 >> "$LOG" 2>&1 \
     || echo "status writer exited non-zero (see above)" >> "$LOG"
-  if [ "$BEFORE" != "$(git rev-parse HEAD)" ]; then
+  AFTER=$(git rev-parse HEAD)
+  if [ "$BEFORE" != "$AFTER" ]; then
     push_branch || true
+    # A closed market is the CHEAPEST time to bounce the JVM: no tape to miss, no live measurement to
+    # wipe, and hours of warm-up before the open. The heartbeat write alone is reports/-only and so
+    # deploys nothing; only a real code/config change pulled in here does.
+    deploy_if_code_changed "$BEFORE" "$AFTER"
   fi
   echo "==== $(date -Is) cycle end (market closed) ====" >> "$LOG"
   exit 0
@@ -160,100 +286,7 @@ fi
 echo "commit(s) this cycle $BEFORE -> $AFTER — pushing" >> "$LOG"
 push_branch || true
 
-# 4b. Rebuild+restart ONLY if code outside reports/ changed. A ledger-only commit (scoring the
-#     previous change) must not bounce the app.
-CODE_CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" | grep -v '^reports/' || true)
-if [ -z "$CODE_CHANGED" ]; then
-  echo "ledger-only update — pushed, no rebuild/restart" >> "$LOG"
-  echo "==== $(date -Is) cycle end ====" >> "$LOG"
-  exit 0
-fi
-echo "code changed:" >> "$LOG"; printf '%s\n' "$CODE_CHANGED" >> "$LOG"
-
-# 5. Rebuild the binary + restart the app — and VERIFY the running process actually turned over.
-#
-#    A change that never reached the JVM is not a change (ADR-0110). The loop's whole feedback circuit
-#    assumes the app the scorer measures next cycle is running the commit it is scoring; when the
-#    deploy silently fails that assumption breaks and the ledger records a verdict for code that never
-#    ran. It happened: a crontab carrying the systemd EXAMPLE from ops/README.md on a box that runs the
-#    app via scripts/svc.sh failed every cycle ("Unit jethro.service not found"), two commits were
-#    scored against a binary that predated them, and the `./gradlew :app:bootJar` half of that command
-#    kept succeeding — overwriting app-0.1.0-SNAPSHOT.jar underneath the LIVE JVM, which then threw
-#    ClassNotFoundException on every lazily-loaded class.
-#
-#    So: run the deploy, then ask the app itself when it started. Reading uptime off the running
-#    process works for any deploy mechanism (systemd, svc.sh, container) — no pidfile convention
-#    assumed, and unlike an exit status it cannot report success for a process that never turned over.
-#
-#    This is YOUR command — set JETHRO_DEPLOY_CMD in the crontab or environment. Unset, the repo's own
-#    `scripts/svc.sh deploy app` is the default rather than doing nothing; it is also the fallback when
-#    verification fails, and it is always correct on this box: it STOPS the running JVM before it
-#    rebuilds the jar (the Spring Boot loader reads classes lazily from app/build/libs, so rebuilding
-#    under a live process corrupts its classloader) and it re-reads local.env, so provider/keys/profile
-#    come back identical rather than reverting to run-local.sh's defaults — a silent feed switch is an
-#    invariant-8 event, not a restart. Set JETHRO_DEPLOY_CMD=none for review-before-live.
-DEPLOY_FALLBACK_CMD="scripts/svc.sh deploy app"
-# `:-` so EMPTY behaves like UNSET → the safe default (a cron line baking JETHRO_DEPLOY_CMD='' must not
-# silently mean "never deploy", the footgun that scored changes against a binary that never ran them).
-# Explicit review-before-live is JETHRO_DEPLOY_CMD=none.
-DEPLOY_CMD="${JETHRO_DEPLOY_CMD:-$DEPLOY_FALLBACK_CMD}"
-
-# Epoch second the running app booted, or empty if it isn't answering. Uses the same JETHRO_URL the
-# scorer and the report read, so "the app" means the app the ledger's numbers come from.
-app_start_epoch() {
-  python3 - <<'PY' 2>/dev/null || true
-import json, os, time, urllib.request
-base = os.environ.get("JETHRO_URL", "http://localhost:8080").rstrip("/")
-try:
-    with urllib.request.urlopen(base + "/api/ops/jvm", timeout=5) as r:
-        print(int(time.time() - float(json.load(r)["uptimeSeconds"])))
-except Exception:
-    pass
-PY
-}
-
-# True once the app answers AND the process behind it started at/after $1 — i.e. this deploy restarted
-# it. Polls rather than sleeping blind: a cold start on this box takes a couple of minutes. Strict
-# `>=`: a false negative only costs a redundant restart, a false positive is the bug we are fixing.
-wait_for_restart() {
-  local since="$1" deadline started
-  deadline=$(( $(date +%s) + ${JETHRO_DEPLOY_TIMEOUT:-300} ))
-  while [ "$(date +%s)" -lt "$deadline" ]; do
-    started="$(app_start_epoch)"
-    if [ -n "$started" ] && [ "$started" -ge "$since" ]; then return 0; fi
-    sleep 5
-  done
-  return 1
-}
-
-# 9>&- as above: the deploy starts the long-lived app (and may spawn Gradle); neither must inherit
-# the single-flight lock, or it stays held for the life of the app and every later cycle skips.
-run_deploy() {
-  echo "deploy: $1" >> "$LOG"
-  bash -c "$1" >> "$LOG" 2>&1 9>&- || echo "deploy command exited non-zero: $1" >> "$LOG"
-}
-
-if [ "$DEPLOY_CMD" = "none" ]; then
-  echo "JETHRO_DEPLOY_CMD=none — change is committed+pushed but the app was NOT rebuilt/restarted." \
-       "The next cycle will score this commit against a binary that does NOT contain it." >> "$LOG"
-else
-  DEPLOY_STARTED=$(date +%s)
-  run_deploy "$DEPLOY_CMD"
-  if wait_for_restart "$DEPLOY_STARTED"; then
-    echo "deploy VERIFIED — app is serving on a process that started after the deploy began" >> "$LOG"
-  elif [ "$DEPLOY_CMD" != "$DEPLOY_FALLBACK_CMD" ]; then
-    echo "deploy NOT verified (no restarted process answering /api/ops/jvm) — falling back to the repo's own restart" >> "$LOG"
-    DEPLOY_STARTED=$(date +%s)
-    run_deploy "$DEPLOY_FALLBACK_CMD"
-    if wait_for_restart "$DEPLOY_STARTED"; then
-      echo "deploy VERIFIED via fallback" >> "$LOG"
-    else
-      echo "deploy FAILED — app did NOT turn over after the fallback either. The next cycle would" \
-           "score this commit against a binary that does NOT contain it; treat that verdict as void." >> "$LOG"
-    fi
-  else
-    echo "deploy FAILED — app did NOT turn over. The next cycle would score this commit against a" \
-         "binary that does NOT contain it; treat that verdict as void." >> "$LOG"
-  fi
-fi
+# 4b/5. Rebuild+restart if this cycle changed code outside reports/ — the shared deploy defined at
+#       the top of this script, verified against the app's own uptime (ADR-0110, ADR-0123).
+deploy_if_code_changed "$BEFORE" "$AFTER"
 echo "==== $(date -Is) cycle end ====" >> "$LOG"
