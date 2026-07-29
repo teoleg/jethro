@@ -2164,3 +2164,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **+87.54** — the combiner is about to flip a winner, the mirror of the JPM whipsaw. If corroboration-aware
   agreement does not settle the sign churn, holding-period discipline (targets re-planned every 30s against
   signals measured over 225–3600s) is the cycle after.
+
+## 2026-07-29T15:00Z — the loss is 100% in round-trips; the open book is up (no change — pending at 3/6)
+
+- **No change permitted.** `scripts/score-change.py score` → `d9f8969cc still accumulating evidence
+  (3/6 cycles)`, `.pending-baseline.json` present. Analysis + memory only, per contract.
+- **Rule 67 — split the book by open vs closed before blaming anything else. Every dollar of the loss is
+  in round-trips.** Script over `/api/risk` `.positions`: names now FLAT (NQ, JPM, GOOGL, ES) total
+  **−$68.12**; names still OPEN (MSFT, JNJ, AAPL, NVDA, AMZN) total **+$7.21**; firm **−$60.91** — they
+  reconcile exactly. The desk's *views* make money; its *churn* loses it. This also settles change-vs-market
+  with no guessing: a realized round-trip loss is 100% trading logic, there is no untouched inventory to
+  blame the market for. **Cost rate:** LIVE turnover **$64,453 on a $18,238 gross book = 3.53× the book**
+  in ~70 min; firm realized = **−9.80 bps of turnover** vs fees **0.88 bps** — the loss is ~11× commission,
+  so it is the *direction* of the round trips, not execution cost. Per name: NQ −42.19bps, GOOGL −14.86bps,
+  JPM −10.46bps; while MSFT/NVDA/AMZN — built but never round-tripped — are each exactly −1.00bps, i.e.
+  pure fee. That contrast is the proof.
+- **Rule 68 — a newly-promoted name is structurally n=1, structurally full-conviction, and structurally
+  un-stoppable. All three at once.** GOOGL took the book's largest turnover ($13,991) while the log shows
+  `trend` cold (2 of 193), `reversion` cold (2 of 241) **and** `risk-cut σ` cold (2 of 121 — *"this name
+  cannot be stopped out until its mark history has accumulated"*). Only `xsreversion` was warm, because a
+  cross-sectional fade needs one snapshot rather than history — and it is the source measuring negative
+  expectancy at every horizon. Add rule 65 (`agreement ≡ 1.0` at n=1) and the least-informed name in the
+  book gets maximum size with the stop switched off. **TSLA (10 of 241) and ORCL (0–3) are queued in the
+  same state.** The fix must couple corroboration *and* a warm risk sensor: no stop ⇒ no size.
+- **Last cycle's prediction landed exactly.** I flagged that the combiner was about to flip the book's only
+  winner: AAPL short −4 sh at **+$9.25**, target +87.54. It flipped to **long +10** — realized +$8.38
+  banked, unrealized −$9.19, total **−$0.81**. A winner converted to a scratch. Third instance of the same
+  sign-reversal whipsaw after JPM and GOOGL.
+- **NQ's rule-66 failure completed and it is the worst single line.** Eight `REJECTED — no market data`
+  exits at 14:10, then a flip to BUY and an *add*, then `SELL 0.007661 FILLED` at 14:51:50 — the exit the
+  desk wanted was executed 40 minutes and one accumulation later, for **−$35.82**.
+- **Telemetry (t by script, LIVE) at 225/900/3600s:** `reversion` **+0.38/+1.26/+0.73** (984/305/88
+  resolved) — still the only source positive at every horizon. `xsreversion` **−0.35/−0.41/−1.36** —
+  negative at every horizon. `trend` −0.14/+0.08/−0.52, `momentum` −0.04/+0.31/−1.45, `social` −0.50/−1.75/−0.79.
+- **Falsifiable check before the next change ships:** META is `sources:1`, agreement 1.0, target +62.79,
+  with **13 consecutive posted-and-cancelled BUYs** ratcheting 1→8 and not one fill. If it round-trips at a
+  double-digit-bps loss, that is the fourth instance and rule 68 is confirmed. If it fills and holds
+  profitably, the mechanism is wrong and holding-period discipline against the 30s re-plan is the target
+  instead.

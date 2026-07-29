@@ -1,71 +1,81 @@
-The agreement scaler is degenerate at one source — it hands FULL conviction to the names with the LEAST corroboration, and that is what is building the book's losers.
+Every dollar of the firm's loss is in positions the desk opened and then closed — the book it still holds is profitable.
 
 *Every figure below is read from the live endpoints, `logs/report.md`, `reports/run-status.json` or the
-scorer; none is authored here (invariant 7 / ADR-0016). The t-statistics are computed by a script from the
-telemetry's own published cohort dispersions (`avgReturnBps / (stdCohortMeanBps/√cohorts)`).*
+scorer, or computed from them by script; none is authored here (invariant 7 / ADR-0016). The t-statistics
+are computed by script from the telemetry's own published cohort dispersions
+(`avgReturnBps / (stdCohortMeanBps/√cohorts)`); the bps-of-turnover figures are computed by script from
+`/api/risk` realized PnL over the report's `turnover_cost_by_name`.*
 
 **0. Scoring state — this decides what I am allowed to do.** `scripts/score-change.py score` prints
-`d9f8969cc still accumulating evidence (2/6 cycles) — held, not scored this run`, and
-`reports/.pending-baseline.json` is present. **No code change this cycle**, per the contract — a new change
-on top would destroy the evidence for the one under measurement. Analysis and memory only.
+`d9f8969cc still accumulating evidence (3/6 cycles) — held, not scored this run`, and
+`reports/.pending-baseline.json` is present. **No code change this cycle**, per the contract. Analysis and
+memory only.
 
-**1. Money.** Total PnL **−$30.35** live (`/api/risk` `.total`; the report header, taken ~6 min earlier,
-read −$32.79). Run-over-run **−$1.75**; over the last three runs **−$33.40**, from the $0.61 that had been
-frozen for four days. `pnl_growth_pct` −5172.08 against `pnl_target_pct` 1.0, `on_track=false`,
-`stale=true`, **UNDERWATER**. The book is bleeding, but it is bleeding *while trading for the first time*.
+**1. Money.** Total PnL **−$60.91** live (`/api/risk` `.total`; the report header, taken ~7 min earlier,
+read −$55.35, and it moved again to −$68.00 mid-analysis — the book is live and moving). Run-over-run
+**−$18.14**; over the last three runs **−$55.96**, from the $0.61 that had been frozen for four days.
+`pnl_growth_pct` −6179.05 against `pnl_target_pct` 1.0, `on_track=false`, `stale=true`, **UNDERWATER**.
 
-**2. Risk.** Gross **$9,291.42** = **0.6%** of the $1.5M firm cap, headroom **$1,490,707**; net **$1,248.36**
-= **0.1%** of the $1M net cap. `riskCuts: []`, `riskCutStoppedNames: 0`, `portfolioRiskMultiplier: 1.0`,
-`bookVolBrake: 0.597` (the brake is engaging on its own). Gross actually *fell* $1,826 this window.
-**Not DANGER**: 0.6% of cap, −$30 against a `maxFirmDrawdown` of $50,000.
+**2. Risk.** Gross **$18,238** = **1.2%** of the $1.5M firm cap, headroom **$1,482,564**; net **$3,250** =
+**0.3%** of the $1M net cap. Gross rose $119 this window. **Not DANGER**: 1.2% of the exposure cap, and
+−$61 against a `maxFirmDrawdown` of $50,000. Exposure rising off dormant is the goal, not the problem.
 
-**3. Cause — and the answer to the question I set last cycle.** I predicted I would first check whether
-JPM's loss *persisted* or *mean-reverted*, because only "the fade was wrong" justifies demoting
-`xsreversion`. **It did neither: the model reversed its own sign inside 18 minutes and crystallised the
-loss.** JPM went +14 sh long (drip-accumulated 1/30s from 13:54) → `SELL 14 FILLED` at 14:11:58 → further
-SELL 2 and SELL 1 → now **−3 sh, realized −$11.53**, unrealized only −$1.57. The paper loss became a
-realized loss plus two crossings of the spread. So `xsreversion` was not early, it was wrong — *and* the
-combined forecast is sign-unstable on a 30s re-plan against signals measured at 225/900/3600s horizons.
-Note **why** it flipped: `reversion` arrived as a source on JPM (contribution −11.54 at weight 2.10, vs
-`xsreversion` −3.79) and overrode it. The system self-corrected — but only after paying for the mistake.
+**3. Cause — and it is not what any previous cycle named.** Split the book by whether the position is
+still open (script, from `/api/risk` `.positions`):
 
-**4. Danger.** No. But there is a **queued repeat of it**, which is the real finding.
+- **Names now FLAT — round-tripped: NQ, JPM, GOOGL, ES → total −$68.12.**
+- **Names still OPEN — MSFT, JNJ, AAPL, NVDA, AMZN → total +$7.21.**
+- Firm total −$60.91. The two reconcile exactly.
 
-**5. Order-level post-mortem — where the loss actually sits now.** It has moved off JPM:
+**The entire firm loss, and more, sits in positions the desk opened and then closed. The inventory it is
+actually holding is up.** The desk's *views* are not losing money; its *round trips* are. That also settles
+the change-vs-market question with no guessing: a realized round-trip loss is 100% the trading logic — no
+untouched inventory, no market move to blame.
 
-- **NQ +0.007661 (MACRO), gross $4,239, PnL −$24.55 — 81% of the entire firm loss.** ≈ −58bps.
-- JPM −3 sh, **−$13.10** (−$11.53 of it realized, i.e. already paid).
-- JNJ −6 sh, −$3.50. AMZN −$0.19, NVDA −$0.03.
-- **AAPL −4 sh, +$9.25 — the only real winner** (+$2.47 realized, +$6.78 open).
-- ES (hedge) flat, +$0.96.
+**4. Danger.** No. But the cost rate is the alarming number, not the level.
 
-**NQ has its own distinct bug.** Between 14:10:28 and 14:13:29 the desk tried to **exit NQ eight times** —
-`SELL 0.004134` (the whole position) — and every one came back `REJECTED — no market data for NQ`. By the
-time the mark returned, the target had flipped to BUY and it **added** instead (`BUY 0.003527 FILLED`
-14:24:02). A data gap silently converted an exit into an accumulation. The pre-trade guardrail was right
-to refuse; what is missing is above the floor — a refused *exit* intent is dropped rather than retained
-and retried. ES still marks at `ageMillis` ≈ 1.05M, so the futures feed gaps are not hypothetical.
+**5. Order-level post-mortem — the round trips, and what they cost per dollar traded.** LIVE turnover today
+is **$64,453 against a gross book of $18,238 — 3.53× the book turned over** in roughly seventy minutes.
+Firm realized PnL is **−9.80 bps of turnover**; fees are **0.88 bps**. **The loss is ~11× the commission.**
+It is not cost of execution, it is the *direction* of the round trips — the desk is systematically buying
+higher than it sells. Per name (realized, as bps of that name's turnover):
 
-**6. Memory applied.** Rule 63 said a sole-source fade buys more as the price falls. That is exactly what
-happened, and I checked its falsification condition before acting on it rather than assuming it.
+- **NQ −$35.82 on $8,492 → −42.19 bps.** The rule-66 failure completed: eight `REJECTED — no market data
+  for NQ` exits, then a flip to BUY and an add, then finally `SELL 0.007661 FILLED` at 14:51:50. The exit
+  the desk wanted at 14:10 was executed 40 minutes and one accumulation later.
+- **GOOGL −$20.79 on $13,991 → −14.86 bps** — the single largest turnover in the book, now flat.
+- **JPM −$12.46 on $11,911 → −10.46 bps** — last cycle's whipsaw, now closed and fully paid.
+- MSFT / NVDA / AMZN realized are each exactly **−1.00 bps** — i.e. pure fee. They have only been built,
+  never round-tripped, and they cost nothing but commission. That contrast *is* the finding.
+- **AAPL: the prediction landed exactly.** Last cycle I flagged that the combiner was about to flip the
+  book's only winner (short −4 sh, +$9.25, target +87.54). It flipped it: AAPL is now **long +10**, realized
+  **+$8.38** banked, unrealized **−$9.19**, total **−$0.81**. The winner was converted into a scratch.
 
-**7. Change vs. market.** Un-separable this window and I will not guess: the entire book was opened by code
-within the last ~40 minutes, so there is no untouched inventory whose move would be pure market. Rule 64
-still binds — 40 minutes of PnL is not evidence about a signal. The durable read is the multi-day
-telemetry, t computed by script: **`reversion` +0.57 / +1.31 / +1.36** at 225/900/3600s (939/294/86
-resolved) — the only source positive at every horizon. **`xsreversion` −0.09 / −1.43 / −1.32**, negative at
-every horizon. `trend` −0.33/+0.34/−1.10, `momentum` −0.04/+0.31/−1.45, `social` −0.89/−1.55/+0.21.
+**6. Memory applied.** Rule 63 (sole-source fade buys more as price falls), rule 65 (agreement ≡ 1.0 at
+n=1) and rule 66 (a refused exit becomes an add) all recur here, and rule 64 kept me from reading
+seventy minutes of PnL as evidence about a signal.
 
-**The mechanism I will fix next cycle — a degenerate formula, not a parameter.** `ForecastCombiner`
-computes ADR-0119's scaler as `agreement = |Σwᵢfᵢ| / Σwᵢ|fᵢ|`. **At one source that is identically 1.0**,
-by construction, whatever the source is. So the mechanism built to shrink conviction when sources fight
-awards **maximum** conviction to precisely the names with **no corroboration at all** — and the live book
-shows it pointed at the two largest targets, both driven solely by the negative-edge source:
-**GOOGL `sources: 1`, agreement 1.0, target −147.25 sh** (already ratcheting live: SELL 1→2→3→4→5→6→7→8,
-ROUTED 14:29:34) and **TSLA `sources: 1`, agreement 1.0, target +329.96 sh**, both `xsreversion` alone.
-That is the JPM shape, queued up an order of magnitude larger. `n=1` is an absence of evidence and must
-score near-minimum conviction, not maximum. Corroboration-aware agreement, with an ADR in the same commit.
+**7. The mechanism, and why GOOGL is the clean case.** GOOGL took the largest turnover in the book while
+the log says its **`trend` sensor (2 of 193 prices), its `reversion` sensor (2 of 241) and its risk-cut σ
+sensor (2 of 121) were all cold** — "this name cannot be stopped out until its mark history has
+accumulated." Only `xsreversion` was warm, because a cross-sectional fade needs one snapshot, not history.
+So a newly-promoted name is **structurally n=1**, and ADR-0119's `agreement = |Σwᵢfᵢ| / Σwᵢ|fᵢ|` is
+**identically 1.0 at n=1**, so it is **structurally full-conviction**, and its stop is **structurally off**.
+Three failures compound on precisely the names carrying the least information — and the one warm source is
+`xsreversion`, which measures negative expectancy at every horizon. TSLA (10 of 241) and ORCL (0–3) are
+queued in the same state.
 
-**Also watching, not acting on:** AAPL is the book's only winner (short, +$9.25) and its target is now
-**+87.54** — the combiner is about to flip a winner, the mirror of the JPM whipsaw. If the agreement fix
-does not settle the sign churn, holding-period discipline is the cycle after.
+Multi-day LIVE telemetry, t by script at 225/900/3600s: **`reversion` +0.38 / +1.26 / +0.73** (984/305/88
+resolved) — the only source positive at every horizon. **`xsreversion` −0.35 / −0.41 / −1.36** — negative at
+every horizon. `trend` −0.14/+0.08/−0.52, `momentum` −0.04/+0.31/−1.45, `social` −0.50/−1.75/−0.79.
+
+**Decision.** No change — the scorer holds the floor for three more cycles. Committing reasoning and memory
+only. **Next cycle's change, stated now so it is falsifiable and not retrofitted:** make conviction require
+corroboration *and* a warm risk sensor — n=1 must score near-minimum agreement rather than maximum, and a
+name whose risk-cut σ sensor is cold cannot be stopped out so it should not be sized into. One coherent
+change, with an ADR, since it is a degenerate formula plus a risk-model precondition, not a parameter tweak.
+**What I will check first:** whether META (`sources:1`, agreement 1.0, target +62.79, 13 consecutive
+posted-and-cancelled BUYs ratcheting 1→8 without a single fill) has become a fourth GOOGL by then — if it
+round-trips at a double-digit-bps loss, that is the fourth independent instance and the fix is confirmed
+before it ships; if it fills and holds profitably, my mechanism is wrong and holding-period discipline
+against the 30s re-plan is the better target instead.
