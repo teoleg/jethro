@@ -348,11 +348,35 @@ def cmd_score():
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     summary = base.get("summary", "")
 
-    # Audited snapshot — every number a verdict rests on, recomputable by anyone.
+    # Attempt the revert FIRST, so the snapshot, ledger row and heartbeat record what ACTUALLY happened
+    # rather than what the verdict asked for. A silent revert failure (git conflict) would otherwise leave
+    # a BAD commit LIVE while every downstream reader — the ledger note, the Improve page, next run's
+    # Step 0 — believes it was pulled.
+    reverted_ok = None  # None = no revert intended; True = reverted; False = revert intended but FAILED
+    if revert and sha != "unknown":
+        r = git("revert", "--no-edit", sha, check=False)
+        if r.returncode != 0:
+            git("revert", "--abort", check=False)
+            reverted_ok = False
+            print(f"score: BAD verdict but `git revert {short}` conflicted — NOT reverted; still LIVE, "
+                  f"needs a manual revert")
+        else:
+            reverted_ok = True
+            print(f"score: BAD verdict — reverted {short}")
+
+    # A revert that was intended but FAILED must never read as "reverted": mark the note that lands in both
+    # the ledger and the snapshot, so the record states plainly that the commit is still live.
+    if reverted_ok is False:
+        note = note + (" — ⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a "
+                       "manual revert")
+
+    # Audited snapshot — every number a verdict rests on, recomputable by anyone. `revertApplied` records
+    # the ACTUAL git outcome (True = reverted / False = intended but failed / None = none intended),
+    # distinct from `revert` (what the verdict ASKED for) so a failure can never masquerade as a revert.
     snap_name = f"{ts.replace(':', '').replace('-', '')}-{short}.json"
     snap = {
         "scoredAt": ts, "commit": sha, "summary": summary,
-        "verdict": verdict, "revert": revert, "note": note,
+        "verdict": verdict, "revert": revert, "revertApplied": reverted_ok, "note": note,
         "method": {"minCycles": MIN_CYCLES, "tHurdle": str(T_HURDLE),
                    "grossFloorUsd": str(GROSS_FLOOR), "exposureFrac": str(EXP_DEADBAND_FRAC)},
         "windowStats": stats,
@@ -373,17 +397,6 @@ def cmd_score():
         net=pair(before["net"], after["net"]),
         verdict=verdict, note=note.replace("|", "/"))
     prepend_ledger_row(row)
-
-    reverted_ok = None
-    if revert and sha != "unknown":
-        r = git("revert", "--no-edit", sha, check=False)
-        if r.returncode != 0:
-            git("revert", "--abort", check=False)
-            reverted_ok = False
-            print(f"score: BAD verdict but `git revert {short}` conflicted — NOT reverted; needs attention")
-        else:
-            reverted_ok = True
-            print(f"score: BAD verdict — reverted {short}")
 
     os.remove(PENDING)
     git("add", "reports/", check=False)
@@ -535,7 +548,13 @@ def cmd_status(argv):
     head = git("rev-parse", "--short", "HEAD", check=False).stdout.strip()
     snap = newest_snapshot() if scored else None
     last_verdict = snap.get("verdict") if snap else None
-    reverted = bool(snap and snap.get("revert"))
+    revert_intended = bool(snap and snap.get("revert"))
+    # `revertApplied` is the ACTUAL git outcome (absent on pre-fix snapshots → assume it applied, the old
+    # behaviour). A revert intended but not applied is a FAILURE the next run's Step 0 must see without
+    # reading git — a BAD commit is still live.
+    revert_applied = snap.get("revertApplied") if snap else None
+    revert_failed = revert_intended and revert_applied is False
+    reverted = revert_intended and not revert_failed
 
     # Claude's own reasoning for this cycle, if it wrote one (reports/last-analysis.md). Only trust it
     # when the brain actually ran this cycle — a stale file from a prior run must not look current.
@@ -552,6 +571,8 @@ def cmd_status(argv):
         action = "market-closed"
     elif not brain_ran:
         action = "no-analysis"
+    elif revert_failed:
+        action = "revert-failed"
     else:
         action = "reverted" if reverted else ("changed" if changed else "no-change")
 
@@ -564,6 +585,10 @@ def cmd_status(argv):
                     "PATH?). No diagnosis was made; the heartbeat/score still ran. Fix the loop's PATH.")
     elif not available:
         decision = f"app unreachable — not measured ({err})"
+    elif revert_failed:
+        short = (snap.get("commit") or "")[:9]
+        decision = (f"⚠️ {short} scored {last_verdict} but the auto-revert FAILED (git conflict) — the "
+                    f"commit is STILL LIVE and needs a manual revert; NOT backed off")
     elif reverted:
         short = (snap.get("commit") or "")[:9]
         decision = f"backed off {short} ({last_verdict}) — next run tries a different lever"
@@ -599,6 +624,7 @@ def cmd_status(argv):
         "underwater": underwater,
         "action": action,
         "last_verdict": last_verdict,
+        "revert_failed": revert_failed,   # a BAD verdict whose git revert conflicted — commit still live
         "decision": decision,
         "reasoning": reasoning,
         "commit": head,
