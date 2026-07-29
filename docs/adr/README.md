@@ -124,9 +124,15 @@ Index of ADRs for the Jethro trading platform. See [template.md](template.md) fo
 
 ## Status vs Implementation
 
-**Status** is the ADR lifecycle (Proposed / Accepted / Superseded); **Implementation** is what is
-actually in the code — the two diverge, which is why this column exists. Several ADRs are still
+**Status** is the ADR lifecycle (Proposed / **Implemented** / Accepted / Superseded); **Implementation**
+is what is actually in the code — the two diverge, which is why this column exists. Several ADRs are still
 *Proposed* yet fully built (0025, 0026, 0027, 0043), and some *Accepted* ones are only partial.
+
+**Implemented** is the status of an ADR authored by the continuous-improvement loop: the loop builds,
+tests green, and deploys the change in the same commit as the ADR, so the record is of a change already
+running — not a proposal awaiting a build. It still awaits owner ratification (Oleg may accept or reverse
+it); *Implemented* asserts "the code is live", *Accepted* asserts "the owner has signed off". A human
+authoring an ADR before building still uses *Proposed*.
 
 **Implementation legend:** ✅ built & in the codebase (tests where applicable) · ◐ core built, parts
 deferred · ○ accepted but no code yet · ⏸ deferred behind a stated trigger · ✖ superseded/rejected ·
@@ -163,7 +169,10 @@ deferred · ○ accepted but no code yet · ⏸ deferred behind a stated trigger
 
 ## Lifecycle
 
-`Proposed` → `Accepted` (or `Rejected`) → possibly `Superseded by ADR-XXXX`.
+`Proposed` **or** `Implemented` → `Accepted` (or `Rejected`) → possibly `Superseded by ADR-XXXX`.
 
-An ADR is **Proposed** when written, **Accepted** once the owner (Oleg) signs off.
+An ADR is **Proposed** when a human writes it before building. It is **Implemented** when the
+continuous-improvement loop authors it, because the loop builds, tests green, and deploys the change in
+the same commit — the record is of a change already running. Either way it becomes **Accepted** once the
+owner (Oleg) signs off (`Implemented` means "the code is live", `Accepted` means "the owner ratified it").
 Never edit the decision of an Accepted ADR — write a new ADR that supersedes it.

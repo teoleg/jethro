@@ -104,10 +104,12 @@ than a checklist would. Two conditions on that freedom:
 - **One coherent, self-contained change per run** — so its effect is attributable in the ledger and
   revertable. "Coherent" can be large (a whole new strategy); it must not be five unrelated edits.
 - **Design-first for architecturally-significant changes** (a new strategy, a new risk model, a new
-  data dependency, anything hard to reverse or cross-cutting): implement it *and* write a **Proposed**
-  ADR (`docs/adr/NNNN-*.md`, next number, per the repo's ADR convention) in the **same commit**. You do
-  not wait for approval — but you leave the decision record for Oleg to ratify or reverse. Small,
-  local, reversible tuning does not need an ADR.
+  data dependency, anything hard to reverse or cross-cutting): implement it *and* write its ADR
+  (`docs/adr/NNNN-*.md`, next number, per the repo's ADR convention) in the **same commit**. Because you
+  build it, test it green, and deploy it in that same cycle, the ADR records an **IMPLEMENTED** change,
+  not a speculative proposal — so set its header `**Status:** Implemented` (owner acceptance is a separate
+  step Oleg takes later; you leave the decision record for him to ratify or reverse). You do not wait for
+  approval. Small, local, reversible tuning does not need an ADR.
 
 ## Inputs (already generated this run)
 - `logs/report.md` — model-readable digest. Opens with a **⚠ SITUATION** header (live PnL/exposure +
@@ -224,8 +226,8 @@ book is the single most important *opportunity* to see. Never miss either.
    compounding memory): what the window's orders/change did to PnL/exposure, the **trigger** behind any bad
    or good move, and the **rule** for next time. 2–4 lines, specific. Commit it alongside your reasoning.
 4. Make the **one coherent change** that targets the **#1 open item in `reports/must-fix.md`** (config,
-   code, new strategy/risk model — with a Proposed ADR in the same commit if it is architecturally
-   significant). Its commit message must name the must-fix item it addresses and the metric that will
+   code, new strategy/risk model — with its ADR (`**Status:** Implemented`) in the same commit if it is
+   architecturally significant, since you build+test+deploy it this cycle). Its commit message must name the must-fix item it addresses and the metric that will
    confirm it next run, so Step 0 can grade it. If genuinely nothing is actionable, say so and stop — but
    an open must-fix item with a live cost is *always* actionable; "nothing to do" while the book bleeds is
    the failure this whole procedure exists to prevent.
