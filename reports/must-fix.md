@@ -15,6 +15,65 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-29 17:00Z (ADR-0124 at 1/6 cycles — held, no code change made)
+
+**Item 1 (agreement scaler inverted at `sources=1`) → ✅ VERIFIED and CLOSED**, on its own written
+VERIFY-BY, read live from `/api/fusion/targets`. Deployment confirmed first: the JVM started **12:45:40
+local**, 45 s after commit `3e7817e` (12:44:55), so the running process is ADR-0124.
+
+- Required: *"every `sources=1` row reads `agreement 0.000` and `combinedForecast 0.0`"*. Live: **META
+  `sources=1`, `agreement 0.000`, `combinedForecast 0.000`, `targetQty 0.000`** — the same name that read
+  `agreement 1.000`, `|forecast| 15.41` and targeted **−78.3** shares against a holding of **0** last cycle.
+- Required: *"the largest conviction in the book belongs to a corroborated name"*. Live: **MSFT
+  `sources=2`, `agreement 0.958`, `combinedForecast −10.381`**. No `sources=1` name carries a
+  `|combinedForecast|` above any multi-source name. The **15.41 (1 src) vs 8.44 (3 src)** inversion is gone.
+- Second check (the `fusion re-plan` cancellation runs): **zero cancellations in `recent_orders` after the
+  16:45:57Z restart**. Recorded as **confounded, not evidence** — pre-restart the identical pathology was
+  running on **ORCL** (15 consecutive cancels, SELL ramping 5 → 12 → 18 → … → 94, zero fills), and the
+  restart re-cut the routed set (`selector: measured 19, tradable 9`) so ORCL is no longer routed at all.
+- **Falsifier still live, and it is the scorer's to call, not this register's:** *if the ordering corrects
+  but firm realized bps does not improve over the evaluation window, the inversion was cosmetic.* The
+  scorer prints `3e7817e4f still accumulating evidence (1/6 cycles)`. If it lands ❌, re-open this item.
+
+**No code change this cycle** — `reports/.pending-baseline.json` is present and the pending change is at
+1/6, so a new change would destroy the evidence.
+
+**Evidence added to item 1 below (execution one-sidedness), not acted on:** the ORCL ramp is the TSLA
+pathology on a different name — a passive sell that never transacts, re-planned larger every 30 s, 15
+times, zero fills. That is the entry side of ADR-0084 failing to trade at all. Separately,
+`/api/attribution` reads ALPHA `totalPnl` **−$18.66** against `feesPaid` **$21.10**: the strategy book is
+positive before commission. Flagged, **not** promoted to a fee-framed item — rule 74 already disproved that
+framing once (fees were 21% of the firm realized loss); fee and adverse selection are both execution costs
+and must be split before either is blamed.
+
+**Not the target — logged only:** TCA `avgSlippageBps` **6.67** (TSLA) and **6.00** (GOOGL) against
+**0.40–0.56** for the Alpaca-WS names, on **3** and **5** fills. Real, too little turnover to matter.
+
+## OPEN (ranked, most-costly first) — as of 2026-07-29 17:00Z
+
+1. **[OPEN] Execution is one-sided by design — 61 of 65 round-trips POST to enter and CROSS to exit.**
+   *(was #2; promoted — it is now the top open item.)* `FusionExecutor.route` per ADR-0084: risk-increasing
+   rests as a DAY LIMIT at the mid, risk-reducing goes MARKET. The desk pays the crossing cost on **100%**
+   of exits and captures spread on **0%** of entries, aggregating **−11.6 bps** on **$39,363** of
+   round-tripped notional at a median **27.4-minute** turn; fees were only **21%** of that realized loss,
+   the rest adverse selection. New supporting evidence this cycle: the ORCL ramp (15 consecutive
+   `fusion re-plan` cancels, size 5 → 94, **zero** fills) — a mid-resting limit that never transacts, so
+   the entry either fills because the market came to it or does not fill at all.
+   - **Architecturally significant** — needs an ADR superseding ADR-0084, not a dial.
+   - **VERIFY-BY:** the LIMIT-in/MARKET-out share of round-trips falls below 61/65, and the aggregate
+     round-trip bps on entered-and-exited notional moves toward zero from **−11.6**.
+   - **Do not chase the holding-period buckets** (rule 77): n=65 and they are not monotone.
+
+2. **[OPEN — ops, not money] The scorer's auto-revert can fail silently.** `score-change.py` records
+   `"revert": true` in the snapshot and prints a warning when `git revert` conflicts, but nothing
+   downstream surfaces it — the ledger row still reads "❌ BAD ... reverted" while the commit is still
+   live (this is what happened to `d9f8969cc`). A future BAD change could stay in production while the
+   register believes it was pulled.
+   - **VERIFY-BY:** the ledger note for a BAD verdict distinguishes "reverted" from "revert FAILED", and
+     `run-status.json` carries the failure so the next run's Step 0 sees it without reading git.
+
+---
+
 ## Verification block — 2026-07-29 16:30Z (`d9f8969cc` scored ❌ BAD; change made: ADR-0124)
 
 **Item 1 (the delayed-price feed cohort) is ❌ FALSIFIED and closed, on its own written VERIFY-BY.** The
@@ -147,4 +206,14 @@ new one.
 ---
 
 ## VERIFIED / CLOSED
-_(none yet — items move here, struck through, once a later run confirms the fix from live telemetry.)_
+
+- ~~**Agreement scaler was inverted at `sources=1`** (ADR-0119 → fixed by ADR-0124).~~ ✅ VERIFIED
+  2026-07-29 17:00Z from `/api/fusion/targets`: **META `sources=1` → `agreement 0.000`,
+  `combinedForecast 0.000`, `targetQty 0.000`** (was `1.000` / `15.41` / **−78.3** shares against a holding
+  of 0), and the book's largest conviction is now a corroborated name (**MSFT `sources=2`,
+  `agreement 0.958`, `−10.381`**). *Re-open if the pending scorer verdict on `3e7817e4f` lands ❌ — the
+  falsifier is that a corrected ordering which does not improve firm realized bps was cosmetic.*
+- ~~**Delayed-price feed cohort loses money.**~~ ❌ FALSIFIED 2026-07-29 16:30Z on its own VERIFY-BY —
+  `/api/marks` `ageMillis` showed GOOGL **1.0s**, NQ **0.9s**, TSLA **0.7s**, all `source=alpaca`, and
+  `markAgeMillis` **50** on every open position. The cohort was real; the latency mechanism was not (the
+  names were single-source, rule 79).

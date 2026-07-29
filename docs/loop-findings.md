@@ -2320,3 +2320,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Attribution this window (honest split):** no change of mine has been live for three cycles, so
   **none** of the +$13.76 PnL or the −$11,145 gross is attributable to one. It is the standing
   exploration configuration trading against the market.
+
+## 2026-07-29 17:00Z — no-change (ADR-0124 at 1/6): the fix landed exactly as specified
+
+- **Rule 83 — a VERIFY-BY written as a *sign or ordering* test, not a PnL test, is what let this be graded
+  in one cycle.** ADR-0124's VERIFY-BY named the exact rows: *every `sources=1` name reads `agreement
+  0.000` / `combinedForecast 0.0`, and the largest conviction belongs to a corroborated name*. Live:
+  **META `sources=1`, `agreement 0.000`, `fc 0.000`, `tgt 0.000`** (was `1.000` / `15.41` / **−78.3**
+  shares against a holding of 0); top of book is **MSFT `sources=2`, `agreement 0.958`, `fc −10.381`**.
+  ✅ VERIFIED with no appeal to money, which is still the scorer's at 1/6. Write mechanism VERIFY-BYs.
+- **Rule 84 — check deployment by process start time, not by `git log`.** The JVM started **12:45:40
+  local**, 45 s after commit `3e7817e` (12:44:55). That one line is what separates "graded the change"
+  from "graded code the app never ran" — and the loop has been burned by exactly that before.
+- **Rule 85 — a restart re-cuts the tradable set, so any post-restart "the churn stopped" claim is
+  confounded.** The second half of the VERIFY-BY (cancellation runs stop) passed — zero `fusion re-plan`
+  cancels post-restart — but `selector` went to `measured 19, tradable 9` in the same minute and ORCL, the
+  name that had been ramping, left the routed set entirely. Recorded as confounded, not as evidence.
+  Warm-up and the fix change the same observable; only the *first* check discriminates.
+- **Rule 86 — the ORCL ramp is the TSLA pathology with a different ticker, and it indicts ADR-0084, not
+  fusion.** Pre-restart: 15 consecutive `fusion re-plan` cancels, SELL size ramping **5 → 12 → 18 → … →
+  94**, **zero** fills. A DAY LIMIT resting at the mid, re-planned every 30 s, simply never transacts —
+  the entry side of one-sided execution failing *silently*, so the desk holds nothing while believing it
+  is working an order. Promoted to must-fix **#1**.
+- **Rule 87 — resist re-adopting the fee framing rule 74 already killed, even when it looks compelling.**
+  `/api/attribution` reads ALPHA `totalPnl` **−$18.66** against `feesPaid` **$21.10** — the strategy book
+  is positive before commission, which is a very tempting "cost is the whole loss" story. But rule 74
+  measured fees at only **21%** of the firm realized loss. Fee and adverse selection are both *execution*
+  costs; split them before blaming either, and note the firm figure is dominated by **NQ −$35.82** and
+  **GOOGL −$40.71**, which are frozen (byte-identical run-over-run, zero exposure, not trading).
+- **Attribution this window (honest split):** ADR-0124 touches only META and TSLA, both at `quantity 0`
+  with no new PnL. Everything that moved — JPM **−$24.88** over 41 fills ending flat, JNJ **+$42.64** over
+  44 fills ending flat, AMZN **−$14.79**, GOOG **−$8.28** — is a multi-source name the change did not
+  silence. So **none** of the −$31.33 is attributable to it. The gross fall $28,332.63 → $9,651.27 is
+  claimed for **neither** side: ADR-0124 shrinks targets book-wide *and* the restart re-cut the universe,
+  in the same minute, and these numbers cannot separate them.
