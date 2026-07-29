@@ -1,103 +1,77 @@
-ADR-0124 holds for a second cycle — every uncorroborated name still sizes at zero — and at 2/6 it is still measuring, so no new change; the order churn it was hoped to stop has resumed on AAPL, which puts the blame back on execution where it belongs.
+Re-measured must-fix #1 with code and it is dead: the "one-sided execution costs −11.6 bps" figure was an n=65 artifact — at n=186 the cohort is +1.68 bps, statistically zero — so I closed it instead of spending the next change superseding ADR-0084, and the real #1 is what it has always been: no source has edge.
 
-*(Every figure below is read live from `/api/risk`, `/api/fusion/targets`, `/api/attribution`, `/api/var`,
-`/api/signals/telemetry`, or the tables in `logs/report.md`. None is authored here — invariant 7 /
-ADR-0016. The PnL verdict stays the scorer's.)*
-
-## Step 0 — did last run's change land, and is it still doing what it claimed?
-
-**Deployed:** yes, and proven behaviourally rather than from `git log` (rule 84). The JVM restarted at the
-17:07 heartbeat (`uptimeSeconds` **1359** at a 17:30:01Z report), and `/api/fusion/targets` reads
-`sources=1 → agreement 0.000` — a value only the ADR-0124 code can produce. No revert commit for
-`3e7817e` exists, so the running process is ADR-0124.
-
-**✅ VERIFIED (second consecutive cycle), on the written VERIFY-BY:**
-
-- *"every `sources=1` row reads `agreement 0.000` and `combinedForecast 0.0`"* — live: **TSLA
-  `sources=1, agreement 0.000, fc 0.000, targetQty 0`**; **META `sources=1, agreement 0.000, fc 0.000,
-  targetQty 0`**; **GOOGL `sources=1, fc 0.000`**. All three carry a non-trivial raw `xsreversion`
-  contribution (TSLA **+13.72**, META **+8.06**) that is correctly discarded for want of a second sensor.
-- *"the largest conviction in the book belongs to a corroborated name"* — live: **NVDA `sources=3,
-  agreement 0.571, combinedForecast +8.206`**. Not one `sources=1` name carries any conviction at all.
-
-**⚠️ The second check FAILS — and last cycle's reading of it was the confounded one.** Last cycle I
-recorded "zero `fusion re-plan` cancels post-restart" as *confounded, not evidence* (rule 85). That
-caution was right: after the 17:07 restart the churn is **back** — **3 of 17** post-restart orders are
-`fusion re-plan` cancels, and AAPL is running the same ramp ORCL ran: SELL **1 FILLED → 1 FILLED →
-1 CANCELLED → 2 CANCELLED → 3 ROUTED**, each re-planned 30 s apart at a larger size. So the cancellation
-churn is **not** an agreement-scaler artefact; it is independent of ADR-0124 and belongs entirely to
-must-fix #1 (one-sided execution). That is a real narrowing of the diagnosis, not a regression of the fix
-— the first check, the decisive one, is clean.
-
-The falsifier stays live and is the scorer's to call: *if the ordering corrects but firm realized bps does
-not improve over the window, the inversion was cosmetic.* `score-change.py score` prints
-**`3e7817e4f still accumulating evidence (2/6 cycles)`**.
+*(Every figure below is read live from `/api/risk`, `/api/fusion/targets`, `/api/attribution`,
+`/api/signals/telemetry`, or the tables in `logs/report.md`, or computed by the FIFO reconstruction
+described below. None is authored here — invariant 7 / ADR-0016. The PnL verdict stays the scorer's.)*
 
 ## Situation
 
-1. **Money.** Underwater, but up on the window and up over three. Total PnL **−$50.75**, **+$1.74** vs last
-   run, **+$37.29** over the last 3. `pnl_growth_pct` **35.01%** against the **+1.0%** target;
-   `on_track=true`, `stale=false`, `underwater=true`. Not bleeding.
-2. **Risk.** Not the problem, and moving the right way. Gross **$18,414.69 = 1.2%** of the $1.5M firm cap
-   (headroom **$1,481,585**); net **−$163.02 = 0.0%** of the $1M net cap. Gross **+$7,742.82** on the
-   window — a book coming off dormant with 98.8% of its ceiling unused, which is the goal, not a concern.
-   Breaker `halted: false`. VaR95 **$158.64**, ES95 **$210.62** on **$18,414.41** covered with
-   `skippedExposure 0.00`. Regime `CHOP` / `CALM`, `volRatio 0.88`.
-3. **Cause.** ADR-0124 is at 2/6 and unscored. Its live footprint is confined to the three names it
-   silences — TSLA, META, GOOGL — all at `targetQty 0`, none of which traded this window. The window's
-   money came from names it did not touch.
-4. **Danger.** No. Underwater is the only flag; there is no near-cap bleed and nothing to de-risk.
+Total PnL **−$68.86**, gross **$20,547.61**, net **$379.75**. Since last run PnL **−31.16**, gross
+**+2,530.03**; over the last 3 runs PnL **−46.50**, gross **−7,785.02**. Gross is **1.4%** of the
+$1,500,000 firm cap (**$1,479,452** headroom), net **0.0%** of the $1,000,000 net cap. Breaker
+`halted: false`; regime CALM, trend CHOP, volRatio 1.33. The flag is **UNDERWATER** only — this is **not**
+the DANGER state, because the book is nowhere near a cap or the breaker. Nothing here calls for de-risking.
 
-## Order-level post-mortem, and change-vs-market attribution (honest)
+**No code change this cycle.** `reports/.pending-baseline.json` is present and the scorer prints
+`3e7817e4f still accumulating evidence (3/6 cycles)`. Piling a change on top would destroy the evidence.
 
-The window traded **42 fills / 17 cancels / 1 routed** across AAPL, GOOG, NVDA, JPM, JNJ, AMZN, MSFT and
-the ES hedge. Turnover is concentrated in JNJ (**44** fills, **$58,850**), JPM (**41**, **$28,661**), AAPL
-(**37**, **$27,964**), GOOG (**30**, **$27,041**), MSFT (**36**, **$22,487**) — every one of them a
-**three-source** name ADR-0124 leaves alone. **So none of the +$1.74 is attributable to my change**; it is
-the standing exploration configuration trading against the market.
+## Step 0 — verdict 1: ADR-0124 → ✅ VERIFIED, third consecutive cycle
 
-The **+$7,742.82** gross rise I *can* attribute, and not to ADR-0124 either: it is the **hedge doing its
-job**. `/api/risk` shows EQUITY gross **$9,288.86** with net **−$9,288.86** (all nine equity positions
-short) against a single ES position of **$9,125.84** long, netting the firm to **−$163.02**. The three ES
-BUYs at 17:15/17:18/17:20 built that leg; `/api/hedging` reads `status: ON-TARGET`, `held 0.024588 →
-target 0.028131`. Gross rose because a hedged book carries both legs — exactly as designed.
+Deployment proven behaviourally, not from `git log`: `uptimeSeconds` **1430** at a report stamped
+**18:00:01.608Z** puts the JVM start at **17:36:11Z**, and `/api/fusion/targets` reads TSLA / META / GOOGL
+`sources=1 → agreement 0.000, fc 0.000, targetQty 0.00` — a value only the ADR-0124 code produces. The
+book's largest conviction is corroborated: NVDA `sources=3, agreement 0.798, fc −5.544`.
 
-Book split: ALPHA **−$18.57** (realized **+$5.16**, unrealized **−$23.73**, fees **$21.60**), HEDGE
-**+$3.64**, MACRO **−$35.82** — and MACRO is realized-only with `grossExposure 0.00`, a frozen historical
-NQ loss in this epoch, not an ongoing bleed. Restating rule 87 deliberately: ALPHA's realized turning
-**positive** against $21.60 of fees is *not* licence to re-adopt the fee framing rule 74 already killed.
+## Step 0 — verdict 2: must-fix #1 → ✅ VERIFIED *as falsified*, and closed
 
-## What I checked on the standing priority (edge), and why it argues for patience
+Its VERIFY-BY was *"aggregate round-trip bps moves toward zero from −11.6, on a count materially above
+65."* I re-measured it with code — FIFO round-trip reconstruction over all **276** LIVE fills joined to
+`orders.order_type`, in exact `Decimal`, with each instrument's `contract_multiplier` applied. The
+reconstruction **reconciles to live**: it returns MACRO **−$35.82** against `/api/risk`
+`MACRO.realizedPnl` **−35.82347655**.
 
-Per the standing priority I asked the first question — does *anything* predict returns here? Cohort-
-clustered t on `/api/signals/telemetry` (LIVE, 3600 s), computed from the endpoint's own `avgReturnBps`,
-`cohorts` and `stdCohortMeanBps` by the same construction the edge gate uses:
-
-| source | n | cohorts | avgReturnBps | t |
+| cohort | round-trips | closed notional | net PnL | net bps |
 |---|---|---|---|---|
-| reversion | 109 | 29 | **+8.783** | **+1.22** |
-| trend | 115 | 30 | −8.634 | −1.25 |
-| xsreversion | 53 | 6 | −11.524 | −1.05 |
-| social | 37 | 9 | −4.370 | −0.39 |
-| momentum | 15 | 5 | −13.257 | −1.45 |
+| LIMIT-in → MARKET-out | **186** (was 65) | $104,394.11 | **+$17.49** | **+1.68** (was **−11.6**) |
+| ALPHA (all equities) | 189 | $106,291.89 | +$20.30 | +1.91 |
+| HEDGE (ES) | 5 | $8,521.60 | −$9.31 | −10.92 |
+| MACRO (NQ) | 2 | $4,263.64 | −$35.82 | −84.02 |
 
-**Reversion is the only positive expectancy in the book, and at t = +1.22 it is short of the 1.5 hurdle —
-not by much, and on only 29 cohorts.** The fusion weights already reflect this (`reversion` **2.384**, the
-largest by a factor of two). This also explains the thing that looks alarming in `/api/fusion/targets` and
-is not: NVDA aims **+148.27** against a holding of **−3.0** with `deltaQty 0.0`, JPM **−69.89** against
-**0** with `deltaQty 0.0`. That is `PositionBuffer` under a reduce-only edge gate, holding size back
-because nothing has cleared the hurdle. The gate is behaving correctly; the desk holds little because it
-has measured little. The honest read is that reversion needs **more cohorts**, not more tuning — another
-argument for letting the window run rather than perturbing the book.
+Clustered by instrument (9 clusters), ALPHA's round-trip net bps is **+1.220 mean, t = +0.13** —
+indistinguishable from zero. The one-sidedness is structurally real (**186 of 196** round-trips are
+LIMIT-in → MARKET-out) but it is **not costing money**; the **−11.6 bps was an n=65 artifact**. I closed
+the item rather than spend the desk's next change writing an ADR to supersede ADR-0084 against a cost that
+is not there.
 
-## Why no code change
+## What that leaves as #1 — the standing priority, now with direct proof
 
-`reports/.pending-baseline.json` is present and the scorer prints **2/6 cycles**. Stacking a change on a
-measurement in progress destroys the evidence, and this cycle's own finding — that the cancellation churn
-is independent of ADR-0124 — is exactly the kind of signal a second change would have muddied. Holding.
+The desk turns over **$106,291.89** of closed equity notional across **189** round-trips to earn
+**+$20.30**. Execution is essentially free and the result is essentially zero, because the signal being
+executed has no measured edge. **Reversion is the one live candidate and the only source positive at every
+horizon**, with expectancy scaling in horizon the way a real signal does and noise does not: **225 s
++0.144 bps (266 cohorts, t +0.40) → 900 s +2.300 bps (101 cohorts, t +1.38) → 3600 s +9.066 bps (29
+cohorts, t +1.26)**. Every other source is negative at the long horizons — trend **−8.634 / t −1.25**,
+xsreversion **−8.887 / t −0.87**, momentum **−13.257 / t −1.45**, social **−2.111 / t −0.20**. It needs
+**cohorts, not tuning**.
 
-Next cycle, once `3e7817e4f` is scored, the target is must-fix **#1**: execution is one-sided by design
-(`FusionExecutor.route`, ADR-0084 — entries rest at the mid, exits cross). The AAPL ramp is now the
-second-named instance of a mid-resting limit that re-plans larger every 30 s instead of transacting, and
-it is the entry side of that scheme failing silently. Changing it needs an ADR superseding ADR-0084, not
-a dial.
+## Attribution this window — honest split
+
+ADR-0124 silences TSLA, META and GOOGL; all three sat at `targetQty 0.00` and did not trade. Every name
+that did trade (GOOG, AAPL, AMZN, NVDA, JNJ, JPM, MSFT, ES) is a multi-source name the change does not
+touch. So **none** of the **−$31.16** is attributable to ADR-0124. Decomposed by book, the firm's realized
+loss is **entirely** two NQ round-trips (MACRO **−$35.82**, closed and flat) against ALPHA equities at
+**+$20.30**; the rest is **−$31.54** of unrealized mark on 9 open equity shorts — market, not change. The
+gross rise is the hedge: EQUITY gross **$11,433.45** at net **−$8,734.41** against a **$9,114.16** long ES
+leg, firm net **$379.75**.
+
+## Checked and deliberately not promoted
+
+- **NQ is 100% of the realized loss.** Hypothesis *"fusion sizes futures without the contract multiplier,
+  so NQ is 20× oversized"* → **falsified**: `TargetPlanner` sizes on `price × contractMultiplier`. n=2, so
+  log, don't chase.
+- **GOOG `targetQty −73.22` vs `currentQty +4.00` at `deltaQty −0.010`** is not a freeze — ADR-0102
+  `withinTarget` clamps the aim to flat because the holding opposes the current target, and
+  `bufferedDelta` then trades to the near edge of the band. Working as designed.
+- **`fusion re-plan` churn is unchanged** at **9 of 20** post-restart orders, with GOOG the third named
+  ramp after ORCL and AAPL. Loud, but it lives in the cohort that just measured **+1.68 bps**, so it is
+  not where the money goes.

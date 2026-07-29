@@ -15,6 +15,89 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-29 18:00Z (ADR-0124 at 3/6 cycles — held, no code change made)
+
+**ADR-0124 → ✅ VERIFIED for a third consecutive cycle** on its decisive VERIFY-BY, read live from
+`/api/fusion/targets`. Deployment proven behaviourally, not from `git log` (rule 84): `uptimeSeconds`
+**1430** at a report stamped **18:00:01.608Z** puts the JVM start at **17:36:11Z**, and the endpoint reads
+`sources=1 → agreement 0.000`, a value only the ADR-0124 code produces.
+
+- **TSLA `sources=1, agreement 0.000, fc −0.000, targetQty 0.00`**; **META `sources=1, agreement 0.000,
+  fc 0.000, targetQty 0.00`**; **GOOGL `sources=1, agreement 0.000, fc −0.000`**.
+- The book's largest conviction is corroborated: **NVDA `sources=3, agreement 0.798, fc −5.544`**. No
+  `sources=1` name carries any conviction.
+
+### 🎯 Item #1 → ✅ VERIFIED **AS FALSIFIED** on its own VERIFY-BY — closing it, and NOT superseding ADR-0084
+
+Item #1's VERIFY-BY was: *"the aggregate round-trip bps on entered-and-exited notional moves toward zero
+from −11.6, on a round-trip count materially above 65."* It did — and then some. Re-measured this cycle by
+**FIFO round-trip reconstruction over all 276 LIVE fills** joined to `orders.order_type`, in exact
+`Decimal`, with each instrument's `contract_multiplier` applied (the reconstruction **reconciles to live**:
+it returns MACRO **−$35.82**, against `/api/risk` `MACRO.realizedPnl` **−35.82347655**):
+
+| cohort | round-trips | closed notional | net PnL | net bps |
+|---|---|---|---|---|
+| LIMIT-in → MARKET-out | **186** (was 65) | $104,394.11 | **+$17.49** | **+1.68** (was **−11.6**) |
+| ALPHA book (all equities) | 189 | $106,291.89 | +$20.30 | +1.91 |
+| HEDGE (ES) | 5 | $8,521.60 | −$9.31 | −10.92 |
+| MACRO (NQ) | 2 | $4,263.64 | −$35.82 | −84.02 |
+
+Clustered by instrument (9 clusters), ALPHA's round-trip net bps is **+1.220 mean, t = +0.13** — the
+cohort is **statistically indistinguishable from zero**, not profitable and not costly. The **−11.6 bps**
+that ranked this item #1 was an **n=65 small-sample artifact** (rule 77, which the register applied to the
+holding-period buckets but not to the headline figure itself). The one-sidedness is still structurally
+real — **186 of 196** round-trips are LIMIT-in → MARKET-out — but it is **no longer evidenced as costly**,
+so an ADR superseding ADR-0084 would be spending the desk's one change on a cost that is not there.
+**Closed. Do not re-open without a fresh code-computed measurement.**
+
+### Checked this cycle, NOT promoted (recorded so a later cycle does not chase them)
+
+- **NQ is 100% of the firm's realized loss** (−$35.82 on 2 round-trips, −84.02 bps) while 189 equity
+  round-trips made +$20.30. Hypothesis *"fusion sizes futures without the contract multiplier, so NQ is
+  20× oversized"* → **FALSIFIED**: `TargetPlanner` sizes on `price × contractMultiplier` (line 64,
+  `unitValue`). **n=2** — rule 77, log, don't chase.
+- **GOOG `targetQty −73.22` against `currentQty +4.00` with `deltaQty −0.010`** reads as a refusal to
+  trade; it is not. Read `PositionBuffer`: ADR-0102 `withinTarget` clamps the aim to flat because the
+  holding opposes the current target, and `bufferedDelta` then trades to the **near edge** of the band.
+  Working as designed (rule 90 again).
+- **`fusion re-plan` churn is unchanged and still not costly**: **9 of 20** post-restart orders are
+  re-plan cancels (45%), with **GOOG** now the *third* named ramp after ORCL and AAPL — BUY 1 FILLED
+  17:45:53 → 2/1/2 CANCELLED → 1 FILLED 17:47:53 → 1/2/4 CANCELLED, re-planned 30 s apart at growing size.
+  It is loud, it is not expensive: the cohort it belongs to measures **+1.68 bps**.
+
+## OPEN (ranked, most-costly first) — as of 2026-07-29 18:00Z
+
+1. **[OPEN — promoted to #1] No source clears the edge gate, and that — not execution — is the whole
+   problem.** This cycle's reconstruction is the direct proof: the desk turns over **$106,291.89** of
+   closed equity notional across **189** round-trips to earn **+$20.30 (+1.91 bps, clustered t = +0.13)**.
+   Execution is essentially free and the result is essentially zero, because the signal being executed has
+   no measured edge. Firm PnL is therefore decided by whatever else happens to move — 2 NQ trades and
+   −$31.54 of unrealized mark on 9 open equity shorts.
+   - **Reversion is the one live candidate, and it is the only source positive at EVERY horizon**, with
+     expectancy scaling in horizon the way a real signal does and noise does not (`/api/signals/telemetry`,
+     LIVE, clustered t from the endpoint's own `avgReturnBps`/`cohorts`/`stdCohortMeanBps`):
+     **225 s +0.144 bps (266 cohorts, t +0.40) → 900 s +2.300 bps (101 cohorts, t +1.38) → 3600 s
+     +9.066 bps (29 cohorts, t +1.26)**. Every other source is negative or zero at the two longer horizons
+     (trend −8.634 / t −1.25; xsreversion −8.887 / t −0.87; momentum −13.257 / t −1.45; social −2.111 /
+     t −0.20, all at 3600 s).
+   - **The action is cohorts, not tuning** (rule 90). Re-weighting or re-tuning a source measured at
+     t = +1.38 does not make it significant; more independent cohorts might. The alternative lever is a
+     genuinely NEW predictor taken through the ADR-0049 OOS gate.
+   - **VERIFY-BY:** reversion's 900 s clustered t crosses the **1.5** hurdle from **+1.38** at **101**
+     cohorts (or its 3600 s t crosses from **+1.26** at **29**), **or** a new source is admitted by the
+     gate. Secondary: ALPHA round-trip net bps rises meaningfully above **+1.91** with clustered t above
+     **+0.13** on a materially larger sample.
+
+2. **[OPEN — ops, not money] The scorer's auto-revert can fail silently.** `score-change.py` records
+   `"revert": true` in the snapshot and prints a warning when `git revert` conflicts, but nothing
+   downstream surfaces it — the ledger row still reads "❌ BAD ... reverted" while the commit is still
+   live (this is what happened to `d9f8969cc`). A future BAD change could stay in production while the
+   register believes it was pulled.
+   - **VERIFY-BY:** the ledger note for a BAD verdict distinguishes "reverted" from "revert FAILED", and
+     `run-status.json` carries the failure so the next run's Step 0 sees it without reading git.
+
+---
+
 ## Verification block — 2026-07-29 17:30Z (ADR-0124 at 2/6 cycles — held, no code change made)
 
 **ADR-0124 → ✅ VERIFIED for a second consecutive cycle** on its first (decisive) VERIFY-BY, read live from
@@ -271,6 +354,14 @@ new one.
 
 ## VERIFIED / CLOSED
 
+- ~~**Execution is one-sided by design — every entry posts, every exit crosses.**~~ ✅ VERIFIED **as
+  FALSIFIED** 2026-07-29 18:00Z on its own VERIFY-BY, by FIFO round-trip reconstruction over all 276 LIVE
+  fills (exact `Decimal`, `contract_multiplier` applied, reconciles to `/api/risk` MACRO
+  **−35.82347655**). The LIMIT-in → MARKET-out cohort went **−11.6 bps at n=65 → +1.68 bps at n=186**;
+  clustered by instrument the ALPHA book's round-trips are **+1.220 mean bps, t = +0.13** — indistinguishable
+  from zero. The structure is real (**186 of 196** round-trips), the cost is not. **No ADR superseding
+  ADR-0084 should be written against this.** Re-open only on a fresh code-computed measurement showing a
+  negative cohort bps with clustered t below −1.5.
 - ~~**Agreement scaler was inverted at `sources=1`** (ADR-0119 → fixed by ADR-0124).~~ ✅ VERIFIED
   2026-07-29 17:00Z from `/api/fusion/targets`: **META `sources=1` → `agreement 0.000`,
   `combinedForecast 0.000`, `targetQty 0.000`** (was `1.000` / `15.41` / **−78.3** shares against a holding

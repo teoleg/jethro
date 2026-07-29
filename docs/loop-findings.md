@@ -2385,3 +2385,33 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   ADR-0124 does not touch; the three names it silences (TSLA, META, GOOGL) sat at `targetQty 0` and did
   not trade. So **none** of the **+$1.74** is attributable to the change; it is the standing exploration
   configuration against the market. The gross rise is attributable to the **hedge**, not to the change.
+
+## 2026-07-29 18:00Z — no-change (ADR-0124 at 3/6): the re-measurement killed must-fix #1
+
+- **Rule 92 — apply the small-sample rule to the HEADLINE number, not just to the sub-buckets.** Must-fix
+  #1 carried an explicit "do not chase the holding-period buckets, n=65 and not monotone" caveat for three
+  cycles — while the **−11.6 bps** headline that ranked the item #1 rested on *the same 65 round-trips*.
+  Re-measured this cycle by FIFO reconstruction over all **276** LIVE fills: LIMIT-in → MARKET-out is
+  **n=186 at +1.68 bps**, and clustered by instrument the ALPHA book is **+1.220 mean bps, t = +0.13** —
+  statistically zero. The item was closed rather than acted on. Had the loop not re-measured, the next
+  change would have been an ADR superseding ADR-0084 to fix a cost that does not exist.
+- **Rule 93 — a re-measurement is only trustworthy if it RECONCILES to a live endpoint; check that first.**
+  The reconstruction initially understated futures by their contract multiplier (NQ 20×, ES 50×), which
+  showed up as MACRO **−$1.95** against `/api/risk` `MACRO.realizedPnl` **−35.82347655**. With the
+  multiplier applied it returns **−$35.82** — an exact match, which is what licenses quoting the equity
+  cohort figures at all. Reconcile the derived number to a number the app publishes, or don't use it.
+- **Rule 94 — "the desk executes for free and earns nothing" is the proof that the problem is EDGE.** 189
+  equity round-trips, **$106,291.89** of closed notional, **+$20.30** net. That is the standing priority
+  stated as a measurement rather than an assertion: cost is not the constraint, so no amount of execution
+  or combiner work can help. Reversion remains the only source positive at **every** horizon, with
+  expectancy scaling in horizon as a real signal does — **+0.144 bps (266 cohorts, t +0.40) at 225 s,
+  +2.300 (101, t +1.38) at 900 s, +9.066 (29, t +1.26) at 3600 s** — and needs **cohorts, not tuning**.
+- **Rule 95 — decompose the firm loss by BOOK before diagnosing anything.** The firm's realized loss is
+  **entirely** two NQ round-trips (MACRO **−$35.82**, −84.02 bps, now closed and flat) against ALPHA
+  equities at **+$20.30**. The obvious hypothesis — futures sized without their contract multiplier — was
+  **falsified** by reading `TargetPlanner` (`unitValue = price × contractMultiplier`). n=2: log, don't chase.
+- **Attribution this window (honest split):** the three names ADR-0124 silences (TSLA, META, GOOGL) all sat
+  at `targetQty 0.00` and did not trade; every name that traded is multi-source and untouched by it. So
+  **none** of the **−$31.16** is attributable to the change. It is **−$31.54** of unrealized mark on 9 open
+  equity shorts — market. The gross rise is the hedge leg (EQUITY net **−$8,734.41** against ES
+  **+$9,114.16**, firm net **$379.75**), not added risk (rule 91).
