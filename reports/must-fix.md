@@ -15,6 +15,82 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-29 19:00Z (ADR-0124 at 5/6 cycles — held, no code change made)
+
+**ADR-0124 → ✅ VERIFIED for a fifth consecutive cycle**, read live from `/api/fusion/targets`.
+Deployment proven behaviourally, not from `git log` (rule 84): `uptimeSeconds` **836** against a
+`traffic.timestampMillis` of **1785351601499** puts the JVM start at **18:46:05Z**, and the endpoint
+reads `sources=1 → agreement 0.000` — a value only the ADR-0124 code produces.
+
+- **TSLA / META / GOOGL** all read `sources=1, agreement 0.000, combinedForecast −0.0, targetQty 0`.
+  None of the three appears anywhere in the window's `recent_orders` (17:50Z–18:57Z), so the rule is
+  holding and costing nothing.
+- Corroborated names still carry all the conviction: **NVDA `sources=3, agreement 0.834, fc −5.227`**,
+  **GOOG `sources=3, agreement 0.826, fc −4.753`**.
+
+Its scored verdict remains the scorer's: `score-change.py score` prints
+**`3e7817e4f still accumulating evidence (5/6 cycles)`**, and `reports/.pending-baseline.json` is present
+— so **no code change was made this cycle**.
+
+### 🎯 Item #1 (NEW — and it is costing money right now) — every held equity position is FROZEN inside its own no-trade band, and ADR-0118's escape hatch is gated on the disabled edge gate
+
+**The defect.** `PositionBuffer.band()` sizes the no-trade region as
+`|target| × Forecast.TARGET_ABS ÷ |forecast| × buffer-fraction` — half the average position the name
+would carry *at a typical-strength forecast*. `Forecast.TARGET_ABS = 10.0` while this book's live
+`combinedForecast` magnitudes run **0.045 – 8.338**, so that ratio inflates the band by 1.2×–222×. The
+band comes out **tens of shares wide against holdings of 2–13 shares**, and every position falls inside
+it. `bufferedDelta` then returns exactly zero, every cycle, indefinitely.
+
+ADR-0118 diagnosed precisely this trap and wrote the escape (`isTrappedExit` → close the holding in
+full). But that call sits inside `if (gate != null && !gate.mayIncrease(...))` in
+`PositionBuffer.apply`, and `jethro.fusion.edge-gate.enabled=false` (ADR-0122, owner-directed
+exploration mode) means **the branch never executes**. The fix is present in the source and unreachable
+in the configuration the desk actually runs.
+
+**Proven live, not inferred.** Band recomputed from `/api/fusion/targets` in exact decimal, using the
+two constants read from source (`Forecast.TARGET_ABS = 10.0`, `jethro.fusion.buffer-fraction=0.5`):
+
+| name | \|forecast\| | target | held | band | \|gap\| | inside band? | live deltaQty |
+|---|---|---|---|---|---|---|---|
+| AMZN | 4.0065 | 70.4258 | −13.0 | **87.8884** | 13.00 | **yes** | 0.0000 |
+| AAPL | 3.2970 | 78.4625 | −9.0 | **118.9907** | 9.00 | **yes** | 0.0012 |
+| MSFT | 8.3379 | 75.1371 | −8.0 | **45.0573** | 8.00 | **yes** | 0.0210 |
+| GOOG | 0.2142 | −2.0340 | −8.0 | **47.4879** | 5.97 | **yes** | 0.0000 |
+| NVDA | 0.0450 | 0.5657 | −2.0 | **62.8966** | 2.00 | **yes** | 0.0000 |
+
+GOOG is the cleanest proof that this is not merely a stalled *entry*: target and holding are the **same
+side** (both short), the desk wants to be short 2.03 and is short 8.00, and it cannot cut the difference.
+
+**What it costs.** These five frozen positions carry essentially the whole mark-to-market loss. From
+`/api/risk` positions: **AMZN −$42.33**, **MSFT −$26.49**, **GOOG −$22.81** unrealized, against firm
+total unrealized **−$83.90**. The desk is holding the losers because the band will not let it out.
+
+**VERIFY-BY (next run).** Recompute the table above from `/api/fusion/targets`. The fix is confirmed when
+**at least one name with `|gap| < band` reports a non-zero, risk-REDUCING `deltaQty`** — i.e. a holding
+whose own forecast opposes it (or whose target is smaller than it) is actually being wound down — and
+`/api/risk` `positions` shows the corresponding `quantity` moving toward zero. Still-broken if all five
+held names again read `deltaQty 0.0000` with gaps far inside their bands.
+
+### Item #2 (NEW) — ADR-0125 is committed but undeployed, carries NO baseline, and will land inside ADR-0124's scoring window
+
+`ecf079c` (V48, ~12 new equities across 7 sectors) was committed **18:54:55Z** by an out-of-band session
+(`Co-Authored-By: Claude Opus 4.8`, with a `Claude-Session` URL — not a loop commit). It is **not
+running**: Flyway's `flyway_schema_history` tops out at **version 47**, and the 18:46Z boot log reads
+`MARKET DATA: Alpaca real-time WS for 7 equities`, not the ~19 V48 would create.
+
+The risk is to the evidence, not to the money. `reports/.pending-baseline.json` still names
+**3e7817e4f (ADR-0124)**, which reaches 6/6 and is scored **next cycle**. If the wrapper restarts the app
+before then, V48 applies, the live cross-section roughly triples, and the resulting gross/PnL move is
+attributed by the scorer to ADR-0124 — a change that has nothing to do with it. A ❌ BAD verdict would
+then auto-revert a change whose own five-cycle record is clean.
+
+**VERIFY-BY (next run).** Read `flyway_schema_history` max version and the boot log's
+`Alpaca real-time WS for N equities`. If N has jumped while the ledger row scoring `3e7817e4f` was
+written in the same cycle, that row is **contaminated and must be discounted in words** — the loop must
+not treat it as evidence about ADR-0124. Never hand-edit the ledger or the baseline to compensate.
+
+---
+
 ## Verification block — 2026-07-29 18:30Z (ADR-0124 at 4/6 cycles — held, no code change made)
 
 **ADR-0124 → ✅ VERIFIED for a fourth consecutive cycle**, read live from `/api/fusion/targets`.

@@ -2445,3 +2445,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   It is **−$71.91** of unrealized mark on four equity shorts against **−$10.42** realized — market. The
   **−$1,634.51** gross fall is the hedge tracking down (EQUITY net **−$6,409.26** vs one ES leg at
   **+$6,507.25**, firm net **$98.00**, `status: ON-TARGET`), not a de-risking (rule 91).
+
+## 2026-07-29 19:00Z — no-change (ADR-0124 at 5/6): the desk cannot get out of its own positions
+
+- **Rule 99 — a no-trade band scaled by the TARGET, not by the HOLDING, freezes every small position the
+  desk actually has.** `PositionBuffer.band()` = `|target| × Forecast.TARGET_ABS ÷ |forecast| ×
+  buffer-fraction`, with `TARGET_ABS = 10.0` and `buffer-fraction = 0.5`. This book's live
+  `|combinedForecast|` runs **0.045–8.338**, so the `10 ÷ |fc|` ratio inflates the band 1.2×–222×. Every
+  held name computed from `/api/fusion/targets` in exact decimal is inside its own band — AMZN band
+  **87.89** vs gap **13.00**, AAPL **118.99** vs **9.00**, MSFT **45.06** vs **8.00**, GOOG **47.49** vs
+  **5.97**, NVDA **62.90** vs **2.00** — so `bufferedDelta` returns **0.0000** every cycle, indefinitely.
+  GOOG is the clean proof it is not a stalled entry: target and holding are the **same side** (short 2.03
+  wanted, short 8.00 held) and the desk still cannot cut the difference.
+- **Rule 100 — this is the SECOND rule found gated behind the disabled edge gate; treat that as a class,
+  not a coincidence.** ADR-0118 diagnosed this exact trap and wrote the escape (`isTrappedExit` → close
+  the holding in full), but the call sits inside `if (gate != null && !gate.mayIncrease(...))` and
+  `jethro.fusion.edge-gate.enabled=false` (ADR-0122). So the fix exists in source and is unreachable in
+  the configuration the desk runs — exactly like rule 96's `anyAdmitted`. **When a gate is disabled, audit
+  every rule whose body reads that gate's verdict; the ones that matter most are the ones that get out.**
+- **Rule 101 — the frozen names ARE the loss.** `/api/risk` positions: AMZN **−$42.33**, MSFT **−$26.49**,
+  GOOG **−$22.81** unrealized against a firm unrealized of **−$83.90**. The desk is holding its losers
+  because the band will not let it out, not because a model chose to.
+- **Rule 102 — a commit is not a deployment, and an out-of-band commit can poison a pending measurement.**
+  `ecf079c` (ADR-0125, V48, ~12 new equities) was committed **18:54:55Z** by a non-loop session after the
+  **18:46:05Z** boot; Flyway tops out at **version 47** and the boot log still reads `Alpaca real-time WS
+  for 7 equities`, so it is NOT running. `.pending-baseline.json` still names **3e7817e4f (ADR-0124)**,
+  which scores next cycle — if the app restarts first, V48's universe change lands inside ADR-0124's
+  window and the scorer credits/blames the wrong commit. Discount that row in words; never hand-edit the
+  ledger or the baseline to compensate.
+- **Attribution this window (honest split):** the three names ADR-0124 silences (TSLA, META, GOOGL) do not
+  appear in `recent_orders` at all, so **none** of the **−$26.18** is the change's. The window's trading is
+  three build-then-dump round trips in a `CHOP` regime that roughly offset — JNJ **+$15.98**, NVDA
+  **+$37.40**, JPM **−$35.20** realized — and the rest is **−$83.90** of unrealized mark on the five frozen
+  shorts: market, on positions the desk is structurally unable to close. The **+$154.97** gross rise is the
+  ES hedge tracking (`ON-TARGET`, `trackingRate 0.992506`), not added risk (rule 91).
