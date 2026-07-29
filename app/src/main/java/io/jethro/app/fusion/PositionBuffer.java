@@ -67,9 +67,10 @@ import java.util.Map;
  * <p><b>What it can never do.</b> It never widens a trade the desk was not already going to make in the
  * same direction on the same aim path, it never moves the aim past the target, and it never buffers an
  * exit: a flat target (the ADR-0086 chandelier cut, the ADR-0065 orphan unwind, the ADR-0027 breaker
- * above it) snaps the aim to zero and trades the whole position, exactly as before. Where the ADR-0064
- * edge gate says a name may not increase, the order is clamped reduce-only and the aim is re-seeded to
- * where the desk will actually be, so intent cannot run away from a book that is not allowed to follow it.
+ * above it) snaps the aim to zero and trades the whole position, exactly as before. Where the desk may
+ * not increase a name — the ADR-0064 edge gate, or ADR-0126's unarmed trailing stop — the order is
+ * clamped reduce-only and the aim is re-seeded to where the desk will actually be, so intent cannot run
+ * away from a book that is not allowed to follow it. See {@link #mayIncrease}.
  *
  * <p>Exact decimal throughout (invariant 1); the only doubles are the dimensionless rate and fraction.
  * It prices nothing and asserts no money number (invariant 7 / ADR-0016).
@@ -111,6 +112,20 @@ public final class PositionBuffer {
      * @param adjustmentRate the ADR-0080 derived partial-adjustment fraction for this cycle
      */
     public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate) {
+        return apply(targets, gate, adjustmentRate, null);
+    }
+
+    /**
+     * ADR-0126 — as above, plus the second reason a name may not have risk ADDED to it: its ADR-0086
+     * trailing-stop σ sensor has not warmed, so the desk has no measured distance at which it would cut
+     * the position and the risk cut cannot protect it. {@code stopArmed} answers "can this name be
+     * stopped out?"; null means unwired, which leaves every path byte-identical.
+     *
+     * @param adjustmentRate the ADR-0080 derived partial-adjustment fraction for this cycle
+     * @param stopArmed      per-name predicate: true when the risk-cut sensor can price this name's stop
+     */
+    public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
+                        java.util.function.Predicate<String> stopArmed) {
         if (targets == null || targets.isEmpty()) {
             aims.clear();
             return new Result(List.of(), Map.of(), 0, 0);
@@ -128,7 +143,7 @@ public final class PositionBuffer {
             double width = widthFor(t.instrument(), gate, edgeBps);
             BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held, width),
                     target, rate);
-            if (gate != null && !gate.mayIncrease(t.instrument())) {
+            if (!mayIncrease(gate, stopArmed, t.instrument())) {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
                 // accumulate into one large order the moment the gate reopens.
@@ -154,6 +169,34 @@ public final class PositionBuffer {
         }
         aims.keySet().retainAll(snapshot.keySet()); // a name that left the book leaves no intent behind
         return new Result(out, Collections.unmodifiableMap(snapshot), inside, traded);
+    }
+
+    /**
+     * May this name have risk ADDED to it this cycle? Two independent reasons say no, and either alone
+     * is sufficient:
+     * <ul>
+     *   <li><b>ADR-0064/0072</b> — the edge gate has no measured edge that beats this name's measured
+     *       round trip. {@code gate} null means the measurement is not wired, which is silence, not a
+     *       veto.</li>
+     *   <li><b>ADR-0126</b> — the name's ADR-0086 trailing-stop σ sensor has not warmed, so there is no
+     *       measured distance at which the desk would cut it. A position that cannot be stopped out is
+     *       one the desk's own risk control cannot protect, and opening it is taking risk it has no
+     *       exit for. {@code stopArmed} null means the sensor is not wired, which is again silence.</li>
+     * </ul>
+     *
+     * <p><b>Why this is a conjunction and not a branch inside the gate's.</b> The σ-cold veto is
+     * evaluated whether or not the edge gate is wired or enabled. A rule whose body only runs inside
+     * {@code if (gate != null && !gate.mayIncrease(...))} is dead the moment the gate is switched off —
+     * which is the desk's current configuration under ADR-0122 — and a risk control that disappears with
+     * an unrelated dial is not a control. The two reasons are therefore combined here, at the one place
+     * the delta is finally decided.
+     */
+    private static boolean mayIncrease(EdgeGate.Decision gate,
+                                       java.util.function.Predicate<String> stopArmed, String instrument) {
+        if (gate != null && !gate.mayIncrease(instrument)) {
+            return false;
+        }
+        return stopArmed == null || stopArmed.test(instrument);
     }
 
     /**

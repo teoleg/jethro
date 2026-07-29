@@ -1,76 +1,72 @@
-Every equity position the desk holds is frozen inside a no-trade band 5–30× wider than the position itself, and ADR-0118's escape hatch — written for exactly this trap — is gated on the edge gate that ADR-0122 disabled, so it can never fire.
+The desk was planning its two largest positions — KO and WMT — in names its own log says it cannot stop out, so an unarmed trailing stop is now a veto on OPENING (ADR-0126).
 
-*(Every figure below is read live from `/api/risk`, `/api/fusion/targets`, `/api/var`, `/api/breaker`,
-`/api/regime`, `/api/attribution`, the Flyway history, or is computed from those endpoints in exact
+*(Every figure below is read live from `/api/risk`, `/api/fusion/targets`, `/api/signals/telemetry`,
+`/api/attribution`, the turnover/TCA aggregates or the app log, or is computed from those in exact
 decimal by the script quoted in the commit. None is authored here — invariant 7 / ADR-0016. The PnL
 verdict stays the scorer's.)*
 
 ## Situation
 
-1. **Money.** Underwater and drifting down. Total PnL **−$130.75**, **−$26.18** on the window,
-   **−$93.05** over the last 3 runs. `pnl_growth_pct` **−99.22%** against the **+1.0%** target —
-   `on_track=false`, `stale=true`, `underwater=true`.
-2. **Risk.** Not the problem. Gross **$24,743.86 = 1.6%** of the $1,500,000 firm cap (headroom
-   **$1,475,256**); net **$284.74 = 0.0%** of the $1,000,000 net cap. VaR95 **$192.34**, ES95
-   **$256.17** on covered exposure **$24,743.86** with `skippedExposure 0.00`. Breaker `halted: false`.
-   Regime `CALM` / `CHOP`, `volRatio 0.98`.
-3. **Cause.** ADR-0124 is at **5/6** and unscored. Its footprint is confined to the three names it
-   silences — TSLA, META, GOOGL — none of which appears in the window's `recent_orders`.
-4. **Danger.** **No.** UNDERWATER is the only flag; 98.4% of the gross ceiling is unused and the breaker
-   is clear. Nothing here calls for de-risking.
+1. **Money.** Recovering, still underwater. Total PnL **−$16.77**, **+$68.30** on the window and
+   **+$86.68** over the last 3 runs — the first positive 3-run move in some time. Fees paid **$28.68**
+   against a firm total of −$16.77, so cost is still the larger number than the loss.
+2. **Risk.** Ample room, and no danger. Gross **$12,610.76 = 0.8%** of the $1,500,000 firm cap
+   (headroom **$1,487,389**); net **−$1,420.66 = 0.1%** of the $1,000,000 net cap. Breaker clear. The
+   only flag is UNDERWATER. Gross **fell $12,283** on the window, which is the ES hedge tracking down,
+   not a de-risking.
+3. **Cause.** ADR-0124 scored **⚠️ INCONCLUSIVE** and was kept; `.pending-baseline.json` is gone, so a
+   new change is due this cycle. The app restarted at ~19:09Z and ADR-0125's V48 universe is now live
+   (`instruments 49`, 20 names in fusion) — that restart, not any loop change, is what moved the book.
+4. **Danger.** No. Nothing near a cap or the breaker.
 
-**No code change this cycle.** `reports/.pending-baseline.json` is present and `score-change.py score`
-prints `3e7817e4f still accumulating evidence (5/6 cycles)`. Stacking a change on a measurement in
-progress destroys the evidence.
+## Step 0 — must-fix #1 re-graded against THIS run's telemetry: ⚠️ RE-SCOPED, not actionable as written
 
-## Step 0 — ADR-0124 → ✅ VERIFIED, fifth consecutive cycle
+Last cycle's #1 was "every held equity position is frozen inside its own no-trade band". **It is no
+longer reproducible.** I recomputed every band in exact decimal from `/api/fusion/targets` at the
+*correct* width — `jethro.fusion.position-buffer.fraction=0.10`, not the `0.5` the register quoted,
+which is a different dial (`jethro.fusion.buffer-fraction`, superseded at the routing stage by
+ADR-0094). At 0.10 the band is `|target| ÷ |forecast|`, and forecasts have strengthened since the
+restart. GOOG, JPM and AAPL carry non-zero `deltaQty` right now; no held name is frozen. What remains
+is that a name with `|combinedForecast| < 1` can never be opened — which is Carver's rule working as
+designed on a view a tenth of typical strength, not a defect. **The register's #1 was measured with the
+wrong constant; corrected in `reports/must-fix.md`.**
 
-Deployment proven behaviourally rather than from `git log` (rule 84): `uptimeSeconds` **836** against
-`traffic.timestampMillis` **1785351601499** puts the JVM start at **18:46:05Z**, and
-`/api/fusion/targets` reads `sources=1 → agreement 0.000, fc −0.0, targetQty 0` for **TSLA, META and
-GOOGL** — a value only the ADR-0124 code produces. Corroborated names still carry all the conviction
-(**NVDA `sources=3, agreement 0.834, fc −5.227`**, **GOOG `sources=3, agreement 0.826, fc −4.753`**).
+## The new #1 — the desk had no exit for its biggest bets
 
-## The new must-fix #1 — the book cannot get out of its own positions
+`FusionLifecycle.seedVolatility` logs, at WARN, `risk-cut σ sensor still cold for KO … this name cannot
+be stopped out until its mark history has accumulated`. **Nothing consumed that warning.** Eight names
+with live published targets — **KO, WMT, BAC, MCD, PG, XOM, NEE, HD** — have never armed an ADR-0086
+stop, and the two **largest absolute targets in the whole book** are among them: **KO short 101.879300**
+and **WMT short 74.222500**, against a largest *protected* target of NVDA 37.621300. ADR-0125 widened
+the universe for breadth and every new name arrived unprotected, so the desk was about to put its
+biggest risk exactly where it had no way out. That inverts the owner's thesis, which is add only when
+risk is *contained* and cut when it is not — a position that cannot be cut keeps its whole left tail.
 
-`PositionBuffer.band()` sizes the no-trade region as `|target| × Forecast.TARGET_ABS ÷ |forecast| ×
-buffer-fraction`. With `TARGET_ABS = 10.0` and this book's live `|combinedForecast|` running
-**0.045–8.338**, that ratio inflates the band to **tens of shares against holdings of 2–13 shares**.
-Recomputed in exact decimal from `/api/fusion/targets`:
+**Shipped ADR-0126:** a name whose σ sensor has not warmed is **reduce-only** — the desk may always cut,
+hold or be stopped out of it, never open or enlarge it. Applied inside `PositionBuffer` because that
+step re-derives every delta and discards upstream clamps, and evaluated **independently of the edge
+gate**: ADR-0075's clamp and ADR-0118's escape both sit inside `if (gate != null && !gate.mayIncrease
+(...))` and are dead while ADR-0122 holds `edge-gate.enabled=false`. That is the third rule found behind
+that dead branch, so this one deliberately does not depend on it. No number introduced — the condition
+is the sensor's own `sigmaPerSample(...).isPresent()`, the same reading `TrailingRiskCut` needs before
+it will cut.
 
-| name | \|fc\| | target | held | band | \|gap\| | inside band? | live deltaQty |
-|---|---|---|---|---|---|---|---|
-| AMZN | 4.0065 | 70.4258 | −13.0 | **87.8884** | 13.00 | **yes** | 0.0000 |
-| AAPL | 3.2970 | 78.4625 | −9.0 | **118.9907** | 9.00 | **yes** | 0.0012 |
-| MSFT | 8.3379 | 75.1371 | −8.0 | **45.0573** | 8.00 | **yes** | 0.0210 |
-| GOOG | 0.2142 | −2.0340 | −8.0 | **47.4879** | 5.97 | **yes** | 0.0000 |
-| NVDA | 0.0450 | 0.5657 | −2.0 | **62.8966** | 2.00 | **yes** | 0.0000 |
+## On edge — checked, and the honest answer is still "none significant"
 
-**All five held names are inside their band, so `bufferedDelta` returns zero every cycle, indefinitely.**
-GOOG proves this is not a stalled *entry*: target and holding are the same side — short 2.03 wanted
-against short 8.00 held — and the desk cannot cut the difference. ADR-0118 diagnosed this exact trap and
-wrote the escape (`isTrappedExit` → close in full), but the call sits inside
-`if (gate != null && !gate.mayIncrease(...))`, and `jethro.fusion.edge-gate.enabled=false` (ADR-0122)
-means that branch never runs. **The fix is in the source and unreachable in the configuration the desk
-actually runs** — the second instance this week of a rule gated behind the disabled edge gate (rule 96,
-`anyAdmitted`). These frozen names carry the loss: **AMZN −$42.33**, **MSFT −$26.49**, **GOOG −$22.81**
-unrealized against a firm unrealized of **−$83.90**.
-
-## Item #2 — ADR-0125 is committed, undeployed, and has no baseline
-
-`ecf079c` (V48, ~12 new equities) was committed **18:54:55Z** by an out-of-band session, after the
-**18:46:05Z** boot. It is not running: Flyway tops out at **version 47** and the boot log reads
-`Alpaca real-time WS for 7 equities`. `.pending-baseline.json` still names **3e7817e4f (ADR-0124)**,
-which scores next cycle — so if the app restarts first, V48's universe change lands inside ADR-0124's
-window and the scorer will attribute it to ADR-0124. Flagged so next run discounts that row in words
-rather than hand-editing anything.
+Per-source cohort t-stats from `/api/signals/telemetry` (`avgReturnBps ÷ stdCohortMeanBps/√cohorts`),
+against the desk's own ~3 bps measured round trip (1.00 bps fee + 0.5–0.7 bps slippage each way):
+reversion is the only source positive at **all three** horizons (+7.62 bps @3600s, t≈1.1; +2.17 @900s,
+t≈1.3; +0.14 @225s) but clears neither the 1.5 hurdle nor cost at the short horizons. **xsreversion is
+negative at every horizon** (−3.57 @3600s, −0.87 @900s) while carrying fusion weight 0.860, and social
+is negative at every horizon on weight 1.030. That is worth acting on — but re-weighting sources is
+combiner work, and it is not worth a cycle while the desk can still open risk it cannot close. Queued
+as must-fix #2.
 
 ## Attribution this window — honest split
 
-The three names ADR-0124 silences did not trade, so **none** of the **−$26.18** is the change's. The
-window's orders are a JNJ round trip (built 18:00–18:08, sold 25 at 18:10:34, **+$15.98** realized), a
-JPM round trip (built 18:16–18:35, sold 28 at 18:37:27, **−$35.20** realized) and an NVDA round trip
-(**+$37.40** realized) — build-then-dump whipsaws in a `CHOP` regime, roughly offsetting. The rest is
-**−$83.90** of unrealized mark on the five frozen shorts — market, on positions the desk is structurally
-unable to close. The gross rise of **+$154.97** is the ES hedge tracking (`status: ON-TARGET`,
-`trackingRate 0.992506`), not added risk (rule 91).
+**None** of the move is attributable to a loop change: ADR-0124's footprint is names at `targetQty 0`,
+and no loop commit was deployed into this window — the JVM restart that brought ADR-0125's V48 universe
+live is what changed the book. The window's realised PnL is two closed-out losers (**GOOGL −$40.71** on
+6.0 bps slippage, **MACRO/NQ −$35.82**, both now flat) against four winners (**NVDA +$42.15**, **AAPL
++$24.41**, **GOOG +$21.30**, **JNJ +$15.98**) and the **HEDGE book +$10.50**. ALPHA is **+$8.56 net of
+$27.22 of fees**; the firm is negative because MACRO gave back **−$35.82**. Market and mix, not code.

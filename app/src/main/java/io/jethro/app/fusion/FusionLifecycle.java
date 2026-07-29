@@ -312,9 +312,14 @@ public final class FusionLifecycle implements AutoCloseable {
             // between that and where it is is worth paying spread for. It runs after the risk cut so a
             // flat target reaches it as a flat AIM and is still worked in full, and it re-applies the
             // ADR-0064 gate itself because it re-derives the delta rather than clamping the old one.
+            // ADR-0126: and the buffer is also where the desk refuses to OPEN a name whose ADR-0086
+            // trailing stop has no measured σ yet — the risk cut above cannot protect a position it
+            // cannot price a distance for, so the desk holds no risk it has no exit for. Passed in here
+            // rather than clamped upstream because this step re-derives every delta from the aim, and
+            // evaluated independently of the edge gate so switching that gate off cannot silence it.
             var buffered = positionBuffer == null
                     ? new PositionBuffer.Result(targets, Map.of(), 0, targets.size())
-                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate());
+                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate(), this::stopArmed);
             targets = buffered.targets();
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
                     normalised.multiplier(), normalised.coveredNames(),
@@ -498,6 +503,21 @@ public final class FusionLifecycle implements AutoCloseable {
     private java.time.Instant markInstant(String instrument) {
         Long millis = markTimeFor == null ? null : markTimeFor.apply(instrument);
         return millis == null || millis <= 0 ? null : java.time.Instant.ofEpochMilli(millis);
+    }
+
+    /**
+     * ADR-0126 — can this name be stopped out? True when the ADR-0086 σ sensor has warmed enough to
+     * price a cut distance for it. With no sensor wired there is no claim to make and every name reads
+     * armed, which leaves the book byte-identical to the behaviour before this control existed.
+     *
+     * <p>Read from the sensor's own warm-up state, not from a threshold: the same
+     * {@code sigmaPerSample(...).isPresent()} that {@link #seedVolatility} logs the cold warning from
+     * and that {@link TrailingRiskCut} requires before it will cut. So "the desk may open it" and "the
+     * risk cut can protect it" are the same question answered in one place, and the answer arrives
+     * exactly one cycle after the seed succeeds — no number is introduced (invariant 7 / ADR-0016).
+     */
+    private boolean stopArmed(String instrument) {
+        return streamVol == null || streamVol.sigmaPerSample(instrument).isPresent();
     }
 
     /** Replays this name's stored recent prices into the σ sensor the first time it is planned. */

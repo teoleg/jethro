@@ -454,6 +454,72 @@ class PositionBufferTest {
         assertThat(exit.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-40.000000"));
     }
 
+    /**
+     * ADR-0126 — a name whose ADR-0086 trailing-stop σ sensor has not warmed may not have risk added to
+     * it, INDEPENDENTLY of the edge gate (here {@code null}, i.e. the gate switched off as ADR-0122
+     * leaves it). This is the live KO plan the control was diagnosed from: the desk planned its single
+     * largest position, short 101.879300, in a name it had logged as unable to be stopped out.
+     */
+    @Test
+    void aNameThatCannotBeStoppedOutIsNeverOpened() {
+        var plan = List.of(target("KO", 2.8267, "-101.879300", "0"));
+        // band = 101.879300 x 10 / 2.8267 x 0.10 = 36.041780, so the aim has to e-fold out past it
+        // before the first order — 14 cycles at a = 0.032784 (aim = target x (1 − (1 − a)^n)).
+        PositionBuffer warm = new PositionBuffer(0.10);
+        BigDecimal opened = null;
+        for (int cycle = 0; cycle < 14; cycle++) {
+            opened = warm.apply(plan, null, RATE, armed(true)).targets().get(0).deltaQty();
+        }
+        // Armed, cycle 14: aim −37.991903, gap 37.991903 > band ⇒ sell to the band's near edge.
+        assertThat(opened).isEqualByComparingTo(new BigDecimal("-1.950123"));
+
+        // Cold: reduce-only against a flat holding is exactly zero, and it stays zero forever — the
+        // intent cannot accumulate either, so nothing is waiting to fire the moment the clamp lifts.
+        PositionBuffer cold = new PositionBuffer(0.10);
+        for (int cycle = 0; cycle < 14; cycle++) {
+            var result = cold.apply(plan, null, RATE, armed(false));
+            assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+            assertThat(result.aims().get("KO")).isEqualByComparingTo("0");
+        }
+    }
+
+    /**
+     * A cold name the desk already holds can still be got OUT of — the clamp is reduce-only, never a
+     * freeze. Held short 10 while the forecast has crossed to the long side, so ADR-0102 clamps the
+     * intent to flat: armed, that is an ordinary rated unwind; cold, ADR-0118's trapped-exit escape
+     * closes it in full. The escape is reachable here with the edge gate OFF, which is the point — its
+     * own branch sits inside the gate's and is dead while ADR-0122 holds.
+     */
+    @Test
+    void aNameThatCannotBeStoppedOutCanStillBeExited() {
+        var plan = List.of(target("AAPL", 2.9237, "24.100800", "-10"));
+        BigDecimal armed = new PositionBuffer(0.10).apply(plan, null, RATE, armed(true))
+                .targets().get(0).deltaQty();
+        BigDecimal cold = new PositionBuffer(0.10).apply(plan, null, RATE, armed(false))
+                .targets().get(0).deltaQty();
+        // band = 24.100800 x 10 / 2.9237 x 0.10 = 8.243253; aim 0, gap 10 ⇒ edge 1.756747, of which
+        // the unwinding part is worked at the derived rate: 1.756747 x 0.032784 = 0.057593.
+        assertThat(armed).isEqualByComparingTo(new BigDecimal("0.057593"));
+        // Cold: the whole short is bought back this cycle. Strictly risk-reducing — |held + delta| = 0.
+        assertThat(cold).isEqualByComparingTo(new BigDecimal("10.000000"));
+        // And an order that would ADD to a holding is removed outright, whatever its size.
+        assertThat(TargetPlanner.reduceOnly(new BigDecimal("-18.236587"), new BigDecimal("-7")))
+                .isEqualByComparingTo("0");
+    }
+
+    /** Unwired (null predicate) is silence, not a veto: every path stays byte-identical. */
+    @Test
+    void anUnwiredStopSensorChangesNothing() {
+        var plan = List.of(target("AAPL", -9.64, "-142.319300", "-40"));
+        assertThat(new PositionBuffer(0.10).apply(plan, null, RATE, null).targets().get(0).deltaQty())
+                .isEqualByComparingTo(new PositionBuffer(0.10).apply(plan, null, RATE)
+                        .targets().get(0).deltaQty());
+    }
+
+    private static java.util.function.Predicate<String> armed(boolean armed) {
+        return instrument -> armed;
+    }
+
     @Test
     void disabledBufferIsNotThisClassAndZeroFractionTradesTheWholeGapToTheAim() {
         PositionBuffer buffer = new PositionBuffer(0.0);

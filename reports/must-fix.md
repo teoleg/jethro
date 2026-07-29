@@ -15,6 +15,63 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-29 19:30Z (ADR-0124 scored ⚠️ INCONCLUSIVE and kept — a new change was due; ADR-0126 shipped)
+
+**Prior item #1 → ⚠️ RE-SCOPED (measured with the wrong constant), struck below the line.** The register
+quoted `jethro.fusion.buffer-fraction=0.5`; `PositionBuffer` is wired from
+`jethro.fusion.position-buffer.fraction=0.10` (`FusionConfig:211`) — a different dial. At the true width
+the band is `|target| ÷ |forecast|`, not `5 × |target| ÷ |forecast|`. Recomputed live in exact decimal
+from `/api/fusion/targets`: **GOOG `deltaQty 1.495053`, AAPL `2.704668`, JPM `0.506787`** — no held name
+is frozen. What survives is that `|combinedForecast| < 1` cannot open a position (BAC 0.7660, MCD
+0.7418, PG/XOM 0.3529, NEE 0.2893), which is the buffering rule behaving correctly on a view a tenth of
+typical strength. Not a defect; dropped from the register.
+
+### 🎯 Item #1 (NEW, and it was about to put the desk's largest risk somewhere it had no exit) — ADDRESSED THIS CYCLE by ADR-0126
+
+**The defect.** `FusionLifecycle.seedVolatility` logs at WARN `risk-cut σ sensor still cold for {} …
+this name cannot be stopped out until its mark history has accumulated`, and **nothing consumed it**.
+The planner sized on forecast and volatility budget alone, so a name could be given a position the same
+cycle the log said ADR-0086 could not protect it.
+
+**Proven live from the app log + `/api/fusion/targets`.** Warmed (`risk-cut σ sensor warmed … from 121
+stored prices`): MSFT, AAPL, NVDA, AMZN, GOOG, NQ, JNJ, JPM. Never warmed, yet carrying a published
+target: **KO, WMT, BAC, MCD, PG, XOM, NEE, HD** — and the two largest absolute targets in the entire
+book are in that set:
+
+| name | target | σ sensor | largest protected target for comparison |
+|---|---|---|---|
+| KO | **−101.879300** | cold (3 of 121 prices) | NVDA 37.621300 |
+| WMT | **−74.222500** | cold (3 of 121) | — |
+| BAC | 19.708000 | cold (3 of 121) | — |
+| JNJ | 24.416700 | warmed | — |
+
+**The fix (ADR-0126).** `PositionBuffer.mayIncrease` now vetoes an increase for two independent reasons —
+the ADR-0064/0072 edge gate, **or** an unarmed σ sensor. Reduce-only, so cutting is always available;
+the aim is re-seeded so intent cannot accumulate behind the veto. Deliberately evaluated with
+`gate == null` handled, because ADR-0075's clamp and ADR-0118's escape both sit inside
+`if (gate != null && !gate.mayIncrease(...))` and are dead while ADR-0122 holds the gate off.
+
+**VERIFY-BY (next run).** In `/api/fusion/targets`, every name for which the log has NOT printed
+`risk-cut σ sensor warmed <name>` must read `deltaQty 0.000000` while `currentQty` is `0`; and no such
+name may appear in `recent_orders` with a BUY/SELL that increases exposure. Conversely, once
+`risk-cut σ sensor warmed KO` appears, KO must begin trading on the ordinary aim path. Today's failing
+witnesses: KO, WMT, BAC, MCD, PG, XOM, NEE, HD.
+
+### Item #2 (open, queued) — two fusion sources carry real weight while measuring NEGATIVE at every horizon
+
+From `/api/signals/telemetry`, cohort t-stat = `avgReturnBps ÷ (stdCohortMeanBps ÷ √cohorts)`:
+**xsreversion** −3.5725 bps @3600s and −0.8669 @900s (negative at every horizon) on live fusion weight
+**0.860**; **social** −1.5647 @3600s, −2.9127 @900s, −0.0450 @225s on weight **1.030**. The only source
+positive at all three horizons is **reversion** (+7.6173 @3600s t≈1.1, +2.1683 @900s t≈1.3, +0.1366
+@225s), which still clears neither the 1.5 hurdle nor the desk's ~3 bps measured round trip (1.00 bps
+fee + 0.5–0.7 bps slippage per side). Not taken this cycle: it is combiner work, and the standing
+priority puts it below a control hole that lets the desk open risk it cannot close.
+
+**VERIFY-BY.** `/api/fusion/targets` `weights` for `xsreversion` and `social` measured against their
+`/api/signals/telemetry` `avgReturnBps` — a source negative at every horizon should not outweigh the
+only consistently positive one.
+
+
 ## Verification block — 2026-07-29 19:00Z (ADR-0124 at 5/6 cycles — held, no code change made)
 
 **ADR-0124 → ✅ VERIFIED for a fifth consecutive cycle**, read live from `/api/fusion/targets`.

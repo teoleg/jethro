@@ -2479,3 +2479,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **+$37.40**, JPM **−$35.20** realized — and the rest is **−$83.90** of unrealized mark on the five frozen
   shorts: market, on positions the desk is structurally unable to close. The **+$154.97** gross rise is the
   ES hedge tracking (`ON-TARGET`, `trackingRate 0.992506`), not added risk (rule 91).
+
+## 2026-07-29 19:30Z — ADR-0126: the desk was sizing its biggest bets in names it could not stop out
+
+- **Rule 103 — a WARN nothing consumes is not a control, it is a confession.** `FusionLifecycle` has
+  logged `risk-cut σ sensor still cold for {} — this name cannot be stopped out` since ADR-0086 shipped,
+  and no code ever read it. ADR-0125's widening turned that into the desk's dominant risk: **KO
+  −101.879300** and **WMT −74.222500**, the two largest absolute targets in the whole book, were both in
+  names that had never armed a stop (3 of 121 prices seeded), against a largest *protected* target of
+  NVDA 37.621300. **When a log line states a risk control cannot protect something, something in the
+  code must branch on that same condition — grep for the predicate behind every WARN you write.**
+- **Rule 104 — verify a register item's CONSTANT before acting on it, not just its symptom.** Last
+  cycle's must-fix #1 computed the no-trade band with `jethro.fusion.buffer-fraction=0.5`; `PositionBuffer`
+  is wired from `jethro.fusion.position-buffer.fraction=0.10` (`FusionConfig:211`). Five times too wide,
+  and the whole "every position is frozen" diagnosis was an artefact of it — live `deltaQty` is
+  **1.495053 GOOG / 2.704668 AAPL / 0.506787 JPM**, nothing frozen. Two same-named dials in one
+  properties file is enough to invalidate a cycle's work; **read the wiring, not the property name.**
+- **Rule 105 — the dead-branch class now has three members; assume it, do not discover it.** ADR-0075's
+  reduce-only clamp, ADR-0118's trapped-exit escape and (nearly) this control all want to live inside
+  `if (gate != null && !gate.mayIncrease(...))`, which is unreachable while ADR-0122 holds
+  `edge-gate.enabled=false`. ADR-0126 is therefore a **conjunction that returns a verdict when
+  `gate == null`**. Bonus: for a σ-cold name, ADR-0118's escape becomes reachable with the gate off.
+  **Any new rule that vetoes risk must be written to work with every optional gate absent.**
+- **Rule 106 — a clamp applied before `PositionBuffer` is a no-op.** That step re-derives every delta
+  from the aim and discards whatever was computed upstream, which is why ADR-0064's clamp had to be
+  re-applied inside it. Put the veto where the delta is finally decided.
+- **Attribution this window (honest split):** **none** of the **+$68.30** is a loop change's — no loop
+  commit was deployed into this window; the ~19:09Z JVM restart brought ADR-0125's V48 universe live
+  (`instruments 49`) and that is what moved the book. Realised: two closed-out losers (**GOOGL −$40.71**
+  at 6.0 bps slippage, **MACRO/NQ −$35.82**) against **NVDA +$42.15 / AAPL +$24.41 / GOOG +$21.30 /
+  JNJ +$15.98** and **HEDGE +$10.50**. ALPHA is **+$8.56 net of $27.22 fees**; the firm is negative
+  only because MACRO gave back **−$35.82**. Market and mix, not code.
+- **Edge check (still no):** reversion is the only source positive at all three horizons (**+7.6173 bps
+  @3600s t≈1.1**, +2.1683 @900s t≈1.3, +0.1366 @225s) and clears neither the 1.5 hurdle nor the ~3 bps
+  round trip. **xsreversion is negative at every horizon (−3.5725 / −0.8669) on weight 0.860** and
+  **social negative at every horizon on weight 1.030** — queued as must-fix #2, not taken, because
+  re-weighting is combiner work and ranks below a hole that lets the desk open unclosable risk.
