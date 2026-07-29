@@ -2285,3 +2285,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   one is at 5/6 — so **none** of the −$6.42 run-over-run move is attributable to a new change of mine. It is
   the standing exploration-mode configuration trading against the market. Do not credit or blame a change
   for it.
+
+## 2026-07-29 16:30Z — the feed thesis was wrong about the mechanism and right about the names
+
+- **Rule 78 — re-test a thesis against the metric that IS the mechanism, not the one that correlates with
+  it.** Two cycles were spent building the case that GOOGL/NQ/TSLA/ES lose money because they are priced
+  off a 15-minute Yahoo poll. The case rested on order-book *behaviour* (reposts collapsing onto one
+  price) and a startup log line. The direct measurement — `/api/marks` `ageMillis` and `/api/risk`
+  `markAgeMillis` — was never read. Read live this cycle it says GOOGL **1.0s**, NQ **0.9s**, TSLA
+  **0.7s**, META **0.5s**, all `source=alpaca`, and `markAgeMillis` **50** on every open position. Only
+  GBPUSD and ES are stale (**1383s**) and both hold **zero** exposure. The thesis is falsified. **Before
+  building a fix, read the metric the mechanism is literally made of.**
+- **Rule 79 — the cohort was right, the reason was wrong: those names are SINGLE-SOURCE, not delayed.**
+  META and TSLA are called by `xsreversion` alone. `UniversePromotionService` promotes names with no
+  history, so the discovery-promoted set is simultaneously the yahoo-symbology set *and* the
+  one-sensor-has-warmed set — two explanations perfectly confounded in the same names. The loss share is
+  still real (**26.7%** of turnover, **58%** of gross losses); the cause is breadth, not latency.
+- **Rule 80 — a ratio that is 1 "by construction" is not a safety property, it is a blind spot.**
+  ADR-0119 sized conviction by `|Σwᵢfᵢ|/Σwᵢ|fᵢ|` and recorded "every single-source name is byte-identical"
+  as *safe*. Live it inverted the book: META `sources=1, agreement=1.000, |forecast| 15.41` — the largest
+  conviction on the desk, **1.8×** the best-corroborated name (NVDA, 3 sources, 0.812 → 8.44) — against a
+  DM of only 1.000 vs 1.155 pushing the other way. Whenever a scalar has a degenerate case, check which
+  END of its range the degenerate case lands on. This one landed on maximum size.
+- **Rule 81 — "unestimable" is not "zero".** The repair (ADR-0124) sizes on the sources' dispersion
+  `s² = Σŵᵢ(fᵢ−μ̂)²/(1 − Σŵᵢ²)`; the denominator is the residual degrees of freedom and is **zero** at one
+  effective source. The old code implicitly read that as zero dispersion (full confidence); the honest
+  reading is no measurement, hence scalar 0. Same trap to watch for anywhere a variance, a standard error
+  or a correlation is computed from a single observation.
+- **Rule 82 — a mechanical ❌ BAD can be the right thing to keep.** `d9f8969cc` scored BAD on
+  "gross grew 0 → $26,879 with no return" — but that commit IS the wake-up from dormant, and it carries
+  the deploy fix without which no later change reaches the JVM. Its auto-revert conflicted and did not
+  land; left un-reverted deliberately. **Read what a BAD change actually did before honouring the revert
+  — and note that the scorer records `"revert": true` even when the revert failed.**
+- **Attribution this window (honest split):** no change of mine has been live for three cycles, so
+  **none** of the +$13.76 PnL or the −$11,145 gross is attributable to one. It is the standing
+  exploration configuration trading against the market.

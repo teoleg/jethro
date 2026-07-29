@@ -32,15 +32,16 @@ import java.util.List;
  * supports. This replaces the ADR-0067 property "re-weighting cannot scale the book" with the strictly
  * safer "re-weighting cannot GROW the book"; equal weights remain the maximum.
  *
- * <p><b>Then the sources' AGREEMENT scales it back down (ADR-0119).</b> The weighted average is the
- * desk's NET view; {@code Σwᵢ|fᵢ|/Σwᵢ} is its GROSS view, the conviction actually on the table. Their
- * ratio
+ * <p><b>Then the sources' AGREEMENT scales it back down (ADR-0119, restated by ADR-0124).</b> The
+ * weighted average is the desk's estimate of the name's conviction; the sources' DISPERSION about that
+ * average is how uncertain that estimate is. The scalar is the share of the combined view's total scale
+ * that is the view rather than the disagreement around it:
  * <pre>
- *   agreement = |Σ wᵢ fᵢ| / Σ wᵢ |fᵢ|     ∈ [0, 1]
+ *   s²        = Σŵᵢ(fᵢ − μ̂)² / (1 − Σŵᵢ²)         // unbiased weighted variance (Bessel/Kish)
+ *   agreement = |μ̂| / √(μ̂² + s²) = 1/√(1 + (s/μ̂)²)  ∈ [0, 1]
  * </pre>
- * is the fraction of the sources' total conviction that survives as net displacement rather than
- * cancelling — the same efficiency ratio the desk already uses over TIME for a trend (ADR-0113) and for
- * the hedge's own path (ADR-0100), read here ACROSS sources. It multiplies the combined value.
+ * a monotone-decreasing function of the sources' coefficient of variation — the amplitude form of the
+ * reliability ratio that attenuates a coefficient measured with error. It multiplies the combined value.
  *
  * <p>Why: sizing reads only the posterior MEAN, and two sources fighting to a small residual produce
  * the same mean as two quiet sources agreeing on it — while carrying far more uncertainty about the
@@ -49,10 +50,19 @@ import java.util.List;
  * DM above then MULTIPLIED that residual up, on a diversification assumption the disagreement itself
  * contradicts.
  *
- * <p>Strictly one-way, by the triangle inequality: {@code agreement ≤ 1} always, so the combined value
- * can only ever SHRINK, and {@code agreement = 1} EXACTLY whenever every contributing forecast shares a
- * sign (or only one contributes) — so a name whose sources agree is byte-identical to before. The sign
- * is never touched. This is the third rule in the same family as ADR-0076 (re-weighting cannot grow the
+ * <p><b>Why the dispersion and not ADR-0119's sign ratio {@code |Σwᵢfᵢ|/Σwᵢ|fᵢ|} (ADR-0124).</b> That
+ * ratio is 1 by construction when only ONE source contributes — there is nothing for it to disagree
+ * with — so an uncorroborated view earned FULL conviction and, being unopposed, routinely carried the
+ * LARGEST combined forecast in the cross-section while genuinely corroborated names were discounted
+ * below it. The scalar was inverted in the breadth it was meant to reward. The dispersion form has no
+ * such degenerate case: {@code 1 − Σŵᵢ²} is the residual degrees of freedom of the weighted variance,
+ * which is ZERO at one effective source — the dispersion is UNESTIMABLE, which is not the same as zero,
+ * and the honest scalar there is 0, not 1. It is also strictly smoother: a source's magnitude, not just
+ * its sign, moves the scalar, so a name cannot flip between full size and flat on one sensor's noise.
+ *
+ * <p>Strictly one-way: {@code s² ≥ 0} so {@code agreement ≤ 1} always and the combined value can only
+ * ever SHRINK; {@code agreement = 1} exactly when the contributing forecasts are identical. The sign is
+ * never touched. This is the third rule in the same family as ADR-0076 (re-weighting cannot grow the
  * book) and ADR-0098 (churn shrinkage is one-way).
  *
  * <p>Pure and dimensionless — the combined value is a conviction, never a size or a price (ADR-0016 /
@@ -71,8 +81,9 @@ public final class ForecastCombiner {
     }
 
     /** The fused view: the combined forecast plus how many sources contributed, the DM applied, and
-     *  the ADR-0119 agreement scalar those sources earned (1 = unanimous sign, 0 = perfect
-     *  cancellation). */
+     *  the ADR-0119/0124 agreement scalar those sources earned (1 = identical forecasts, 0 = the
+     *  disagreement between them swamps the view, or there is only one effective source and so no
+     *  corroboration was ever tested). */
     public record Combined(String instrument, double value, int activeSources,
                            double diversificationMultiplier, double agreement) {
     }
@@ -85,7 +96,6 @@ public final class ForecastCombiner {
     public static Combined combine(String instrument, List<Weighted> forecasts, double assumedAvgCorrelation) {
         double weightSum = 0;
         double weighted = 0;
-        double weightedGross = 0;
         double weightSqSum = 0;
         int active = 0;
         for (Weighted w : forecasts) {
@@ -94,38 +104,75 @@ public final class ForecastCombiner {
             }
             weightSum += w.weight();
             weighted += w.weight() * w.forecast().value();
-            weightedGross += w.weight() * Math.abs(w.forecast().value());
             weightSqSum += w.weight() * w.weight();
             active++;
         }
         if (weightSum <= 0 || active == 0) {
-            return new Combined(instrument, 0.0, 0, 1.0, 1.0);
+            return new Combined(instrument, 0.0, 0, 1.0, 0.0);
         }
         double average = weighted / weightSum;
         // Σwᵢ² over NORMALISED weights: Σ(wᵢ/Σw)² = Σwᵢ²/(Σw)². Formed from the running sums so the
         // weight vector is never materialised (ADR-0076).
         double normalisedSumSq = weightSqSum / (weightSum * weightSum);
         double dm = diversificationMultiplierForConcentration(normalisedSumSq, assumedAvgCorrelation);
-        double agreement = agreement(weighted, weightedGross);
+        // Second pass for the dispersion ABOUT the average, which the first pass cannot know yet
+        // (ADR-0124). Bounded by the source count (≤ 5 today) and allocation-free, like the first.
+        double weightedSqDeviation = 0;
+        for (Weighted w : forecasts) {
+            if (w.weight() <= 0 || w.forecast() == null) {
+                continue;
+            }
+            double deviation = w.forecast().value() - average;
+            weightedSqDeviation += w.weight() * deviation * deviation;
+        }
+        double agreement = agreement(average, weightedSqDeviation / weightSum, normalisedSumSq);
         return new Combined(instrument, Forecast.clamp(average * dm * agreement), active, dm, agreement);
     }
 
     /**
-     * ADR-0119 — the share of the sources' gross conviction that survives as a net view:
-     * {@code |Σwᵢfᵢ| / Σwᵢ|fᵢ|}. The Σw normalisation is common to both sums and cancels, so this is
-     * formed from the same running sums the average is.
+     * ADR-0124 — the share of the combined view's total scale that is the view rather than the
+     * disagreement around it: {@code |μ̂| / √(μ̂² + s²)}, where {@code s²} is the sources' UNBIASED
+     * weighted variance about {@code μ̂}. Equivalently {@code 1/√(1 + (s/μ̂)²)}: a monotone-decreasing
+     * function of the sources' coefficient of variation, in amplitude units because it multiplies a
+     * forecast (an amplitude), not a variance.
      *
-     * <p>By the triangle inequality {@code |Σwᵢfᵢ| ≤ Σwᵢ|fᵢ|}, with EQUALITY exactly when every
-     * contributing forecast shares a sign — so unanimous sources (and the single-source case) return 1
-     * and change nothing, and the result never exceeds 1. All forecasts zero is the 0/0 case: the net
-     * view is already zero, so the scalar is irrelevant and 1 is returned rather than a NaN. The
-     * min/max clamp is defensive against floating-point residue only.
+     * <p>The Bessel/Kish correction for reliability weights divides the weighted mean square deviation
+     * by the residual degrees of freedom {@code 1 − Σŵᵢ²}, which at equal weights is {@code (n−1)/n} and
+     * so reproduces {@code Σ(fᵢ − μ̂)²/(n−1)} exactly. Its reciprocal {@code 1/Σŵᵢ²} is Kish's effective
+     * number of sources, so the correction is stated in the same effective breadth the ADR-0076 DM is.
+     *
+     * <p>The three degenerate cases, each answered conservatively:
+     * <ul>
+     *   <li><b>No net view</b> ({@code μ̂ = 0}) — the combined value is already zero; return 0 rather
+     *       than a 0/0 NaN.</li>
+     *   <li><b>One effective source</b> ({@code Σŵᵢ² ≥ 1}, i.e. all the weight on one forecast) — the
+     *       residual degrees of freedom are ZERO, so the dispersion is UNESTIMABLE. Return 0: an
+     *       untested view is not a corroborated one. This is the ADR-0119 defect it repairs — the sign
+     *       ratio returned 1 here, handing full conviction to exactly the names with no second opinion.
+     *       It is self-healing, not a ban: the name sizes again as soon as a second sensor warms.</li>
+     *   <li><b>Identical forecasts</b> ({@code s² = 0} with two or more effective sources) — full
+     *       corroboration, return 1, and the name is byte-identical to the pre-ADR-0124 desk.</li>
+     * </ul>
+     * The min/max clamp is defensive against floating-point residue only; {@code s² ≥ 0} already bounds
+     * the result at 1, so the scalar is strictly one-way and can never grow the book.
+     *
+     * @param mean               {@code μ̂}, the weighted average of the contributing forecasts
+     * @param meanSqDeviation    {@code Σŵᵢ(fᵢ − μ̂)²}, the weighted mean square deviation about it
+     * @param sumSqNormalisedWeights {@code Σŵᵢ²} over weights summing to 1 (the Herfindahl index)
      */
-    private static double agreement(double weightedNet, double weightedGross) {
-        if (!(weightedGross > 0)) {
+    private static double agreement(double mean, double meanSqDeviation, double sumSqNormalisedWeights) {
+        if (!(Math.abs(mean) > 0)) {
+            return 0.0;
+        }
+        double residualDegreesOfFreedom = 1.0 - sumSqNormalisedWeights;
+        if (!(residualDegreesOfFreedom > 0)) {
+            return 0.0;
+        }
+        double variance = meanSqDeviation / residualDegreesOfFreedom;
+        if (!(variance > 0)) {
             return 1.0;
         }
-        return Math.max(0.0, Math.min(1.0, Math.abs(weightedNet) / weightedGross));
+        return Math.max(0.0, Math.min(1.0, Math.abs(mean) / Math.sqrt(mean * mean + variance)));
     }
 
     /**

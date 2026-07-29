@@ -295,22 +295,21 @@ class TelemetryWeightsTest {
     }
 
     @Test
-    void standingDownADisconfirmedSourceRestoresTheConvictionItWasSubtracting() {
+    void standingDownADisconfirmedSourceStopsItDraggingTheAverage() {
         // The live shape at the 225 s rung that motivated the rule, on the desk's own readings:
         //   reversion  +2.0087 bps, SE 0.4271 ⇒ t = +4.70  ⇒ DEMONSTRATED, weight 2.899…
         //   trend      −1.5033 bps, SE 0.3860 ⇒ t = −3.89  ⇒ CONTRADICTED, weight 0.25 (was)
         // and GOOG's two fresh forecasts that cycle: reversion +15.134, trend −13.974.
         //
         // Held at MIN, by hand:
-        //   average = (15.134·2.899 + (−13.974)·0.25) / (2.899 + 0.25) = 40.379966/3.149 = 12.823139…
-        //   Σw²ₙ    = (2.899² + 0.25²)/3.149² = 8.466701/9.916201 = 0.8538178…
-        //   DM      = 1/√(0.8538178… + 0.5·(1 − 0.8538178…)) = 1/√0.9269089… = 1.0386636…
-        //   agreement = |40.379966| / (15.134·2.899 + 13.974·0.25) = 40.379966/47.366966 = 0.8524921…
-        //   combined = 12.823139… × 1.0386636… × 0.8524921… = 11.354402…      (ADR-0119)
-        // Stood down, by hand: one active source ⇒ average = 15.134, Σw²ₙ = 1, DM = 1, agreement 1
-        // (nothing left to contradict it), combined = 15.134.
-        // The disconfirmed source was costing the desk conviction on this name twice over: once through
-        // the average it dragged down, and again through the agreement it destroyed.
+        //   average = (15.134·2.899 + (−13.974)·0.25) / (2.899 + 0.25) = 40.379966/3.149 = 12.823107…
+        //   Σw²ₙ    = (2.899² + 0.25²)/3.149² = 8.466701/9.916201 = 0.8538250…
+        //   DM      = 1/√(0.8538250… + 0.5·(1 − 0.8538250…)) = 1.0386772…
+        //   s²      = Σŵ(f − avg)²/(1 − Σw²ₙ) = 1.0666527…/0.1461749… = 7.2969…       (ADR-0124)
+        //   agreement = 12.823107…/√(12.823107…² + 7.2969…·…) = 0.5287846…
+        //   combined = 12.823107… × 1.0386772… × 0.5287846… = 7.042919…
+        // The floored source still drags the average down; what it no longer does under ADR-0111 is
+        // drag it down at a weight the desk has measured as unearned.
         var reversion = Forecast.of("reversion", "GOOG", 15.134);
         var trend = Forecast.of("trend", "GOOG", -13.974);
 
@@ -321,15 +320,19 @@ class TelemetryWeightsTest {
                 new ForecastCombiner.Weighted(reversion, 2.899),
                 new ForecastCombiner.Weighted(trend, 0.0)), 0.5);
 
-        assertEquals(0.8524921355528662, floored.agreement(), 1e-12);
-        assertEquals(11.354402, floored.value(), 1e-6, "the shipped behaviour, by hand");
+        assertEquals(0.5287846076008532, floored.agreement(), 1e-12);
+        assertEquals(7.042919, floored.value(), 1e-6, "the shipped behaviour, by hand");
         assertEquals(2, floored.activeSources());
-        assertEquals(15.134, stoodDown.value(), 1e-9, "one view, no diversification claimed");
         assertEquals(1, stoodDown.activeSources(), "a stood-down source is not breadth");
         assertEquals(1.0, stoodDown.diversificationMultiplier(), 1e-12);
-        assertEquals(1.0, stoodDown.agreement(), 1e-12, "one view cannot disagree with itself");
-        assertTrue(stoodDown.value() > floored.value(),
-                "conviction the desk had measured is no longer surrendered to a measured loser");
+        // ADR-0124 narrows ADR-0111's remedy, and the ADR says so: standing the loser down leaves ONE
+        // surviving view, whose dispersion is unestimable, so the name is sized at zero rather than at
+        // the un-diversified +15.134 ADR-0111 restored. The conviction is no longer SURRENDERED to a
+        // measured loser — but it is not handed over uncorroborated either. Self-healing: any second
+        // sensor waking on this name sizes it again.
+        assertEquals(0.0, stoodDown.agreement(), 1e-12, "one view corroborates nothing");
+        assertEquals(0.0, stoodDown.value(), 1e-12);
+        assertTrue(floored.value() > 0, "the admitted source still sets the sign while it has company");
     }
 
     @Test

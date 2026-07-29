@@ -15,6 +15,72 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-29 16:30Z (`d9f8969cc` scored ❌ BAD; change made: ADR-0124)
+
+**Item 1 (the delayed-price feed cohort) is ❌ FALSIFIED and closed, on its own written VERIFY-BY.** The
+thesis was that GOOGL/NQ/TSLA/ES are quoted off a 15-minute Yahoo poll, so limits rest at a price the
+market has left. This run's `/api/marks`, read live, says otherwise: **GOOGL 1.0s, NQ 0.9s, TSLA 0.7s,
+META 0.5s, NFLX 0.6s, ORCL 0.5s**, all `source=alpaca`; `/api/risk` reports `markAgeMillis` **50** on
+every open position. The only genuinely stale marks are **GBPUSD and ES at 1383s**, and both carry
+**zero** exposure and are not being traded. The cohort's loss share is still elevated (**26.7%** of
+turnover against **58%** of the book's gross losses, 2.2× — GOOGL −$40.71, NQ −$35.82, TSLA −$2.91 of
+−$136.82 total) but the *mechanism* the fix would have targeted is not present, so a price-age gate would
+have been a fix for a defect that is not there. Item 1's VERIFY-BY said so explicitly: *"If it does not
+move, the feed thesis is falsified and the target reverts to item 3."* Closed as falsified; what remains
+of the cohort's loss is folded into the item below, since **every one of those names is single-source**.
+
+**Old #2 (agreement scaler inverted at `sources=1`) → ⚠️ STILL-BROKEN, re-confirmed live, and FIXED this
+cycle.** `/api/fusion/targets` read live: META `sources=1`, `agreement=1.000`, `|forecast|` **15.41** —
+the largest in the book — and TSLA `sources=1`, `agreement=1.000`; against three-source names at
+`0.972 → 7.87` (MSFT), `0.812 → 8.44` (NVDA), `0.674 → 6.50` (JNJ). The DM pushes the other way
+(**1.000** at one source vs **1.155** at three) and is far too small to offset it. Downstream: META
+targets **−78.3** shares against a holding of **0**, and TSLA's oversized target produced **fourteen
+consecutive** `fusion re-plan — passive order superseded by a fresh target` cancellations in
+`recent_orders` against a held position of **one** share. Promoted to **#1** and addressed by ADR-0124.
+
+**Scorer note (open, ops):** the scorer wrote `"revert": true` for `d9f8969cc` but **no revert commit
+exists** — `git log` runs straight from the analysis commit to the ledger commit. The revert conflicted
+(later commits touch the same loop files) and the run printed "NOT reverted; needs attention". Left
+un-reverted **deliberately**: reverting `d9f8969cc` would undo ADR-0123 (so no future change reaches the
+JVM) and ADR-0122 (exploration mode), returning the desk to DORMANT — the failure state this loop exists
+to escape. The ❌ was mechanical (gross 0 → $26,879 is the wake-up itself). Logged as item 3 below.
+
+## OPEN (ranked, most-costly first)
+
+1. **[OPEN — fix shipped this cycle, ADR-0124] Agreement scaler was inverted at `sources=1`.** The
+   ADR-0119 sign ratio `|Σwᵢfᵢ|/Σwᵢ|fᵢ|` is 1 *by construction* with one contributor, so an
+   uncorroborated view earned the maximum scalar in the cross-section. Replaced by the sources'
+   dispersion: `s² = Σŵᵢ(fᵢ − μ̂)²/(1 − Σŵᵢ²)`, `agreement = |μ̂|/√(μ̂² + s²)`. The residual d.f.
+   `1 − Σŵᵢ²` is zero at one effective source, so the dispersion is unestimable and the scalar is 0.
+   - **VERIFY-BY (next run, from `/api/fusion/targets`):** no `sources=1` name may carry a
+     `|combinedForecast|` above the largest `sources≥2` name — today that ordering is inverted at
+     **15.41 (1 source)** against **8.44 (3 sources)**. Fixed = every `sources=1` row reads
+     `agreement 0.000` and `combinedForecast 0.0`, and the largest conviction in the book belongs to a
+     corroborated name. Second check, in `recent_orders`: the repeated single-name `fusion re-plan`
+     cancellation runs (14 consecutive on TSLA this cycle) should stop.
+   - **Falsifier:** if the ordering corrects but firm realized bps does not improve over the evaluation
+     window, the inversion was cosmetic and the target moves to item 2.
+
+2. **[OPEN] Execution is one-sided by design — 61 of 65 round-trips POST to enter and CROSS to exit.**
+   `FusionExecutor.route` per ADR-0084: risk-increasing rests as a DAY LIMIT at the mid, risk-reducing
+   goes MARKET. The desk therefore pays the crossing cost on **100%** of exits and captures spread on
+   **0%** of entries, aggregating **−11.6 bps** on **$39,363** of round-tripped notional at a median
+   **27.4-minute** turn. Fees are only **$10.83** of the **$51.61** realized loss (**21%**, 0.89 bps on
+   $122,221 turnover) — the other **79%** is adverse selection: a limit at the mid fills only when the
+   market comes *to* it, i.e. when the move went against the view.
+   - **Architecturally significant** — changing it needs an ADR superseding ADR-0084, not a dial.
+   - **VERIFY-BY:** the LIMIT-in/MARKET-out share of round-trips falls below 61/65, and the aggregate
+     round-trip bps on entered-and-exited notional moves toward zero from −11.6.
+
+3. **[OPEN — ops, not money] The scorer's auto-revert can fail silently.** `score-change.py` records
+   `"revert": true` in the snapshot and prints a warning when `git revert` conflicts, but nothing
+   downstream surfaces it — the ledger row still reads "❌ BAD ... reverted" while the commit is still
+   live. A future BAD change could stay in production while the register believes it was pulled.
+   - **VERIFY-BY:** the ledger note for a BAD verdict distinguishes "reverted" from "revert FAILED", and
+     `run-status.json` carries the failure so the next run's Step 0 sees it without reading git.
+
+---
+
 ## Verification block — 2026-07-29 16:00Z (pending change `d9f8969cc` at 5/6 cycles, no code change made)
 
 All three seeded items re-tested against this run's live telemetry. **None is fixed** — no fix has been
