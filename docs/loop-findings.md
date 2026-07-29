@@ -2247,3 +2247,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   feeds from the edge evidence. **Falsifiable check:** if the delayed cohort is made reduce-only, firm
   realized bps should move toward the real-time cohort's +1.81 bps. If it does not, the feed thesis is wrong
   and the target reverts to holding-period discipline against the 30s re-plan.
+
+## 2026-07-29 16:00Z — the execution scheme is one-sided by design, and fees are NOT the churn cost
+
+- **Rule 73 — reconstruct round-trips FIFO from `fills`⋈`orders` before blaming "churn". It reframes the
+  loss.** Over the LIVE epoch: **61 of 65** round-trips are **LIMIT-entry → MARKET-exit**, aggregating
+  **−11.6 bps** on **$39,363** of round-tripped notional (**−$45.53** pre-fee), median holding period
+  **27.4 min**. That is `FusionExecutor.route` doing exactly what ADR-0084 says — *"an entry POSTS, an exit
+  CROSSES"*: risk-increasing rests as a DAY LIMIT at the mid, risk-reducing goes MARKET. So the desk pays
+  the crossing cost on **100%** of exits and captures spread on **0%** of entries. Changing it needs a
+  superseding ADR, not a dial.
+- **Rule 74 — this KILLS the "round-trip *cost* is the loss" framing (which had been must-fix #1).**
+  Explicit fees are **$10.83** of the **$51.61** realized loss — **21%**, or **0.89 bps** on **$122,221** of
+  turnover. The other **79%** is adverse price movement between entry and exit. A limit resting at the mid
+  only fills when the market comes *to* it, i.e. when the move went against the view: the fills are
+  adversely selected by construction, and that dwarfs commission. Never diagnose "we trade too much and pay
+  too much cost" from turnover alone — split fee from price movement first.
+- **Rule 75 — the feed split survived re-test: the delayed cohort is still >100% of realized loss.** DELAYED
+  (ES, GOOGL, NQ, TSLA) is **27.6%** of turnover but **67.5%** of total loss (was 29% / 82%) — **2.4×** its
+  share. Its realized loss is **three round-trips**: NQ **−84.3 bps** (2 RTs) + GOOGL **−27.7 bps** (1 RT) =
+  **−$55.04**, versus the firm's entire realized loss of **−$51.61**. The rest of the book is net positive
+  on realized. Rule 72's TCA-blindness corollary re-confirmed hard: NQ's measured `avgSlippageBps` is
+  **0.033** against a realized −84.3 bps, because `arrival_price` is stamped from the same stale mark.
+- **Rule 76 — the agreement scaler is INVERTED, not just degenerate (rule from must-fix #3, sharpened).**
+  `/api/fusion/targets`: single-source names carry `agreement` **1.000** and `|combinedForecast|` **20.00**
+  (the cap) / **18.95** / **18.55**; three-source names carry **0.993 → 10.33**, **0.981 → 6.62**,
+  **0.832 → 5.80**. Uncorroborated views size **2–3× LARGER** than corroborated ones, because `agreement`
+  returns 1.0 when there is nothing to disagree with. And every single-source name is driven by
+  `xsreversion` alone — which are the discovery-promoted, hence yahoo-delayed, names (rule 71). **The two
+  defects compound: maximum conviction is handed to exactly the names priced on a 15-minute delay.**
+  Downstream symptom: TSLA target **192** shares vs current **1**, repeatedly cancelled/replanned and
+  rejected with `no market data for TSLA`.
+- **Rule 77 — resist the holding-period story; n is too small.** Bucketing the 65 round-trips by holding
+  period is NOT monotone — 20–30 min is **+7.7 bps** while 30–60 min is **−32.1 bps**. That is noise, not a
+  regime. Log it; do not spend a change on it until the round-trip count is materially above 65.
+- **Attribution this window (honest split):** no code change has been made for three cycles — the pending
+  one is at 5/6 — so **none** of the −$6.42 run-over-run move is attributable to a new change of mine. It is
+  the standing exploration-mode configuration trading against the market. Do not credit or blame a change
+  for it.
