@@ -1,86 +1,71 @@
-The desk woke up and started trading for the first time — and the loss is concentrated in the one source that measures *negative* edge; no change this cycle because the previous one is still under measurement (1/6).
+The agreement scaler is degenerate at one source — it hands FULL conviction to the names with the LEAST corroboration, and that is what is building the book's losers.
 
-*Every figure below is read from the live endpoints, `reports/run-status.json`, the ledger, this run's
-report or `ps`; none is authored here (invariant 7 / ADR-0016 — the scorer owns every number that gates
-money). The t-statistics quoted are computed by script from the gate's own published cohort dispersions.*
+*Every figure below is read from the live endpoints, `logs/report.md`, `reports/run-status.json` or the
+scorer; none is authored here (invariant 7 / ADR-0016). The t-statistics are computed by a script from the
+telemetry's own published cohort dispersions (`avgReturnBps / (stdCohortMeanBps/√cohorts)`).*
 
 **0. Scoring state — this decides what I am allowed to do.** `scripts/score-change.py score` prints
-`d9f8969cc still accumulating evidence (1/6 cycles) — held, not scored this run`, and
-`reports/.pending-baseline.json` is present. Per the contract that forbids a new code change: piling one
-on top would destroy the evidence for the deploy that *just* landed. Analysis and memory only.
+`d9f8969cc still accumulating evidence (2/6 cycles) — held, not scored this run`, and
+`reports/.pending-baseline.json` is present. **No code change this cycle**, per the contract — a new change
+on top would destroy the evidence for the one under measurement. Analysis and memory only.
 
-**1. Money.** Total PnL **$-23.21** live (the report header, taken 37s earlier, read $-9.32). It was
-`$0.61209817` — frozen at that value for the previous three runs. So the book has moved
-**down** roughly twenty-four dollars in twelve minutes, after four days of not moving at all.
-`pnl_growth_pct` 0.0 vs `pnl_target_pct` 1.0, `on_track=false`, and the flag is now **UNDERWATER**.
+**1. Money.** Total PnL **−$30.35** live (`/api/risk` `.total`; the report header, taken ~6 min earlier,
+read −$32.79). Run-over-run **−$1.75**; over the last three runs **−$33.40**, from the $0.61 that had been
+frozen for four days. `pnl_growth_pct` −5172.08 against `pnl_target_pct` 1.0, `on_track=false`,
+`stale=true`, **UNDERWATER**. The book is bleeding, but it is bleeding *while trading for the first time*.
 
-**2. Risk.** Gross **$10,772.39** = **0.7%** of the $1,500,000 firm cap; net **$2,915.32** = **0.3%** of
-the $1,000,000 net cap. From `$0.00`. Breaker `halted:false`, and the drawdown limit is `maxFirmDrawdown`
-$50,000 against a $23 loss. `riskCuts: []`, `bookVolBrake: 1.0`, `portfolioRiskMultiplier` 0.77.
-**This is the DORMANT→active transition the loop has been trying to cause, not a danger state** — 0.7% of
-cap with $1,489,228 of headroom. The contract is explicit that gross rising with room to spare is the goal.
+**2. Risk.** Gross **$9,291.42** = **0.6%** of the $1.5M firm cap, headroom **$1,490,707**; net **$1,248.36**
+= **0.1%** of the $1M net cap. `riskCuts: []`, `riskCutStoppedNames: 0`, `portfolioRiskMultiplier: 1.0`,
+`bookVolBrake: 0.597` (the brake is engaging on its own). Gross actually *fell* $1,826 this window.
+**Not DANGER**: 0.6% of cap, −$30 against a `maxFirmDrawdown` of $50,000.
 
-**3. Cause — the prediction landed, exactly.** Last cycle predicted: after the ADR-0123 deploy the running
-app should report `edgeGate` inactive and `deltaQty` should go non-zero. `ps` gives JVM start
-`Wed Jul 29 09:48:18 2026` (13:48:18Z) — a fresh process, minutes after commit `fea8dac`. Live
-`/api/fusion/targets` now returns **`edgeGate: null`** (`gateSupplier` null ⇒ gate off, per ADR-0122) with
-`routing:true` over 11 instruments and non-zero deltas. First LIVE order in 22 hours fired at
-**13:54:00Z**; 13 fills today against 7 in the book's entire prior history. **The dormancy was a delivery
-bug, and it is fixed.** Rule 62 named the conflation in advance and it holds: this window contains two
-deployments, and the behaviour on display is **ADR-0122's**, not the plumbing fix's.
+**3. Cause — and the answer to the question I set last cycle.** I predicted I would first check whether
+JPM's loss *persisted* or *mean-reverted*, because only "the fade was wrong" justifies demoting
+`xsreversion`. **It did neither: the model reversed its own sign inside 18 minutes and crystallised the
+loss.** JPM went +14 sh long (drip-accumulated 1/30s from 13:54) → `SELL 14 FILLED` at 14:11:58 → further
+SELL 2 and SELL 1 → now **−3 sh, realized −$11.53**, unrealized only −$1.57. The paper loss became a
+realized loss plus two crossings of the spread. So `xsreversion` was not early, it was wrong — *and* the
+combined forecast is sign-unstable on a 30s re-plan against signals measured at 225/900/3600s horizons.
+Note **why** it flipped: `reversion` arrived as a source on JPM (contribution −11.54 at weight 2.10, vs
+`xsreversion` −3.79) and overrode it. The system self-corrected — but only after paying for the mistake.
 
-**4. Danger.** No. Bleeding, yes — but at 0.7% of the exposure cap and 0.05% of the drawdown breaker.
-De-risking a book that just came off zero because its first twelve minutes are red would be exactly the
-overreaction the contract warns against.
+**4. Danger.** No. But there is a **queued repeat of it**, which is the real finding.
 
-**5. Order-level post-mortem — this is the finding.** Per-position, the loss is not spread evenly:
+**5. Order-level post-mortem — where the loss actually sits now.** It has moved off JPM:
 
-- **JPM +14 sh, gross $4,893, PnL −$18.05** — **~78% of the entire firm loss in one name.** That is
-  roughly −37bps, far past any plausible spread. Accumulated 1 share at a time every 30s from 13:54:00.
-- **NQ +0.004134, gross $2,301, PnL −$5.28** (~−23bps) — same drip pattern, order re-planned and
-  re-posted larger each cycle.
-- **AAPL −6 sh, PnL −$0.16** and **JNJ −7 sh, PnL −$0.47** — ≈1–2bps, i.e. entry cost. Fine.
-- **ES (hedge) flat, +$0.96.**
+- **NQ +0.007661 (MACRO), gross $4,239, PnL −$24.55 — 81% of the entire firm loss.** ≈ −58bps.
+- JPM −3 sh, **−$13.10** (−$11.53 of it realized, i.e. already paid).
+- JNJ −6 sh, −$3.50. AMZN −$0.19, NVDA −$0.03.
+- **AAPL −4 sh, +$9.25 — the only real winner** (+$2.47 realized, +$6.78 open).
+- ES (hedge) flat, +$0.96.
 
-So the damage is entirely in the two names the desk is *accumulating a long into*, and both longs are
-driven by **`xsreversion`**: JPM shows `sources: 1`, `combinedForecast 15.02`, `xsreversion` alone, with
-**nothing opposing it** — `trend` does not even contribute. The mechanism is the classic failure mode of an
-unfiltered cross-sectional fade: as JPM falls further below its peer median, its residual grows, so the
-forecast grows, so `targetQty` grows (89.68 vs `currentQty` 12) — **a falling price makes the model buy
-more.** A self-reinforcing accumulator, no trend filter, no per-name stop (`riskCutStoppedNames: 0`).
+**NQ has its own distinct bug.** Between 14:10:28 and 14:13:29 the desk tried to **exit NQ eight times** —
+`SELL 0.004134` (the whole position) — and every one came back `REJECTED — no market data for NQ`. By the
+time the mark returned, the target had flipped to BUY and it **added** instead (`BUY 0.003527 FILLED`
+14:24:02). A data gap silently converted an exit into an accumulation. The pre-trade guardrail was right
+to refuse; what is missing is above the floor — a refused *exit* intent is dropped rather than retained
+and retried. ES still marks at `ageMillis` ≈ 1.05M, so the futures feed gaps are not hypothetical.
 
-**6. Memory.** Applied. Rule 61 (prove the JVM runs the code you're reading) is why I checked `ps` and
-`edgeGate` first rather than trusting `application.properties` — and it is why point 3 is a verification
-rather than a guess. Rule 62's warning about this window is honoured in point 3.
+**6. Memory applied.** Rule 63 said a sole-source fade buys more as the price falls. That is exactly what
+happened, and I checked its falsification condition before acting on it rather than assuming it.
 
-**7. Change vs. market — attributed honestly.** The book was flat at `$0.00` gross when the window opened,
-so **100% of the $10,772 of exposure and every dollar of the move sits on positions the code opened this
-cycle** — there is no untouched inventory for the market to have moved. But that does *not* make the
-twelve-minute PnL evidence about any signal: the entries are minutes old, the marks are mid, and −$23 on a
-$10.7k book is comfortably inside noise. **I am deliberately not drawing a conclusion from it.**
+**7. Change vs. market.** Un-separable this window and I will not guess: the entire book was opened by code
+within the last ~40 minutes, so there is no untouched inventory whose move would be pure market. Rule 64
+still binds — 40 minutes of PnL is not evidence about a signal. The durable read is the multi-day
+telemetry, t computed by script: **`reversion` +0.57 / +1.31 / +1.36** at 225/900/3600s (939/294/86
+resolved) — the only source positive at every horizon. **`xsreversion` −0.09 / −1.43 / −1.32**, negative at
+every horizon. `trend` −0.33/+0.34/−1.10, `momentum` −0.04/+0.31/−1.45, `social` −0.89/−1.55/+0.21.
 
-The durable evidence is elsewhere, and it is not noisy. `/api/signals/telemetry`, scored by t-statistic
-computed from the gate's own published cohort dispersions (`avgReturnBps / (stdCohortMeanBps/√cohorts)`),
-across days and hundreds of resolved observations:
+**The mechanism I will fix next cycle — a degenerate formula, not a parameter.** `ForecastCombiner`
+computes ADR-0119's scaler as `agreement = |Σwᵢfᵢ| / Σwᵢ|fᵢ|`. **At one source that is identically 1.0**,
+by construction, whatever the source is. So the mechanism built to shrink conviction when sources fight
+awards **maximum** conviction to precisely the names with **no corroboration at all** — and the live book
+shows it pointed at the two largest targets, both driven solely by the negative-edge source:
+**GOOGL `sources: 1`, agreement 1.0, target −147.25 sh** (already ratcheting live: SELL 1→2→3→4→5→6→7→8,
+ROUTED 14:29:34) and **TSLA `sources: 1`, agreement 1.0, target +329.96 sh**, both `xsreversion` alone.
+That is the JPM shape, queued up an order of magnitude larger. `n=1` is an absence of evidence and must
+score near-minimum conviction, not maximum. Corroboration-aware agreement, with an ADR in the same commit.
 
-| source | 225s | 900s | 3600s |
-|---|---|---|---|
-| **reversion** | +0.39 | **+1.76** | +1.39 |
-| trend | −0.09 | −0.02 | −0.88 |
-| momentum | −0.04 | +0.31 | −1.45 |
-| social | −0.43 | −0.49 | +0.21 |
-| **xsreversion** | −0.25 | −0.74 | −8.32 |
-
-**`reversion` is the only source with positive expectancy at every horizon, and the only one clearing the
-1.5 hurdle anywhere** (900s: +3.17bps over 291 resolved / 88 cohorts). **`xsreversion` is negative at
-every horizon** — and it is the sole driver of the position holding four-fifths of the loss. The live
-12-minute result is not the evidence; it is a *consistent illustration* of what the multi-day telemetry
-already said. That distinction matters, and it answers the standing "work on EDGE" priority: yes, one
-signal in this universe does predict returns, and it is `reversion`.
-
-**Decision.** No change — the scorer holds the floor for five more cycles. Committing reasoning and memory
-only. **Next cycle's candidate, stated now so it is falsifiable and not retrofitted:** demote or gate
-`xsreversion` (weight 0.52, sole source on JPM/NVDA/NFLX) on its own measured expectancy, and let
-`reversion` — the one source with real, significant, multi-day edge — carry the size. What I will check
-first: whether JPM's loss persisted or mean-reverted over the full window, which distinguishes "the fade
-was early" from "the fade was wrong."
+**Also watching, not acting on:** AAPL is the book's only winner (short, +$9.25) and its target is now
+**+87.54** — the combiner is about to flip a winner, the mirror of the JPM whipsaw. If the agreement fix
+does not settle the sign churn, holding-period discipline is the cycle after.

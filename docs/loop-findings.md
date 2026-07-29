@@ -2131,3 +2131,36 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   let `reversion` carry the size. **Check first** whether JPM's loss persisted or mean-reverted across the
   full window — that distinguishes "the fade was early" from "the fade was wrong," and only the second
   justifies the demotion.
+
+## 2026-07-29T14:30Z — the agreement scaler is degenerate at n=1; the loss rotated from JPM to NQ (no change — pending at 2/6)
+
+- **No change permitted.** `scripts/score-change.py score` → `d9f8969cc still accumulating evidence
+  (2/6 cycles)`, `.pending-baseline.json` present. Analysis + memory only, per contract.
+- **Last cycle's question is answered, and the answer is neither option I offered.** I asked whether JPM's
+  loss *persisted* or *mean-reverted*. It did neither: **the model reversed its own sign in 18 minutes and
+  realized the loss.** +14 sh long → `SELL 14 FILLED` 14:11:58 → SELL 2, SELL 1 → now **−3 sh, realized
+  −$11.53**, unrealized only −$1.57. `xsreversion` was *wrong*, not early. It flipped because `reversion`
+  arrived as a source on JPM (−11.54 @ w2.10 vs `xsreversion` −3.79) and overrode it — the system
+  self-corrected, but only after paying the loss plus two spread crossings.
+- **Rule 65: `agreement = |Σwᵢfᵢ| / Σwᵢ|fᵢ|` is identically 1.0 at one source — so ADR-0119's scaler gives
+  FULL conviction to the names with NO corroboration.** Confirmed in `ForecastCombiner.java:39,124-128`.
+  Live proof, and it is the next JPM queued larger: **GOOGL `sources:1`, agreement 1.0, target −147.25 sh**
+  (already ratcheting: SELL 1→2→…→8, ROUTED 14:29:34) and **TSLA `sources:1`, agreement 1.0, target
+  +329.96 sh** — both driven solely by `xsreversion`, the source measuring negative edge at every horizon.
+  n=1 is absence of evidence and must score near-minimum conviction. **This is the next change**, with an
+  ADR — it is a degenerate formula, not a parameter tweak, so it is not combiner-tuning-without-edge.
+- **Rule 66: a data gap silently converts an exit into an add.** The loss rotated off JPM onto **NQ:
+  +0.007661, gross $4,239, −$24.55 = 81% of the firm loss.** Between 14:10:28–14:13:29 the desk tried to
+  exit NQ **eight times** (`SELL 0.004134`, the whole position) and every one returned `REJECTED — no
+  market data for NQ`. When the mark returned the target had flipped to BUY and it **accumulated**
+  (`BUY 0.003527 FILLED` 14:24:02). The guardrail was right to refuse; what is missing is above the floor
+  — a refused *exit* intent must be retained and retried, not re-derived from a fresh forecast. ES marks
+  at `ageMillis` ≈ 1.05M, so futures feed gaps are routine, not a one-off.
+- **Telemetry (t by script, `avg/(sdCohort/√cohorts)`) at 225/900/3600s:** `reversion` **+0.57/+1.31/+1.36**
+  (939/294/86 resolved) — still the only source positive at every horizon. `xsreversion` **−0.09/−1.43/−1.32**
+  — negative at every horizon, yet sole driver of the book's two biggest targets. `trend` −0.33/+0.34/−1.10,
+  `momentum` −0.04/+0.31/−1.45, `social` −0.89/−1.55/+0.21.
+- **Watch, don't act yet:** AAPL is the only winner (short −4 sh, **+$9.25**) and its target is now
+  **+87.54** — the combiner is about to flip a winner, the mirror of the JPM whipsaw. If corroboration-aware
+  agreement does not settle the sign churn, holding-period discipline (targets re-planned every 30s against
+  signals measured over 225–3600s) is the cycle after.
