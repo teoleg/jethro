@@ -1,0 +1,20 @@
+{
+  "commit": "3e7817e4fdda17c13c2699e1388474063992abc4",
+  "fees": "19.412703",
+  "gross_exposure": "29348.25000000",
+  "net_exposure": "-490.93000000",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "29348.25000000",
+    "hedgePnl": "0.79365317",
+    "netExposure": "-490.93000000",
+    "realizedPnl": "-38.53537535",
+    "strategyAlpha": "-29.27416907",
+    "totalFees": "19.412703",
+    "totalPnl": "-28.48051590",
+    "unrealizedPnl": "10.05485945"
+  },
+  "summary": "a name's conviction is scaled by the DISPERSION of the sources behind it rather than by whether their signs cancel, so an uncorroborated single-source view \u2014 which the old ratio scored at full confidence by construction, handing it the largest position on the desk \u2014 is sized at nothing until a second sensor corroborates it (ADR-0124)",
+  "total_pnl": "-28.48051590",
+  "ts": "2026-07-29T16:45:00Z"
+}
