@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-07-29T19:30:10Z",
+    "fees": "28.780533",
+    "gross": "11589.37701250",
+    "net": "-398.80298750",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "11589.37701250",
+      "hedgePnl": "10.49907844",
+      "netExposure": "-398.80298750",
+      "realizedPnl": "-23.65273508",
+      "strategyAlpha": "-27.14825312",
+      "totalFees": "28.780533",
+      "totalPnl": "-16.64917468",
+      "unrealizedPnl": "7.00356040"
+    },
+    "total_pnl": "-16.64917468"
+  },
+  "before": {
+    "at": "2026-07-29T16:45:00Z",
+    "gross": "29348.25000000",
+    "net": "-490.93000000",
+    "total_pnl": "-28.48051590"
+  },
+  "commit": "3e7817e4fdda17c13c2699e1388474063992abc4",
+  "delta": {
+    "gross": "-17758.87298750",
+    "net": "92.12701250",
+    "total_pnl": "11.83134122"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle +0.000068 over 7 cycles, t=+0.12 (hurdle 1.5); gross 29,348\u219211,589",
+  "revert": false,
+  "revertApplied": null,
+  "scoredAt": "2026-07-29T19:30:10Z",
+  "summary": "a name's conviction is scaled by the DISPERSION of the sources behind it rather than by whether their signs cancel, so an uncorroborated single-source view \u2014 which the old ratio scored at full confidence by construction, handing it the largest position on the desk \u2014 is sized at nothing until a second sensor corroborates it (ADR-0124)",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 11589.3770125,
+    "gross_start": 29348.25,
+    "mean_ret_per_cycle": 6.831e-05,
+    "n": 7,
+    "scale": 24741.36,
+    "t": 0.115
+  }
+}
