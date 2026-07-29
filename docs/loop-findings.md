@@ -2094,3 +2094,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   undeployed code. ADR-0123 makes stranding rarer; teaching `scripts/score-change.py` to refuse to
   score a commit it cannot prove was deployed is what makes the verdicts honest, and is now the
   higher-priority half.
+
+## 2026-07-29T14:00Z — the desk woke up; the loss sits in the one source measuring negative edge (no change — pending at 1/6)
+
+- **No change permitted.** `scripts/score-change.py score` → `d9f8969cc still accumulating evidence
+  (1/6 cycles)`, `.pending-baseline.json` present. Analysis + memory only, per contract.
+- **Last cycle's prediction landed in full.** `ps` → JVM start `13:48:18Z` (fresh, minutes after
+  `fea8dac`); `/api/fusion/targets` now returns **`edgeGate: null`** with `routing:true`, 11 instruments,
+  non-zero deltas. First LIVE order in 22 hours at `13:54:00Z`; 13 fills today vs 7 in the book's entire
+  prior history. Gross `$0.00` → **`$10,772.39`** (0.7% of the $1.5M cap), PnL `$0.61209817` → **`-$23.21`**.
+  **The dormancy was a delivery bug (ADR-0123), not a signal problem** — the diagnosis is now verified,
+  not merely argued. Per Rule 62 this window is ADR-0122's behaviour, not the plumbing fix's.
+- **Not danger.** 0.7% of the exposure cap, `-$23` against a `maxFirmDrawdown` of `$50,000`, breaker
+  clear, `riskCuts: []`. A book coming off zero into 0.7% of cap is the goal, not a reason to de-risk.
+- **Rule 63: when a fade is the *sole* source on a name, a falling price makes it buy more.**
+  **JPM +14sh, gross `$4,893`, PnL `-$18.05` — ~78% of the whole firm loss in one name**, drip-accumulated
+  1 share/30s from 13:54. Its target is `sources: 1` — `xsreversion` alone, `combinedForecast 15.02`,
+  `trend` not contributing at all. As JPM falls below its peer median the residual grows, so the forecast
+  grows, so `targetQty` grows (89.68 vs `currentQty` 12). Self-reinforcing accumulator, no trend filter,
+  no per-name stop (`riskCutStoppedNames: 0`). NQ (`+$2,301` gross, `-$5.28`) is the same shape. The two
+  *shorts* — AAPL `-$0.16`, JNJ `-$0.47` — are at entry cost, i.e. fine. The damage is specifically in
+  the names being accumulated into.
+- **Rule 64: 12 minutes of live PnL is not evidence about a signal — the multi-day telemetry is.** The
+  book was flat when the window opened, so 100% of the move is on code-opened positions with zero
+  untouched inventory; that makes it cleanly attributable and still statistically worthless. The durable
+  read, t computed by script from the gate's own cohort dispersions (`avg/(sdCohort/√cohorts)`):
+  **`reversion` +0.39 / +1.76 / +1.39** at 225/900/3600s — the only source positive at every horizon and
+  the only one clearing the 1.5 hurdle anywhere (900s: +3.17bps, 291 resolved, 88 cohorts). `trend`
+  −0.09/−0.02/−0.88, `momentum` −0.04/+0.31/−1.45, `social` −0.43/−0.49/+0.21, and **`xsreversion`
+  −0.25/−0.74/−8.32 — negative at every horizon**, yet weighted 0.52 and sole driver of JPM/NVDA/NFLX.
+  The live loss is a *consistent illustration* of what the telemetry already said, not the proof.
+- **This answers the standing "work on EDGE" question:** yes, one signal here predicts returns —
+  `reversion`. That is no longer an open question, and re-weighting is no longer combiner-tuning-without-
+  edge; there is now a measured edge to shape.
+- **Predicted next, so it can be checked:** demote/gate `xsreversion` on its own measured expectancy and
+  let `reversion` carry the size. **Check first** whether JPM's loss persisted or mean-reverted across the
+  full window — that distinguishes "the fade was early" from "the fade was wrong," and only the second
+  justifies the demotion.
