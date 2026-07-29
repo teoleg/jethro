@@ -1,5 +1,28 @@
 [
   {
+    "ts": "2026-07-29T15:43:06Z",
+    "feedMode": "LIVE",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-80.76819705",
+    "gross": "32606.45420000",
+    "net": "-4344.42420000",
+    "fees": "9.144961",
+    "pnl_pct": -14.15,
+    "gross_pct": 92.29,
+    "pnl_growth_pct": -160.16,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": false,
+    "stale": true,
+    "underwater": true,
+    "action": "changed",
+    "last_verdict": "\u26a0\ufe0f INCONCLUSIVE",
+    "decision": "made a change: the loop's market-closed branch now deploys what it fast-forwards in, so a change pushed after the close reaches the JVM instead of being stranded in the repo forever (ADR-0123) \u2014 this deploy also brings the owner's exploration mode live for the first time, which will dominate the window \u00b7 prev \u26a0\ufe0f INCONCLUSIVE",
+    "reasoning": "82% of the firm's loss sits in one cohort \u2014 the names priced off a 15-minute-delayed feed, where the desk posts limit orders at a price the market left a quarter-hour ago.\n\n*(No code change this cycle \u2014 the pending change is still under measurement at 4/6 cycles. Every figure\nbelow is read from the live endpoints, the order book, or `reports/run-status.json`, or computed from them\nby script; none is authored here \u2014 invariant 7 / ADR-0016.)*\n\n## Situation\n\n1. **Money.** Underwater. The SITUATION header has total PnL **\u2212$58.29** (+$12.46 vs last run, **\u2212$27.25**\n   over the last 3); a live read mid-analysis showed **\u2212$69.04**, so the book is swinging within the window\n   rather than trending. `pnl_growth_pct` is far below the +1%/3-iteration target, `on_track=false`,\n   `stale=true`, `underwater=true`.\n2. **Risk.** Gross **$31,727 = 2.12%** of the $1.5M firm cap (headroom **$1,468,272**); net **\u2212$4,148 =\n   0.41%** of the $1M net cap. No cap flag, no breaker. Exposure is *rising off dormant*, which is the goal\n   \u2014 this is **not** the DANGER state, so the correct response is to fix the bleed mechanism, not de-risk.\n3. **Cause.** Last change `d9f8969cc` (the closed-market deploy fix + the owner's exploration mode) is\n   **still accumulating evidence (4/6)** \u2014 no verdict yet, and it did not open these positions. The loss is\n   not attributable to it.\n4. **Danger.** No. Bleeding, but with ~98% of the gross cap unused.\n\n## What the orders say\n\nSplitting the book by market-data feed \u2014 the 7 names carrying real-time `alpaca` symbology vs everything\npriced only by the delayed `yahoo` poll \u2014 separates the P&L almost perfectly, and the two halves reconcile\nto the firm total exactly:\n\n- **REALTIME** (AAPL, AMZN, GOOG, JNJ, JPM, MSFT, NVDA): realized **+$11.13**, total **\u2212$12.60**;\n  **+1.81 bps** of its $61,481 turnover.\n- **DELAYED** (GOOGL, NQ, TSLA, ES): realized **\u2212$56.67**, total **\u2212$56.44**; **\u221223.04 bps** of its\n  $24,592 turnover.\n\n**29% of the turnover is producing 82% of the loss**, and it is almost entirely *realized* \u2014 round-trips,\ni.e. trading logic, not market drift on untouched inventory.\n\n## Mechanism\n\n`FusionExecutor.passiveLimitPrice` posts the limit **at the last mark**, read from `LastPriceCache` \u2014 a\nlast-value map with **no age check** (`FusionExecutor.java:180-190`, `LastPriceCache.java:21-37`). For\nyahoo-only names that mark only steps every ~15 minutes, so the desk posts DAY limits at a price the market\nleft a quarter-hour ago. The order-book evidence is unambiguous \u2014 over a 3-hour window, distinct limit\nprices vs number of reposts:\n\n| | reposts | distinct prices | fill rate |\n|---|---|---|---|\n| GOOGL / ORCL / NFLX / META | 19 / 16 / 5 / 29 | 1 / 1 / 1 / 2 | 5% / 0% / 0% / 0% |\n| NVDA / JPM / MSFT / AAPL | 11 / 18 / 22 / 13 | 11 / 18 / 21 / 11 | 100% / 83% / 77% / 77% |\n\n29 META orders over 52.9 minutes collapsed onto **2** prices; NVDA got a distinct price on all 11. Same\nmarket, same 30-second cadence \u2014 that is a property of the feed, not of the market. A stale limit only\ntrades when the market comes *back* to it, i.e. when the move went against the view, so fills are adversely\nselected by construction. And it is structural, not incidental: `UniversePromotionService.java:67-73`\ndeliberately writes yahoo-only symbology, so **every** discovery-promoted name (GOOGL, META, ORCL, NFLX,\nTSLA) lands in the delayed cohort by design.\n\nThis also contaminates the measurement the edge gate runs on: **29.7%** of resolved observations on delayed\nnames have `exit_mark == entry_mark` exactly, versus **3.7%** on real-time names. Roughly a third of the\nevidence on those names is a frozen non-observation booked as a flat return. The standing \"no source has\ndemonstrated edge\" conclusion is therefore partly a data-quality artifact \u2014 you cannot measure a\n225\u20133600s expectancy on a price that steps every 15 minutes. TCA is blind to it too, because\n`arrival_price` is written from the same stale mark, making measured slippage ~0 by construction.\n\n## Decision\n\nNo change \u2014 the pending one is being measured. **Queued for the next cycle** (architecturally significant,\nso with a Proposed ADR): gate tradability on *price age* \u2014 a name whose mark is older than the horizon the\ndesk plans on is reduce-only, and/or a discovery-promoted name must earn real-time symbology before it\nbecomes tradable. This supersedes the rule-68 explanation: the newly-promoted names are not primarily\nlosing because they are uncorroborated, they are losing because they are **priced on a 15-minute delay**.",
+    "commit": "0377e24"
+  },
+  {
     "ts": "2026-07-29T15:05:03Z",
     "feedMode": "LIVE",
     "available": true,
