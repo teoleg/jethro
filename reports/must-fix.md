@@ -15,6 +15,70 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-29 17:30Z (ADR-0124 at 2/6 cycles — held, no code change made)
+
+**ADR-0124 → ✅ VERIFIED for a second consecutive cycle** on its first (decisive) VERIFY-BY, read live from
+`/api/fusion/targets`. Deployment proven behaviourally, not from `git log` (rule 84): the JVM restarted at
+the 17:07 heartbeat (`uptimeSeconds` **1359** at a 17:30:01Z report) and the endpoint reads
+`sources=1 → agreement 0.000`, a value only the ADR-0124 code produces.
+
+- **TSLA `sources=1, agreement 0.000, fc 0.000, targetQty 0`**; **META `sources=1, agreement 0.000,
+  fc 0.000, targetQty 0`**; **GOOGL `sources=1, fc 0.000`** — each still carrying a live raw `xsreversion`
+  contribution (TSLA **+13.72**, META **+8.06**) that is correctly discarded for want of a second sensor.
+- Largest conviction in the book is corroborated: **NVDA `sources=3, agreement 0.571, fc +8.206`**. No
+  `sources=1` name carries any conviction at all.
+
+**⚠️ The SECOND check FAILS — and that is a diagnosis narrowing, not a regression.** Last cycle's "zero
+`fusion re-plan` cancels post-restart" was recorded as *confounded, not evidence* (rule 85). Correctly so:
+after the 17:07 restart the churn is **back** — **3 of 17** post-restart orders are `fusion re-plan`
+cancels, and **AAPL** is running the ORCL ramp in miniature: SELL **1 FILLED → 1 FILLED → 1 CANCELLED →
+2 CANCELLED → 3 ROUTED**, each re-planned 30 s apart at a larger size. The cancellation churn is therefore
+**independent of the agreement scaler** and belongs wholly to item #1 below. Evidence moved accordingly.
+
+**Falsifier still live and still the scorer's:** *if the ordering corrects but firm realized bps does not
+improve over the window, the inversion was cosmetic.* Scorer prints
+`3e7817e4f still accumulating evidence (2/6 cycles)`. Re-open item if it lands ❌.
+
+**No code change this cycle** — `reports/.pending-baseline.json` is present at 2/6; a new change would
+destroy the evidence.
+
+**Checked, not promoted — the edge question behind the whole backlog.** Cohort-clustered t on
+`/api/signals/telemetry` (LIVE, 3600 s), from the endpoint's own `avgReturnBps` / `cohorts` /
+`stdCohortMeanBps`: **reversion +8.783 bps, 29 cohorts, t = +1.22** — the only positive expectancy in the
+book, short of the 1.5 hurdle; trend **−8.634 (t −1.25)**, xsreversion **−11.524 (t −1.05)**, social
+**−4.370 (t −0.39)**, momentum **−13.257 (t −1.45)**. This explains the large target-vs-holding gaps that
+look like a defect and are not — NVDA aims **+148.27** against **−3.0** held with `deltaQty 0.0`, JPM
+**−69.89** against **0** with `deltaQty 0.0`: that is `PositionBuffer` under a reduce-only edge gate doing
+its job. **Not a must-fix item** — reversion needs more cohorts, not tuning.
+
+## OPEN (ranked, most-costly first) — as of 2026-07-29 17:30Z
+
+1. **[OPEN — unchanged at #1] Execution is one-sided by design — 61 of 65 round-trips POST to enter and
+   CROSS to exit.** `FusionExecutor.route` per ADR-0084: risk-increasing rests as a DAY LIMIT at the mid,
+   risk-reducing goes MARKET. The desk pays the crossing cost on **100%** of exits and captures spread on
+   **0%** of entries, aggregating **−11.6 bps** on **$39,363** of round-tripped notional at a median
+   **27.4-minute** turn; fees were only **21%** of that realized loss, the rest adverse selection.
+   - **Second named instance of the silent-entry pathology, this cycle:** the **AAPL** ramp above
+     (1 → 2 → 3, re-planned every 30 s, cancelling instead of filling), after **ORCL** last cycle
+     (15 consecutive cancels, 5 → 94, zero fills). Now confirmed **independent of ADR-0124**, so this item
+     owns it outright: a mid-resting limit either fills because the market came to it, or does not
+     transact at all while the desk believes it is working an order.
+   - **Architecturally significant** — needs an ADR superseding ADR-0084, not a dial.
+   - **VERIFY-BY:** the LIMIT-in/MARKET-out share of round-trips falls below 61/65, and the aggregate
+     round-trip bps on entered-and-exited notional moves toward zero from **−11.6**. Secondary: the
+     `fusion re-plan` share of orders falls below the **3 of 17** measured post-restart this cycle.
+   - **Do not chase the holding-period buckets** (rule 77): n=65 and they are not monotone.
+
+2. **[OPEN — ops, not money] The scorer's auto-revert can fail silently.** `score-change.py` records
+   `"revert": true` in the snapshot and prints a warning when `git revert` conflicts, but nothing
+   downstream surfaces it — the ledger row still reads "❌ BAD ... reverted" while the commit is still
+   live (this is what happened to `d9f8969cc`). A future BAD change could stay in production while the
+   register believes it was pulled.
+   - **VERIFY-BY:** the ledger note for a BAD verdict distinguishes "reverted" from "revert FAILED", and
+     `run-status.json` carries the failure so the next run's Step 0 sees it without reading git.
+
+---
+
 ## Verification block — 2026-07-29 17:00Z (ADR-0124 at 1/6 cycles — held, no code change made)
 
 **Item 1 (agreement scaler inverted at `sources=1`) → ✅ VERIFIED and CLOSED**, on its own written

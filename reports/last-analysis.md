@@ -1,71 +1,103 @@
-ADR-0124 is VERIFIED on its exact VERIFY-BY — the uncorroborated name now sizes at zero, not at maximum — and it is at 1/6 of its evaluation window, so no new change this cycle.
+ADR-0124 holds for a second cycle — every uncorroborated name still sizes at zero — and at 2/6 it is still measuring, so no new change; the order churn it was hoped to stop has resumed on AAPL, which puts the blame back on execution where it belongs.
 
-*(Every figure below is read live from `/api/risk`, `/api/fusion/targets`, `/api/attribution`, the TCA and
-turnover tables in `logs/report.md`, or `reports/run-status.json`. None is authored here — invariant 7 /
-ADR-0016. The PnL verdict remains the scorer's.)*
+*(Every figure below is read live from `/api/risk`, `/api/fusion/targets`, `/api/attribution`, `/api/var`,
+`/api/signals/telemetry`, or the tables in `logs/report.md`. None is authored here — invariant 7 /
+ADR-0016. The PnL verdict stays the scorer's.)*
 
-## Step 0 — did last run's change land, and did it do what it claimed?
+## Step 0 — did last run's change land, and is it still doing what it claimed?
 
-**Deployed:** yes. The JVM started **12:45:40 local**, 45 s after commit `3e7817e` (12:44:55) — the running
-process is ADR-0124, not the code that preceded it.
+**Deployed:** yes, and proven behaviourally rather than from `git log` (rule 84). The JVM restarted at the
+17:07 heartbeat (`uptimeSeconds` **1359** at a 17:30:01Z report), and `/api/fusion/targets` reads
+`sources=1 → agreement 0.000` — a value only the ADR-0124 code can produce. No revert commit for
+`3e7817e` exists, so the running process is ADR-0124.
 
-**✅ VERIFIED**, on the written VERIFY-BY, read live from `/api/fusion/targets`:
+**✅ VERIFIED (second consecutive cycle), on the written VERIFY-BY:**
 
-- The register required *"every `sources=1` row reads `agreement 0.000` and `combinedForecast 0.0`"*.
-  **META: `sources=1`, `agreement 0.000`, `combinedForecast 0.000`, `targetQty 0.000`.** Last cycle the same
-  name read `sources=1, agreement 1.000, |forecast| 15.41` and was targeting **−78.3** shares against a
-  holding of **0**.
-- The register required *"the largest conviction in the book belongs to a corroborated name"*. It does:
-  **MSFT, `sources=2`, `agreement 0.958`, `combinedForecast −10.381`**. No `sources=1` name carries a
-  `|combinedForecast|` above any multi-source name — the inversion (**15.41** at one source against
-  **8.44** at three) is gone.
-- Second check — the repeated single-name `fusion re-plan` cancellation runs. **Zero cancellations in
-  `recent_orders` after the 16:45:57Z restart**; every post-restart order is FILLED. Honest caveat: this
-  half is **confounded**. Pre-restart the same pathology was running on **ORCL** (15 consecutive
-  `fusion re-plan` cancels, SELL size ramping 5 → 12 → 18 → … → 94, never filled), and after the restart
-  ORCL is no longer in the routed set at all (`selector: measured 19, tradable 9`). Warm-up, not the fix,
-  may be doing that work. The **first** check is not confounded and is decisive.
+- *"every `sources=1` row reads `agreement 0.000` and `combinedForecast 0.0`"* — live: **TSLA
+  `sources=1, agreement 0.000, fc 0.000, targetQty 0`**; **META `sources=1, agreement 0.000, fc 0.000,
+  targetQty 0`**; **GOOGL `sources=1, fc 0.000`**. All three carry a non-trivial raw `xsreversion`
+  contribution (TSLA **+13.72**, META **+8.06**) that is correctly discarded for want of a second sensor.
+- *"the largest conviction in the book belongs to a corroborated name"* — live: **NVDA `sources=3,
+  agreement 0.571, combinedForecast +8.206`**. Not one `sources=1` name carries any conviction at all.
 
-The falsifier stays live: *if the ordering corrects but firm realized bps does not improve over the window,
-the inversion was cosmetic.* That is the scorer's call at 6/6, not mine.
+**⚠️ The second check FAILS — and last cycle's reading of it was the confounded one.** Last cycle I
+recorded "zero `fusion re-plan` cancels post-restart" as *confounded, not evidence* (rule 85). That
+caution was right: after the 17:07 restart the churn is **back** — **3 of 17** post-restart orders are
+`fusion re-plan` cancels, and AAPL is running the same ramp ORCL ran: SELL **1 FILLED → 1 FILLED →
+1 CANCELLED → 2 CANCELLED → 3 ROUTED**, each re-planned 30 s apart at a larger size. So the cancellation
+churn is **not** an agreement-scaler artefact; it is independent of ADR-0124 and belongs entirely to
+must-fix #1 (one-sided execution). That is a real narrowing of the diagnosis, not a regression of the fix
+— the first check, the decisive one, is clean.
+
+The falsifier stays live and is the scorer's to call: *if the ordering corrects but firm realized bps does
+not improve over the window, the inversion was cosmetic.* `score-change.py score` prints
+**`3e7817e4f still accumulating evidence (2/6 cycles)`**.
 
 ## Situation
 
-1. **Money.** Underwater and down on the window, up over three. SITUATION header: total PnL **−$53.69**,
-   **−$31.33** vs last run, **+$27.08** over the last 3. Read again live a few minutes later: **−$56.76**.
-   `pnl_growth_pct` **68.4%** vs the **+1.0%** target, `on_track=true`, `stale=false`, `underwater=true`.
-2. **Risk.** Not the problem. Gross **$9,651.27 = 0.6%** of the $1.5M firm cap (headroom **$1,490,349**);
-   net **−$4,361.67 = 0.4%** of the $1M net cap. Breaker `halted: false`. VaR95 **$169.64**, ES95
-   **$209.05** on **$9,651.27** covered, `skippedExposure 0.00`. No cap flag, no DANGER flag, and the book
-   is trading — neither near the ceiling nor dormant. The only flag is UNDERWATER.
-3. **Cause — and it is mostly *not* my change.** ADR-0124's live effect is confined to the two names it
-   silences: META and TSLA, both `quantity 0`, contributing no new PnL. Everything that moved money this
-   window is a **multi-source** name ADR-0124 did not silence: JPM **−$24.88** realized over **41** fills
-   ending flat, JNJ **+$42.64** over **44** fills ending flat, AMZN **−$14.79**, GOOG **−$8.28**. GOOGL
-   (**−$40.71**) and NQ (**−$35.82**) are byte-identical to last cycle — frozen historical losses in this
-   epoch, not an ongoing bleed. **Attribution:** essentially none of the −$31.33 is attributable to
-   ADR-0124; it is the standing exploration configuration trading against the market. The gross fall
-   ($28,332.63 → $9,651.27) I will **not** claim either — ADR-0124 does shrink targets book-wide, but the
-   restart re-cut the tradable set from ORCL-inclusive to 9 names in the same minute. The two cannot be
-   separated from these numbers, so I am attributing neither.
-4. **Danger.** No. Bleeding, yes — but at 0.6% of the gross cap with the breaker untripped, this is not the
-   near-cap bleed that would override everything. Nothing to de-risk.
+1. **Money.** Underwater, but up on the window and up over three. Total PnL **−$50.75**, **+$1.74** vs last
+   run, **+$37.29** over the last 3. `pnl_growth_pct` **35.01%** against the **+1.0%** target;
+   `on_track=true`, `stale=false`, `underwater=true`. Not bleeding.
+2. **Risk.** Not the problem, and moving the right way. Gross **$18,414.69 = 1.2%** of the $1.5M firm cap
+   (headroom **$1,481,585**); net **−$163.02 = 0.0%** of the $1M net cap. Gross **+$7,742.82** on the
+   window — a book coming off dormant with 98.8% of its ceiling unused, which is the goal, not a concern.
+   Breaker `halted: false`. VaR95 **$158.64**, ES95 **$210.62** on **$18,414.41** covered with
+   `skippedExposure 0.00`. Regime `CHOP` / `CALM`, `volRatio 0.88`.
+3. **Cause.** ADR-0124 is at 2/6 and unscored. Its live footprint is confined to the three names it
+   silences — TSLA, META, GOOGL — all at `targetQty 0`, none of which traded this window. The window's
+   money came from names it did not touch.
+4. **Danger.** No. Underwater is the only flag; there is no near-cap bleed and nothing to de-risk.
+
+## Order-level post-mortem, and change-vs-market attribution (honest)
+
+The window traded **42 fills / 17 cancels / 1 routed** across AAPL, GOOG, NVDA, JPM, JNJ, AMZN, MSFT and
+the ES hedge. Turnover is concentrated in JNJ (**44** fills, **$58,850**), JPM (**41**, **$28,661**), AAPL
+(**37**, **$27,964**), GOOG (**30**, **$27,041**), MSFT (**36**, **$22,487**) — every one of them a
+**three-source** name ADR-0124 leaves alone. **So none of the +$1.74 is attributable to my change**; it is
+the standing exploration configuration trading against the market.
+
+The **+$7,742.82** gross rise I *can* attribute, and not to ADR-0124 either: it is the **hedge doing its
+job**. `/api/risk` shows EQUITY gross **$9,288.86** with net **−$9,288.86** (all nine equity positions
+short) against a single ES position of **$9,125.84** long, netting the firm to **−$163.02**. The three ES
+BUYs at 17:15/17:18/17:20 built that leg; `/api/hedging` reads `status: ON-TARGET`, `held 0.024588 →
+target 0.028131`. Gross rose because a hedged book carries both legs — exactly as designed.
+
+Book split: ALPHA **−$18.57** (realized **+$5.16**, unrealized **−$23.73**, fees **$21.60**), HEDGE
+**+$3.64**, MACRO **−$35.82** — and MACRO is realized-only with `grossExposure 0.00`, a frozen historical
+NQ loss in this epoch, not an ongoing bleed. Restating rule 87 deliberately: ALPHA's realized turning
+**positive** against $21.60 of fees is *not* licence to re-adopt the fee framing rule 74 already killed.
+
+## What I checked on the standing priority (edge), and why it argues for patience
+
+Per the standing priority I asked the first question — does *anything* predict returns here? Cohort-
+clustered t on `/api/signals/telemetry` (LIVE, 3600 s), computed from the endpoint's own `avgReturnBps`,
+`cohorts` and `stdCohortMeanBps` by the same construction the edge gate uses:
+
+| source | n | cohorts | avgReturnBps | t |
+|---|---|---|---|---|
+| reversion | 109 | 29 | **+8.783** | **+1.22** |
+| trend | 115 | 30 | −8.634 | −1.25 |
+| xsreversion | 53 | 6 | −11.524 | −1.05 |
+| social | 37 | 9 | −4.370 | −0.39 |
+| momentum | 15 | 5 | −13.257 | −1.45 |
+
+**Reversion is the only positive expectancy in the book, and at t = +1.22 it is short of the 1.5 hurdle —
+not by much, and on only 29 cohorts.** The fusion weights already reflect this (`reversion` **2.384**, the
+largest by a factor of two). This also explains the thing that looks alarming in `/api/fusion/targets` and
+is not: NVDA aims **+148.27** against a holding of **−3.0** with `deltaQty 0.0`, JPM **−69.89** against
+**0** with `deltaQty 0.0`. That is `PositionBuffer` under a reduce-only edge gate, holding size back
+because nothing has cleared the hurdle. The gate is behaving correctly; the desk holds little because it
+has measured little. The honest read is that reversion needs **more cohorts**, not more tuning — another
+argument for letting the window run rather than perturbing the book.
 
 ## Why no code change
 
-`score-change.py score` prints **`3e7817e4f still accumulating evidence (1/6 cycles) — held, not scored
-this run`**, and `reports/.pending-baseline.json` is present. Per the contract, stacking a change on top of
-a measurement in progress destroys the evidence. Holding.
+`reports/.pending-baseline.json` is present and the scorer prints **2/6 cycles**. Stacking a change on a
+measurement in progress destroys the evidence, and this cycle's own finding — that the cancellation churn
+is independent of ADR-0124 — is exactly the kind of signal a second change would have muddied. Holding.
 
-## What I am watching, and what is next
-
-The next target is already ranked: **execution is one-sided by design** (`FusionExecutor.route`, ADR-0084 —
-entries POST at the mid, exits CROSS). This cycle handed it two more pieces of evidence. First, the ORCL
-ramp is the TSLA pathology on a different name — a passive sell that never fills, re-planned every 30 s at
-a larger size, 15 times, zero fills: the entry side simply does not transact unless the market comes to it.
-Second, `/api/attribution` reads ALPHA `totalPnl` **−$18.66** against `feesPaid` **$21.10** — the strategy
-book is positive before commission. I am flagging that carefully rather than acting on it, because rule 74
-already disproved the pure-fee framing once (fees were 21% of the realized loss firm-wide); fee and adverse
-selection are both execution costs and must be split before either is blamed. Also logged, not chased:
-TCA `avgSlippageBps` is **6.67** (TSLA) and **6.00** (GOOGL) against **0.40–0.56** for the Alpaca-WS names —
-real, but on 3 and 5 fills respectively, too little turnover to be the target.
+Next cycle, once `3e7817e4f` is scored, the target is must-fix **#1**: execution is one-sided by design
+(`FusionExecutor.route`, ADR-0084 — entries rest at the mid, exits cross). The AAPL ramp is now the
+second-named instance of a mid-resting limit that re-plans larger every 30 s instead of transacting, and
+it is the entry side of that scheme failing silently. Changing it needs an ADR superseding ADR-0084, not
+a dial.

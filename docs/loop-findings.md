@@ -2354,3 +2354,34 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   silence. So **none** of the −$31.33 is attributable to it. The gross fall $28,332.63 → $9,651.27 is
   claimed for **neither** side: ADR-0124 shrinks targets book-wide *and* the restart re-cut the universe,
   in the same minute, and these numbers cannot separate them.
+
+## 2026-07-29 17:30Z — no-change (ADR-0124 at 2/6): the fix holds, but the churn it was blamed for is back
+
+- **Rule 88 — a "the symptom stopped" check taken right after a restart must be RE-TESTED a cycle later,
+  not just flagged as confounded.** Rule 85 correctly refused to credit ADR-0124 for the post-restart
+  silence. This cycle re-tested it and the silence was indeed warm-up: **3 of 17** post-restart orders are
+  `fusion re-plan` cancels, with **AAPL** running the ORCL ramp in miniature — SELL **1 FILLED → 1 FILLED
+  → 1 CANCELLED → 2 CANCELLED → 3 ROUTED**, re-planned 30 s apart at a growing size. Flagging a confound
+  is only half the job; the other half is scheduling the re-test.
+- **Rule 89 — that re-test is what NARROWED the diagnosis, and narrowing is worth a cycle.** The
+  cancellation churn is now proven **independent of the agreement scaler**: it recurs on a three-source
+  name with the scaler working correctly. It belongs wholly to must-fix #1 (one-sided execution,
+  ADR-0084), and the AAPL ramp is the *second* named instance of a mid-resting limit that never
+  transacts. A held cycle that removes a wrong attribution is not a wasted cycle.
+- **Rule 90 — before blaming the buffer for holding tiny positions, check whether anything has EDGE.**
+  `/api/fusion/targets` shows NVDA aiming **+148.27** against **−3.0** held with `deltaQty 0.0`, JPM
+  **−69.89** against **0** with `deltaQty 0.0` — which reads as a refusal to trade. It is not:
+  `PositionBuffer` is under a reduce-only edge gate, and cohort-clustered t on `/api/signals/telemetry`
+  (LIVE 3600 s) says why — **reversion +8.783 bps on 29 cohorts, t = +1.22**, the only positive
+  expectancy in the book and short of the 1.5 hurdle; trend **−8.634**, xsreversion **−11.524**, social
+  **−4.370**, momentum **−13.257**. The gate is correct. The desk holds little because it has measured
+  little, and reversion needs **more cohorts, not more tuning**.
+- **Rule 91 — a gross rise on a hedged book is two legs, not more risk.** Gross **+$7,742.82** on the
+  window looked like risk-taking; `/api/risk` says EQUITY gross **$9,288.86** at net **−$9,288.86** (nine
+  shorts) against one ES leg of **$9,125.84** long, firm net **−$163.02**, `/api/hedging`
+  `status: ON-TARGET`. Read net alongside gross before calling a gross rise a risk event.
+- **Attribution this window (honest split):** every name that traded — JNJ (44 fills, $58,850), JPM (41,
+  $28,661), AAPL (37, $27,964), GOOG (30, $27,041), MSFT (36, $22,487) — is **three-source**, i.e. a name
+  ADR-0124 does not touch; the three names it silences (TSLA, META, GOOGL) sat at `targetQty 0` and did
+  not trade. So **none** of the **+$1.74** is attributable to the change; it is the standing exploration
+  configuration against the market. The gross rise is attributable to the **hedge**, not to the change.
