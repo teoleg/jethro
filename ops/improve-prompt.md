@@ -150,6 +150,29 @@ Read the ledger every cycle: a repeated **INCONCLUSIVE** streak means you are tu
 move the number — change *what* you're working on (see the thesis), not just the parameter. A BAD verdict
 tells you what not to repeat. Never touch the ledger, snapshots, or `.pending-baseline.json` by hand.
 
+## Step 0 — VERIFY LAST RUN before anything new (MANDATORY, do this first)
+The loop's worst failure mode is diagnosing well but never confirming a fix actually LANDED and WORKED —
+so the same defect bleeds money run after run while new changes pile on top. Close that loop FIRST, every
+cycle, before any new diagnosis:
+
+1. **Re-test last run's change, specifically.** Read the previous ledger row, `reports/last-analysis.md`,
+   and the top of `reports/must-fix.md`. For the change deployed last cycle, decide from THIS run's LIVE
+   telemetry whether it did what it CLAIMED — one verdict, each with the exact number that proves it:
+   - ✅ **VERIFIED** — the targeted defect is measurably gone (name the metric that was wrong and now isn't).
+   - ⚠️ **STILL-BROKEN** — deployed, but the metric did not move; the fix was wrong or incomplete.
+   - 🔴 **REGRESSED** — the change made this metric, or another, worse.
+   Also confirm it actually deployed (the running commit matches; the config/threshold is live), so you
+   never grade a change the app never ran.
+2. **Verification OUTRANKS novelty.** If last run's change is STILL-BROKEN or REGRESSED, THIS run's job is
+   to fix or revert THAT — do not chase a new idea while the last one is unconfirmed. Only a ✅ VERIFIED
+   item frees you to pick up the next must-fix.
+3. **Maintain `reports/must-fix.md` — the carried-forward MUST-FIX register** (a checklist, newest block on
+   top). Every cycle: mark each open item ✅/⚠️/🔴 with its proving number, strike the VERIFIED ones, and
+   (re)rank what remains most-costly-first. Every item MUST carry a concrete **VERIFY-BY** — the exact
+   metric / endpoint / number that will prove it fixed next run — so "fixed" is never an opinion. The ONE
+   change you make this cycle targets the **#1 open item**. Every number you quote is read from live
+   telemetry, never authored (invariant 7). Commit `reports/must-fix.md` alongside your reasoning each run.
+
 ## Situation triage — answer these PRECISELY, first, every cycle (before any diagnosis)
 Open every cycle by stating the live money situation in plain numbers — mandatory, and it goes at the TOP
 of `reports/last-analysis.md`. Do not jump to a clever code fix before you have answered:
@@ -200,8 +223,12 @@ book is the single most important *opportunity* to see. Never miss either.
    **Also APPEND one dated finding to `docs/loop-findings.md`** (append — never overwrite; it is the durable,
    compounding memory): what the window's orders/change did to PnL/exposure, the **trigger** behind any bad
    or good move, and the **rule** for next time. 2–4 lines, specific. Commit it alongside your reasoning.
-4. If there is a clear improvement, make the **one coherent change** (config, code, new strategy/risk
-   model — with a Proposed ADR in the same commit if it is architecturally significant).
+4. Make the **one coherent change** that targets the **#1 open item in `reports/must-fix.md`** (config,
+   code, new strategy/risk model — with a Proposed ADR in the same commit if it is architecturally
+   significant). Its commit message must name the must-fix item it addresses and the metric that will
+   confirm it next run, so Step 0 can grade it. If genuinely nothing is actionable, say so and stop — but
+   an open must-fix item with a live cost is *always* actionable; "nothing to do" while the book bleeds is
+   the failure this whole procedure exists to prevent.
 5. **Verify:** `./gradlew -Pci test` (or the narrowest relevant module). Not green → revert your edit
    and stop. Never commit a red build.
 6. **Commit** to branch `claude/auto-improve` — message = your diagnosis and the change, in words (no
