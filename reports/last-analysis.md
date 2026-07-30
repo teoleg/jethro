@@ -1,88 +1,75 @@
-The ADR-0131 evaluation window closed ❌ BAD and the scorer's own revert failed on a git conflict, leaving the bad code live — so I reverted it by hand, restoring only its code paths and preserving the five cycles of findings a whole-commit revert would have destroyed.
+The hand-completed revert of the BAD cold-sensor re-seed is VERIFIED live on every pre-registered leg — the mechanism logs nothing, seeds only at boot, and is gone from the tree — and since it is only 1/6 cycles into its measurement window I made no new change, ranking ALPHA's notional churn as the next target instead.
 
 *(Every figure below is read from the live endpoints, `logs/report.md`, `reports/improvement-ledger.md`
 or `reports/run-status.json`. None is authored here — invariant 7 / ADR-0016.)*
 
-## Step 0 — the hold is over, and it ended badly
+## Situation triage
 
-For five cycles I made no change because `efccc6502` was under measurement. This run
-`scripts/score-change.py score` prints **`no pending change to score`** and
-`reports/.pending-baseline.json` is **gone** — the window closed. The ledger row reads **❌ BAD**, and its
-note reads `⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert`.
+1. **Money.** `/api/risk` `.total` reads total PnL **$145.76317190** (realized **$159.90126235**,
+   unrealized **−$14.13809045**). The report SITUATION header computes **+$20.51** on the run and
+   **−$0.96** across the last three. Not bleeding this window; the last three are essentially flat,
+   which is what `stale=true` on the last heartbeat is reporting.
+2. **Risk.** Gross **$33028.88788750** = **2.2%** of the firm cap $1,500,000, headroom **$1,466,971**;
+   net **−$10212.24788750** = **1.0%** of the $1,000,000 net cap. Flags: **none**. Gross fell
+   **$3,279.94** on the run and **$17,223.30** across the last three. Not near a cap and not DORMANT —
+   20 equity positions plus the ES hedge, filling continuously through the window.
+3. **Cause.** Last cycle's change was the hand-completed revert of the ❌ BAD ADR-0131 cold-sensor
+   re-seed (`64a7a6336`). It is **not yet scored**: `scripts/score-change.py score` prints
+   `still accumulating evidence (1/6 cycles)` and `reports/.pending-baseline.json` is present.
+4. **Danger.** No. Not bleeding, not near the exposure cap, breaker not tripped. The inverse does not
+   apply either — gross is *falling*, so there is nothing to de-risk.
 
-That single line outranks everything else I had queued. A change the scorer has graded BAD, still running
-because the automation meant to remove it silently failed, is the most expensive open item on the board —
-and it would have stayed live indefinitely, since the scorer only attempts a revert once. So this cycle's
-one change is completing that revert, not the strict-improvement guard I had specified over the last two
-cycles.
+## Step 0 — did last cycle's revert land and work? ✅ VERIFIED
 
-**Why the auto-revert conflicted, and what I did differently.** Of the 13 files in `efccc6502`, exactly
-three have moved since: `docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md` — each
-touched by all five hold-cycle doc commits. Those three are the loop's accumulating memory. A whole-commit
-`git revert` conflicts on them (it did), and had it succeeded it would have **erased five cycles of
-findings** — a worse outcome than the bad code. I restored only the ten code/ADR paths. Verification that
-the revert is exact and complete: `git diff --cached efccc6502^` over `app/src` and `trading-core/`
-returns **empty**, and `grep -rn SensorReseed` over the tree returns **none**. `./gradlew -Pci :app:test
-:trading-core:algo-engine:test` is green.
+All four pre-registered legs check out against this run's JVM log and working tree:
 
-`docs/adr/0131-*.md` is marked **Status: Reverted** rather than deleted, with the five-cycle diagnosis
-written up under a new "Why it was reverted" section — including the specific consequence bullet in the
-original ADR that reasoned the defect away in advance ("*the worst case discards state that was earning
-nothing and would have kept earning nothing*"). That is where the error actually lives: a sensor at 191 of
-193 prints is publishing nothing **now**, but it is two prints from publishing, and that state is nearly
-complete rather than worthless.
+1. The ADR-0131 WARN text (`re-seeding every … sightings until it does (ADR-0131)`) appears **zero**
+   times. Last run's JVM logged it, which is what proved the BAD code was live.
+2. Every `trend sensor warmed … from … stored prices` line is timestamped between **12:36:32** and
+   **12:36:57**, against a `Started JethroApplication` at **12:36:29** — all inside the boot window.
+   That is ADR-0071 boot seeding, which must and does still appear; there are **no** post-boot lines,
+   which is the retry being gone.
+3. With no retry there is no second seeding wave, so the six negative wave-over-wave deltas last run
+   recorded (HD, PG, CAT, UNH, MCD, GOOG) have no mechanism to recur — and none do.
+4. `grep -rn SensorReseed` over the tree returns nothing, and the JVM booted at **12:36:29** against a
+   revert committed **12:35:46**, so the running process is this revert or later.
 
-**And the guard I had queued is closed, not carried.** It was a correct diagnosis of the mechanism's
-defect — but it guards the mechanism the scorer just graded BAD, and re-attempting a reverted idea is
-precisely what the contract forbids. Preserved in the ADR so it is never re-derived; not an open item.
+Item #1 is closed. Per the contract that frees the next must-fix — but the window is at 1/6, so the
+next item is *ranked*, not *acted on*.
 
-## Situation
+## Order-level post-mortem and honest attribution
 
-1. **Money — down on the run and off target.** `/api/risk` `.total` reads total PnL **$125.44**. The
-   SITUATION header computes **−16.06** on the run and **−60.15** across the last three; `run-status`
-   reads `pnl_growth_pct` **−1.36** vs `pnl_target_pct` **1.0**, `on_track=false`, **`stale=true`**.
-   `/api/attribution` reads `firmTotal` **$125.43676941** = ALPHA **$11.04806156** + HEDGE
-   **$150.21218440** + MACRO **−$35.82347655**, `hedgeMasking` back to **true**. The shape is worth naming
-   plainly: **the hedge is carrying the entire firm total**, ALPHA's realized **$50.44247139** is nearly
-   cancelled by unrealized **−$39.39440983**, and `strategyAlpha` reads **−$24.77541499** net of ALPHA's
-   **$51.332169** of fees. Against a firm total of **$125.44**, `totalFees` of **$54.339315** is no longer
-   a rounding error.
-2. **Risk — comfortable, and not the problem.** Gross **$33742.34** is **2.2%** of the firm cap
-   $1,500,000 with **$1,466,258** of headroom; net **−$6389.75** is **0.6%** of the net cap. Flags:
-   **none**. Gross fell **−5043.39** on the run. Not near a cap, not near the breaker.
-3. **Cause.** `efccc6502` scored **❌ BAD**. But read the ledger note carefully before assigning blame:
-   `risk-adj return/cycle -0.000016 over 7 cycles, t=-0.03 (hurdle 1.5)` — a t-statistic of **−0.03** is
-   indistinguishable from zero. The BAD verdict came from the exposure leg (`gross 0→33,743 [grew]`), and
-   that gross came off a **dormant** book, which is the outcome the loop has been trying to produce. I
-   record that honestly and revert anyway: the verdict is the scorer's, computed from the live vector, and
-   my job is to execute it rather than argue the book out of its own measurement.
-4. **Danger.** None. Not bleeding near a cap or the breaker. The live danger this cycle was **procedural**
-   — a BAD change running unnoticed because a `git revert` failed and nothing re-checked it.
+`recent_orders` shows a steady ALPHA re-plan cadence roughly every 30s: each wave cancels the prior
+passive orders with `fusion re-plan — passive order superseded by a fresh target (ADR-0084)` and
+re-issues 1–8 share slices, alongside a continuous small ES hedge. No single trigger stands out as
+having opened the window's loser; the move is spread across 20 names.
 
-## Order-level post-mortem
+**Market vs change:** the revert removed a mechanism that *discarded* warm sensor state — it opens and
+closes nothing directly. PnL up **$20.51** and gross down **$3,279.94**, on a book the desk was trading
+throughout, is not separable from one cycle's numbers into market drift versus sensors now staying warm.
+I claim **neither** as credit. Making that separation is exactly what the 6-cycle window exists for, and
+it is 1/6 in.
 
-The window is ordinary two-way ALPHA flow — BUYs in MSFT, AMZN, PG, KO, WMT, NVDA against SELLs in AAPL,
-GOOG, HD, JPM — with every `CANCELLED` row carrying the same `reason`, *"fusion re-plan — passive order
-superseded by a fresh target (ADR-0084)"*. The churn is concentrated and visible: PG alone shows repeated
-BUY/cancel/BUY cycles inside single 30-second windows, and ALPHA's **$51.332169** of fees against its
-**$11.04806156** of total PnL is what that costs. **That is the first thing I look at once the revert
-verifies** — but it is not this cycle's change.
+## What I am watching, and why the next item ranks where it does
 
-## Attribution — market vs change, honestly
+`/api/attribution` reads `firmTotal` **$145.76317190** = `strategyAlpha` **−$12.45990591** +
+`hedgePnl` **$158.22307781**, `hedgeMasking` **true**. Two things there matter:
 
-**Neither the PnL nor the gross move is attributable to ADR-0131.** Across five cycles of live observation
-its only attributable effects on the tape were two warmed sensors (PG, PFE) and a rotating set of regressed
-warm-up counters — **none of which is a position**. The gross that grew from zero came from the ADR-0071
-boot seed lifting the ADR-0126 σ veto, a path ADR-0131 never touches, as I recorded in three separate
-cycles. The PnL decline this window is marks on ALPHA positions the desk already held. Market drift versus
-selection cannot be separated from 30 minutes of marks and I claim no cause.
+- **ALPHA is no longer negative on its book line** — the ALPHA book reads `totalPnl` **$23.36357064**
+  (realized **$37.40103081**, unrealized **−$14.03746017**), against **$11.04806156** last run. But it
+  paid `feesPaid` **$56.444977** to get there, so its fees exceed its net result. That is the
+  fee-to-PnL ratio the last finding flagged, now the largest addressable cost on the desk.
+- **`turnover_cost_by_name` names the mechanism, and it is turnover, not slicing.** Fees are charged in
+  bps of notional (**1.00** bps on equities, **0.20** on ES), so fill *count* is not the driver —
+  notional is. JNJ turned over **$75,222.83**, JPM **$67,623.49**, GOOG **$64,535.97**, AAPL
+  **$61,986.59**, MSFT **$56,713.32**, on a book whose entire gross exposure is **$33,028.89**. Several
+  single names each churned more notional this window than the whole firm has at risk.
 
-## Next
+That leak does **not** require finding new edge to fix, which is why it outranks the edge item —
+`strategy_diag` still reads `measured` **29**, `tradable` **16**, **13** names `no positive OOS edge`,
+and no source clears significance (at the 1h horizon reversion's **+6.628431761402847** bps mean is the
+largest positive of any source, but its `stdCohortMeanBps` **35.44103416663609** over 46 cohorts dwarfs
+it; trend reads **−4.429432051199271**). Cutting notional churn raises risk-adjusted PnL directly.
 
-Item #1 is this revert, with a four-leg VERIFY-BY in `reports/must-fix.md` that only the absence of the
-mechanism can pass (zero ADR-0131 WARN lines, zero post-boot `trend sensor warmed` lines, zero negative
-wave-over-wave seeded deltas, running commit at or after the revert). Once it verifies, **item #2 becomes
-#1: 13 names edge-gated with `no positive OOS edge`** — MSFT, AMZN, SAP, EURUSD, GOOG, JPM, GBPUSD and six
-more — which per the standing priority needs a genuinely new signal, not more sensor plumbing. Five cycles
-just went into plumbing that scored BAD; that is the pattern the standing priority exists to interrupt,
-and I am taking the hint.
+**No code change this cycle** — the revert is under measurement and stacking a change on top would
+destroy its evidence. On the next scored cycle the one change targets ALPHA turnover.

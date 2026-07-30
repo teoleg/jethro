@@ -2775,3 +2775,33 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **$54.339315** on a **$125.44** total. `strategy_diag` still reads `measured` **29**, `tradable` **16**,
   **13** names `no positive OOS edge`. **Next actionable item is a new signal with measured edge — and
   ALPHA's fee-to-PnL ratio — not more sensor mechanics.**
+
+## 2026-07-30 17:00Z — the hand revert verified on every leg; the next leak is notional churn, not edge
+
+- **Rule 137 — a revert is verified by the ABSENCE of a log line, which is the cheapest VERIFY-BY there
+  is; pre-register it.** The ADR-0131 WARN text appears **zero** times this run against a JVM that logged
+  it last run, and every `trend sensor warmed … from … stored prices` line sits between **12:36:32** and
+  **12:36:57** against a boot at **12:36:29** — inside the boot window, so ADR-0071 seeding still fires
+  and the reverted retry does not. Two greps closed a five-cycle defect with no judgement call in the
+  loop. When a change adds or removes a log line, make that line the VERIFY-BY.
+- **Rule 138 — closing item #1 does NOT free you to act when the pending baseline exists.** The scorer
+  printed `still accumulating evidence (1/6 cycles)` and `reports/.pending-baseline.json` was present, so
+  the correct move was to rank the next item and stop. A verified fix and a scored fix are different
+  things; only the second lifts the hold. Rank the next target in `must-fix.md` so the freed slot isn't
+  re-derived next cycle.
+- **Rule 139 — fees are bps of NOTIONAL, so fill count is a decoy; measure turnover_usd against gross
+  exposure.** `turnover_cost_by_name` reads JNJ **$75,222.83**, JPM **$67,623.49**, GOOG **$64,535.97**,
+  AAPL **$61,986.59**, MSFT **$56,713.32** at **1.00** bps, on a book whose entire `grossExposure` is
+  **$33,028.89** — five single names each churned more notional in one window than the firm has at risk.
+  MSFT's 93 fills and NVDA's 109 look like the problem and aren't; the ADR-0084 re-plan re-issuing
+  targets every ~30s is. **A cost leak beats an edge hunt: it converts to risk-adjusted PnL without
+  needing a signal to work first.**
+- **Rule 140 — ALPHA's book line turned positive while `strategyAlpha` stayed negative; read both.**
+  `/api/attribution` reads ALPHA `totalPnl` **$23.36357064** (from **$11.04806156**) but `strategyAlpha`
+  **−$12.45990591**, with `feesPaid` **$56.444977** — the book made money gross and gave more than all of
+  it back in fees. `firmTotal` **$145.76317190** is still carried by `hedgePnl` **$158.22307781** with
+  `hedgeMasking` **true**. The alpha book does not need a better forecast before it needs a cheaper one.
+- **Rule 141 — do not credit a revert for a good window.** PnL rose **$20.51** and gross fell
+  **$3,279.94**, but the reverted mechanism opened and closed nothing — it only discarded sensor state.
+  One cycle cannot separate market drift from sensors staying warm, so claim neither. That is what the
+  6-cycle window is for; say "not separable" rather than inventing a cause.

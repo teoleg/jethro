@@ -15,7 +15,60 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
-## Verification block — 2026-07-30 16:30Z (window CLOSED — ❌ BAD, auto-revert failed, reverted by hand)
+## Verification block — 2026-07-30 17:00Z (revert ✅ VERIFIED — now under measurement at 1/6, no change made)
+
+**The hand-completed revert landed and did exactly what it claimed.** All four pre-registered legs pass
+against this run's JVM log and tree: the ADR-0131 WARN text appears **zero** times (last run's JVM logged
+it, which is what proved the BAD code live); every `trend sensor warmed … from … stored prices` line is
+timestamped **12:36:32**–**12:36:57** against a `Started JethroApplication` at **12:36:29**, i.e. all
+inside the boot window, so ADR-0071 boot seeding still fires and the post-boot retry does not; with no
+retry there is no second wave, so last run's six negative wave-over-wave deltas (HD, PG, CAT, UNH, MCD,
+GOOG) have no mechanism to recur; and `grep -rn SensorReseed` returns nothing against a JVM that booted
+after the revert commit. **Item #1 of the previous block is CLOSED and struck below the line.**
+
+**No change made this cycle.** `scripts/score-change.py score` prints
+`64a7a6336 still accumulating evidence (1/6 cycles) — held, not scored this run` and
+`reports/.pending-baseline.json` is present, so per the contract a new change would destroy the evidence.
+
+**Live situation.** `/api/risk` `.total` reads total PnL **$145.76317190**, gross **$33028.88788750**
+(**2.2%** of the $1,500,000 firm cap, headroom **$1,466,971**), net **−$10212.24788750** (**1.0%** of the
+$1,000,000 net cap). Flags: **none**. The SITUATION header computes **+$20.51** PnL and **−$3,279.94**
+gross on the run; **−$0.96** and **−$17,223.30** across the last three. The book is trading — 20 equity
+positions plus the ES hedge — so it is neither DORMANT nor in danger.
+
+### 🎯 Item #1 — ALPHA churns several times the firm's gross exposure in notional per window
+
+The desk's largest addressable cost, and it needs **no new edge to fix**. `/api/attribution` reads the
+ALPHA book `totalPnl` **$23.36357064** against `feesPaid` **$56.444977** — fees exceed the book's net
+result. `turnover_cost_by_name` names the mechanism: fees are bps of **notional** (**1.00** bps equities,
+**0.20** ES), so fill count is not the driver. JNJ turned over **$75,222.83**, JPM **$67,623.49**, GOOG
+**$64,535.97**, AAPL **$61,986.59**, MSFT **$56,713.32** — each single name churning more notional in the
+window than the firm's entire gross exposure of **$33,028.89**. `recent_orders` shows the shape: an ADR-0084
+fusion re-plan roughly every 30s cancelling and re-issuing passive slices.
+
+**Not actionable until `64a7a6336` is scored** (a fresh ledger row appears and the pending baseline
+clears). It is the target for the next scored cycle.
+
+**VERIFY-BY (the cycle after the change ships):**
+1. `turnover_cost_by_name` — the top names' `turnover_usd` must fall relative to `/api/risk` `.total`
+   `grossExposure`; today the top five each exceed it outright.
+2. `/api/attribution` — ALPHA's `feesPaid` must fall **relative to** its `totalPnl`; today feesPaid
+   **$56.444977** exceeds totalPnl **$23.36357064**.
+3. Gross exposure must not fall as a side effect — this is a cost fix, not a de-risking. Compare
+   `/api/risk` `.total` `grossExposure` against **$33,028.89**.
+
+### Item #2 — no source has demonstrated positive out-of-sample edge (the standing priority)
+
+`strategy_diag` reads `measured` **29**, `tradable` **16**, **13** names `no positive OOS edge`. At the
+1h horizon `reversion` has the largest positive mean of any source at **+6.628431761402847** bps over 202
+resolved, but `stdCohortMeanBps` **35.44103416663609** across 46 cohorts dwarfs it; `trend` reads
+**−4.429432051199271** over 230. The ADR-0064 gate is working as designed. The answer remains **a new
+signal with genuinely measured edge**, never a looser gate. Ranked below the turnover item because that
+one converts to money without needing to find edge first.
+
+---
+
+## ~~Verification block — 2026-07-30 16:30Z~~ (item #1 CLOSED ✅ — revert verified 17:00Z)
 
 **The scorer closed the ADR-0131 window and graded it ❌ BAD — and its own revert did not land.** The
 ledger row for `efccc6502` carries the computed vector and the verdict; its note reads
