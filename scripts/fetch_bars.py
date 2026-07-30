@@ -16,15 +16,34 @@ from datetime import date, timedelta
 # are <sym>.us; ES/NQ futures use the continuous ^spx/^ndx indices as PROXIES (stated in the
 # output notes); FX pairs are direct.
 SYMBOLS = {
+    # Original mega-cap tech + FX + index proxies.
     "AAPL": "aapl.us",
     "MSFT": "msft.us",
     "AMZN": "amzn.us",
     "GOOG": "goog.us",
     "SAP": "sap.us",       # NYSE-listed ADR (USD), matching the platform's USD SAP line
+    "NVDA": "nvda.us",
+    "JNJ": "jnj.us",
+    "JPM": "jpm.us",
     "ES": "^spx",          # proxy: S&P 500 index (continuous-future history isn't free)
     "NQ": "^ndx",          # proxy: Nasdaq-100 index
     "EURUSD": "eurusd",
     "GBPUSD": "gbpusd",
+    "AUDUSD": "audusd",
+    # Sector-breadth equities (ADR-0125 / V48) — the OOS backtest needs each name's daily history to
+    # validate it, so every tradable equity must appear here or it can never clear the ADR-0049 gate.
+    "XOM": "xom.us",       # energy
+    "CVX": "cvx.us",       # energy
+    "UNH": "unh.us",       # healthcare
+    "PFE": "pfe.us",       # healthcare
+    "BAC": "bac.us",       # financials
+    "PG": "pg.us",         # consumer staples
+    "KO": "ko.us",         # consumer staples
+    "WMT": "wmt.us",       # consumer staples / retail
+    "CAT": "cat.us",       # industrials
+    "HD": "hd.us",         # consumer discretionary
+    "MCD": "mcd.us",       # consumer discretionary
+    "NEE": "nee.us",       # utilities
 }
 
 YEARS = 6
