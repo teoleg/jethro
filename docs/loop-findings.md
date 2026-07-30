@@ -2711,3 +2711,31 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   which is a position. Market drift versus selection on 30 minutes of new marks cannot be separated here;
   no cause is claimed. `/api/attribution` reads `firmTotal` **$120.16705892** = ALPHA **$20.35473620** +
   HEDGE **$135.63579927** + MACRO **−$35.82347655**, `hedgeMasking` **true**.
+
+## 2026-07-30 16:00Z — third reproduction on a third JVM, and the second success proves the fix rather than the defect
+
+- **Rule 129 — when a non-monotone mechanism succeeds twice, check whether both successes share a
+  precondition; if they do, that precondition IS the fix.** ADR-0131's retry warmed **PFE 192→193** this
+  cycle (11:36:35 `still cold ... 192 of 193` → 11:52:45 `trend sensor warmed PFE from 193 stored prices
+  (needs 193) — warm`) after warming **PG 190→193** last cycle. Both are *strict improvements* in seed
+  count. Meanwhile the six regressions — **HD 171→133, PG 181→143, CAT 174→139, UNH 156→141,
+  MCD 159→145, GOOG 191→180** — are all cases where the replay returned *less* than the sensor held.
+  The strict-improvement guard is not a compromise between the wins and the losses; it is the exact
+  boundary between them. Third JVM (PID 3523413, boot 11:36:18, `uptimeSeconds` 1425), third distinct set
+  of victims, one defect. **Class A reconfirmed a third time:** the same 12 rate/swap names seeded
+  `193 of 193` in both waves and stayed cold, so they retire under the same one condition.
+- **Rule 130 — an unrealized swing on freshly-opened positions is a mark, not a loss; wait one cycle
+  before calling it anything.** Last cycle's unrealized **−$49.23652754** (NVDA −$27.85750000, UNH
+  −$24.72000000) now reads **−$6.20316872**, with realized up to **$180.21540531** and total PnL
+  **$174.01223659** (**+$25.70** on the run). I declined to chase it as a defect and it reverted on its
+  own. This is Rule 128 paying off — record the split, don't act on it.
+- **Rule 131 — gross falling while PnL rises is the objective moving, and it deserves the same
+  attribution discipline as a loss.** Gross **$32990.96481250** is down **−$18,049.05** on the run
+  (2.1% of the firm cap, **$1,467,797** headroom, no flags) while PnL rose. The driver is visible in
+  `recent_orders`: ALPHA SELLs across PG/KO/BAC/GOOG/AMZN/XOM/NEE/AAPL/NVDA plus a run of small HEDGE
+  **ES BUYs** covering the short leg — fusion re-planning, **not** ADR-0131, whose only attributable
+  effects on this tape are one warmed sensor and six regressed counters, none of which is a position.
+  **Carry forward:** net moved **+$49.80412500 → −$8,634.83518750**, so the market-neutral book of last
+  cycle is now net short. At 0.9% of the net cap that is not a danger — but note it now rather than
+  rediscover it later. `/api/attribution`: `firmTotal` **$174.01223659** = ALPHA **$59.63435276** +
+  HEDGE **$150.20136038** + MACRO **−$35.82347655**, `hedgeMasking` flipped **true → false**.

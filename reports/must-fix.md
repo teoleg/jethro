@@ -15,6 +15,90 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 16:00Z (ADR-0131 at 5/6 cycles — held, no code change made)
+
+**GROSS FELL AND PnL ROSE — the objective moved the right way this window.** Live `/api/risk` `.total`
+reads total PnL **$174.01223659** (realized **$180.21540531**, unrealized **−$6.20316872**), gross
+exposure **$32990.96481250**, net **−$8634.83518750**. Gross is **2.1%** of the firm cap $1,500,000 with
+**$1,467,797** of headroom; net **0.9%** of the $1,000,000 net cap. Flags: **none**. The report SITUATION
+header computes PnL **+$25.70** and gross **−$18,049.05** on the run, **+$28.97** across the last three.
+`run-status` last heartbeat reads `pnl_growth_pct` **15.65** vs `pnl_target_pct` **1.0**, `on_track=true`,
+`stale=false`, `underwater=false`.
+
+**Last cycle's unrealized scare reverted on its own, as called.** Unrealized was **−$49.23652754** (NVDA
+**−$27.85750000**, UNH **−$24.72000000**) and now reads **−$6.20316872**. I declined to treat it as a
+defect; that was correct. **One shape change to carry forward:** net moved from **+$49.80412500**
+(market-neutral) to **−$8,634.83518750**, so the book is now net *short*. At 0.9% of the net cap this is
+not a danger and not an item — it is recorded so a later cycle does not rediscover it as a surprise.
+
+**Item #1 → ⚠️ STILL-BROKEN, third independent reproduction, on a third JVM.** PID **3523413**, booted
+**11:36:18**, `uptimeSeconds` **1425** — a different process from the 10:36 and 11:06:51 runs. Wave 1
+(11:36:35–11:43:07) → wave 2 (11:52:45–11:59:16), **16 min** apart, the predicted 193 × 5 s cadence:
+
+- **Six names went backwards:** **HD 171→133**, **PG 181→143**, **CAT 174→139**, **UNH 156→141**,
+  **MCD 159→145**, **GOOG 191→180**.
+- **Seven advanced:** JPM 141→190, XOM 153→166, CVX 175→185, JNJ 163→167, GOOGL 0→2, TSLA 9→11,
+  EURUSD 28→29, ES 48→49.
+- **The retry's second clean win is PFE**, and it is the decisive evidence: 11:36:35
+  `still cold ... 192 of 193` → 11:52:45 `trend sensor warmed PFE from 193 stored prices (needs 193) —
+  warm`. Only the ADR-0131 retry emits that line. PG did the same at 190→193 last cycle. **Both successes
+  are strict-improvement cases**, and the two costliest regressions this run — **GOOG at 191** and
+  **PG at 181**, each within a dozen prints of warm — are precisely what the queued guard refuses to
+  discard. The evidence now favours *guarding* the mechanism, not reverting it.
+- **Class A reconfirmed a third time:** the same **12** rate/swap names (USD.TSY.\*, USD.SOFR.\*,
+  USD_IRS_\*) seeded **193 of 193** in *both* waves and are still cold.
+- **Baseline for the fix, re-measured on the unfixed code:** **53** trend still-cold lines across **27**
+  distinct names, **26** of them repeating.
+
+**Deployment confirmed:** the running JVM logs the ADR-0131 WARN text (`re-seeding every 193 sightings
+until it does (ADR-0131)`), so the code under test is live and this is a fair grade.
+
+**Why no change was made:** `scripts/score-change.py score` prints `efccc6502 still accumulating evidence
+(5/6 cycles) — held, not scored this run`; `reports/.pending-baseline.json` still holds `efccc650`. One
+cycle remains. The fix below ships next cycle, when the window closes.
+
+### 🎯 Item #1 (carried, unchanged — root cause pinned, fix specified, awaiting the scorer window)
+
+`TrendForecastLifecycle.warmWhileCold` calls `forecaster.forget(instrumentId)` **unconditionally**, then
+replays whatever `SensorWarmup.warm` returns. The read window is `lookback = step × samples ×
+LOOKBACK_MULTIPLE` measured **back from the current mark's provider timestamp**, and
+`consumptionStepMillis` re-derives the median print gap from whatever that read returned — so both ends of
+the window and the thinning stride move between waves. The count is free to fall, and when it does the
+sensor has been reset to something *worse* than it held.
+
+**The fix — one condition that repairs both classes.** `SensorWarmup.seedPrices` is already a pure
+function returning the list before anything mutates: compute it first, compare its size against the best
+seed this name has previously achieved, and only `forget()` + replay when it is **strictly larger**;
+otherwise leave the sensor's live state alone at the cost of one bounded read. Class B (HD, PG, CAT, UNH,
+MCD, GOOG) keeps its accumulated prints. Class A (the 12 rate names at 193/193, already at the maximum)
+can never exceed its best, so it retires itself from retrying — no separate "unwarmable" rule. PFE's
+192→193 and PG's 190→193 are strictly larger, so both real wins survive. A bug fix in a sample-count path:
+no money, risk or exposure number is introduced or changed, so no ADR is required.
+
+**VERIFY-BY (next run), written so only the mechanism can pass it:** across every name logging more than
+one `still cold` line, the wave-over-wave seeded-count delta must be **≥ 0 for all of them** — this run's
+six negatives (**HD −38, PG −38, CAT −35, UNH −15, MCD −14, GOOG −11**) must become **zero negatives**;
+**and** the 12 rate names at `193 of 193` must log **at most one** still-cold line each, so the trend
+still-cold *line* count falls well below this run's **53** while distinct names hold near **27**.
+
+### Item #2 (unchanged, still the binding constraint on the rest of the book)
+
+`strategy_diag` reads `measured` **29**, `tradable` **16**, `edgeGated` **13 names**, each annotated
+`no positive OOS edge` — MSFT (momentum **−37.36954202** over 3 paths, mean-rev **−73.69953186** over 3),
+AMZN (**−46.40665676** over 4 paths), GOOG and ten more. The ADR-0064 gate working as designed. Per the
+standing priority the answer is **a new signal with genuinely measured edge**, never a looser gate.
+
+### Context — where the money is actually coming from
+
+`/api/attribution` reads `firmTotal` **$174.01223659** = ALPHA **$59.63435276** + HEDGE **$150.20136038**
++ MACRO **−$35.82347655**, `totalFees` **$47.780648**, `hedgeMasking` now **false** (it was **true** last
+cycle). ALPHA has climbed from **$20.35473620** as its unrealized leg recovered to **−$6.18030270**. The
+hedge still carries most of the firm total; MACRO (**NQ**, flat, realized **−$35.82347655**) is still the
+one closed loser. Turnover watch for after the sensor work: NVDA **93** fills on **$38,748.31**, MSFT
+**81**, GOOG **69**, AAPL **68**, against CANCELLED **1032** vs FILLED **3592**, all ADR-0084 re-plans.
+
+---
+
 ## Verification block — 2026-07-30 15:30Z (ADR-0131 at 4/6 cycles — held, no code change made)
 
 **THE DESK IS FULLY DEPLOYED AND MARKET-NEUTRAL.** Live `/api/risk` `.total` reads total PnL
