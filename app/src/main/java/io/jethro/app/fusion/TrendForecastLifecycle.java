@@ -52,8 +52,8 @@ public final class TrendForecastLifecycle implements AutoCloseable {
     private final SensorWarmup.History history; // optional — null means cold-start (ADR-0071)
     private final ScheduledExecutorService scheduler;
     private final long intervalSeconds;
-    /** ADR-0131: when a still-cold name replays history again — touched only from the tick thread. */
-    private final SensorReseed reseed;
+    /** Instruments already warmed from history — touched only from the scheduled tick thread. */
+    private final java.util.Set<String> seeded = new java.util.HashSet<>();
     /** ADR-0113: admits a mark only when the market's own clock advanced — same thread as {@link #seeded}. */
     private final PrintClock printClock = new PrintClock();
 
@@ -70,7 +70,6 @@ public final class TrendForecastLifecycle implements AutoCloseable {
         this.history = history;
         this.scheduler = scheduler;
         this.intervalSeconds = Math.max(1, intervalSeconds);
-        this.reseed = new SensorReseed(forecaster.warmupSamples());
     }
 
     public void start() {
@@ -94,7 +93,7 @@ public final class TrendForecastLifecycle implements AutoCloseable {
                 if (mark.stale()) {
                     continue; // warm-loaded, not yet refreshed by the live feed (invariant 4)
                 }
-                warmWhileCold(mark.instrumentId(), mark.providerTimestamp());
+                warmIfFirstSight(mark.instrumentId(), mark.providerTimestamp());
                 if (!printClock.advanced(mark.instrumentId(), mark.providerTimestamp())) {
                     // The tape has not printed since we last looked: the mark cache is republishing the
                     // same last-value price. Advancing here would feed a fabricated zero-return step,
@@ -116,47 +115,32 @@ public final class TrendForecastLifecycle implements AutoCloseable {
     }
 
     /**
-     * Replays this instrument's stored recent prices into the forecaster, so a redeploy does not restart
-     * its warm-up from zero (ADR-0071). The seed goes through the same {@code update} path as a live mark
-     * but is deliberately NOT recorded in the signal telemetry: a historical price is not a call the desk
-     * made, and counting it would fabricate track record.
-     *
-     * <p><b>Runs on first sight and then again, while the name is still cold (ADR-0131).</b> First sight
-     * is boot, and a boot that followed an outage, a weekend or a pre-market start reads a store whose
-     * series ends in exactly the gap that made the seed necessary — {@link SensorWarmup} then rightly
-     * refuses to walk across the hole and hands over a couple of prices against a warm-up of hundreds.
-     * Seeding once left the sensor abandoned there for the life of the process. {@link SensorReseed}
-     * re-attempts on the sensor's own warm-up cadence until it warms, and never afterwards.
-     *
-     * <p>The replay goes into a state the caller has just dropped ({@code forget}), because the store already
-     * contains every live print the forecaster has consumed and replaying on top would count them twice.
-     * That reset is safe precisely because the name is cold: a cold name publishes no view, so nothing
-     * downstream is disturbed by re-deriving it.
+     * Replays this instrument's stored recent prices into the forecaster the first time we see it, so a
+     * redeploy does not restart its warm-up from zero (ADR-0071). The seed goes through the same
+     * {@code update} path as a live mark but is deliberately NOT recorded in the signal telemetry: a
+     * historical price is not a call the desk made, and counting it would fabricate track record.
      *
      * <p>The seed window is anchored on the mark's own <b>provider</b> timestamp, because that is the
      * clock the store is keyed by. Anchoring on wall-clock now empties the seed by exactly the feed's
      * delay (see {@link SensorWarmup} — one clock only).
      */
-    private void warmWhileCold(String instrumentId, java.time.Instant providerTimestamp) {
-        if (history == null || !reseed.due(instrumentId)) {
+    private void warmIfFirstSight(String instrumentId, java.time.Instant providerTimestamp) {
+        if (history == null || !seeded.add(instrumentId)) {
             return;
         }
         int needed = forecaster.warmupSamples();
         long anchor = providerTimestamp != null ? providerTimestamp.toEpochMilli() : System.currentTimeMillis();
-        forecaster.forget(instrumentId); // replay into a clean state — never on top of consumed prints
         int n = SensorWarmup.warm(history, instrumentId, anchor,
                 intervalSeconds * 1_000L, needed,
                 price -> forecaster.update(instrumentId, price));
         boolean warm = forecaster.readingFor(instrumentId).warm();
-        reseed.record(instrumentId, warm);
         if (warm) {
             log.info("trend sensor warmed {} from {} stored prices (needs {}) — warm", instrumentId, n, needed);
         } else {
             // WARN, not INFO: a sensor that never warms is silent dead code the edge gate can never
             // judge, and that failure has to be loud enough to reach the report (ADR-0071 correction).
             log.warn("trend sensor still cold for {} after seeding {} of {} stored prices — it will not "
-                    + "publish until the mark history has accumulated its warm-up span; re-seeding "
-                    + "every {} sightings until it does (ADR-0131)", instrumentId, n, needed, needed);
+                    + "publish until the mark history has accumulated its warm-up span", instrumentId, n, needed);
         }
     }
 

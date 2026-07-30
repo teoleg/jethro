@@ -88,8 +88,8 @@ public final class FusionLifecycle implements AutoCloseable {
     private final SensorWarmup.History markHistory;
     /** Provider timestamp of a name's current mark — the σ sensor's seed anchor (ADR-0071 correction). */
     private final Function<String, Long> markTimeFor;
-    /** ADR-0131: when a still-unmeasured name replays history into the σ sensor again — tick thread only. */
-    private final SensorReseed volReseed;
+    /** Instruments already seeded into the σ sensor — touched only from the scheduled tick thread. */
+    private final java.util.Set<String> volSeeded = new java.util.HashSet<>();
     /** ADR-0089: pairwise covariance measured on the mark stream — null ⇒ not wired, book untouched. */
     private final StreamCovariance streamCov;
     /** Instruments already in the ADR-0089 joint seed — touched only from the scheduled tick thread. */
@@ -202,8 +202,6 @@ public final class FusionLifecycle implements AutoCloseable {
         this.routeOrders = routeOrders && executor != null;
         this.intervalSeconds = Math.max(5, intervalSeconds);
         this.minForecastToRoute = Math.max(0, minForecastToRoute);
-        // ADR-0131: the retry cadence is the sensor's own warm-up length in prices, never a new dial.
-        this.volReseed = new SensorReseed(streamVol == null ? 1 : streamVol.warmupPrices());
     }
 
     /** True when this loop is actually placing orders (route-orders set AND an order path is wired). */
@@ -522,43 +520,24 @@ public final class FusionLifecycle implements AutoCloseable {
         return streamVol == null || streamVol.sigmaPerSample(instrument).isPresent();
     }
 
-    /**
-     * Replays this name's stored recent prices into the σ sensor while the name is still UNMEASURED.
-     *
-     * <p><b>Re-seeds until it measures (ADR-0131).</b> Seeding once, on the first cycle that plans the
-     * name, reads the store at boot — and a boot that followed an outage, a weekend or a pre-market start
-     * reads a series ending in exactly the gap that made the seed necessary, so {@link SensorWarmup}
-     * rightly refuses to walk across the hole and hands over a couple of prices against a warm-up of
-     * {@code warmupPrices()}. That left the σ sensor abandoned for the life of the process, and this σ is
-     * what ADR-0126 requires before the desk may OPEN a name at all — so a failed boot seed did not merely
-     * disarm a stop, it froze the book flat.
-     *
-     * <p>The replay goes into a state just dropped ({@link StreamVolatility#forget}), because the store
-     * already holds every print the sensor has consumed and replaying on top would count them twice. The
-     * reset is confined to names with no σ: a name the sensor cannot measure has no trailing cut to move
-     * and no position ADR-0126 would have let the desk open, so re-deriving it disturbs nothing live.
-     */
+    /** Replays this name's stored recent prices into the σ sensor the first time it is planned. */
     private void seedVolatility(String instrument) {
-        if (markHistory == null || !volReseed.due(instrument)) {
+        if (markHistory == null || !volSeeded.add(instrument)) {
             return;
         }
         Long providerMillis = markTimeFor == null ? null : markTimeFor.apply(instrument);
         long anchor = providerMillis != null && providerMillis > 0 ? providerMillis : System.currentTimeMillis();
-        streamVol.forget(instrument); // replay into a clean state — never on top of consumed prints
         // The seed is counted in PRICES, the sensor in RETURNS, and a return needs two prices
         // (ADR-0117) — asking for warmupSamples() prices lands the replay one return short every time.
         int n = SensorWarmup.warm(markHistory, instrument, anchor, intervalSeconds * 1_000L,
                 streamVol.warmupPrices(), price -> streamVol.update(instrument, price));
-        boolean measured = streamVol.sigmaPerSample(instrument).isPresent();
-        volReseed.record(instrument, measured);
-        if (!measured) {
+        if (streamVol.sigmaPerSample(instrument).isEmpty()) {
             // WARN, not INFO: an unmeasured name is one the risk cut can never protect, and that has
             // to be loud enough to reach the report (the ADR-0071 correction's lesson). Quoted against
             // what the seed ASKED FOR, so "n of n, still cold" can only ever mean a genuine cold start.
             log.warn("risk-cut σ sensor still cold for {} after seeding {} of {} stored prices — this "
-                    + "name cannot be stopped out (and so cannot be opened, ADR-0126) until its mark "
-                    + "history has accumulated; re-seeding every {} plans until it does (ADR-0131)",
-                    instrument, n, streamVol.warmupPrices(), streamVol.warmupPrices());
+                    + "name cannot be stopped out until its mark history has accumulated", instrument, n,
+                    streamVol.warmupPrices());
         } else {
             log.info("risk-cut σ sensor warmed {} from {} stored prices (ADR-0086)", instrument, n);
         }

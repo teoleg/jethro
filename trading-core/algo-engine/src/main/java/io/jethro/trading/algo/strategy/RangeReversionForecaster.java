@@ -158,25 +158,6 @@ public final class RangeReversionForecaster {
     }
 
     /**
-     * Drops everything this sensor knows about one instrument, so the next {@code update} starts its
-     * warm-up from that price as if the name had never been seen (ADR-0131 re-seed).
-     *
-     * <p>The Donchian window, the efficiency-ratio window and the scale estimator are all estimated from
-     * the same price sequence, so the only coherent reset is to drop the state whole; the cached reading
-     * goes with it so {@link #readingFor} cannot report a warm view for a name that no longer has one.
-     *
-     * <p>Caller contract: reset a name only while it is COLD — a cold name publishes no view, so nothing
-     * downstream can be disturbed by re-deriving its state.
-     */
-    public void forget(String instrumentId) {
-        if (instrumentId == null) {
-            return;
-        }
-        states.remove(instrumentId);
-        readings.remove(instrumentId);
-    }
-
-    /**
      * Feeds one fresh price and returns this instrument's current reading. A stale or non-positive
      * price must not be passed — a repeated stale mark would fake a zero-return step and bias both the
      * range and the efficiency ratio toward "no movement" (the same rule {@link TrendDetector} and

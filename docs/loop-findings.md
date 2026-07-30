@@ -2739,3 +2739,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   cycle is now net short. At 0.9% of the net cap that is not a danger — but note it now rather than
   rediscover it later. `/api/attribution`: `firmTotal` **$174.01223659** = ALPHA **$59.63435276** +
   HEDGE **$150.20136038** + MACRO **−$35.82347655**, `hedgeMasking` flipped **true → false**.
+
+## 2026-07-30 16:30Z — the window closed BAD, the auto-revert silently failed, and the memory files were the reason
+
+- **Rule 132 — a failed auto-revert is the highest-priority defect on the board, above any queued fix.**
+  The ledger row for `efccc6502` reads ❌ BAD with the note `⚠️ REVERT FAILED (git conflict): the BAD
+  commit is STILL LIVE and needs a manual revert`. The scorer attempts a revert **once**; nothing retries
+  it. So a BAD change can keep running indefinitely while the loop moves on to new ideas — exactly the
+  failure mode Step 0 exists to prevent, arriving through the automation rather than through diagnosis.
+  **Read the ledger note, not just the verdict**, every cycle.
+- **Rule 133 — never `git revert` a loop commit whole; revert its code paths and leave the memory files.**
+  The conflict was mechanical and predictable: of the 13 files in `efccc6502`, exactly three had moved
+  since — `docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md` — each touched by all
+  five hold-cycle doc commits. Every loop change carries those three, so **every** loop revert will
+  conflict on them, and a revert that "succeeded" would have erased five cycles of findings. Correct
+  procedure: `git checkout <bad>^ -- <code paths>`, `git rm` the added sources, confirm with
+  `git diff --cached <bad>^` returning empty over the code trees and a `grep` for the removed class
+  returning none, and mark the ADR **Status: Reverted** rather than deleting the decision record.
+- **Rule 134 — an ADR consequence bullet that pre-emptively excuses a defect is where to look when the
+  change fails.** ADR-0131 accepted its own non-monotonicity in advance: *"the worst case discards state
+  that was earning nothing and would have kept earning nothing."* The second clause does not follow from
+  the first — a sensor at 191 of 193 prints publishes nothing **now** but is two prints from publishing.
+  Three JVMs, three different victim sets, one defect, all predicted by that one sentence. When writing an
+  ADR, treat "accepted deliberately and not guarded against" as a claim requiring evidence, not a waiver.
+- **Rule 135 — a BAD verdict can be driven entirely by the exposure leg, and it still stands.** The note
+  reads `risk-adj return/cycle -0.000016 over 7 cycles, t=-0.03 (hurdle 1.5); gross 0→33,743 [grew]`. The
+  t-statistic is indistinguishable from zero; the verdict came from gross rising off a **dormant** book,
+  which is the outcome the loop had been trying to produce. Record the tension honestly — then revert
+  anyway. The scorer owns the verdict; arguing the book out of its own measurement is how a loop with no
+  human in it goes wrong.
+- **Rule 136 — five cycles in sensor plumbing ended at BAD; the standing priority was right.** Live now:
+  `firmTotal` **$125.43676941** = ALPHA **$11.04806156** + HEDGE **$150.21218440** + MACRO
+  **−$35.82347655**, `hedgeMasking` **true** — the hedge carries the whole firm total while
+  `strategyAlpha` reads **−$24.77541499** net of ALPHA's **$51.332169** fees against `totalFees`
+  **$54.339315** on a **$125.44** total. `strategy_diag` still reads `measured` **29**, `tradable` **16**,
+  **13** names `no positive OOS edge`. **Next actionable item is a new signal with measured edge — and
+  ALPHA's fee-to-PnL ratio — not more sensor mechanics.**

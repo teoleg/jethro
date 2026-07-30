@@ -15,6 +15,65 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 16:30Z (window CLOSED — ❌ BAD, auto-revert failed, reverted by hand)
+
+**The scorer closed the ADR-0131 window and graded it ❌ BAD — and its own revert did not land.** The
+ledger row for `efccc6502` carries the computed vector and the verdict; its note reads
+`⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert`.
+`reports/.pending-baseline.json` is **gone** and `scripts/score-change.py score` now prints
+`no pending change to score`, so the hold that blocked the last five cycles is lifted. **A BAD change
+still running is the most expensive open defect on the board**, so it — not the queued guard, not the
+edge work — is item #1, and this cycle's one change completes the revert.
+
+**Live situation.** `/api/risk` `.total` reads total PnL **$125.44**, gross exposure **$33742.34**, net
+**−$6389.75**. Gross is **2.2%** of the firm cap $1,500,000 (headroom **$1,466,258**); net **0.6%** of the
+$1,000,000 net cap. Flags: **none**. The report SITUATION header computes PnL **−16.06** and gross
+**−5043.39** on the run, and **−60.15** / **+2240.39** across the last three. `run-status` last heartbeat
+reads `pnl_growth_pct` **−1.36** vs `pnl_target_pct` **1.0**, `on_track=false`, `stale=true`.
+
+**Why the conflict happened, and what the manual revert did differently.** Of the 13 files in
+`efccc6502`, exactly three have been touched since — `docs/loop-findings.md`, `reports/last-analysis.md`
+and `reports/must-fix.md`, each by all five of the hold cycles' doc commits. Those three are the loop's
+**accumulating memory**; a whole-commit `git revert` would have conflicted on them (it did) and, had it
+succeeded, would have **destroyed five cycles of findings**. The manual revert therefore restores only
+the ten code/ADR paths — verified by `git diff --cached efccc6502^` over `app/src` and `trading-core/`
+returning **empty**, and `grep -rn SensorReseed` over the tree returning **none** — and leaves the memory
+files standing. `docs/adr/0131-*.md` is marked **Status: Reverted** rather than deleted, with the
+five-cycle diagnosis preserved under a new "Why it was reverted" section.
+
+**The queued strict-improvement guard is now CLOSED, not carried.** It was the right diagnosis of the
+mechanism's defect — but the mechanism it would have guarded is the one the scorer just graded BAD, and
+re-attempting a reverted idea is exactly what the contract forbids. The reasoning is preserved in the ADR
+so no future cycle re-derives it from scratch; it does not remain an open item here.
+
+### 🎯 Item #1 — complete the revert of the BAD commit (THIS cycle's change)
+
+The scorer's auto-revert failed and left `efccc6502` live. Restore the ten code/ADR paths to
+`efccc6502^`, preserve the three memory files, mark ADR-0131 Reverted.
+
+**VERIFY-BY (next run), each leg falsifiable from the log alone:**
+1. The running JVM must log **zero** occurrences of the ADR-0131 WARN text
+   (`re-seeding every … sightings until it does (ADR-0131)`) — this run's JVM logs it, which is what
+   proved the BAD code was live.
+2. **Zero** `trend sensor warmed … from … stored prices` lines at timestamps well after boot (only the
+   reverted retry emitted those; boot-time ADR-0071 seeding is unaffected and must still appear).
+3. **Zero negative** wave-over-wave seeded-count deltas — not because they are guarded, but because with
+   the retry gone there is no second wave to regress. This run's six negatives (**HD −38, PG −38,
+   CAT −35, UNH −15, MCD −14, GOOG −11**) must not recur in any form.
+4. The running commit must be this revert or later.
+
+### Item #2 — the binding constraint on the rest of the book (becomes #1 once the revert verifies)
+
+`strategy_diag` reads `measured` **29**, `tradable` **16**, `edgeGated` **13 names**, each annotated
+`no positive OOS edge` — MSFT (momentum **−37.36954202** over 3 paths, mean-rev **−73.69953186** over 3),
+AMZN (**−46.40665676** over 4 paths), SAP (**−39.20256473** / **−65.12971133** over 4), EURUSD
+(**−20.20213556** / **−84.79537128** over 5), GOOG, JPM, GBPUSD and six more. The ADR-0064 gate working
+as designed. Per the standing priority the answer is **a new signal with genuinely measured edge**, never
+a looser gate — and note that five cycles just went into sensor plumbing that the scorer graded BAD,
+which is precisely the pattern the standing priority warns against.
+
+---
+
 ## Verification block — 2026-07-30 16:00Z (ADR-0131 at 5/6 cycles — held, no code change made)
 
 **GROSS FELL AND PnL ROSE — the objective moved the right way this window.** Live `/api/risk` `.total`

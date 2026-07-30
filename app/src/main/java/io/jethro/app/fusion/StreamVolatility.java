@@ -223,27 +223,4 @@ public final class StreamVolatility {
     public boolean seen(String instrumentId) {
         return instrumentId != null && states.containsKey(instrumentId);
     }
-
-    /**
-     * Drops everything this sensor knows about one instrument, so the next {@link #update} treats its
-     * price as a first sight and the warm-up restarts from there (ADR-0131 re-seed).
-     *
-     * <p>{@code lastPrice}, the running variance, its warm-up sum and the return counter are all derived
-     * from one price sequence, so the only coherent reset is to drop the state whole — clearing the
-     * variance but keeping {@code lastPrice} would manufacture a return across the reset boundary.
-     *
-     * <p><b>Caller contract: reset a name only while {@link #sigmaPerSample} is empty.</b> This σ is the
-     * distance the ADR-0086 trailing cut is measured in; re-deriving a MEASURED name's σ would move a
-     * live stop underneath a live position. A name with no σ has no stop to move — which is exactly why
-     * ADR-0126 refuses to open it, and exactly why re-seeding it is safe.
-     *
-     * <p>The print clock is deliberately left alone: it records the last provider timestamp consumed, and
-     * forgetting that would let a republished mark be read as a fresh print (ADR-0116).
-     */
-    public void forget(String instrumentId) {
-        if (instrumentId == null) {
-            return;
-        }
-        states.remove(instrumentId);
-    }
 }

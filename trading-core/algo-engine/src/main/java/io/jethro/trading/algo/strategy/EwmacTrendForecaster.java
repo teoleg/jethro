@@ -152,27 +152,6 @@ public final class EwmacTrendForecaster {
         return params.slowSpan() + 1 + scaleWarmupSamples;
     }
 
-    /**
-     * Drops everything this sensor knows about one instrument, so the next {@code update} starts its
-     * warm-up from that price as if the name had never been seen (ADR-0131 re-seed).
-     *
-     * <p>Every field of the per-name state is estimated jointly from the same price sequence — the two
-     * EWMAs, the step vol, the efficiency-ratio window, the scale estimator and its sample counter — so
-     * the only coherent reset is to drop the state whole. Removing the cached reading with it keeps
-     * {@link #readingFor} from reporting a warm view for a name that no longer has one.
-     *
-     * <p>Caller contract: reset a name only while it is COLD. A cold name publishes no view, so nothing
-     * downstream can be disturbed by re-deriving its state; resetting a WARM name would silently
-     * un-publish a live forecast the fusion layer is already sizing on.
-     */
-    public void forget(String instrumentId) {
-        if (instrumentId == null) {
-            return;
-        }
-        states.remove(instrumentId);
-        readings.remove(instrumentId);
-    }
-
     /** Standard EWMA smoothing constant for a span: {@code α = 2/(span+1)}. */
     private static BigDecimal alpha(int span) {
         return BigDecimal.valueOf(2).divide(BigDecimal.valueOf(span + 1L), MC);

@@ -1,9 +1,18 @@
 # ADR-0131: A cold sensor re-seeds — the warm restart is not a single attempt at boot
 
-- **Status:** Implemented
+- **Status:** Reverted
 - **Date:** 2026-07-30
+- **Reverted:** 2026-07-30 — see below
 - **Deciders:** Oleg
 - **Tags:** trading, fusion, sensors, warm-start, availability
+
+> **REVERTED.** `scripts/score-change.py` scored the implementing commit `efccc6502` **❌ BAD** at the
+> close of its ADR-0116 evaluation window; the ledger row carries the computed vector and the verdict.
+> The scorer's own `git revert` hit a conflict on the loop's report files and did not land, so the code
+> was reverted manually in a later cycle (this change), leaving this record in place rather than deleting
+> it. The mechanism is **not** to be re-attempted as specified. What the five cycles of live observation
+> established is recorded under "Why it was reverted" below; a future ADR that wants this behaviour must
+> supersede this one and address that defect, not restate the original design.
 
 ## Context
 
@@ -114,3 +123,32 @@ tolerance are untouched. This ADR changes only *how often the read is attempted*
 `combinedForecast`; `forecastScalars` must contain a `trend` entry; and the app log must contain
 `trend sensor warmed …` / `risk-cut σ sensor warmed …` lines at timestamps well after boot. Today all
 four of those read empty, zero, absent and absent.
+
+## Why it was reverted
+
+The verification above passed in the narrow sense — the retry does fire, and over the evaluation window it
+warmed two sensors (PG, then PFE) that the boot-only rule would have left cold for the life of the process.
+But the pre-registered test written alongside it — *no negative wave-over-wave seeded-count delta anywhere*
+— **failed on three consecutive runs, on three distinct JVMs, with a different set of victim names each
+time** (read from the app log's `still cold … N of M` lines). The consequence bullet above that accepted
+this in advance is where the error is, and it is worth naming precisely, because the reasoning is seductive
+and wrong:
+
+> *"the policy only ever touches a sensor that is publishing nothing, so the worst case discards state that
+> was earning nothing and would have kept earning nothing."*
+
+The second clause does not follow from the first. A cold sensor at 191 of 193 prints is indeed publishing
+nothing **now**, but it is two prints from publishing; the state it holds is not worthless, it is nearly
+complete. `warmWhileCold` calls `forget()` unconditionally *before* it knows what the replay will return,
+and `SensorWarmup` re-derives both the window start and the thinning stride from the current mark each
+time — so a name that had walked to the edge of warm could be reset to a materially shorter series and
+have to start again. Repeated every warm-up span, that is a mechanism that can hold a name cold
+indefinitely: the opposite of the ADR's purpose. A separate class of names — the rate/swap instruments —
+seeded the full count in **every** wave and stayed cold regardless, so for them the retry was pure waste;
+sample count was never their binding predicate.
+
+Both facts point at the same missing condition (replay only when the new series is *strictly longer* than
+the best this name has held), and that guard was queued rather than shipped, because the ADR-0116 window
+was still measuring the unguarded version. The window closed ❌ BAD first. The verdict stands and the code
+is out; the diagnosis is preserved here so it is not re-derived from scratch, but a future ADR must earn
+the behaviour on its own measurement rather than inherit this one's.
