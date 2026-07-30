@@ -77,7 +77,7 @@
   <div class="panel"><div id="gate"><div class="empty">loading…</div></div></div>
 
   <div class="section-h">Promotion audit trail
-    <span class="note" style="text-transform:none;letter-spacing:0">— durable record (universe_promotion), newest first: PROPOSED = dry-run; PROMOTED / EVICTED = live writes to reference data.</span>
+    <span class="note" style="text-transform:none;letter-spacing:0">— durable record (universe_promotion), newest first: PROPOSED = dry-run; PROMOTED / EVICTED = live writes to reference data. A PROMOTED row shown struck-through/dimmed is <b>superseded</b> — a later EVICTED cancelled it, so the name is no longer in the universe (the log keeps both; it never rewrites history).</span>
     <button id="clean-btn" onclick="cleanCrossMode()" title="Evict discovered names promoted under a different feed mode (e.g. a SIM-era promotion sitting in the LIVE master), so this mode's universe reflects this mode's discovery only. Pinned names and names with a position are never touched; evicted names are re-promotable under the current mode."
             style="float:right;font:inherit;cursor:pointer;background:transparent;border:1px solid var(--line,#444);color:inherit;border-radius:4px;padding:2px 10px">clean cross-mode</button></div>
   <div id="clean-result" class="note" style="text-transform:none;letter-spacing:0;margin:0 0 6px"></div>
@@ -159,18 +159,31 @@
       : '<div class="empty">no candidates to evaluate yet</div>') + '</div>';
 
     const a = g.recent || [];
+    // A PROMOTED row is SUPERSEDED once a later EVICTED row exists for the same name — the promotion is
+    // no longer live (e.g. a SIM-era name cleaned out of a LIVE universe). The audit log is append-only
+    // (invariant 8), so we KEEP both rows but dim the dead PROMOTED one and tag it, so current state reads
+    // unambiguously instead of a live-looking SIM promotion sitting next to its own eviction.
+    const evictedAtBy = {};
+    a.forEach(x => {
+      if (x.action === "EVICTED") {
+        evictedAtBy[x.instrument] = Math.max(evictedAtBy[x.instrument] || 0, x.atMillis || 0);
+      }
+    });
     document.getElementById("audit").outerHTML = '<div id="audit">' + (a.length ?
       "<table><tr><th>time</th><th>action</th><th>instrument</th><th>outcome</th><th class='num'>score</th><th class='num'>days</th><th>reason</th><th>mode</th></tr>" +
-      a.map(x => `<tr>
+      a.map(x => {
+        const superseded = x.action === "PROMOTED" && (evictedAtBy[x.instrument] || 0) > (x.atMillis || 0);
+        return `<tr${superseded ? ' style="opacity:.42" title="this promotion was later evicted — no longer in the universe"' : ""}>
         <td class="dim mono">${x.atMillis ? fmtDateTimeET(x.atMillis) : "—"}</td>
-        <td><span class="tag">${esc(x.action)}${x.dryRun ? " · dry" : ""}</span></td>
-        <td class="mono">${esc(x.instrument)}</td>
+        <td><span class="tag">${esc(x.action)}${x.dryRun ? " · dry" : ""}${superseded ? " · superseded" : ""}</span></td>
+        <td class="mono"${superseded ? ' style="text-decoration:line-through"' : ""}>${esc(x.instrument)}</td>
         <td class="dim">${esc(OUTCOME_LABEL[x.outcome] || x.outcome)}</td>
         <td class="num mono">${x.score != null ? Number(x.score).toFixed(1) : "—"}</td>
         <td class="num mono">${x.distinctDays ?? "—"}</td>
         <td class="dim" style="max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.reason)}">${esc(x.reason)}</td>
         <td class="dim mono">${esc(x.feedMode || "—")}</td>
-      </tr>`).join("") + "</table>"
+      </tr>`;
+      }).join("") + "</table>"
       : '<div class="empty">no proposals recorded yet — the gate evaluates ~60s after startup, then daily</div>') + '</div>';
   }
 
