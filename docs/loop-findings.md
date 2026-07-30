@@ -2873,3 +2873,29 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   book MACRO `totalPnl` **−$35.82347655**, all realized, on `feesPaid` of just **$0.169833** — the largest
   single negative line inside `strategyAlpha` **−$27.20516312**, with essentially no turnover. A cost fix
   aimed at ALPHA will leave it intact; it needs its own cycle and its own trigger-level post-mortem.
+
+## 2026-07-30 18:30Z — the revert holds on a fourth JVM; ALPHA's cost ratio is now a four-run trend
+
+- **Rule 154 — a monotone four-point sequence upgrades a diagnosis to a trend; re-rank on it.** ALPHA's
+  `/api/attribution` pair moved the wrong way on both legs four runs running — `totalPnl`/`feesPaid`
+  **$23.36357064**/**$56.444977** → **$9.88820735**/**$60.552698** → **$8.61831343**/**$66.073455** →
+  **$7.64428496**/**$73.682486**. PnL down and fees up on every step is not noise. A defect that is merely
+  *present* can wait behind a bigger one; a defect that is *compounding* cannot. Track the pair, not the fee.
+- **Rule 155 — the convergence gap and the step size sit in the SAME `fusion_targets` row; read them
+  together before blaming the executor.** KO `currentQty` **−69.0**, `targetQty` **−412.71**, `deltaQty`
+  **−1.915`; JNJ **−14.0** / **−146.26** / **−2.745**; NVDA **10.0** / **124.21** / **2.795**. The step is
+  ADR-0080's 3600s e-folding rate; the aim is redrawn every 30s under `reversion` weight
+  **1.6024876487480502** vs `trend` **0.42024570127205746**. A desk that never arrives pays a round trip
+  per flip — that one row is the whole churn story, no cross-referencing needed.
+- **Rule 156 — net exposure can swing sign hard while gross barely moves; read both, and read the headroom
+  before calling it.** Gross moved **-1385.11** to **$36625.58** while net went to **$-13291.73** — a
+  reversion-dominated aim (KO **−412.71**, NEE **−351.01**, JNJ **−146.26**) pulling the book short. At
+  **1.3%** of the $1,000,000 net cap with no flag set, that is a read, not a danger (Rule 147 again).
+- **Rule 157 — a frozen loss ranks below a compounding one.** MACRO `totalPnl` **−$35.82347655** on
+  `feesPaid` **$0.169833** is bit-identical to last run: the book is not trading, so the loss is a closed
+  directional position that is not growing. It stays item #2 behind ALPHA's churn for exactly that reason —
+  "largest single negative line" is not the same as "most costly going forward".
+- **Rule 158 — prove "no name warmed twice" by count, not by inspecting the late lines.** Keying warm lines
+  on lifecycle+name, every per-name entry is count **1**; the only count>1 is `fusion covariance warmed 19
+  of …`, the ADR-0089 rolling matrix rebuild. That is unfalsifiable by clock skew and far cheaper than
+  reading each post-boot line — which is what the previous three cycles did.
