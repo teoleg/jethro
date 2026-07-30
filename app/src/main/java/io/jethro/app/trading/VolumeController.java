@@ -43,7 +43,7 @@ public final class VolumeController {
         var stats = core != null ? core.volumeStats() : null;
         MeasuredAdvSource adv = measuredAdv.getIfAvailable();
         Map<String, String> names = instrumentNames();
-        return properties.simInstruments().stream().map(id -> {
+        return universeIds().stream().map(id -> { // DYNAMIC refdata master (invariant 9), not a list
             long samples = stats != null ? stats.sampleCount(id) : 0;
             double rel = stats != null ? stats.relativeVolume(id) : 1.0;
             Double advUsd = adv != null ? adv.advUsd(id).map(java.math.BigDecimal::doubleValue).orElse(null) : null;
@@ -54,5 +54,13 @@ public final class VolumeController {
     private Map<String, String> instrumentNames() {
         RefDataRepository rd = refData.getIfAvailable();
         return rd != null ? rd.instrumentAttribute("name") : Map.of();
+    }
+
+    /** The current tradable universe from the refdata master (invariant 9) — dynamic, so a discovery-
+     *  promoted or seeded name shows up here with no edit. Empty when refdata isn't wired. */
+    private List<String> universeIds() {
+        RefDataRepository rd = refData.getIfAvailable();
+        return rd == null ? List.of()
+                : rd.findAllInstruments().stream().map(i -> i.id().value()).toList();
     }
 }
