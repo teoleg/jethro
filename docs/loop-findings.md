@@ -2677,3 +2677,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   freshly-opened intraday positions cannot be separated from these numbers; no cause is claimed.
   `/api/attribution` reads `firmTotal` **$167.04598599** = ALPHA **$57.15161336** + HEDGE **$145.71784918**
   + MACRO **−$35.82347655** — the hedge book carries most of the firm total, and MACRO is the one loser.
+
+## 2026-07-30 15:30Z — the pre-registered test failed on a fresh JVM, and the one success on the tape names the fix
+
+- **Rule 126 — a mechanism that helps some names and hurts others is not "partly working"; it is
+  non-monotone, and that is a single fixable defect.** ADR-0131's retry reproduced on a *different*
+  process (booted 11:06:51, `uptimeSeconds` **1392**): 8 names advanced (CAT **136→180**, HD 150→156,
+  PFE 159→166, TSLA 3→8, GOOGL 0→1, EURUSD 1→27, META 1→3, NFLX 1→3), **4 regressed** — XOM **179→151**,
+  CVX **165→146**, JNJ **160→149**, JPM **150→148** — and 12 stood still. The cause is one line:
+  `warmWhileCold` calls `forecaster.forget(...)` **before** it knows what the replay yields, while
+  `SensorWarmup` reads `step × samples × LOOKBACK_MULTIPLE` back from the *current* mark's provider
+  timestamp and re-derives `step` from that same read. Both ends of the window and the stride move
+  between waves. **Never destroy accumulated state before the replacement is in hand and measured.**
+- **Rule 127 — the one success is worth more than the four failures, because it tells you what NOT to
+  revert.** PG logged `still cold ... 190 of 193` at 11:07:04 and `trend sensor warmed PG from 193 stored
+  prices (needs 193) — warm` at 11:23:14. Nothing but the ADR-0131 retry emits that line. So the answer
+  is not "revert ADR-0131" — it is a strict-improvement guard: compute `seedPrices` first (it is already
+  pure), replay only when strictly larger than this name's best. PG's 190→193 passes; the four
+  regressions are refused; and the **12** rate names sitting at `193 of 193` are already at their maximum,
+  so they retire from retrying with **no separate unwarmable rule**. One condition, both classes.
+- **Rule 128 — when PnL falls, split realized from unrealized before you look for a culprit.** Total PnL
+  **$128.22843661** is down **−$57.35** on the run, but realized *rose* to **$177.46496415** (from
+  **$159.63438842**) while unrealized swung **+$18.39164203 → −$49.23652754**. Nothing was lost in a closed
+  trade. Two names carry it — NVDA **−$27.85750000** and UNH **−$24.72000000** — together more than the
+  whole firm unrealized figure, on positions opened this window. A book that opens 19 positions will mark
+  against you on some of them; that is not a defect to chase.
+- **Attribution this window (honest split): market on fresh positions, and again NOT ADR-0131's doing.**
+  Gross **$40994.69587500** / net **$49.80412500** — 19 equities net long **$13298.56500000** against one
+  ES short **−$13248.76087500**, i.e. gross with essentially no directional net, **2.7%** of the firm cap,
+  no flags. The enabler was once more the **boot seed**: **19** σ sensors warmed at 11:07:29 against 7 last
+  cycle and 1 before that — the ADR-0071 path ADR-0131 never touches — which lifted the ADR-0126 veto.
+  ADR-0131's only attributable effects are one warmed sensor and four regressed warm-up counters, none of
+  which is a position. Market drift versus selection on 30 minutes of new marks cannot be separated here;
+  no cause is claimed. `/api/attribution` reads `firmTotal` **$120.16705892** = ALPHA **$20.35473620** +
+  HEDGE **$135.63579927** + MACRO **−$35.82347655**, `hedgeMasking` **true**.

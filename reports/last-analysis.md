@@ -1,85 +1,92 @@
-ADR-0131's re-seed retry finally fired, and the evidence disproves my own last-cycle diagnosis — it works for trend but re-derives from a *sliding* window, so it never converges and actually set six tradable names backwards; the change is at 3/6 evaluation cycles, so I held and made no new change.
+ADR-0131's re-seed is at 4/6 evaluation cycles so I made no change; I re-ran its pre-registered test on a fresh JVM and it failed again — four more sensors moved backwards — but the same tape shows the retry warming PG, which pins the defect to non-monotonicity and gives a one-condition fix for next cycle.
 
 *(Every figure below is read from the live endpoints, `logs/report.md`, `logs/jethro-app.log` or
 `reports/run-status.json`. None is authored here — invariant 7 / ADR-0016.)*
 
-**No code change this cycle** — `reports/.pending-baseline.json` still exists for `efccc6502` and no new
-ledger row has appeared, so the change is still accumulating evidence (3/6). Piling a second change on
-top would destroy the measurement.
+**No code change this cycle.** `reports/.pending-baseline.json` still holds `efccc650` and no new ledger
+row has appeared; counting heartbeats since the baseline gives **4 of 6** cycles. Piling a second change
+on top would destroy the measurement.
 
 ## Situation
 
-1. **Money.** Live `/api/risk` `.total` reads total PnL **$167.76973099**; a later read the same cycle
-   reads **$178.02603045** (realized **$159.63438842**, unrealized **$18.39164203**). The report's
-   SITUATION header computes **+$23.60** on the run and **+$40.17** across the last three.
-   `run-status` reads `pnl_growth_pct` **13.06** against `pnl_target_pct` **1.0** — `on_track=true`,
-   `stale=false`, `underwater=false`. Not bleeding; comfortably ahead of the owner target.
-2. **Risk.** Gross exposure **$24383.04512500**, net **$6210.52512500** — **1.5%** of the firm gross cap
-   with **$1,477,265** of headroom, and **0.5%** of the net cap. Flags: **none**. Gross rose
-   **+$15,755.74** on the run, which is exactly what a book coming off dormant should do with 98.5% of
-   its budget unused. That is the goal, not a risk event.
-3. **Cause.** Last cycle's change (ADR-0131, `efccc6502`) is unscored at 3/6 cycles. It gets **no credit**
-   for the book opening — see the attribution below.
-4. **Danger.** None. Nowhere near the exposure cap or the drawdown breaker, and PnL is rising.
+1. **Money.** Live `/api/risk` `.total` reads total PnL **$128.22843661** — realized **$177.46496415**,
+   unrealized **−$49.23652754**. The report's SITUATION header computes **−$57.35** on the run and
+   **+$1.36** across the last three. So PnL *is* lower run-over-run, and the split says exactly why:
+   **realized PnL rose** (from **$159.63438842** read live last cycle to **$177.46496415**) while
+   **unrealized swung from +$18.39164203 to −$49.23652754**. Nothing was lost in a closed trade; the
+   decline is marks on positions opened this window. `run-status` last heartbeat still reads
+   `pnl_growth_pct` **46.27** vs target **1.0**, `on_track=true`, `stale=false`, `underwater=false`.
+2. **Risk.** Gross **$40994.69587500**, net **$49.80412500** — **2.7%** of the firm gross cap with
+   **$1,459,005** of headroom, **0.0%** of the net cap. Flags: **none**. And note the *shape*: **19**
+   equity positions carrying **$13298.56500000** net long against one ES short at **−$13248.76087500**,
+   so the book is running gross with almost no directional net. Gross rising into 97% unused budget is
+   the goal, not a risk event.
+3. **Cause.** Last cycle's change (ADR-0131, `efccc650`) is unscored at 4/6. It gets **no credit and no
+   blame** for the PnL move — see the attribution below.
+4. **Danger.** None. Nowhere near the exposure cap or the drawdown breaker, and the loss is unrealized on
+   fresh intraday positions, not a realized bleed.
 
 ## Order-level post-mortem
 
-The desk traded **eight ALPHA names plus the HEDGE book** this window, against two names last cycle:
-NVDA (repeated BUYs, +8/+7/+7/+6…), AAPL (repeated SELLs), CAT, HD, PG, MSFT, UNH, JNJ, and HEDGE ES.
-A large share of the orders are `CANCELLED` with `reason` = *"fusion re-plan — passive order superseded
-by a fresh target (ADR-0084)"* — normal passive re-planning, but the churn is high enough to be worth
-watching against `totalFees` **$36.280400** once the sensor work closes.
+The window traded AAPL, NEE, GOOG, MSFT, BAC, JPM, WMT, NVDA, JNJ, PFE plus the HEDGE ES leg. Every
+`CANCELLED` row carries the same `reason` — *"fusion re-plan — passive order superseded by a fresh target
+(ADR-0084)"* — ordinary passive re-planning, but the churn is heavy enough to watch against `totalFees`
+**$41.996983** once the sensor work closes. The unrealized drag is concentrated in **two** names:
+NVDA **−$27.85750000** (20 long, realized **+$37.23710000**) and UNH **−$24.72000000** (11 short) — those
+two exceed the whole firm unrealized figure, and the rest of the 19-name book is within a few dollars
+either side of flat. On realized PnL the standouts are MSFT **+$113.82670000** and the hedge
+**+$135.95482734** against GOOGL **−$40.71220000**, JPM **−$48.29160000**, AMZN **−$31.72520000** and
+MACRO's flat NQ **−$35.82347655**.
 
-## Step 0 — verifying ADR-0131, and correcting my own last-cycle root cause
+## Step 0 — verifying ADR-0131 against its own pre-registered test
 
-**The retry fired.** Last cycle I wrote a VERIFY-BY that only the mechanism could pass: *a second
-`still cold` line for a name that already logged one*. It passed — **52** trend still-cold lines across
-**27 distinct names**, so **25 names logged twice**. XOM is the clean trace: **10:36:25.022**
-(`170 of 193`) → **10:52:34.778** (`169 of 193`), **16 min 9 s** apart against the predicted
-193 × 5 s = **16.08 min**.
+Last cycle I wrote a two-leg VERIFY-BY. This JVM is a **different process** (booted 11:06:51,
+`uptimeSeconds` **1392**), so this is an independent reproduction rather than a re-reading:
 
-**So last cycle's root cause was half wrong.** I claimed the retry cadence outlives the process on three
-of four call sites. For trend that is false — 16.1 min fits inside this process (`uptimeSeconds`
-**1506**) and it fired. It holds only for the other two: `Reversion` still-cold is **22 lines across 22
-distinct names** (zero duplicates), `XsReversion` **0 lines**.
+- **Leg 1 — "no negative wave-over-wave seeded-count delta anywhere" → FAILED.** Four names went
+  backwards between the 11:07:0x wave and the 11:23:1x wave (**16 min**, the predicted 193 × 5 s cadence):
+  **XOM 179→151**, **CVX 165→146**, **JNJ 160→149**, **JPM 150→148**. Different process, different names
+  than last cycle's six, identical defect. **⚠️ STILL-BROKEN.**
+- **Leg 2 — "distinct trend-cold names below 27 / 25 repeating" → 26 distinct / 24 repeating.** Below, by
+  one name, and that one name is the win below — not a meaningful pass.
+- **But the retry produced its first genuine success, and it is the most useful line on the tape.** PG:
+  11:07:04 `still cold ... 190 of 193`, then 11:23:14 `trend sensor warmed PG from 193 stored prices
+  (needs 193) — warm`. Nothing but the ADR-0131 retry can emit that. So the mechanism is right; its
+  **non-monotonicity** is the entire defect. Eight names advanced (CAT 136→180, HD, PFE, TSLA, GOOGL,
+  EURUSD, META, NFLX), four regressed, twelve stood still.
+- **Class A reconfirmed:** the same **12** rate/swap names seeded **193 of 193** in *both* waves and are
+  still cold — the sample count is not their binding predicate, so re-seeding them is pure waste.
 
-**And the pre-registered discriminator resolved.** I had written: *"if the retries fire and σ stays cold,
-the defect is the seed span, not the cadence."* The retries fired; the names stayed cold. Two distinct
-defects sit underneath:
+I read the code to pin the mechanism to a line: `warmWhileCold` calls `forecaster.forget(...)`
+**unconditionally** before it knows what the replay will yield, and `SensorWarmup` reads
+`step × samples × LOOKBACK_MULTIPLE` back from the *current* mark's provider timestamp while re-deriving
+`step` from whatever that read returned — so both ends of the window and the thinning stride move between
+waves, and the count is free to fall onto a sensor that has just been wiped.
 
-- **12 rate/swap names seeded `193 of 193` and are still cold in both waves** (USD.TSY.\*, USD.SOFR.\*,
-  USD_IRS_\*). They got the full warm-up span and `warm()` is still false, so the sample count is not the
-  binding predicate — their stored series does not move, leaving the scale estimator nothing to absorb.
-  Re-seeding them can never work.
-- **The retry can move a tradable name backwards.** `warmWhileCold` calls `forecaster.forget(...)` and
-  replays whatever the re-read returns; because the seed anchors on the *current* mark's provider
-  timestamp and walks newest-first, the window **slides** rather than accumulating. Wave 1 → wave 2:
-  **HD 164→140**, **JPM 188→161**, **MCD 171→162**, **JNJ 186→182**, **PFE 178→175**, **XOM 170→169** —
-  against **UNH 153→183**, **PG 176→183**, **CAT 150→159**, **CVX 157→162**. For those six, the retry
-  discarded ~16 minutes of consumed live prints *and* replayed less history than the boot seed had.
-
-That is a real regression in the sensor-warmup path, so the honest defect-level verdict is 🔴 REGRESSED,
-not merely still-broken. I did **not** revert it this cycle: the regression is confined to warm-up
-progress on cold sensors, the desk is trading and PnL is up 13.06%, there is no DANGER flag, and a revert
-is itself a code change that would corrupt the 3/6 measurement window. It becomes item #1's fix next
-cycle, and the fix is now *monotone re-seeding* — not last cycle's "shorten the cadence", which would
-only have regressed these names faster.
+**Next cycle's fix, and why it is one condition rather than two:** `SensorWarmup.seedPrices` is already a
+pure function returning the list before anything mutates. Compute it first, and only `forget()` + replay
+when it is **strictly larger** than the best seed this name has achieved. Class B keeps its prints; Class A
+sits at the maximum so it retires itself from retrying with no separate rule; PG's 190→193 is strictly
+larger so the one real win survives. It is a sample-count bug fix — no money, risk or exposure number
+changes — so no ADR is needed.
 
 ## Attribution this window (honest split)
 
-**Desk activity, but not ADR-0131's doing, and cause not separable.** The enabling event was the boot
-seed: **7 names** warmed their σ sensor at **10:36:40** (NVDA, MSFT, KO, AAPL, GOOG, AMZN, NQ) — the
-pre-existing ADR-0071 path, untouched by ADR-0131 — where the previous process had warmed one. That is
-what lifted the ADR-0126 σ veto across the desk. ADR-0131's retry ran only *after* that, and every name
-it touched stayed cold. **It takes no credit for the PnL.** How much of the move is market drift on
-freshly-opened intraday positions versus selection cannot be separated from these numbers, so I claim no
-cause. Note also that `/api/attribution` reads `firmTotal` **$167.04598599** = ALPHA **$57.15161336** +
-HEDGE **$145.71784918** + MACRO **−$35.82347655**: the hedge book is carrying most of the firm total.
+**Market, not the change — and the enabling event again was not ADR-0131.** What unlocked the full book
+was the **boot seed**: **19** σ sensors warmed at 11:07:29 (JPM, MCD, MSFT, BAC, KO, NVDA, PFE, NEE, CAT,
+JNJ, WMT, XOM, AMZN, GOOG, CVX, PG, AAPL, HD, UNH), against 7 last cycle and 1 the cycle before — the
+pre-existing ADR-0071 path, untouched by ADR-0131 — which lifted the ADR-0126 σ veto across the desk. The
+PnL move itself is **mark-to-market on positions the desk opened this window**, and it is dominated by two
+names (NVDA, UNH) whose marks moved against freshly-established entries. That is market drift on new
+positions; whether the *selection* of those two was good cannot be separated from 30 minutes of marks, and
+I am not going to guess a cause. ADR-0131 takes neither credit nor blame: its only attributable effect on
+this tape is warming PG's trend sensor and regressing four others' warm-up progress, none of which is a
+position.
 
 ## What remains blocking the rest of the book
 
 `strategy_diag` reads `measured` **29**, `tradable` **16**, `edgeGated` **13 names**, each annotated
-`no positive OOS edge` — PFE (momentum **−137.76114263**, mean-rev **−1.56304119**), PG
-(**−82.99627912** / **0.00000000**), GOOGL (**−58.18505489** / **−41.67661313**), and ten more. That is
-the ADR-0064 gate working as designed. Per the standing priority the answer stays **a new signal with
-genuinely measured edge**, never a looser gate.
+`no positive OOS edge` — PFE (momentum **−137.76114263**), PG (**−82.99627912**), GOOGL
+(**−58.18505489** / **−41.67661313**) and ten more. That is the ADR-0064 gate working as designed. Per
+the standing priority the answer stays **a new signal with genuinely measured edge**, never a looser gate —
+and that is item #2, queued behind the sensor fix.
