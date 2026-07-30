@@ -15,6 +15,65 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 14:00Z (ADR-0131 at 1/6 cycles — held, no code change made)
+
+**Prior item #1 (ADR-0131, the boot-only warm-start seed) → ⚠️ PARTIALLY VERIFIED — the forecast half is
+green, the mechanism itself is still unexercised.** Its VERIFY-BY was `sources ≥ 2` and a non-zero
+`agreement` on `/api/fusion/targets`, and both read green off the live endpoint: **15 of 20** names show
+`sources: 2` (every name was at 1), `agreement` runs to **0.870** (CVX), **15** names carry a non-zero
+`targetQty` (WMT **+378.11**, XOM **+147.74**, BAC **−166.31**), and `weights` now contains a **trend**
+key at **0.30282274653051533** where the source had published nothing at all. Since the 09:49:31 ET boot
+the log shows **5 `trend sensor warmed`** and **22 `cross-sectional reversion sensor warmed`** against
+**0** of each in the whole previous process.
+
+**The half that is NOT verified, stated plainly:** every warmed line is timestamped within 90 seconds of
+the 09:49:40 boot and every still-cold name has logged exactly **one** line — the boot seed. The retry
+cadence is 193 sightings (trend) / 121 plans (σ) and neither had elapsed at report time. The sensors
+warmed because this restart followed two hours of uptime rather than a 4h45m outage, so the store's tail
+was full — **not** because the re-seed fired. ADR-0131's mechanism is deployed and live in the log
+(`re-seeding every 193 sightings until it does (ADR-0131)`); it has not yet been tested. It carries no
+credit for this recovery and stays open until a retry is observed.
+
+**No change this cycle.** The scorer reports `efccc6502 still accumulating evidence (1/6 cycles)` and
+`.pending-baseline.json` exists, so a second change would destroy the evidence.
+
+### 🎯 Item #1 (carried, sharpened) — the σ leg of ADR-0131 is what still holds the book at $0.00
+
+**The defect, now precisely located.** All 20 targets show `deltaQty: 0` against `targetQty` up to
+**+378.11**. `PositionBuffer.mayIncrease` (`PositionBuffer.java:146,195`) requires **both** the ADR-0064
+edge gate **and** ADR-0126's `stopArmed`, and `stopArmed` is `streamVol.sigmaPerSample(id).isPresent()`
+(`FusionLifecycle.java:521`). Since boot there is exactly **1 `risk-cut σ sensor warmed`** (NQ) against
+**19 `still cold`**, so every name that finally has a real target is vetoed from opening because its
+trailing stop cannot be priced. The σ seeds are short but close — MSFT **106 of 121**, AAPL **79 of 121**,
+AMZN **75 of 121**, and the low tail (HD **27**, MCD **29**) — exactly the case ADR-0131's retry exists to
+clear. Give it the cycle it needs before concluding the cadence is wrong.
+
+**VERIFY-BY (next run, both parts):** (a) `grep -c "risk-cut σ sensor warmed"` over the log since boot
+must exceed **1**; (b) at least one name on `/api/fusion/targets` must show a non-zero `deltaQty`. If the
+retries have fired and σ is still cold, the defect is the **seed span** (121 contiguous prints at the plan
+interval that the store does not hold), not the cadence — and that becomes the change.
+
+### Item #2 (carried, was #2) — no source has demonstrated positive out-of-sample edge
+
+The second lock on the same door, and the standing priority. `signals_telemetry` reads **trend −5.9926
+bps** and **xsreversion −5.1514 bps** at 3600s — the two sources actually publishing — while the
+learned-signal backtest logged `VETOED — -4.58 bps/opportunity net does not clear zero-and-baselines
+(best baseline -9.54 bps)`, and `strategy_diag.edgeGated` lists 13 names with `no positive OOS edge`.
+Ranked below item #1 only because item #1 is one cycle from resolving itself; once σ arms and the book can
+open, this is the whole problem, and the answer is a **new** predictor through the ADR-0049 OOS gate, not
+another fusion weight.
+
+**VERIFY-BY:** a source whose measured expectancy is positive and clears the zero-and-baselines test at
+its horizon, or an explicit written finding that none in this universe does.
+
+### Item #3 (carried) — the loop's heartbeat reported a dead app as a healthy market-closed cycle
+
+Unchanged, not addressed. Still ranked below the money items.
+
+**VERIFY-BY:** with the app stopped, `reports/run-status.json` must record `available: false`.
+
+---
+
 ## Verification block — 2026-07-30 13:30Z (the platform is back UP — and the reason the book is flat is now visible)
 
 **Prior item #1 (V49 boot-blocking migration) → ✅ VERIFIED, struck.** Every part of its VERIFY-BY reads

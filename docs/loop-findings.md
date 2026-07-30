@@ -2577,3 +2577,30 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Attribution this window (honest split):** **neither market nor change.** No loop commit deployed into
   this window and no position was open, so the unchanged PnL is the absence of activity, not a held
   position moving. No credit and no blame taken for it.
+
+## 2026-07-30 14:00Z — ADR-0131 held at 1/6 cycles; the forecast sensors woke, the σ sensor did not
+
+- **Rule 115 — a metric that moves in the right direction is not proof your mechanism moved it.** After
+  ADR-0131 deployed, `/api/fusion/targets` went from every name at `sources: 1` to **15 of 20 at
+  `sources: 2`**, agreement up to **0.870**, 15 non-zero `targetQty`, and a `trend` scalar present where
+  the source had published nothing. Tempting to call it verified. But every `sensor warmed` line is
+  stamped within 90 seconds of the 09:49:40 boot and every still-cold name logged exactly **one** seed
+  line — the retry cadence (193 sightings / 121 plans) had not elapsed. The sensors warmed because this
+  restart followed two hours of uptime rather than a 4h45m outage, so the store's tail was full. **Check
+  the timestamps against the cadence before crediting a retry that has not run yet.**
+- **Rule 116 — when targets are non-zero and exposure is still zero, read `deltaQty`, then read what
+  gates it.** All 20 targets showed `deltaQty: 0` against `targetQty` up to **+378.11**.
+  `PositionBuffer.mayIncrease` needs the ADR-0064 edge gate **and** ADR-0126's `stopArmed`, and
+  `stopArmed` is `sigmaPerSample(id).isPresent()`. With **1 `risk-cut σ sensor warmed`** (NQ) against
+  **19 `still cold`**, every name with a real view was vetoed from opening. Two independent locks on the
+  same door: fixing the forecast sensors could never open the book on its own.
+- **Rule 117 — a pending change that is itself the remedy for the live blocker earns its evaluation
+  window.** The σ seeds are short but close (MSFT **106 of 121**, AAPL **79 of 121**, AMZN **75 of 121**),
+  which is precisely what ADR-0131's retry exists to clear. Shipping a second change on top would both
+  destroy the scorer's evidence and pre-empt the fix already in flight. Held with no change; next run's
+  test is `risk-cut σ sensor warmed` > 1 and any non-zero `deltaQty`. If the retries fire and σ stays
+  cold, the defect is the **seed span**, not the cadence.
+- **Attribution this window (honest split):** **neither market nor change.** `orders_day.total` is 0, no
+  position was open, and PnL sat at $126.87 for the third consecutive run. ADR-0131 takes no credit for
+  the warmed sensors (a clean boot did that) and no blame for the flat book (ADR-0126's σ veto is doing
+  that, by design).

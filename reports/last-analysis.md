@@ -1,56 +1,58 @@
-The desk has traded nothing all session because its sensors were seeded once, at boot, into a store the outage had emptied — a cold sensor now re-seeds until it warms (ADR-0131).
+ADR-0131 landed and the forecast sensors are speaking again — 15 of 20 names now carry two sources and a real target — but the σ sensor is still cold on everything but NQ, so ADR-0126 vetoes every open and the book is still flat; the change is at 1/6 evaluation cycles, so I held and made no new change.
 
-*(Every figure below is read from `logs/report.md`, `logs/jethro-app.log`, the live endpoints,
-`reports/run-status.json` or `flyway_schema_history` / `pg_constraint`. None is authored here —
-invariant 7 / ADR-0016.)*
+*(Every figure below is read from the live endpoints, `logs/report.md`, `logs/jethro-app.log` or
+`reports/run-status.json`. None is authored here — invariant 7 / ADR-0016.)*
 
 **Situation triage.**
 
 1. **Money.** Total PnL **$126.87**, unchanged run-over-run and unchanged across the last three runs
-   (**+$0.00** each). It is not bleeding — but it is not moving either, and the reason is that nothing is
-   on. Fees for the day stand at $32.23 against **zero** orders placed (`orders_day.total = 0`).
-2. **Risk.** Gross exposure **$0.00** — **0.0%** of the $1,500,000 firm cap, with the entire $1,500,000 of
-   headroom unused; net $0.00 against a $1,000,000 net cap. The flag is **DORMANT**, which is a failure to
-   attack, not a rest state.
-3. **Cause.** Last cycle's change (the V49 asset-class constraint fix) is **✅ VERIFIED**: `/api/risk`
-   answers HTTP 200 instead of `Connection refused`, `flyway_schema_history` shows V49 `success=t`, and
-   `instrument` now holds 12 `INDEX` rows against 0. The app has been up since 07:47 ET. The change before
-   that, ADR-0126, finally accumulated cycles and scored **⚠️ INCONCLUSIVE** (kept, not reverted), so a new
-   change is due and `.pending-baseline.json` is clear.
-4. **Danger.** None of the danger kind — no drawdown breaker (`halted: false`), no proximity to any cap.
-   The live problem is the opposite one: a completely idle book with a full risk budget.
-5. **Order-level post-mortem.** There is nothing to post-mortem: `recent_orders` and `orders_day` are both
-   empty for the session. That absence *is* the finding, and it is what I chased.
+   (**+$0.00** each). Not bleeding, not moving. Realized only; unrealized is $0.00 because nothing is held.
+2. **Risk.** Gross exposure **$0.00** — **0.0%** of the $1,500,000 firm cap, all $1,500,000 of headroom
+   unused; net $0.00 against the $1,000,000 net cap. Flag **DORMANT**. The breaker is not tripped
+   (`halted: false`) and the JVM guard is clear (`heapUsedPct 29`, `guardTripping false`).
+3. **Cause.** Last cycle's change (ADR-0131, `efccc65`) **deployed** — the JVM restarted 09:49:31 ET and
+   the new log line is live (`re-seeding every 193 sightings until it does (ADR-0131)`). The scorer holds
+   it at **1/6 cycles**, so `.pending-baseline.json` still exists and no new change is due.
+4. **Danger.** None. There is no proximity to a cap and no drawdown breaker — the live problem is the
+   opposite one, a fully idle book with its entire risk budget unused.
+5. **Order-level post-mortem.** `orders_day.total` is **0** and `recent_orders` shows nothing since
+   2026-07-29 21:06Z. There is no order to attribute; the absence is the finding.
 
-**Diagnosis — the mechanism, not the symptom.** `/api/fusion/targets` shows every name with `sources: 1`,
-`agreement: 0.0` and `combinedForecast: -0.0`, while the underlying raw source forecasts are large
-(MSFT −20.0, AMZN −12.5, NQ −11.3, AAPL +6.4). That is ADR-0124 working exactly as designed — the
-dispersion of one source is unestimable, so an uncorroborated view sizes at nothing. The real question is
-why every name has only one source, and the log answers it: since boot there are **39 `trend sensor still
-cold` warnings and 0 `trend sensor warmed`**, the same 39/0 for reversion, and 9/1 for the σ sensor. The
-seeds read `0 of 193`, `1 of 241`, `0 of 121`. The one name that warmed is NQ, which prints overnight and
-whose seed returned `232 of 241` — the natural experiment that pins the cause on a discontinuity in the
-stored price series rather than on the sensors themselves.
+**Step 0 — did ADR-0131 do what it claimed? ⚠️ PARTIALLY VERIFIED, and I am explicit about which half.**
 
-The defect behind that is one line of policy: the ADR-0071 warm-restart seed runs **on first sight of a
-name and never again**. First sight is boot, and this boot followed a 4h45m outage, so the single read
-that mattered was taken at the one moment the store's tail was guaranteed to be empty. The sensors were
-abandoned there — and an hour and three quarters later, with the store holding 378 AAPL prints over 81
-minutes at a 1.1-second median (far more than any of those warm-ups needs), `forecastScalars` still
-contains no `trend` key at all. ADR-0126's open veto reads the same failed σ, so it was independently
-blocking every open for the same reason.
+Its VERIFY-BY was `sources ≥ 2` and non-zero `agreement` on `/api/fusion/targets`. Both read green:
+**15 of 20** names now show `sources: 2` (every name was at 1), agreement runs up to **0.870** (CVX),
+**15** names carry a non-zero `targetQty` (WMT **+378.11**, XOM **+147.74**, BAC **−166.31**), and
+`weights` now contains a **trend** key at **0.30282274653051533** — the source that had published nothing
+at all since the previous boot. Since this boot the log shows **5 `trend sensor warmed`** and **22
+`cross-sectional reversion sensor warmed`**, against **0** of each in the whole previous process.
 
-**The change (ADR-0131).** A cold sensor re-seeds. `SensorReseed` re-attempts the replay every
-`warmupSamples()` sightings while a sensor is still cold, and retires a name permanently once it warms —
-the cadence is read off the sensor's own warm-up length, so no dial and no number is introduced. The
-replay goes into a state just dropped by a new `forget(instrumentId)` on the two forecasters and the σ
-sensor, so prints already consumed are never double-counted; the reset touches only cold names, which
-publish no view and arm no stop, so nothing live can be disturbed. `SensorWarmup` and every gate between a
-forecast and a fill are untouched — this lets the sensors speak, it does not relax anything that decides
-whether speaking becomes a trade. Tests green (`./gradlew -Pci test`), including an end-to-end case that
-reproduces a truncated boot seed and shows the retry warming the same sensor.
+The honest half: **the re-seed retry has not actually fired yet.** Every warmed line is timestamped
+within 90 seconds of the 09:49:40 boot, and each still-cold name has logged exactly **one** line — the
+boot seed. The cadence is 193 sightings for trend and 121 plans for σ, and neither has elapsed in the
+11 minutes of uptime at report time. So what warmed the sensors was a boot whose store was already full
+(this restart followed two hours of uptime, not a 4h45m outage), **not** the mechanism ADR-0131 added.
+The mechanism is deployed and correct-looking; it is still unproven. I take no credit for the recovery.
 
-**Attribution, honestly.** No loop commit deployed into this window and no position was live, so the
-unchanged PnL is neither market nor change — there was nothing to move. I take no credit and no blame for
-it. Whether ADR-0131 helps will be visible next run as `sources ≥ 2` and a non-zero `agreement` on
-`/api/fusion/targets`, and only after that as exposure.
+**Why the book is nonetheless still flat — the mechanism, not the symptom.** Every one of the 20 targets
+shows `deltaQty: 0` despite targets as large as **+378.11**. `PositionBuffer.mayIncrease` requires *both*
+the ADR-0064 edge gate *and* ADR-0126's `stopArmed`, and `stopArmed` is `sigmaPerSample(...).isPresent()`
+— the risk-cut σ. Since boot there is exactly **1 `risk-cut σ sensor warmed`** (NQ) against **19 `still
+cold`**, so every name with a real target is vetoed from opening because its trailing stop cannot be
+priced. The σ seeds are close but short — MSFT **106 of 121**, AAPL **79 of 121**, AMZN **75 of 121** —
+which is precisely the case ADR-0131's retry exists to clear, and its first retry is still pending. The
+edge gate is the second lock on the same door: `signals_telemetry` has trend at **−5.9926 bps** and
+xsreversion at **−5.1514 bps** at 3600s, and the learned-signal backtest logged `VETOED — -4.58
+bps/opportunity net does not clear zero-and-baselines (best baseline -9.54 bps)`.
+
+**Decision.** No code change. The pending change is under measurement and the contract forbids piling a
+second one on top of it; independently, the σ leg of that very change is the remedy for what is blocking
+the book, and it deserves the cycle or two it needs to fire before I conclude it is insufficient. Next
+run's test is sharp and falsifiable: `risk-cut σ sensor warmed` must exceed 1 since boot, and at least
+one name must show a non-zero `deltaQty`. If the retries fire and σ stays cold, the defect is the seed
+span itself, not its cadence, and that becomes the change.
+
+**Attribution, honestly.** **Neither market nor change.** No position was open and no order was placed in
+this window, so the unchanged PnL is the absence of activity rather than a held position moving. ADR-0131
+gets no credit for the warmed sensors (a clean boot did that) and no blame for the flat book (ADR-0126's
+σ veto is doing that, by design, and ADR-0131's own retry is the thing that will lift it).
