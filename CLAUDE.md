@@ -39,6 +39,26 @@ the `chore(status): run …` commits and `reports/` are the ground truth of what
   market-open prints + EWMAC warm-up. So "no dramatic book change immediately after wiring a signal" is
   the designed behaviour — never present a just-added source as if it should have moved PnL this cycle.
 
+## Objective — deploy capital to make money, NOT preserve the status quo (ADR-0132)
+
+Learned the hard way (the loop turned 1,222 orders into ~$122 by keeping the book at ~$39k of a $500k
+allowance — because the mission said "hold or reduce exposure" and the daily risk budget was $250).
+
+- **"Better" = grow firm total PnL by DEPLOYING capital up to the owner-set gross budget ($200k, moderate
+  vol — ADR-0132) at moderate volatility.** Exposure inside the budget is a resource to **use**, not a
+  number to minimize. Only **dead exposure** (risk earning nothing) gets cut. Never re-introduce an
+  "exposure must fall" objective — that is the status-quo trap this rule exists to prevent.
+- **Undeployed capital under the budget is a failure to attack, not safety.** A flat book while the budget
+  is unused is the thing to fix this cycle.
+- **State PnL targets honestly against capital and risk.** A dollar target is meaningless without the
+  capital base and the vol budget behind it: PnL ≈ gross × daily-return. $1,000/day on $200k is 0.5%/day ≈
+  126%/yr — a **strong-day run-rate to build toward**, never a floor the edge guarantees at moderate risk.
+  The real floor is **positive expectancy over a rolling 3-day window** at the deployed size. Don't let an
+  aspirational dollar figure harden into an assumed-achievable rule (the "no invented numbers" discipline).
+- **Bigger book, SAME safety floor.** Scaling size never means relaxing the deterministic floor — the
+  gross/net/instrument caps, firm drawdown breaker, conviction floor, edge gate and pre-trade guardrail all
+  still stand. Raising *size* dials and relaxing *safety* gates are different decisions; do not conflate.
+
 ## Design-first rule
 
 Any architecturally significant choice (hard to reverse, cross-service, cost/latency
