@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-07-30T13:30:05Z",
+    "fees": "32.230093",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "155.95830511",
+      "netExposure": "0.00000000",
+      "realizedPnl": "126.87240898",
+      "strategyAlpha": "-29.08589613",
+      "totalFees": "32.230093",
+      "totalPnl": "126.87240898",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "126.87240898"
+  },
+  "before": {
+    "at": "2026-07-29T19:54:31Z",
+    "gross": "23393.97093750",
+    "net": "-1596.74093750",
+    "total_pnl": "-71.92920393"
+  },
+  "commit": "5e35752dd8b2c4b6d7728efde657223312500834",
+  "delta": {
+    "gross": "-23393.97093750",
+    "net": "1596.74093750",
+    "total_pnl": "198.80161291"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle +0.005522 over 36 cycles, t=+1.49 (hurdle 1.5); gross 23,394\u21920",
+  "revert": false,
+  "revertApplied": null,
+  "scoredAt": "2026-07-30T13:30:05Z",
+  "summary": "an unarmed ADR-0086 trailing stop is now a veto on OPENING a name \u2014 the desk may cut, hold or be stopped out of a sigma-cold name but never open or enlarge one, closing the hole where ADR-0125's widening put the book's two largest targets in names it had logged as impossible to stop out (ADR-0126)",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 0.0,
+    "gross_start": 23393.9709375,
+    "mean_ret_per_cycle": 0.00552227,
+    "n": 36,
+    "scale": 1000.0,
+    "t": 1.488
+  }
+}
