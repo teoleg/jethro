@@ -51,4 +51,25 @@ public final class HistoricalBars {
         });
         return out;
     }
+
+    /**
+     * The same bar map read from the DB {@code daily_close} SEED history instead of a file (ADR-0128).
+     * This is the ONE history source of truth — Tiingo-seeded and periodically refreshed by
+     * {@code HistorySeeder} — so the walk-forward runs on the same rolling window that feeds VaR /
+     * vol-targeting / the hedge covariance, and there is no separate (and, per the Stooq 404s, unreliable)
+     * bars file to keep in sync. SEED closes are uniformly scaled, and the backtest's PnL is
+     * scale-invariant (notional × return), so the edge verdict is unaffected. Ascending by day per name.
+     */
+    public static Map<String, List<Bar>> fromDailyClose(
+            org.springframework.jdbc.core.JdbcTemplate jdbc, String feedMode) {
+        Map<String, List<Bar>> out = new LinkedHashMap<>();
+        jdbc.query("select instrument, day, close from daily_close where feed_mode = ? order by instrument, day",
+                rs -> {
+                    String id = rs.getString("instrument");
+                    LocalDate day = rs.getDate("day").toLocalDate();
+                    BigDecimal close = rs.getBigDecimal("close");
+                    out.computeIfAbsent(id, k -> new ArrayList<>()).add(new Bar(day, close));
+                }, feedMode);
+        return out;
+    }
 }

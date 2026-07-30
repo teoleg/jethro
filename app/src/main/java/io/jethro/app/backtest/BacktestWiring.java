@@ -27,14 +27,17 @@ public class BacktestWiring {
         return new BacktestService(engine, sim, strategy, refs, execution.perFillCostBps("EQUITY"));
     }
 
-    /** Walk-forward replay over real daily bars (ADR-0027 point 2); the bars file is
-     *  generated on a networked host by scripts/fetch_bars.py. */
+    /** Walk-forward replay over real daily bars (ADR-0027 point 2): reads the DB {@code daily_close} SEED
+     *  history — the periodically-refreshed source of truth (ADR-0128) — and falls back to the on-host
+     *  bars file only when persistence is off (e.g. tests). */
     @Bean
     WalkForwardService walkForwardService(StrategyProperties strategy, ExecutionProperties execution,
                                           InstrumentRefSource refs,
+                                          org.springframework.beans.factory.ObjectProvider<
+                                                  org.springframework.jdbc.core.JdbcTemplate> jdbc,
                                           @org.springframework.beans.factory.annotation.Value(
                                                   "${jethro.backtest.bars-path:data/historical-bars.json}")
                                           String barsPath) {
-        return new WalkForwardService(strategy, execution, refs, barsPath);
+        return new WalkForwardService(strategy, execution, refs, jdbc.getIfAvailable(), barsPath);
     }
 }

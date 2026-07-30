@@ -173,18 +173,11 @@ fi
 
 echo "==== $(date -Is) cycle start ====" >> "$LOG"
 
-# Keep the OOS backtest's daily history current (supports ADR-0125 breadth: the walk-forward validates
-# each name on data/historical-bars.json, which scripts/fetch_bars.py writes). Refresh at most ~once a
-# day — only when the file is missing or older than 20h (1200 min) — so the backtest sees the latest
-# closes without a manual fetch, while a 30-minute loop never hammers the source. Run from the repo dir
-# (fetch_bars.py writes a CWD-relative path, the same the app's bars-path reads), and NEVER block the
-# cycle on a network hiccup: on failure keep the existing history file and carry on.
-BARS_FILE="$REPO/data/historical-bars.json"
-if [ ! -f "$BARS_FILE" ] || [ -n "$(find "$BARS_FILE" -mmin +1200 2>/dev/null)" ]; then
-  echo "refreshing daily bars (missing or >20h old) via scripts/fetch_bars.py" >> "$LOG"
-  ( cd "$REPO" && python3 scripts/fetch_bars.py ) >> "$LOG" 2>&1 \
-    || echo "bars refresh failed (network?) — keeping the existing history file" >> "$LOG"
-fi
+# NOTE (ADR-0128): the OOS backtest now reads the DB `daily_close` SEED history — the ONE source of
+# truth, Tiingo-seeded and refreshed daily by the app's own HistorySeeder — so there is no separate bars
+# file to fetch here. The previous scripts/fetch_bars.py (Stooq) step was removed: Stooq 404'd every
+# name and it was a second, redundant, unreliable history source. History currency is the app's job now,
+# not the loop's.
 
 # 0. Market-hours gate. On a LIVE feed outside the US session, the tape is frozen — there is nothing
 #    to analyse, so spending an Opus cycle on it is pure waste (and the frozen book reads as false

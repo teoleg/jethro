@@ -33,8 +33,11 @@ Make the seeder **periodic** and have the refresh keep the `daily_close` SEED se
   running-mode), so keeping the *source* current updates VaR, vol-targeting and the hedge covariance with
   **no per-consumer change** — the one place to fix, fixed once.
 
-The OOS-backtest bars file (`data/historical-bars.json`) is refreshed daily on the same principle by the
-loop step added earlier (ADR-0127 companion); this ADR covers the DB history the risk engine runs on.
+The **OOS walk-forward backtest now reads this same DB `daily_close` SEED history** (`WalkForwardService`
+→ `HistoricalBars.fromDailyClose`), falling back to the on-host file only when persistence is off. The
+previous `scripts/fetch_bars.py` (Stooq) loop step was **removed** — Stooq 404'd every symbol and it was
+a second, redundant, unreliable history source. So there is now ONE history source of truth (Tiingo →
+`daily_close`, refreshed here) feeding VaR, vol-targeting, the hedge covariance, AND the backtest.
 
 ## Consequences
 
