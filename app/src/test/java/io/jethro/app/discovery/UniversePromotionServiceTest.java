@@ -185,6 +185,24 @@ class UniversePromotionServiceTest {
     }
 
     @Test
+    void restoreReAddsEvictedNamesReTaggedAndIsIdempotent() {
+        FakeGateway gw = new FakeGateway();
+        RecordingAudit audit = new RecordingAudit();
+        var svc = new UniversePromotionService(gw, companies, audit, props(50));
+
+        // A name that was evicted (not in the master now) is restored, re-tagged LIVE.
+        List<String> restored = svc.restoreDiscovered(List.of("PLTR", "HOOD"), "e", "LIVE", 10L);
+        assertEquals(List.of("PLTR", "HOOD"), restored);
+        assertTrue(gw.exists("PLTR") && gw.exists("HOOD"), "evicted names are re-added to the master");
+        assertEquals(RefDataRepository.SOURCE_DISCOVERED,
+                gw.attrs.get("PLTR").get(RefDataRepository.ATTR_SOURCE), "re-added as a discovered name");
+
+        // Idempotent: a name already present is skipped, not duplicated.
+        List<String> again = svc.restoreDiscovered(List.of("PLTR", "COIN"), "e", "LIVE", 11L);
+        assertEquals(List.of("COIN"), again, "PLTR already present — only the missing COIN is restored");
+    }
+
+    @Test
     void crossModeCleanupIsANoopWhenNothingIsForeign() {
         FakeGateway gw = new FakeGateway();
         RecordingAudit audit = new RecordingAudit();

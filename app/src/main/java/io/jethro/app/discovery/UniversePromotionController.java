@@ -4,6 +4,7 @@ import io.jethro.messaging.Provenance;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -70,34 +71,67 @@ public final class UniversePromotionController {
         return new ProposalsView(true, dryRun, wouldPromote, rows, recentAudit());
     }
 
-    /** Result of a cross-mode cleanup. {@code evicted} = names removed; {@code kept} = names left in place
-     *  (pinned or holding a position/tape — never orphaned). {@code mode} is the mode we cleaned FOR. */
-    public record CleanupView(boolean available, String mode, List<String> evicted, String kept) {
+    /** Result of a cross-mode cleanup. In a preview ({@code applied=false}) {@code evicted} is what WOULD be
+     *  removed; when applied it is what WAS removed. {@code kept} = names left in place (pinned or holding a
+     *  position/tape — never orphaned). {@code mode} is the mode we cleaned FOR. */
+    public record CleanupView(boolean available, boolean applied, String mode, List<String> evicted, String kept) {
     }
 
     /**
      * Evict discovered names that were promoted under a DIFFERENT feed mode than the one this process is
      * running, so the current mode's universe reflects the current mode's discovery only — the fix for a
-     * SIM-era promotion persisting into a LIVE run (invariant 8 / ADR-0029). On-demand and idempotent:
-     * running it again once clean evicts nothing. Never touches a pinned name or a name with fills; an
-     * evicted name is re-promotable by discovery under the current mode if it still qualifies.
+     * SIM-era promotion persisting into a LIVE run (invariant 8 / ADR-0029).
      *
-     * <p>{@code POST /api/universe/cleanup-cross-mode}.
+     * <p><b>PREVIEW-FIRST.</b> Because a stale/mislabeled feed-mode tag (e.g. the legacy Alpaca-as-SIM
+     * mislabel) can make this evict names that are really live discoveries, it does NOTHING unless called
+     * with {@code apply=true}. The default preview returns exactly what it WOULD evict so a human can look
+     * before pulling the trigger. Never touches a pinned name or a name with fills; an evicted name can be
+     * restored (see {@code /api/universe/restore-cross-mode}) or re-promoted by discovery.
+     *
+     * <p>{@code POST /api/universe/cleanup-cross-mode} (preview) · {@code ?apply=true} (evict).
      */
     @PostMapping("/api/universe/cleanup-cross-mode")
-    public CleanupView cleanupCrossMode() {
+    public CleanupView cleanupCrossMode(@RequestParam(name = "apply", defaultValue = "false") boolean apply) {
         String mode = Provenance.mode().name();
         UniversePromotionRepository repo = repository.getIfAvailable();
         UniversePromotionService svc = service.getIfAvailable();
         if (repo == null || svc == null) {
-            return new CleanupView(false, mode, List.of(), "dynamic universe write path not available");
+            return new CleanupView(false, false, mode, List.of(), "dynamic universe write path not available");
         }
         List<String> foreign = repo.promotedOnlyInForeignMode(mode);
+        if (!apply) {
+            // Preview only — evict nothing. Show the caller what a real run would remove.
+            return new CleanupView(true, false, mode, foreign,
+                    "PREVIEW — nothing evicted. Re-run with ?apply=true to evict these. Pinned names and "
+                            + "names with fills are always kept.");
+        }
         List<String> evicted = svc.evictForeignModePromotions(
                 Set.copyOf(foreign), props.pinListOrEmpty(), Provenance.epoch(), mode, System.currentTimeMillis());
         List<String> kept = foreign.stream().filter(id -> !evicted.contains(id)).toList();
-        return new CleanupView(true, mode, evicted,
+        return new CleanupView(true, true, mode, evicted,
                 kept.isEmpty() ? "" : "pinned or has fills (kept to not orphan a position): " + String.join(", ", kept));
+    }
+
+    /**
+     * Undo of a cross-mode cleanup: re-write the names it evicted back into the master, re-tagged with the
+     * CURRENT feed mode (so a name evicted for a legacy/mislabeled SIM tag comes back correctly labeled).
+     * Idempotent — a name discovery has since re-promoted is skipped, never duplicated.
+     *
+     * <p>{@code POST /api/universe/restore-cross-mode}.
+     */
+    @PostMapping("/api/universe/restore-cross-mode")
+    public CleanupView restoreCrossMode() {
+        String mode = Provenance.mode().name();
+        UniversePromotionRepository repo = repository.getIfAvailable();
+        UniversePromotionService svc = service.getIfAvailable();
+        if (repo == null || svc == null) {
+            return new CleanupView(false, false, mode, List.of(), "dynamic universe write path not available");
+        }
+        List<String> restorable = repo.foreignModeEvictedRestorable();
+        List<String> restored = svc.restoreDiscovered(restorable, Provenance.epoch(), mode, System.currentTimeMillis());
+        List<String> already = restorable.stream().filter(id -> !restored.contains(id)).toList();
+        return new CleanupView(true, true, mode, restored,
+                already.isEmpty() ? "" : "already back (re-promoted since eviction): " + String.join(", ", already));
     }
 
     private List<AuditView> recentAudit() {

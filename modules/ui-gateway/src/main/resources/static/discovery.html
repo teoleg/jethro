@@ -78,8 +78,12 @@
 
   <div class="section-h">Promotion audit trail
     <span class="note" style="text-transform:none;letter-spacing:0">— durable record (universe_promotion), newest first: PROPOSED = dry-run; PROMOTED / EVICTED = live writes to reference data. A PROMOTED row shown struck-through/dimmed is <b>superseded</b> — a later EVICTED cancelled it, so the name is no longer in the universe (the log keeps both; it never rewrites history).</span>
-    <button id="clean-btn" onclick="cleanCrossMode()" title="Evict discovered names promoted under a different feed mode (e.g. a SIM-era promotion sitting in the LIVE master), so this mode's universe reflects this mode's discovery only. Pinned names and names with a position are never touched; evicted names are re-promotable under the current mode."
-            style="float:right;font:inherit;cursor:pointer;background:transparent;border:1px solid var(--line,#444);color:inherit;border-radius:4px;padding:2px 10px">clean cross-mode</button></div>
+    <span style="float:right">
+      <button id="restore-btn" onclick="restoreCrossMode()" title="Undo a cross-mode cleanup: re-add the names it evicted, re-tagged with the current feed mode. Fixes an over-aggressive clean or a legacy SIM-mislabel. Idempotent."
+              style="font:inherit;cursor:pointer;background:transparent;border:1px solid var(--line,#444);color:inherit;border-radius:4px;padding:2px 10px;margin-right:6px">restore evicted</button>
+      <button id="clean-btn" onclick="previewCrossMode()" title="PREVIEW first: shows which discovered names were promoted under a different feed mode than the one running now (e.g. a SIM-era promotion in a LIVE run). Nothing is evicted until you confirm. Pinned names and names with a position are never touched."
+              style="font:inherit;cursor:pointer;background:transparent;border:1px solid var(--line,#444);color:inherit;border-radius:4px;padding:2px 10px">preview cross-mode clean</button>
+    </span></div>
   <div id="clean-result" class="note" style="text-transform:none;letter-spacing:0;margin:0 0 6px"></div>
   <div class="panel"><div id="audit"><div class="empty">loading…</div></div></div>
 
@@ -187,28 +191,67 @@
       : '<div class="empty">no proposals recorded yet — the gate evaluates ~60s after startup, then daily</div>') + '</div>';
   }
 
-  async function cleanCrossMode() {
+  async function previewCrossMode() {
     const btn = document.getElementById("clean-btn");
     const out = document.getElementById("clean-result");
     btn.disabled = true;
-    out.textContent = "cleaning…";
+    out.textContent = "checking…";
     try {
-      const r = await fetch("/api/universe/cleanup-cross-mode", { method: "POST" });
-      const v = await r.json();
+      const v = await (await fetch("/api/universe/cleanup-cross-mode", { method: "POST" })).json(); // apply defaults false
       if (!v.available) {
         out.innerHTML = '<span style="color:var(--down,#c33)">cleanup unavailable — ' + esc(v.kept || "write path off") + '</span>';
       } else if ((v.evicted || []).length === 0) {
-        out.innerHTML = `already clean — no promotions from a mode other than <span class="mono">${esc(v.mode)}</span>`
-          + (v.kept ? ` <span class="dim">(${esc(v.kept)})</span>` : "");
+        out.innerHTML = `nothing to clean — every discovered name was promoted under <span class="mono">${esc(v.mode)}</span>.`;
       } else {
-        out.innerHTML = `<span style="color:var(--up,#2a2)">evicted ${v.evicted.length} cross-mode promotion(s): `
-          + `<span class="mono">${v.evicted.map(esc).join(", ")}</span></span>`
-          + ` — cleaned so the <span class="mono">${esc(v.mode)}</span> universe is ${esc(v.mode)}-only; re-promotable by discovery.`
-          + (v.kept ? ` <span class="dim">Kept: ${esc(v.kept)}</span>` : "");
+        out.innerHTML = `<b>Preview — nothing evicted yet.</b> ${v.evicted.length} name(s) were promoted under a mode `
+          + `other than <span class="mono">${esc(v.mode)}</span>: <span class="mono">${v.evicted.map(esc).join(", ")}</span>. `
+          + `<span style="color:var(--down,#c33)">Note: a legacy SIM-mislabel can list live discoveries here — review before evicting.</span> `
+          + `<button onclick="applyCrossMode()" style="font:inherit;cursor:pointer;background:transparent;border:1px solid var(--down,#c33);color:var(--down,#c33);border-radius:4px;padding:1px 8px">evict these ${v.evicted.length}</button>`;
       }
+    } catch (e) {
+      out.innerHTML = '<span style="color:var(--down,#c33)">preview failed: ' + esc(String(e)) + '</span>';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function applyCrossMode() {
+    const out = document.getElementById("clean-result");
+    out.textContent = "evicting…";
+    try {
+      const v = await (await fetch("/api/universe/cleanup-cross-mode?apply=true", { method: "POST" })).json();
+      out.innerHTML = `<span style="color:var(--up,#2a2)">evicted ${(v.evicted||[]).length}: `
+        + `<span class="mono">${(v.evicted||[]).map(esc).join(", ") || "—"}</span></span>`
+        + ` — the <span class="mono">${esc(v.mode)}</span> universe is now ${esc(v.mode)}-only.`
+        + (v.kept ? ` <span class="dim">Kept: ${esc(v.kept)}</span>` : "")
+        + ` <span class="dim">Changed your mind? Use “restore evicted”.</span>`;
       load(); // refresh the audit trail to show the new EVICTED rows
     } catch (e) {
-      out.innerHTML = '<span style="color:var(--down,#c33)">cleanup failed: ' + esc(String(e)) + '</span>';
+      out.innerHTML = '<span style="color:var(--down,#c33)">evict failed: ' + esc(String(e)) + '</span>';
+    }
+  }
+
+  async function restoreCrossMode() {
+    const btn = document.getElementById("restore-btn");
+    const out = document.getElementById("clean-result");
+    btn.disabled = true;
+    out.textContent = "restoring…";
+    try {
+      const v = await (await fetch("/api/universe/restore-cross-mode", { method: "POST" })).json();
+      if (!v.available) {
+        out.innerHTML = '<span style="color:var(--down,#c33)">restore unavailable — ' + esc(v.kept || "write path off") + '</span>';
+      } else if ((v.evicted || []).length === 0) {
+        out.innerHTML = `nothing to restore — no cross-mode evictions are outstanding`
+          + (v.kept ? ` <span class="dim">(${esc(v.kept)})</span>` : "") + `.`;
+      } else {
+        out.innerHTML = `<span style="color:var(--up,#2a2)">restored ${v.evicted.length}: `
+          + `<span class="mono">${v.evicted.map(esc).join(", ")}</span></span>`
+          + ` — re-added and re-tagged <span class="mono">${esc(v.mode)}</span>.`
+          + (v.kept ? ` <span class="dim">${esc(v.kept)}</span>` : "");
+      }
+      load(); // refresh the audit trail to show the RESTORED (PROMOTED) rows
+    } catch (e) {
+      out.innerHTML = '<span style="color:var(--down,#c33)">restore failed: ' + esc(String(e)) + '</span>';
     } finally {
       btn.disabled = false;
     }

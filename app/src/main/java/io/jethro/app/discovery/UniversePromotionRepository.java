@@ -87,6 +87,18 @@ public final class UniversePromotionRepository implements PromotionAudit {
                 String.class, currentMode, currentMode);
     }
 
+    /** Ids the cross-mode cleanup evicted (action EVICTED, outcome EVICTED_FOREIGN_MODE) that have NOT
+     *  since been PROMOTED again — the restorable set for the cleanup's undo. Ordered for a stable report. */
+    public List<String> foreignModeEvictedRestorable() {
+        return jdbc.queryForList(
+                "select distinct instrument_id from universe_promotion e where e.action = 'EVICTED' "
+                        + "and e.outcome = 'EVICTED_FOREIGN_MODE' "
+                        + "and not exists (select 1 from universe_promotion p where p.instrument_id = "
+                        + "e.instrument_id and p.action = 'PROMOTED' and p.at_millis > e.at_millis) "
+                        + "order by instrument_id",
+                String.class);
+    }
+
     /** Whether a PROPOSED row for this name was already written since {@code sinceMillis} — dedupe so the
      *  daily dry-run (and reboots) don't append a duplicate proposal for the same name every cycle. */
     public boolean proposedSince(String instrumentId, long sinceMillis) {
