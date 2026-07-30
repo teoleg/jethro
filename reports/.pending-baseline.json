@@ -1,0 +1,20 @@
+{
+  "commit": "c58e7bb8382ab650cf38cb4f7689dd5485cf4425",
+  "fees": "93.224704",
+  "gross_exposure": "50941.78500000",
+  "net_exposure": "-14118.31500000",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "50941.78500000",
+    "hedgePnl": "135.03832909",
+    "netExposure": "-14118.31500000",
+    "realizedPnl": "200.31781700",
+    "strategyAlpha": "89.68860893",
+    "totalFees": "93.224704",
+    "totalPnl": "224.72693802",
+    "unrealizedPnl": "24.40912102"
+  },
+  "summary": "the buffer's no-trade destination is held to the side of flat the current target is on, so a position the desk's own forecast contradicts is no longer frozen \u2014 or steered toward another wrong-side stopping point \u2014 by a band scaled off a target it does not hold (ADR-0132)",
+  "total_pnl": "224.72693802",
+  "ts": "2026-07-30T19:49:20Z"
+}
