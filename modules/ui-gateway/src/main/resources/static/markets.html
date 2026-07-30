@@ -80,6 +80,8 @@
 </div>
 <main>
   <div class="subtabs" id="subtabs"></div>
+  <div class="section-h">World markets <span class="muted" style="margin-left:8px;text-transform:none;letter-spacing:0;font-size:12px">— major indices by region · change since session open (delayed feed), not previous close</span></div>
+  <div id="indices" class="muted" style="padding:2px 0 10px">loading…</div>
   <div class="section-h">Prices <span class="muted" style="margin-left:8px;text-transform:none;letter-spacing:0;font-size:12px">— click a price for its history chart</span></div>
   <div class="marks" id="marks"><span class="muted">loading…</span></div>
   <div class="section-h">Positions</div>
@@ -100,11 +102,14 @@
   let filter = "ALL";
   let instrClass = {};     // instrumentId -> assetClass
   let cusipOf = {};        // instrumentId -> primary standard identifier
-  let marks = [], positions = [];
+  let marks = [], positions = [], indices = [];
+  const REGION_LABEL = { US:"United States", EU:"Europe", ASIA:"Asia-Pacific" };
+  const num2 = s => Number(s).toLocaleString(undefined, { maximumFractionDigits: 2 });
   const primaryId = sym => (sym && (sym.CUSIP || sym.ISIN || sym.GLOBEX || sym.ISO)) || null;
 
   function classes() {
-    const set = new Set(Object.values(instrClass));
+    // INDEX has its own "World markets" panel — keep it out of the tradable-market subtabs.
+    const set = new Set(Object.values(instrClass).filter(c => c !== "INDEX"));
     return ["ALL", ...[...set].sort()];
   }
 
@@ -116,9 +121,33 @@
 
   function match(instrumentId) { return filter === "ALL" || instrClass[instrumentId] === filter; }
 
+  function renderIndices() {
+    const el = document.getElementById("indices");
+    if (!indices.length) { el.innerHTML = '<span class="muted">no index master rows yet</span>'; return; }
+    const byRegion = {};
+    indices.forEach(x => (byRegion[x.region] = byRegion[x.region] || []).push(x));
+    const order = ["US", "EU", "ASIA"];
+    const regions = order.filter(r => byRegion[r]).concat(Object.keys(byRegion).filter(r => !order.includes(r)));
+    el.innerHTML = regions.map(r => `<div style="margin:4px 0 10px">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px">${esc(REGION_LABEL[r] || r)}</div>
+      <div class="marks">${byRegion[r].map(x => {
+        const chg = x.changePct == null ? null : Number(x.changePct);
+        const c = chg == null ? "flat" : (chg > 0 ? "up" : (chg < 0 ? "down" : "flat"));
+        const arrow = chg == null ? "" : (chg > 0 ? "▲" : (chg < 0 ? "▼" : "·"));
+        const chgTxt = chg == null ? "—" : `${arrow} ${chg > 0 ? "+" : ""}${x.changePct}%`;
+        return `<div class="m" title="${esc(x.instrumentId)} · ${esc(x.currency)}${x.source ? ' · ' + esc(x.source) : ''}${x.hasMark ? ' · ' + fmtAge(x.ageMillis) : ' · no mark yet'}">
+          <span class="sym">${esc(x.displayName)}</span>
+          <span class="px mono">${x.hasMark ? esc(num2(x.price)) : '—'}</span>
+          <span class="age ${c}">${chgTxt}</span></div>`;
+      }).join("")}</div></div>`).join("");
+  }
+
   function render() {
     renderSubtabs();
-    const ms = marks.filter(m => !m.instrumentId.startsWith("USD.SOFR.")).filter(m => match(m.instrumentId));
+    renderIndices();
+    const ms = marks.filter(m => !m.instrumentId.startsWith("USD.SOFR."))
+      .filter(m => instrClass[m.instrumentId] !== "INDEX") // indices live in the World markets panel
+      .filter(m => match(m.instrumentId));
     document.getElementById("marks").innerHTML = ms.length ? ms.map(m =>
       `<div class="m ${m.ageMillis>10000?'stale':''}" data-i="${esc(m.instrumentId)}" title="${m.bid&&m.ask?`bid ${esc(fmtPrice(m.bid,m.instrumentId))} / ask ${esc(fmtPrice(m.ask,m.instrumentId))} — `:''}click for price history"><span class="sym">${esc(m.instrumentId)}</span>
         <span class="px mono">${esc(fmtPrice(m.price,m.instrumentId))}</span><span class="age">${fmtAge(m.ageMillis)}</span>
@@ -142,6 +171,7 @@
     try {
       marks = await (await fetch("/api/marks")).json();
       positions = (await (await fetch("/api/risk")).json()).positions || [];
+      try { indices = await (await fetch("/api/indices")).json(); } catch (e) { indices = indices || []; }
       render();
     } catch (e) {}
   }

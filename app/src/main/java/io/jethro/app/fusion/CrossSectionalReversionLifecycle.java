@@ -147,13 +147,19 @@ public final class CrossSectionalReversionLifecycle implements AutoCloseable {
         }
     }
 
-    /** The name's asset class from the instrument master — the universe's single source (invariant 9). */
+    /** The name's asset class from the instrument master — the universe's single source (invariant 9).
+     *  A spot INDEX is a market-trend reference, never tradable (ADR-0129): it is peer of nothing, so it is
+     *  skipped here and never forms a reversion signal (the executor also vetoes it — this just saves the
+     *  wasted work). */
     private String peerGroupFor(String instrumentId) {
         if (refs == null || instrumentId == null) {
             return null;
         }
         var ref = refs.find(instrumentId).orElse(null);
-        return ref == null ? null : ref.assetClass();
+        if (ref == null || "INDEX".equals(ref.assetClass())) {
+            return null;
+        }
+        return ref.assetClass();
     }
 
     /**

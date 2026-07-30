@@ -122,6 +122,12 @@ public final class FusionExecutor {
             if (ref == null) {
                 return Result.vetoed(instrument, "not in the instrument master");
             }
+            // ADR-0129: a spot INDEX is a market-trend/context reference, never tradable spot (its future
+            // is the tradable expression). This is the single order chokepoint, so the veto holds even
+            // with require-backtest-support=false, where the ADR-0049 OOS veto below is off.
+            if ("INDEX".equals(ref.assetClass())) {
+                return Result.vetoed(instrument, "INDEX is a market-trend reference, not tradable spot (ADR-0129)");
+            }
             // ADR-0078: round in the instrument's own contract terms. A share/FX unit still rounds to a
             // whole unit; a CONTRACT keeps the quantity scale the order and fill records already carry,
             // because one contract is worth price × multiplier and a correctly-sized position in it is
