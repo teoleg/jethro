@@ -146,7 +146,6 @@
       <a class="tab" href="/discovery.html">Discover</a>
       <a class="tab" href="/ollama.html">Ops</a>
     </nav>
-    <div class="indices" id="indices"></div>
     <span class="feeds" id="feeds"></span>
     <span class="pill" id="trendPill" title="market trend — price-derived (ADR-0044)"><span class="led"></span><span>trend —</span></span>
     <span class="pill" id="regimePill" title="volatility regime — price-derived (ADR-0051)"><span class="led"></span><span>regime —</span></span>
@@ -287,70 +286,55 @@
     } catch (e) {}
   }
 
-  // ---- price ticker + feed connection indicators ----
+  // ---- price ticker (world indices + securities, one strip under the menu) ----
   let tickPrev = {};
   async function loadTicker() {
     try {
-      const marks = (await (await pollFetch("/api/marks")).json()).filter(m => !m.instrumentId.startsWith("USD.SOFR."));
       const el = document.getElementById("ticker");
-      if (!marks.length) { el.innerHTML = '<span class="muted" style="padding:4px 8px">no live prices</span>'; el.dataset.syms = ""; return; }
-      // Compute each tile's HTML once per refresh (the up/down colour diff mutates tickPrev,
-      // so it must run exactly once per symbol even though the marquee has two copies).
+      // World indices lead the strip (named, with a change chip); securities follow. Indices come
+      // through /api/marks too, so exclude their ids from the securities half to avoid duplication.
+      const [marksRaw, indicesRaw] = await Promise.all([
+        pollFetch("/api/marks").then(r => r.json()).catch(() => []),
+        pollFetch("/api/indices").then(r => r.json()).catch(() => [])
+      ]);
+      const indices = (indicesRaw || []).filter(x => x.hasMark);
+      const indexIds = new Set((indicesRaw || []).map(x => x.instrumentId));
+      const marks = (marksRaw || []).filter(m =>
+        !m.instrumentId.startsWith("USD.SOFR.") && !indexIds.has(m.instrumentId));
+      if (!marks.length && !indices.length) {
+        el.innerHTML = '<span class="muted" style="padding:4px 8px">no live prices</span>'; el.dataset.syms = ""; return;
+      }
+      // Compute each tile's HTML once per refresh (the up/down colour diff mutates tickPrev, so it
+      // must run exactly once per symbol even though the marquee renders two copies).
       const inner = {};
+      indices.forEach(x => {
+        const chg = x.changePct == null ? null : Number(x.changePct);
+        const c = chg == null ? "flat" : (chg > 0 ? "up" : (chg < 0 ? "down" : "flat"));
+        const chip = chg == null ? "" : `<span class="c mono ${c}">${chg > 0 ? "+" : ""}${x.changePct}%</span>`;
+        const px = Number(x.price).toLocaleString(undefined, { maximumFractionDigits: 2 });
+        inner["IX:" + x.instrumentId] = `<span class="s">${esc(x.displayName)}</span><span class="p mono">${esc(px)}</span>` + chip;
+      });
       marks.forEach(m => {
         const prev = tickPrev[m.instrumentId], now = Number(m.price);
         const c = prev == null ? "flat" : (now > prev ? "up" : (now < prev ? "down" : "flat"));
         tickPrev[m.instrumentId] = now;
         inner[m.instrumentId] = `<span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(fmtPrice(m.price, m.instrumentId))}</span>`;
       });
+      // Order: indices first, then securities.
+      const order = indices.map(x => "IX:" + x.instrumentId).concat(marks.map(m => m.instrumentId));
       let track = el.querySelector(".marquee");
-      // Rebuild only when the set of symbols changes — otherwise update in place so the CSS
-      // animation keeps running smoothly (a rebuild restarts the scroll and causes a jump).
-      const symKey = marks.map(m => m.instrumentId).join(",");
+      // Rebuild only when the set of tiles changes — otherwise update in place so the CSS animation
+      // keeps running smoothly (a rebuild restarts the scroll and causes a jump).
+      const symKey = order.join(",");
       if (!track || el.dataset.syms !== symKey) {
         // Two duplicated copies give the seamless -50% loop (keyframes: translateX(-50%)).
-        const tiles = marks.map(m => `<span class="tk" data-sym="${esc(m.instrumentId)}">${inner[m.instrumentId]}</span>`).join("");
+        const tiles = order.map(k => `<span class="tk" data-sym="${esc(k)}">${inner[k]}</span>`).join("");
         el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
         el.dataset.syms = symKey;
       } else {
         track.querySelectorAll(".tk").forEach(node => {
           const h = inner[node.dataset.sym];
           if (h) node.innerHTML = h;
-        });
-      }
-    } catch (e) {}
-  }
-  // Major indices/ETFs (US + international) in the top bar — context only, delayed.
-  async function loadIndicators() {
-    try {
-      const ix = await (await pollFetch("/api/indicators")).json();
-      const el = document.getElementById("indices");
-      if (!ix.length) { el.innerHTML = ""; return; }
-      const inner = i => {
-        if (i.price == null) return `<span class="l">${esc(i.label)}</span><span class="v mono muted">N/A</span>`;
-        // Text tile (e.g. the sim regime): show the string as-is, no change chip.
-        if (isNaN(Number(i.price))) return `<span class="l">${esc(i.label)}</span><span class="v mono">${esc(i.price)}</span>`;
-        const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:3});
-        let chip = "";
-        if (i.changePercent != null) {
-          const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
-          const sign = i.changePercent > 0 ? "+" : "";
-          chip = `<span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span>`;
-        }
-        return `<span class="l">${esc(i.label)}</span><span class="v mono">${v}</span>` + chip;
-      };
-      let track = el.querySelector(".marquee");
-      if (!track) {
-        // Build the ticker ONCE (two copies for a seamless -50% loop). Rebuilding on every
-        // refresh would restart the CSS animation and cause the jump — so we update in place below.
-        const tiles = ix.map(i => `<span class="ix" data-sym="${esc(i.symbol)}">${inner(i)}</span>`).join("");
-        el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
-      } else {
-        // Update numbers in place (both copies of each symbol) — animation keeps running smoothly.
-        const bySym = {}; ix.forEach(i => bySym[i.symbol] = i);
-        track.querySelectorAll(".ix").forEach(node => {
-          const i = bySym[node.dataset.sym];
-          if (i) node.innerHTML = inner(i);
         });
       }
     } catch (e) {}
@@ -593,16 +577,14 @@
   loadHistory();
   loadTicker();
   loadFeeds();
-  loadIndicators();
   // poll() (poll.js): one in-flight run per loop, paused while the tab is hidden, immediate
   // refresh on return — so backgrounded tabs stop hammering the JVM and a backend stall can't
   // pile up pending fetches. The initial call inside each loadX above stays; poll runs its own
   // immediate tick too (idempotent). Replaces raw setInterval, which wedged tabs overnight.
   poll(loadRisk, 5000);       // was 2s — hits the shared risk lock; 5s is plenty for a dashboard
   poll(loadMarketState, 5000);
-  poll(loadTicker, 3000);     // was 2s — cosmetic marquee
+  poll(loadTicker, 3000);     // was 2s — cosmetic marquee (world indices + securities)
   poll(loadFeeds, 5000);
-  poll(loadIndicators, 30000);
   poll(loadFusionPanel, 10000);
   poll(loadHedging, 5000);
   poll(loadHistory, 15000);
