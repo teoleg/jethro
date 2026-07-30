@@ -77,7 +77,10 @@
   <div class="panel"><div id="gate"><div class="empty">loading…</div></div></div>
 
   <div class="section-h">Promotion audit trail
-    <span class="note" style="text-transform:none;letter-spacing:0">— durable record (universe_promotion), newest first: PROPOSED = dry-run; PROMOTED / EVICTED = live writes to reference data.</span></div>
+    <span class="note" style="text-transform:none;letter-spacing:0">— durable record (universe_promotion), newest first: PROPOSED = dry-run; PROMOTED / EVICTED = live writes to reference data.</span>
+    <button id="clean-btn" onclick="cleanCrossMode()" title="Evict discovered names promoted under a different feed mode (e.g. a SIM-era promotion sitting in the LIVE master), so this mode's universe reflects this mode's discovery only. Pinned names and names with a position are never touched; evicted names are re-promotable under the current mode."
+            style="float:right;font:inherit;cursor:pointer;background:transparent;border:1px solid var(--line,#444);color:inherit;border-radius:4px;padding:2px 10px">clean cross-mode</button></div>
+  <div id="clean-result" class="note" style="text-transform:none;letter-spacing:0;margin:0 0 6px"></div>
   <div class="panel"><div id="audit"><div class="empty">loading…</div></div></div>
 
   <div class="section-h">Latest headlines
@@ -169,6 +172,33 @@
         <td class="dim mono">${esc(x.feedMode || "—")}</td>
       </tr>`).join("") + "</table>"
       : '<div class="empty">no proposals recorded yet — the gate evaluates ~60s after startup, then daily</div>') + '</div>';
+  }
+
+  async function cleanCrossMode() {
+    const btn = document.getElementById("clean-btn");
+    const out = document.getElementById("clean-result");
+    btn.disabled = true;
+    out.textContent = "cleaning…";
+    try {
+      const r = await fetch("/api/universe/cleanup-cross-mode", { method: "POST" });
+      const v = await r.json();
+      if (!v.available) {
+        out.innerHTML = '<span style="color:var(--down,#c33)">cleanup unavailable — ' + esc(v.kept || "write path off") + '</span>';
+      } else if ((v.evicted || []).length === 0) {
+        out.innerHTML = `already clean — no promotions from a mode other than <span class="mono">${esc(v.mode)}</span>`
+          + (v.kept ? ` <span class="dim">(${esc(v.kept)})</span>` : "");
+      } else {
+        out.innerHTML = `<span style="color:var(--up,#2a2)">evicted ${v.evicted.length} cross-mode promotion(s): `
+          + `<span class="mono">${v.evicted.map(esc).join(", ")}</span></span>`
+          + ` — cleaned so the <span class="mono">${esc(v.mode)}</span> universe is ${esc(v.mode)}-only; re-promotable by discovery.`
+          + (v.kept ? ` <span class="dim">Kept: ${esc(v.kept)}</span>` : "");
+      }
+      load(); // refresh the audit trail to show the new EVICTED rows
+    } catch (e) {
+      out.innerHTML = '<span style="color:var(--down,#c33)">cleanup failed: ' + esc(String(e)) + '</span>';
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function load() {

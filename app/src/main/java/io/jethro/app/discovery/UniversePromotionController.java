@@ -1,10 +1,13 @@
 package io.jethro.app.discovery;
 
+import io.jethro.messaging.Provenance;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * Read-only view of the ADR-0060 promotion gate. Surfaces, for every live discovery candidate, the gate's
@@ -17,13 +20,16 @@ public final class UniversePromotionController {
 
     private final ObjectProvider<UniversePromotionLifecycle> lifecycle;
     private final ObjectProvider<UniversePromotionRepository> repository;
+    private final ObjectProvider<UniversePromotionService> service;
     private final DynamicUniverseProperties props;
 
     public UniversePromotionController(ObjectProvider<UniversePromotionLifecycle> lifecycle,
                                        ObjectProvider<UniversePromotionRepository> repository,
+                                       ObjectProvider<UniversePromotionService> service,
                                        DynamicUniverseProperties props) {
         this.lifecycle = lifecycle;
         this.repository = repository;
+        this.service = service;
         this.props = props;
     }
 
@@ -62,6 +68,36 @@ public final class UniversePromotionController {
                 .toList();
         int wouldPromote = (int) rows.stream().filter(ProposalView::promote).count();
         return new ProposalsView(true, dryRun, wouldPromote, rows, recentAudit());
+    }
+
+    /** Result of a cross-mode cleanup. {@code evicted} = names removed; {@code kept} = names left in place
+     *  (pinned or holding a position/tape — never orphaned). {@code mode} is the mode we cleaned FOR. */
+    public record CleanupView(boolean available, String mode, List<String> evicted, String kept) {
+    }
+
+    /**
+     * Evict discovered names that were promoted under a DIFFERENT feed mode than the one this process is
+     * running, so the current mode's universe reflects the current mode's discovery only — the fix for a
+     * SIM-era promotion persisting into a LIVE run (invariant 8 / ADR-0029). On-demand and idempotent:
+     * running it again once clean evicts nothing. Never touches a pinned name or a name with fills; an
+     * evicted name is re-promotable by discovery under the current mode if it still qualifies.
+     *
+     * <p>{@code POST /api/universe/cleanup-cross-mode}.
+     */
+    @PostMapping("/api/universe/cleanup-cross-mode")
+    public CleanupView cleanupCrossMode() {
+        String mode = Provenance.mode().name();
+        UniversePromotionRepository repo = repository.getIfAvailable();
+        UniversePromotionService svc = service.getIfAvailable();
+        if (repo == null || svc == null) {
+            return new CleanupView(false, mode, List.of(), "dynamic universe write path not available");
+        }
+        List<String> foreign = repo.promotedOnlyInForeignMode(mode);
+        List<String> evicted = svc.evictForeignModePromotions(
+                Set.copyOf(foreign), props.pinListOrEmpty(), Provenance.epoch(), mode, System.currentTimeMillis());
+        List<String> kept = foreign.stream().filter(id -> !evicted.contains(id)).toList();
+        return new CleanupView(true, mode, evicted,
+                kept.isEmpty() ? "" : "pinned or has fills (kept to not orphan a position): " + String.join(", ", kept));
     }
 
     private List<AuditView> recentAudit() {

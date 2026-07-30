@@ -140,4 +140,38 @@ public final class UniversePromotionService {
         }
         return evicted;
     }
+
+    /**
+     * Clean cross-mode promotion leftovers (invariant 8 / ADR-0029): evict every DISCOVERED name in
+     * {@code foreignPromoted} — names promoted while the process ran a DIFFERENT feed mode — so the current
+     * mode's universe reflects the current mode's discovery only, never a SIM name persisting into LIVE.
+     * Guarded EXACTLY like cap eviction: never a pinned name, never a name that has traded (a held position
+     * is never orphaned) and, by construction, never a core (non-discovered) name. An evicted name is
+     * re-promotable by discovery under the current mode if it still qualifies. Returns the evicted ids.
+     */
+    public List<String> evictForeignModePromotions(Set<String> foreignPromoted, Set<String> pinList,
+                                                    String sessionEpoch, String feedMode, long now) {
+        List<String> evicted = new java.util.ArrayList<>();
+        for (String id : refdata.discoveredInstrumentIds()) {
+            if (!foreignPromoted.contains(id)) {
+                continue; // promoted under the current mode (or not a tracked promotion) — keep
+            }
+            if (pinList.contains(id) || refdata.hasFills(id)) {
+                continue; // pinned or has traded — never evict (don't orphan a position/tape)
+            }
+            if (refdata.evict(id)) {
+                audit.record(now, sessionEpoch, feedMode, id, "EVICTED", "EVICTED_FOREIGN_MODE", null, null,
+                        null, "evicted cross-mode promotion so the " + feedMode + " universe reflects "
+                                + feedMode + " discovery only (invariant 8 / ADR-0029); re-promotable under "
+                                + feedMode, false);
+                evicted.add(id);
+                log.info("ADR-0060 EVICTED {} — promoted under a different feed mode; cleaned so the {} "
+                        + "universe is {}-only (re-promotable under {})", id, feedMode, feedMode, feedMode);
+            }
+        }
+        if (!evicted.isEmpty()) {
+            refdata.refresh();
+        }
+        return evicted;
+    }
 }
