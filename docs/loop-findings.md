@@ -2638,3 +2638,42 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   takes **no credit**: MSFT's σ came from the boot seed and NVDA's from the live stream, neither being the
   path ADR-0131 added, and that path never ran. How much of the +$20.70 is market drift on two intraday
   positions versus selection cannot be separated from these numbers, so no cause is claimed.
+
+## 2026-07-30 15:02Z — the re-seed retry fired, disproved my own root cause, and is moving sensors backwards
+
+- **Rule 122 — a retry that re-derives from a sliding window is not a retry; it is a coin flip.**
+  ADR-0131's `warmWhileCold` calls `forecaster.forget(...)` and replays whatever the re-read returns.
+  The seed anchors on the *current* mark's provider timestamp and walks newest-first, so the window
+  **slides** with the anchor instead of accumulating. Wave 1 → wave 2 seeded counts went **down** for six
+  tradable names — **HD 164→140**, **JPM 188→161**, **MCD 171→162**, **JNJ 186→182**, **PFE 178→175**,
+  **XOM 170→169** — and up for four (**UNH 153→183**, **PG 176→183**, **CAT 150→159**, **CVX 157→162**).
+  For the six, the retry threw away ~16 min of consumed live prints *and* replayed less history than the
+  boot seed had. **Waiting moves the window; it does not fill it.** Any retry that discards accumulated
+  state must first prove the replacement is at least as large — make re-seeding monotone or don't retry.
+- **Rule 123 — check the discriminating test's OTHER branch; last cycle's root cause was half wrong.**
+  I concluded the retry cadence outlives the process on 3 of 4 call sites. For trend that is **false**:
+  16.1 min (193 × 5 s) fits inside this process (`uptimeSeconds` **1506**) and it fired — **52** still-cold
+  lines across **27 distinct names**, XOM at **10:36:25.022** then **10:52:34.778**, **16 min 9 s** apart,
+  matching the prediction to the second. It held only for reversion (**22** lines / **22** distinct, zero
+  duplicates) and xs-reversion (**0** lines). A cadence table that is arithmetically right can still be
+  the wrong *diagnosis* — confirm which call sites the arithmetic actually indicts.
+- **Rule 124 — "seeded N of N and still cold" means the count is not the predicate.** Twelve rate/swap
+  names (USD.TSY.\*, USD.SOFR.\*, USD_IRS_\*) replayed **193 of 193** in *both* waves and `warm()` is
+  still false. Their stored series does not move, so the scale estimator has nothing to absorb. Re-seeding
+  a name whose seed is already complete is unfixable-by-retry — such names must be declared **unwarmable**,
+  not retried forever. When a "not enough data" remedy is applied to a full dataset, the diagnosis is wrong.
+- **Rule 125 — a pre-registered discriminator is worth more than a confident diagnosis.** Last cycle wrote
+  *"if the retries fire and σ stays cold, the defect is the seed span, not the cadence."* That one sentence
+  converted this cycle from re-arguing a hypothesis into reading off an answer, and it redirected the fix
+  away from "shorten the cadence" — which would only have regressed Class B faster. Write the branch you
+  do *not* expect.
+- **Attribution this window (honest split):** **desk activity, cause not separable, and not ADR-0131's.**
+  Total PnL **$167.76973099** (later read **$178.02603045**), gross **$24383.04512500** from $3288.885,
+  net **$6210.52512500** — **1.5%** of the firm cap, no flags, `on_track=true` at **13.06%** vs the **1.0%**
+  target. Eight ALPHA names plus HEDGE traded. The enabling event was the **boot seed** warming **7** σ
+  sensors at **10:36:40** (NVDA, MSFT, KO, AAPL, GOOG, AMZN, NQ) against one in the prior process — the
+  ADR-0071 path, untouched by ADR-0131 — which lifted the ADR-0126 σ veto. ADR-0131's retry ran only after
+  that and every name it touched stayed cold, so it takes **no credit**. Market drift versus selection on
+  freshly-opened intraday positions cannot be separated from these numbers; no cause is claimed.
+  `/api/attribution` reads `firmTotal` **$167.04598599** = ALPHA **$57.15161336** + HEDGE **$145.71784918**
+  + MACRO **−$35.82347655** — the hedge book carries most of the firm total, and MACRO is the one loser.

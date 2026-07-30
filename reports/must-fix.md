@@ -15,6 +15,79 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 15:02Z (ADR-0131 at 3/6 cycles — held, no code change made)
+
+**THE DESK IS FULLY ACTIVE.** Live `/api/risk` `.total` reads total PnL **$167.76973099**, gross exposure
+**$24383.04512500**, net **$6210.52512500** (a later read the same cycle: total PnL **$178.02603045**,
+realized **$159.63438842**, unrealized **$18.39164203**). Gross is **1.5%** of the firm cap $1,500,000
+with **$1,477,265** of headroom; net **0.5%** of the $1,000,000 net cap. `run-status` reads
+`pnl_growth_pct` **13.06** vs `pnl_target_pct` **1.0**, `on_track=true`, `stale=false`,
+`underwater=false`. No flags. Eight ALPHA names plus the HEDGE book traded this window. This is the
+opposite of the dormant book of three runs ago.
+
+**Prior item #1 (ADR-0131's re-seed retry) → mechanism ✅ VERIFIED FIRING, effect 🔴 REGRESSED.** Both
+halves matter, and last cycle's stated root cause turns out to be only half right:
+
+- **The retry fired — the pre-registered test passed on the only evidence that can produce it.** Last
+  cycle's VERIFY-BY was "a *second* `still cold` line for a name that already logged one, which nothing
+  else can produce" (Rule 120). `grep -c "trend sensor still cold"` = **52 lines across 27 distinct
+  names** → **25 names logged twice**. XOM is the clean trace: **10:36:25.022** (`170 of 193`) then
+  **10:52:34.778** (`169 of 193`) — **16 min 9 s** apart against the predicted 193 × 5 s = **16.08 min**.
+  The arithmetic in last cycle's table was right about *trend*.
+- **But last cycle's conclusion "the cadence outlives the process on 3 of 4 call sites" was wrong for
+  trend** — trend's 16.1 min fits inside this process (`uptimeSeconds` **1506**, 25.1 min) and did fire.
+  It still holds for the other two: `Reversion` still-cold = **22 lines across 22 distinct names**, i.e.
+  **zero** duplicates (40.2 min > uptime), and `XsReversion` still-cold = **0 lines**.
+
+**The pre-registered discriminator resolved, and it points somewhere new.** Last cycle wrote: *"If the
+retries fire and σ stays cold, the defect is the seed span, not the cadence."* The retries fired. The
+names stayed cold. So it is the seed span — and it splits into two different defects:
+
+- **Class A — 12 rate/swap names seeded `193 of 193` and are STILL COLD, in both waves.** USD_IRS_5Y/10Y,
+  USD.SOFR.1Y/2Y/5Y/10Y/30Y, USD.TSY.1Y/2Y/5Y/10Y/30Y each replayed the *full* warm-up span and
+  `forecaster.readingFor(x).warm()` is still false. The binding predicate is therefore **not** the sample
+  count, so no amount of re-seeding can ever clear it — these are the names whose stored series does not
+  move, leaving the scale estimator nothing to absorb. Re-seeding them forever is pure waste.
+- **Class B — the retry can move a tradable name BACKWARDS.** `warmWhileCold` calls
+  `forecaster.forget(instrumentId)` and then replays whatever the re-read returns. Because the seed
+  anchors on the *current* mark's provider timestamp and walks newest-first (truncating at a gap wider
+  than `GAP_TOLERANCE_SAMPLES`), the window **slides** with the anchor instead of accumulating. Wave 1 →
+  wave 2 seeded counts: **HD 164→140** (−24), **JPM 188→161** (−27), **MCD 171→162** (−9), **JNJ 186→182**,
+  **PFE 178→175**, **XOM 170→169** — against **UNH 153→183** (+30), **PG 176→183**, **CAT 150→159**,
+  **CVX 157→162**. So for six tradable equities the retry discarded ~16 minutes of consumed live prints
+  *and* replayed a shorter history than the boot seed had. Waiting moves the window; it does not fill it.
+
+### 🎯 Item #1 (reframed by the above) — ADR-0131's retry re-derives from a sliding window, so it never converges and can regress a sensor
+
+The fix direction for next cycle (**not** last cycle's "shorten the cadence" — trend already fires, and a
+shorter cadence would only regress Class B faster): the retry must be **monotone**. Either keep the
+sensor's accumulated state instead of `forget()`-ing it when the re-read is shorter than what the sensor
+already holds, or widen the walk so it covers the full needed span regardless of anchor drift. And Class A
+must be declared **unwarmable** rather than retried — a series with no variation can never warm a scale
+estimator. Bug fix, no money/risk dial.
+
+**VERIFY-BY (next run), written so only the mechanism can pass it:** for every name logging a second
+`still cold` line, the second line's seeded count must be **≥** the first's (no negative wave-over-wave
+delta anywhere — the six negatives above must all be gone), **and** the count of distinct trend-cold
+tradable equity names must fall below the current **27 distinct / 25 repeating**.
+
+### Item #2 (unchanged, still the binding constraint on the rest of the book)
+
+`strategy_diag` reads `measured` **29**, `tradable` **16**, and `edgeGated` **13 names** each annotated
+`no positive OOS edge` — PFE (momentum **−137.76114263**, mean-rev **−1.56304119**), PG
+(**−82.99627912** / **0.00000000**), GOOGL (**−58.18505489** / **−41.67661313**), AMZN, GOOG, SAP, JPM,
+EURUSD, GBPUSD, BAC, HD, UNH, MSFT. This is the ADR-0064 gate working **as designed**. Per the standing
+priority the answer is **a new signal with genuinely measured edge**, never a looser gate.
+
+### Context — where the money is actually coming from
+
+`/api/attribution` reads `firmTotal` **$167.04598599** = ALPHA **$57.15161336** + HEDGE **$145.71784918**
++ MACRO **−$35.82347655**, `totalFees` **$36.280400**, `hedgeMasking` **false**. The hedge book is
+carrying most of the firm total and MACRO is the one book losing money — worth a look once the sensor
+work closes, but the firm total is what the loop optimizes and it is up.
+
+---
+
 ## Verification block — 2026-07-30 14:30Z (ADR-0131 at 2/6 cycles — held, no code change made)
 
 **THE BOOK IS OPEN.** After three runs pinned at $0.00 gross, live `/api/risk` `.total` reads total PnL
