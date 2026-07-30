@@ -15,6 +15,91 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 17:30Z (revert ✅ VERIFIED on a second, independent JVM — at 2/6, no change made)
+
+**Independent reproduction of last run's verdict.** This is a different process (PID 3583451,
+`Started JethroApplication` at **13:04:30**) from the one that verified the revert at 17:00Z, so the four
+pre-registered legs are re-tested on fresh evidence rather than re-read:
+- ADR-0131 WARN/re-seed text: **zero** occurrences in the running JVM log.
+- The binding leg — no second re-seed wave — now has a **direct** proof rather than an inferred one:
+  keyed by lifecycle+name, **every** cold name logs its `still cold for … after seeding N of 193 stored
+  prices` line exactly **once** (`TrendForecastLifecycle|XOM` 1, `|JNJ` 1, `|PG` 1, `|CAT` 1, `|MCD` 1,
+  `|UNH` 1, `|HD` 1, and likewise under `ReversionForecastLifecycle`). One wave means the wave-over-wave
+  regressions that scored the mechanism BAD (HD 171→133, PG 181→143, CAT 174→139, UNH 156→141,
+  MCD 159→145, GOOG 191→180) have no mechanism to recur.
+- ADR-0071 boot seeding still fires: **48** of the **66** `sensor warmed` lines are stamped
+  **13:04:33**–**13:04:59**, inside the boot window. The **9** later lines were checked individually and
+  are all late-arriving instruments taking their *first* seed (NQ trend/xs-reversion/σ at 13:08:34–13:09:00,
+  TSLA 13:07:09, META 13:21:32, GOOGL 13:28:04) or cross-sectional reversion accumulating live prints —
+  none is a re-seed of an already-seeded name.
+- `grep -rn SensorReseed --include=*.java` returns nothing.
+
+**Item #1 of the previous block stays CLOSED.** Two independent JVMs, four legs each.
+
+**No change made this cycle.** `scripts/score-change.py score` prints
+`64a7a6336 still accumulating evidence (2/6 cycles) — held, not scored this run` and
+`reports/.pending-baseline.json` is present, so per the contract a new change would destroy the evidence.
+
+**Live situation.** `/api/risk` `.total` reads total PnL **$130.12772736**, gross **$46057.90980000**
+(**3.1%** of the $1,500,000 firm cap, headroom **$1,453,942**), net **$4228.76020000** (**0.4%** of the
+$1,000,000 net cap). Flags: **none**. The SITUATION header computes **−$12.17** PnL and **+$19,147.75**
+gross on the run; **−$11.37** and **+$7,272.18** across the last three. `run-status.json` reads
+`pnl_growth_pct` **−3.02** against `pnl_target_pct` **1.0**, `on_track` **false**, `stale` **true**,
+`underwater` **false**. 20 equity positions plus the ES hedge — not DORMANT, and not in danger: gross rose
+with 97% of the cap unused, which is the intended direction off dormant.
+
+### 🎯 Item #1 — ALPHA churns several times the firm's gross exposure in notional per window (evidence strengthened)
+
+Still the desk's largest addressable cost, and the case got **worse**, not better, this run.
+`/api/attribution` reads ALPHA `totalPnl` **$9.88820735** against `feesPaid` **$60.552698** — fees are now
+several times the book's entire result (last run: **$23.36357064** against **$56.444977**). `firmTotal`
+**$130.12772736** is carried by `hedgePnl` **$156.06299656** with `hedgeMasking` **true**, while
+`strategyAlpha` reads **−$25.93526920**.
+
+`turnover_cost_by_name` sizes the leak against a firm `grossExposure` of **$46,057.91**: JNJ
+**$79,061.19**, JPM **$69,031.25**, GOOG **$68,870.18**, AAPL **$63,317.02**, MSFT **$58,534.65** — five
+single names each churning more notional in the window than the firm has at risk in total, at **1.00** bps.
+The ES hedge churns **$159,122.83** against a hedge book gross of **$10,018.66**, i.e. ~16× — cheap at
+**0.20** bps but the same mechanism.
+
+**`recent_orders` now shows the mechanism at order level, and it is more specific than "re-plan churn".**
+The ADR-0084 fusion re-plan fires on a ~**30s** cadence (17:28:09, 17:28:39, 17:29:09, 17:29:40) and each
+wave cancels the prior passive slice with `fusion re-plan — passive order superseded by a fresh target
+(ADR-0084)`. The costly part is that the *superseded slices keep filling first*: PG alone runs
+BUY 10 FILLED → BUY 4 FILLED → BUY 3 CANCELLED → BUY 4 CANCELLED → BUY 13 FILLED → BUY 2 ROUTED inside
+~2 minutes, and NEE runs BUY 1 → 2 → 2 → 13 → 13 the same way. Same name, same direction, re-sized every
+30s — so the book pays 1.00 bps on the full notional of each partial re-approach to a target it was
+already walking toward. **The defect is that the re-plan re-issues absolute targets without netting against
+the slice already working**, not the re-plan cadence itself.
+
+**Not actionable until `64a7a6336` is scored** (a fresh ledger row appears and the pending baseline clears).
+It is the target for the next scored cycle.
+
+**VERIFY-BY (the cycle after the change ships):**
+1. `turnover_cost_by_name` — the top names' `turnover_usd` must fall relative to `/api/risk` `.total`
+   `grossExposure`; today JNJ/JPM/GOOG/AAPL/MSFT each exceed the firm's **$46,057.91** outright.
+2. `/api/attribution` — ALPHA's `feesPaid` must fall **relative to** its `totalPnl`; today feesPaid
+   **$60.552698** against totalPnl **$9.88820735**.
+3. `recent_orders` — the same-name/same-direction re-approach pattern (PG 10→4→3→4→13→2 in ~2 min) must
+   not recur; a re-plan should show one working slice per name, not a stack of superseded partials.
+4. Gross exposure must not fall as a side effect — this is a cost fix, not a de-risking. Compare
+   `/api/risk` `.total` `grossExposure` against **$46,057.91**.
+
+### Item #2 — no source has demonstrated positive out-of-sample edge (the standing priority)
+
+Unchanged as a rank, but this run's telemetry narrows *where* to look, which is worth carrying forward.
+`strategy_diag` still reads `measured` **29**, `tradable` **16**, with **13** names carrying
+`no positive OOS edge`. But `/api/signals/telemetry` at the **3600s** horizon reads two positively-signed
+sources — `reversion` `avgReturnBps` **+7.215148481777953** on **213** resolved (**46** cohorts,
+`stdCohortMeanBps` **34.9930536141166**) and `xsreversion` **+2.7840649126009924** on **189** resolved
+(`hitRate` **0.5592105263157895**) — against negatives for `trend` (**−4.104976474445127**) and
+`momentum` (**−3.1019291527777773**) at the same horizon. Significance is the edge gate's to compute, not
+mine; the gate's own answer today is still "no positive OOS edge" for 13 names. The pointer to record is
+that the *reversion family at the long horizon* is the only place with a positive sign and a large enough
+resolved count to be worth a proper OOS test.
+
+---
+
 ## Verification block — 2026-07-30 17:00Z (revert ✅ VERIFIED — now under measurement at 1/6, no change made)
 
 **The hand-completed revert landed and did exactly what it claimed.** All four pre-registered legs pass

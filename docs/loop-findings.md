@@ -2805,3 +2805,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **$3,279.94**, but the reverted mechanism opened and closed nothing — it only discarded sensor state.
   One cycle cannot separate market drift from sensors staying warm, so claim neither. That is what the
   6-cycle window is for; say "not separable" rather than inventing a cause.
+
+## 2026-07-30 17:30Z — the revert re-verified on a second JVM; the order tape renamed the churn defect
+
+- **Rule 142 — "exactly one log line per name" is a stronger revert proof than "all lines inside the boot
+  window"; prefer the count over the timestamp.** Last cycle inferred no-second-wave from timestamps. This
+  cycle proved it directly: keyed by lifecycle+name, every cold name logs its `still cold for … after
+  seeding N of 193 stored prices` line exactly **once** (`TrendForecastLifecycle|XOM` 1, `|PG` 1, `|CAT` 1,
+  `|MCD` 1, `|UNH` 1, `|HD` 1). A count of one is unfalsifiable by clock skew or a slow boot; a timestamp
+  window is not. When the reverted mechanism emitted a per-attempt line, **count it, don't time it**.
+- **Rule 143 — check the late log lines individually before calling a boot-window verification clean.**
+  **48** of **66** `sensor warmed` lines fell in the boot window at **13:04:33**–**13:04:59**; **9** did
+  not, which on a naive read looks like the retry surviving the revert. Each was a late-arriving instrument
+  taking its *first* seed (NQ 13:08:34–13:09:00, TSLA 13:07:09, META 13:21:32, GOOGL 13:28:04). A prior
+  cycle already logged this exact false positive with NQ (Rule from the 10:19 block) — the memory paid off.
+- **Rule 144 — the ALPHA churn defect is the re-plan's *absolute targets*, not its cadence.** `recent_orders`
+  shows PG running BUY 10 FILLED → 4 FILLED → 3 CANCELLED → 4 CANCELLED → 13 FILLED → 2 ROUTED in ~2
+  minutes, and NEE 1 → 2 → 2 → 13 → 13, on a ~30s ADR-0084 re-plan. The cancels work; the problem is that
+  superseded slices **fill first**, so the book pays 1.00 bps on the full notional of every partial
+  re-approach to a target it was already walking toward. **Fixing the cadence would not fix this — netting
+  the new target against the slice already working would.** Don't tune the timer.
+- **Rule 145 — a worsening fee-to-PnL ratio is the signal, not the fee level.** ALPHA reads `totalPnl`
+  **$9.88820735** against `feesPaid` **$60.552698**, from **$23.36357064** against **$56.444977** last run:
+  fees rose slightly while the book's result fell by more than half. `firmTotal` **$130.12772736** is still
+  carried by `hedgePnl` **$156.06299656** with `hedgeMasking` **true** and `strategyAlpha`
+  **−$25.93526920**. Track the ratio run-over-run; the absolute fee number hides the deterioration.
+- **Rule 146 — reversion at the LONG horizon is the only positively-signed place left; look there for
+  item #2.** `/api/signals/telemetry` at 3600s reads `reversion` `avgReturnBps` **+7.215148481777953** on
+  **213** resolved and `xsreversion` **+2.7840649126009924** on **189** (`hitRate` **0.5592105263157895**),
+  against `trend` **−4.104976474445127** and `momentum` **−3.1019291527777773**. The edge gate still says
+  `no positive OOS edge` on **13** names and significance is its to compute — but a positive sign with a
+  large resolved count is where an OOS test is worth spending a cycle, and the short horizons are not it.
+- **Rule 147 — gross rising while PnL falls is not danger; read the headroom before reacting.** Gross rose
+  **+$19,147.75** to **$46,057.91** while PnL fell **−$12.17**, which pattern-matches to "bleeding into
+  rising risk". It isn't: that gross is **3.1%** of the cap with **$1,453,942** of headroom and **no** flag
+  set. Danger requires proximity to the cap or the breaker. De-risking here would have been the error.
