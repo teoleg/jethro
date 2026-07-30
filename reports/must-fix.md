@@ -15,6 +15,74 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 11:30Z (the platform was DOWN — every prior item is unverifiable until it boots)
+
+**Prior item #1 (ADR-0126, σ-cold veto) → ⏸️ UNVERIFIABLE, carried forward unchanged at #2.** Its VERIFY-BY
+required reading `deltaQty` per name from `/api/fusion/targets`; that endpoint — and every other — returns
+`URLError: [Errno 111] Connection refused` in this run's `logs/report.md`. `score-change.py status` prints
+`app unreachable — not measured`. ADR-0126 has therefore accumulated **zero** evaluation cycles, not a
+verdict. `.pending-baseline.json` still holds its commit `5e35752dd`, untouched. Not graded, not reverted.
+
+### 🎯 Item #1 (NEW, and it outranks everything because nothing else can even be measured) — FIXED THIS CYCLE
+
+**The defect.** The JVM has refused to boot since **07:00Z** (last write to `logs/jethro-app.log`; no java
+process, nothing listening on 8080 — only Postgres 5432 and Redpanda 9092 are up). ADR-0129 added `INDEX`
+to `AssetClass.java` but never widened the SQL check constraint, so its migration cannot apply:
+
+```
+FlywaySqlScriptException: Script V49__world_indices.sql failed
+SQL State : 23514
+Message   : new row for relation "instrument" violates check constraint "instrument_asset_class_check"
+  Detail: Failing row contains (SPX, INDEX, USD, 1.00000000).
+```
+
+Flyway fails → `PersistenceConfig.flyway` (`PersistenceConfig.java:41`) fails → Spring context aborts →
+exit. Confirmed live: `pg_constraint` still defines the check as
+`EQUITY, FUTURE, OPTION, FX, BOND, SWAP` (set by `V7__rates_and_swaps.sql:9`), `flyway_schema_history`
+tops out at **V48**, and `select count(*) from instrument where asset_class='INDEX'` returns **0**. V49 has
+never applied anywhere and its transaction rolled back cleanly, so there is no failed history row to repair.
+
+**Cost.** Nine consecutive loop cycles (07:00Z–11:00Z) reported `action: market-closed` with
+`available: true` and a **frozen** `total_pnl 126.87240898 / gross 0E-8` repeated verbatim — a last-known
+value, not a live read. Four and a half hours of zero trading, zero measurement, and no ability to cut a
+position, presented as a normal flat book.
+
+**The fix.** `V49__world_indices.sql` now drops and re-adds `instrument_asset_class_check` with `INDEX`
+appended, ahead of its own inserts — the same cumulative drop/re-add shape `V7` used for `SWAP`, no class
+removed. Edited in place rather than as a V50 because Flyway runs in version order and would never reach a
+V50; safe because V49 has never successfully applied. Dry-run through psql in `BEGIN … ROLLBACK` gave
+`ALTER TABLE / ALTER TABLE / INSERT 0 12 / INSERT 0 12 / INSERT 0 24`. No trade path opens: `INDEX` is
+vetoed at the order chokepoint (`FusionExecutor:128`, holds even with `require-backtest-support=false`)
+and skipped in `CrossSectionalReversionLifecycle:159`.
+
+**VERIFY-BY (next run).** `/api/risk` must return a live `.total` at all (not `Connection refused`), and
+`flyway_schema_history` must show `version 49, success=true`. `select count(*) from instrument where
+asset_class='INDEX'` must read **12** (today: 0). No `INDEX` name may appear in `recent_orders`. If
+`/api/risk` still refuses connection, this is 🔴 REGRESSED and the next change reverts V49's inserts
+entirely rather than debugging the feature.
+
+### Item #2 (carried, was #1) — ADR-0126's σ-cold veto has never been measured
+
+Full statement in the 2026-07-29 19:30Z block below. Unchanged VERIFY-BY: in `/api/fusion/targets`, every
+name for which the log has not printed `risk-cut σ sensor warmed <name>` must read `deltaQty 0.000000`
+while `currentQty` is `0`. Failing witnesses to re-check: KO, WMT, BAC, MCD, PG, XOM, NEE, HD.
+
+### Item #3 (NEW, queued) — the loop's heartbeat reported a dead app as a healthy market-closed cycle
+
+For nine cycles `run-status.json` carried `available: true` while every endpoint refused connection, and
+the frozen PnL made the outage indistinguishable from a quiet weekend. `logs/report.md` did print the
+endpoint errors, so the raw signal existed and the status writer ignored it. An outage should be a loud,
+distinct state — not `market-closed` with yesterday's number. **VERIFY-BY:** with the app deliberately
+stopped, `run-status.json` must record `available: false` and an action distinct from `market-closed`,
+and must not repeat a stale `total_pnl`.
+
+### Item #4 (carried, was #2) — two fusion sources carry real weight while measuring NEGATIVE at every horizon
+
+`xsreversion` (weight 0.860, −3.5725 / −0.8669 bps) and `social` (weight 1.030, negative at every horizon).
+Still combiner work, still ranked below anything that gates availability or unclosable risk.
+
+---
+
 ## Verification block — 2026-07-29 19:30Z (ADR-0124 scored ⚠️ INCONCLUSIVE and kept — a new change was due; ADR-0126 shipped)
 
 **Prior item #1 → ⚠️ RE-SCOPED (measured with the wrong constant), struck below the line.** The register

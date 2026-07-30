@@ -2515,3 +2515,35 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   round trip. **xsreversion is negative at every horizon (−3.5725 / −0.8669) on weight 0.860** and
   **social negative at every horizon on weight 1.030** — queued as must-fix #2, not taken, because
   re-weighting is combiner work and ranks below a hole that lets the desk open unclosable risk.
+
+## 2026-07-30 11:30Z — the platform had been dead for 4.5 hours and the heartbeat called it "market-closed"
+
+- **Rule 107 — a new enum value is a two-sided change: the language enum AND the schema constraint.**
+  ADR-0129 added `INDEX` to `AssetClass.java` and shipped `V49__world_indices.sql` inserting twelve index
+  rows, but never widened `instrument_asset_class_check` (last set by `V7__rates_and_swaps.sql:9` for
+  `SWAP`). Result: `SQLSTATE 23514` on the first insert → Flyway aborts → `PersistenceConfig.flyway` fails
+  → Spring context aborts → **the JVM never boots**. A migration that only ever ran in a test that doesn't
+  exercise the constraint is not tested. **When adding a value to an enum that is persisted, grep for a
+  CHECK on that column in the same change.**
+- **Rule 108 — a boot-blocking migration outranks the no-new-change-while-pending rule.** That rule
+  protects measurement evidence; a dead app produces none. ADR-0126 sat at zero accumulated cycles with
+  `.pending-baseline.json` still holding `5e35752dd`, and would have sat there forever. Restoring service
+  is not a strategy change — it touches no signal, dial or risk model — so it ships, the pending baseline
+  is left alone, and the scorer's own refusal to record a baseline against an unreachable app keeps it
+  honest. **Availability is prerequisite to the objective, not competing with it.**
+- **Rule 109 — edit an unapplied migration in place; never "fix it forward" with a later version.** Flyway
+  runs in version order, so a `V50` widening is unreachable while `V49` fails first. Check
+  `flyway_schema_history` before deciding: it topped out at **V48**, `count(*) where asset_class='INDEX'`
+  was **0**, and Postgres had rolled the failed transaction back with no history row to repair — so V49 was
+  never published and editing it breaks no checksum. Verify by piping the migration through psql inside
+  `BEGIN … ROLLBACK` (got `INSERT 0 12 / 0 12 / 0 24`) — green tests do not exercise Flyway against the
+  real constraint.
+- **Rule 110 — a frozen number reported as `available: true` is worse than an error.** Nine cycles
+  (07:00Z–11:00Z) logged `action: market-closed`, `available: true`, and the identical
+  `total_pnl 126.87240898 / gross 0E-8` — the last thing the app said before dying, indistinguishable from
+  a quiet closed session. `logs/report.md` *did* show `Connection refused` on every endpoint. **Trust the
+  endpoint errors over the status summary; when PnL is byte-identical across cycles, check for a pulse
+  before concluding the book is flat.** Queued as must-fix #3.
+- **Attribution this window (honest split):** **neither market nor change.** No loop commit deployed into
+  this window and no position was live to be moved; the unchanged PnL is a stale read, not a held position.
+  No credit and no blame taken for it.

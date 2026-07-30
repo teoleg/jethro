@@ -8,6 +8,14 @@
 -- is the index's native currency. contract_multiplier is a nominal 1 (never used — indices carry no
 -- position). region drives the US / EU / ASIA grouping on the trend panel.
 
+-- INDEX is a NEW asset class, so widen the check constraint before inserting against it. AssetClass.java
+-- already carries INDEX; this is the schema half of that same enum, and without it every insert below
+-- fails 23514, Flyway aborts and the whole JVM refuses to boot. Same drop/re-add shape V7 used when it
+-- added SWAP — the list is cumulative, no existing class is removed.
+alter table instrument drop constraint instrument_asset_class_check;
+alter table instrument add constraint instrument_asset_class_check
+    check (asset_class in ('EQUITY', 'FUTURE', 'OPTION', 'FX', 'BOND', 'SWAP', 'INDEX'));
+
 insert into instrument (instrument_id, asset_class, currency, contract_multiplier) values
     ('SPX',    'INDEX', 'USD', 1),   -- S&P 500
     ('CCMP',   'INDEX', 'USD', 1),   -- Nasdaq Composite
