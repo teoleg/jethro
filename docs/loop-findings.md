@@ -2934,3 +2934,31 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **0.39443196542948245**, and `edgeGated` reading `no positive OOS edge` on every listed name, the churn is
   a SIGNAL-stability problem upstream of every execution dial. Three cheap endpoint reads beat four cycles
   of inference — take them first.
+
+## 2026-07-30 19:30Z — the buffer was steering wrong-side positions to a destination that is also wrong-side (ADR-0132)
+
+- **Rule 164 — recompute the component's published arithmetic before theorising about it.** Four cycles of
+  inference produced three different wrong diagnoses of the same symptom (band inert → ADR-0101 fallback
+  inverted → targets re-randomise). `/api/fusion/targets` publishes `aims` alongside `targetQty`,
+  `currentQty` and `combinedForecast` — enough to recompute the whole ADR-0094/0101/0102 chain. Done once,
+  it reproduced the published `deltaQty` **exactly on all 13 planned names** (GOOG
+  `6.043466 × 0.008298707 = 0.050153`, AMZN `22.379233 × 0.008298707 = 0.185720`) and the defect was
+  visible in the intermediate value nobody had printed: the DESTINATION, `held + delta`. An exact
+  reproduction of a component's output is a stronger instrument than any number of samples of its input.
+- **Rule 165 — bounding the INTENT does not bound where the desk STOPS.** ADR-0102 clamps the aim into
+  [flat, target]. But ADR-0094 trades to the near EDGE of the no-trade region, a whole band below the aim,
+  and the band is scaled by the average position at the TARGET — so early on ADR-0080's hour-long aim path
+  the band exceeds the aim and the region straddles flat. GOOG's destination computed to **-2.956534**
+  against a target of **+32.814821**. When a policy clamps an intermediate quantity, check every quantity
+  DOWNSTREAM of it that inherits none of the clamp.
+- **Rule 166 — a fix scoped to a branch is worth nothing if the shipped config never enters that branch.**
+  ADR-0118 diagnosed this identical AAPL plan (short 1 vs target +6.031064) and fixed it — inside
+  `!mayIncrease`. With `jethro.fusion.edge-gate.enabled=false` (ADR-0122) and the ADR-0126 σ sensors warm,
+  that branch never runs, so the remedy has been dead code and its own test pinned the live-configuration
+  case at `deltaQty` 0 as correct. When writing or reading a fix, state which config reaches it — and when
+  a test asserts "0" for a state an ADR calls a defect, that test is pinning the bug.
+- **Rule 167 — "same six names, unchanged, across N re-plans" is the signal; the targets moving is not.**
+  Rule 163 read sign flips in `targetQty` and concluded the book re-randomises. Re-sampled, the targets
+  drift (MSFT **-63.86 → -51.60 → -57.99**). What was actually invariant across every sample was
+  `currentQty`: GOOG **-9.00**, AAPL **-13.00**, NVDA **-16.00**, KO **+45.00** in all three. Look for what
+  does NOT move between samples — a frozen position is a defect; a moving target is a forecast.

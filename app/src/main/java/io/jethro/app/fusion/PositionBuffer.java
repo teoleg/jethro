@@ -64,6 +64,14 @@ import java.util.Map;
  * aim is clamped into the closed interval between flat and this cycle's target, which can only ever
  * shrink intent or put it back on the side the forecast is on.
  *
+ * <p><b>And so is the position it STOPS AT (ADR-0132).</b> Buffering the aim bounds where the desk means
+ * to be; it does not bound where the desk actually stops, which is a whole band below that. Because the
+ * band is scaled by the average position at the TARGET, it routinely exceeds the aim early on the aim's
+ * slow path, so the no-trade region straddles flat and reaches onto the side the forecast opposes — and a
+ * wrong-side holding inside it is frozen at exactly zero delta indefinitely. See {@link #onTargetSide}:
+ * the destination is held to the side of flat the target is on, which is the same bound ADR-0102 puts on
+ * the intent.
+ *
  * <p><b>What it can never do.</b> It never widens a trade the desk was not already going to make in the
  * same direction on the same aim path, it never moves the aim past the target, and it never buffers an
  * exit: a flat target (the ADR-0086 chandelier cut, the ADR-0065 orphan unwind, the ADR-0027 breaker
@@ -460,11 +468,14 @@ public final class PositionBuffer {
         if (target.signum() == 0) {
             return gap; // a control ordered the exit — worked in full (ADR-0090/0086/0065)
         }
-        if (gap.abs().compareTo(band) <= 0) {
+        BigDecimal edge = gap.abs().compareTo(band) <= 0
+                ? BigDecimal.ZERO.setScale(QTY_SCALE)
+                : gap.abs().subtract(band).multiply(BigDecimal.valueOf(gap.signum()))
+                        .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+        edge = onTargetSide(edge, aim, held, target); // ADR-0132
+        if (edge.signum() == 0) {
             return BigDecimal.ZERO.setScale(QTY_SCALE);
         }
-        BigDecimal edge = gap.abs().subtract(band).multiply(BigDecimal.valueOf(gap.signum()))
-                .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
         if (held.signum() == 0 || aim.signum() == held.signum()) {
             return edge; // the aim moved by a rated step on its own side — ADR-0094, unchanged
         }
@@ -474,5 +485,61 @@ public final class PositionBuffer {
         return edge.subtract(unwind)
                 .add(unwind.multiply(BigDecimal.valueOf(rate)))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+    }
+
+    /**
+     * ADR-0132 — the position the buffer STOPS AT, held to the side of flat the current target is on.
+     *
+     * <h3>The hole this closes</h3>
+     * ADR-0094 buffers around the <em>aim</em> and trades to the near edge, so the position the desk
+     * settles at is {@code aim − band·sgn(gap)}. ADR-0102 confines the aim to the closed interval between
+     * flat and the target, but nothing confined that destination — and the band is scaled by
+     * {@code |target| × TARGET_ABS / |forecast|}, the average position at the TARGET, which is routinely
+     * many times the aim early on the aim's slow ADR-0080 path. Subtracting a whole band from a small aim
+     * lands past flat: the no-trade region straddles zero and extends onto the side the desk's own
+     * forecast opposes. A holding on that side is then either frozen at exactly zero delta (it sits inside
+     * the region) or traded toward a destination that is still on the wrong side. Either way the desk
+     * intends to keep a position its current view contradicts, pays gross exposure on it, and pays again
+     * on the hedge sized against it.
+     *
+     * <p>ADR-0118 diagnosed exactly this position — short 1 AAPL against a target of +6.031064 at forecast
+     * +0.436599, band 13.813752 against a gap of 1.000000 — but scoped its remedy to
+     * {@link #isTrappedExit}, which only runs where {@link #mayIncrease} is false. With the edge gate off
+     * (ADR-0122, the desk's shipped configuration) and the ADR-0126 σ sensors warm, that branch never
+     * runs, so the trap it describes was live on the ordinary path the whole time.
+     *
+     * <h3>The rule</h3>
+     * A destination on the opposite side of flat from the target is replaced by flat. Nothing else moves:
+     * the band, the aim path and the ADR-0107 rating are untouched, and a destination already on the
+     * target's side (or at flat) is returned unchanged, so every same-side rebalance is byte-identical.
+     *
+     * <h3>Why it can only ever reduce risk</h3>
+     * The clamp resolves the destination to flat, so {@code |held + delta'| = 0 ≤ |held|}: it never opens
+     * a position, never enlarges one, and never flips one onto a new side. It also never trades past the
+     * aim, i.e. {@code |delta'| ≤ |gap|}, because it fires only when {@code held} is on the side the target
+     * opposes: with {@code sgn(aim) ∈ {0, sgn(target)}} the aim and the holding are then on opposite sides
+     * of flat (or the aim is flat), so {@code |gap| = |aim| + |held| ≥ |held| = |delta'|}. And it fires
+     * <em>only</em> there — for a holding on the target's own side with the aim in ADR-0102's interval the
+     * destination is {@code held + edge ≥ held > 0} when {@code gap ≥ 0} and {@code aim + band ≥ 0} when
+     * {@code gap < 0}, neither of which can cross flat.
+     *
+     * <p>Where ADR-0102's guarantee does not hold for the aim it is handed — an aim on neither flat nor
+     * the target's side, which {@link #nextAim} cannot produce — there is no interval to hold the
+     * destination to and no claim to make, so the delta is returned untouched. A flat target never reaches
+     * here (that branch returns above), so the ADR-0086 cut, the ADR-0065 unwind and the deterministic
+     * floor above them keep their exact semantics.
+     *
+     * <p>Exact decimal (invariant 1). It introduces no number at all — the bound is flat (invariant 7 /
+     * ADR-0016).
+     */
+    static BigDecimal onTargetSide(BigDecimal delta, BigDecimal aim, BigDecimal held, BigDecimal target) {
+        if (target.signum() == 0 || (aim.signum() != 0 && aim.signum() != target.signum())) {
+            return delta; // no ADR-0102 interval to hold the destination to
+        }
+        BigDecimal dest = held.add(delta);
+        if (dest.signum() == 0 || dest.signum() == target.signum()) {
+            return delta; // already where the current view can justify being
+        }
+        return held.negate().setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
     }
 }

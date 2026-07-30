@@ -180,15 +180,133 @@ class PositionBufferTest {
 
     /**
      * The ADR-0090 churn case is untouched: with the gate OPEN the desk can rebuild, so a forecast that
-     * has flipped against the holding is still a rebalance — buffered and rated, never liquidated.
+     * has flipped against the holding is still a rebalance — buffered and rated, never liquidated. What
+     * ADR-0132 changed is that the rebalance now actually MOVES: this is the identical AAPL plan of
+     * {@link #aWrongSideHoldingUnderAShutGateIsExitedNotFrozen}, and under an open gate it used to sit at
+     * delta 0 forever because ADR-0118's remedy is scoped to a shut gate.
+     * <pre>
+     *   width           = max(0.10, min(1, 2 x 2.0 / 8.0))  =   0.500000   (ADR-0101, this name's cost)
+     *   averagePosition = 6.031064 x 10 / 0.436598559661783 = 138.137520
+     *   band            = 0.500000 x 138.137520             =  69.068760
+     *   aim             = 0            (ADR-0102: the raw step −0.941652 opposes the target)
+     *   gap             = 0 - (-1)                          =  +1.000000 ; |gap| <= band => edge 0
+     *   destination     = -1 + 0                            =  -1.000000  SHORT, target is LONG
+     *   ADR-0132        = flat                              => edge' = +1.000000
+     *   all of it unwinds the short, so it is rated: 1.000000 x 0.008298755… = 0.008299
+     * </pre>
+     * Rated, not dumped — ADR-0107 is intact — but no longer frozen.
      */
     @Test
-    void anOpenGateStillRebalancesAWrongSideHoldingRatherThanLiquidatingIt() {
+    void anOpenGateRebalancesAWrongSideHoldingTowardFlatRatherThanFreezingIt() {
         PositionBuffer buffer = new PositionBuffer(0.10);
         var open = gateAt(8.0, 5.0, java.util.Map.of("AAPL", 2.0));
         var result = buffer.apply(List.of(target("AAPL", 0.436598559661783, "6.031064", "-1")),
                 open, HOUR_RATE);
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("0.008299"));
+        // Strictly a rebalance and not a liquidation: it buys back a fraction of the short, not all of it.
+        assertThat(result.targets().get(0).deltaQty()).isLessThan(BigDecimal.ONE);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0132 — the buffer's DESTINATION is held to the side of flat the target is on. The band is
+    // scaled by the average position at the target, so subtracting it from a small aim lands past flat
+    // and the no-trade region reaches onto the side the forecast opposes.
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * The live GOOG plan of 2026-07-30, read from {@code /api/fusion/targets} and worked by hand. The
+     * desk was short 9 in a name it targeted long 32.814821, and the position the buffer was steering to
+     * was <em>still short</em>:
+     * <pre>
+     *   averagePosition = 32.814821 x 10 / 2.618561447358846 = 125.316220
+     *   band            = 0.10 x 125.316220                  =  12.531622
+     *   gap             = 9.575088 - (-9)                    =  18.575088 ; |gap| > band
+     *   edge            = 18.575088 - 12.531622              =   6.043466
+     *   destination     = -9 + 6.043466                      =  -2.956534  SHORT, target is LONG
+     *   ADR-0132        = flat                               => edge' = +9.000000
+     *   all of it unwinds the short ⇒ x a = 9.000000 x 0.008298707… = 0.074688
+     * </pre>
+     * The old destination reproduced the live delta exactly (6.043466 x a = 0.050153), which is how the
+     * defect was identified.
+     */
+    @Test
+    void theDestinationIsNeverOnTheSideTheTargetOpposes() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        assertThat(buffer.band(new BigDecimal("32.814821"), 2.618561447358846, new BigDecimal("-9")))
+                .isEqualByComparingTo(new BigDecimal("12.531622"));
+        // The old rule, for the record: it stopped at −2.956465, on the wrong side of flat.
+        assertThat(PositionBuffer.onTargetSide(new BigDecimal("6.043466"), new BigDecimal("9.575088"),
+                new BigDecimal("-9"), new BigDecimal("32.814821")))
+                .isEqualByComparingTo(new BigDecimal("9.000000"));
+        var result = buffer.apply(List.of(target("GOOG", 2.618561447358846, "32.814821", "-9")),
+                null, HOUR_RATE);
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("0.074688"));
+    }
+
+    /**
+     * The other half of the defect: a wrong-side holding small enough to sit INSIDE the band never traded
+     * at all. The live KO plan — long 45 against a short target — produced a delta of exactly zero, every
+     * cycle, with an open gate:
+     * <pre>
+     *   averagePosition = 18.120000 x 10 / 0.31 = 584.516129 ; band = 58.451613
+     *   aim             = 0        (ADR-0102: intent may not oppose the view)
+     *   gap             = 0 - 45   = -45.000000 ; |gap| <= 58.451613  =>  delta 0, indefinitely
+     *   ADR-0132: the destination +45 is LONG while the target is SHORT  =>  flat
+     *   edge' = -45.000000, all unwinding ⇒ x a = -0.373442
+     * </pre>
+     */
+    @Test
+    void aWrongSideHoldingInsideTheBandIsNoLongerFrozen() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        assertThat(buffer.band(new BigDecimal("-18.120000"), -0.31, new BigDecimal("45")))
+                .isEqualByComparingTo(new BigDecimal("58.451613"));
+        var result = buffer.apply(List.of(target("KO", -0.31, "-18.120000", "45")), null, HOUR_RATE);
+        assertThat(result.aims().get("KO")).isEqualByComparingTo("0");
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-0.373442"));
+    }
+
+    /** A holding already on the target's own side is byte-identical — the clamp cannot reach it. */
+    @Test
+    void aSameSideHoldingInsideTheBandStillTradesNothing() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        // The ADR-0094 worked example: aim −11.436294, held −7, band 14.763413, target −142.319300.
+        var result = buffer.apply(List.of(target("AAPL", -9.64, "-142.319300", "-7")), null, RATE);
         assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+        assertThat(result.insideBuffer()).isEqualTo(1);
+    }
+
+    @Test
+    void theDestinationClampIsStrictlyOneWayAndOnlyReachesWrongSideHoldings() {
+        // Swept over every aim ADR-0102 can actually produce (flat, or on the target's side).
+        for (String t : List.of("32.814821", "-18.120000", "6.031064", "-219.420787")) {
+            BigDecimal tgt = new BigDecimal(t);
+            for (String a : List.of("0", "0.500000", "5.000000")) {
+                BigDecimal aim = new BigDecimal(a).multiply(BigDecimal.valueOf(tgt.signum()));
+                for (String h : List.of("104", "-104", "9", "-9", "45", "0")) {
+                    BigDecimal held = new BigDecimal(h);
+                    for (String b : List.of("0.000000", "12.531622", "58.451613")) {
+                        BigDecimal band = new BigDecimal(b);
+                        BigDecimal gap = aim.subtract(held);
+                        // The ADR-0094 destination, before the clamp — the only edges reachable here.
+                        BigDecimal raw = gap.abs().compareTo(band) <= 0
+                                ? BigDecimal.ZERO
+                                : gap.abs().subtract(band).multiply(BigDecimal.valueOf(gap.signum()));
+                        BigDecimal out = PositionBuffer.onTargetSide(raw, aim, held, tgt);
+                        if (out.compareTo(raw) == 0) {
+                            continue; // untouched — every same-side rebalance lands here
+                        }
+                        // When it fires it resolves the destination to FLAT: it can only ever take
+                        // exposure off, and never opens, enlarges or side-flips a position.
+                        assertThat(held.add(out)).isEqualByComparingTo("0");
+                        assertThat(held.add(out).abs()).isLessThanOrEqualTo(held.abs());
+                        // And it only ever reaches a holding on the side the target opposes.
+                        assertThat(held.signum()).isNotEqualTo(tgt.signum());
+                        // Never past the aim: |gap| = |aim| + |held| >= |held| = |delta'|.
+                        assertThat(out.abs()).isLessThanOrEqualTo(gap.abs());
+                    }
+                }
+            }
+        }
     }
 
     /** Strictly one-way: the branch resolves to flat, so it can only ever take exposure off. */
@@ -281,16 +399,20 @@ class PositionBufferTest {
         //   stepped         = 104 + a(−219.420787 − 104) = 93.397005 → clamped to 0 (ADR-0102)
         //   gap             = 0 − 104 = −104.000000 ; |gap| > band
         //   edge            = −(104.000000 − 17.359240) = −86.640760      (to the near buffer edge)
-        //   all of it unwinds the holding ⇒ x a = −86.640760 x 0.0327838995179941 = −2.840422
+        //   destination     = 104 − 86.640760 = +17.359240   LONG, while the target is SHORT
+        //   ADR-0132        = flat  ⇒ edge' = −104.000000    (the band may not reach past flat)
+        //   all of it unwinds the holding ⇒ x a = −104.000000 x 0.0327838995179941 = −3.409526
         var cut = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "104")), null, RATE);
         assertThat(cut.aims().get("JNJ")).isEqualByComparingTo("0");
-        assertThat(cut.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-2.840422"));
+        assertThat(cut.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-3.409526"));
+        // Still a rated unwind and not a dump — ADR-0107's whole point: 3.41 of 104 this cycle.
+        assertThat(cut.targets().get(0).deltaQty().abs()).isLessThan(new BigDecimal("104"));
         // Next cycle the aim path restarts from flat and runs to the new side, so the gap keeps
         // growing and the unwind cannot stall: aim = 0 + a(−219.420787) = −7.193469 against a book
-        // still long 101 ⇒ gap −108.193469, edge −90.834229, x a = −2.977900.
+        // still long 101. The destination is again clamped to flat ⇒ −101 x a = −3.311174.
         var next = buffer.apply(List.of(target("JNJ", -12.64, "-219.420787", "101")), null, RATE);
         assertThat(next.aims().get("JNJ")).isEqualByComparingTo(new BigDecimal("-7.193469"));
-        assertThat(next.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-2.977900"));
+        assertThat(next.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-3.311174"));
     }
 
     @Test
@@ -498,8 +620,9 @@ class PositionBufferTest {
         BigDecimal cold = new PositionBuffer(0.10).apply(plan, null, RATE, armed(false))
                 .targets().get(0).deltaQty();
         // band = 24.100800 x 10 / 2.9237 x 0.10 = 8.243253; aim 0, gap 10 ⇒ edge 1.756747, of which
-        // the unwinding part is worked at the derived rate: 1.756747 x 0.032784 = 0.057593.
-        assertThat(armed).isEqualByComparingTo(new BigDecimal("0.057593"));
+        // the destination would be -8.243253 — SHORT, while the target is LONG — so ADR-0132 holds it at
+        // flat instead and the whole short is the unwind: 10.000000 x 0.032784 = 0.327839.
+        assertThat(armed).isEqualByComparingTo(new BigDecimal("0.327839"));
         // Cold: the whole short is bought back this cycle. Strictly risk-reducing — |held + delta| = 0.
         assertThat(cold).isEqualByComparingTo(new BigDecimal("10.000000"));
         // And an order that would ADD to a holding is removed outright, whatever its size.

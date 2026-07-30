@@ -15,6 +15,102 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 19:30Z (the pending revert SCORED ⚠️ INCONCLUSIVE, so a change was due; item #1 re-diagnosed a THIRD time — this time from the buffer's own published arithmetic, and shipped as ADR-0132)
+
+**Step 0 — last cycle's change.** `64a7a6336` (the completed auto-revert) scored **⚠️ INCONCLUSIVE**
+(`c3d588c`), `reports/.pending-baseline.json` is gone and `score` prints `no pending change to score`. Its
+own claim — that the graded-BAD ADR-0131 re-seed mechanism is out of the running code — was **✅ VERIFIED**
+on five independent JVMs across the 17:00Z–19:00Z blocks. That item stays closed and this cycle was free to
+make a change.
+
+**Live situation.** The SITUATION header reads total PnL **$131.04**, gross **$38033.13** (**2.5%** of the
+$1,500,000 firm cap, headroom **$1,461,967**), net **$-6383.71** (**0.6%** of the $1,000,000 net cap).
+Flags: **none**. Since last run PnL **+7.70**, gross **-3089.11**; over three runs PnL **+1.25**, gross
+**+22.43**. `run-status.json` (heartbeat `2026-07-30T19:06:38Z`) reads `pnl_growth_pct` **7.74** vs
+`pnl_target_pct` **1.0**, `on_track` **true**, `stale` **false**, `underwater` **false** — back on track
+since last run. Not DORMANT (24 names in `fusion_targets`), not in danger.
+
+**Attribution.** The window's move is **not separable** into market vs change: the scored change was a
+*revert* that opens and closes nothing, and a JVM boot sits inside the window. Claim neither (Rule 141/152).
+
+### ✅ Item #1 — CLOSED and shipped: the buffer's DESTINATION sat on the side the target opposes (ADR-0132)
+
+The 19:00Z block re-framed this as "the target book re-randomises every 30s, so no buffer width or
+adjustment rate can absorb it". **That framing is also wrong, and this cycle's telemetry says so.** Rule 163
+sampled `targetQty` at three re-plans and read sign flips; sampling the *same* names again this cycle
+(`atMillis` 1785439853409 / 1785439883657 / 1785439913989) shows the targets **drift**, they do not
+re-randomise: MSFT **-63.86 → -51.60 → -57.99**, PG **-285.25 → -153.26 → -158.88**, NVDA **+132.74 →
++169.02 → +174.22**, AAPL **+95.05 → +93.32 → +106.59**. The earlier "re-randomisation" was the forecast
+crossing zero on a handful of names, not the whole book.
+
+**What the same three samples DO show, in every one of them, is the actual defect.** The desk held the
+SAME six names on the opposite side of their own live target, at a standstill:
+
+| name | held (all 3 re-plans) | target | `deltaQty` per re-plan |
+|---|---|---|---|
+| GOOG | **-9.00** | +115.70 / +102.33 / +95.24 | +0.011 / +0.019 / +0.040 |
+| AAPL | **-13.00** | +95.05 / +93.32 / +106.59 | +0.019 / +0.034 / +0.058 |
+| NVDA | **-16.00** | +132.74 / +169.02 / +174.22 | +0.098 / +0.110 / +1.050 |
+| PG | **+26.00** | -285.25 / -153.26 / -158.88 | -0.128 / -0.139 / -0.198 |
+| KO | **+45.00** | -18.12 / -30.32 / -63.07 | **0.000000 / 0.000000 / 0.000000** |
+| WMT | **+9.00** | (long) / (long) / -10.23 | **0.000000** |
+
+**The mechanism, proved rather than inferred (new Rule 164).** `/api/fusion/targets` also publishes `aims`.
+With `aims`, `targetQty`, `currentQty` and `combinedForecast` the whole ADR-0094/0101/0102 arithmetic can be
+recomputed — and it reproduces the published `deltaQty` **exactly on all 13 planned names**, e.g. GOOG
+`6.043466 × 0.008298707 = 0.050153` and AMZN `22.379233 × 0.008298707 = 0.185720`, both matching the
+published figure digit for digit. That closes the four cycles of inference. What the arithmetic shows:
+
+```
+GOOG  held -9   target +32.814821   forecast +2.618561447358846   aim +9.575088
+  band = 32.814821 x 10 / 2.618561447358846 x 0.10 = 12.531622
+  gap  = 9.575088 - (-9) = 18.575088 > band  =>  edge = 6.043466
+  DESTINATION = -9 + 6.043466 = -2.956534    <-- the desk intends to STOP while SHORT a name it wants LONG
+KO    held +45  target -18.120000   forecast -0.31   aim 0
+  band = 58.451613 ; gap = -45.000000 ; |gap| <= band  =>  deltaQty 0.000000, indefinitely
+```
+
+The band is scaled by the average position at the **target**; early on ADR-0080's hour-long aim path it
+exceeds the aim, so the no-trade region **straddles flat** and reaches onto the side the forecast opposes.
+Nothing bounded it: ADR-0102 bounds the *intent*, not the destination a whole band below it.
+
+**Rule 161 stands and Rule 163 is retracted.** The band is not inert (`insideBuffer` **19** of **24**) — but
+"binding" was never the question; *where* it binds is. And this is not an upstream signal-stability problem.
+
+**ADR-0118 already diagnosed this exact position and its fix does not reach the shipped configuration.**
+It worked the identical AAPL plan (short 1 vs target +6.031064) but scoped the remedy to `isTrappedExit`,
+inside `!mayIncrease` — a shut edge gate or a σ-cold name. With `jethro.fusion.edge-gate.enabled=false`
+(ADR-0122) and the σ sensors warm, that branch never runs. Its own test pinned the open-gate case at
+`deltaQty` 0 as if correct.
+
+**The change (ADR-0132).** `PositionBuffer.onTargetSide` replaces a destination on the opposite side of flat
+from the target with **flat**, before the ADR-0107 rating — so it stays a rated unwind, not a liquidation.
+Band, aim path, ADR-0101 width and rating unchanged; no number introduced (the bound is flat). Proved to
+fire only on a holding the target opposes, to resolve to `|held+delta| = 0` (never opens, enlarges or
+side-flips), and never to trade past the aim. Flat-target exits keep exact semantics. Full `-Pci test` green.
+
+**VERIFY-BY (next cycle, from live telemetry).** On `/api/fusion/targets`: **no name has `currentQty` and
+`targetQty` of opposite sign with `|deltaQty|` below `|currentQty| x 0.0082987`** — i.e. every wrong-side
+holding is unwinding at the full derived rate rather than at a band-reduced one or at zero. `insideBuffer`
+should fall from **19** of **24**. GOOG/AAPL/NVDA/PG/KO/WMT should show `currentQty` moving toward flat
+across consecutive re-plans instead of standing still, and firm gross should fall as they wind off.
+
+### Item #2 — MACRO holds a frozen directional loss (unchanged, still ranked below #1)
+
+`/api/attribution` reads MACRO `totalPnl` **-$35.82347655**, all realized, on `feesPaid` **$0.169833** —
+bit-identical for a fourth consecutive run. The book is not trading, so the loss is closed and not growing
+(Rule 157). It needs its own cycle and its own trigger-level post-mortem.
+**VERIFY-BY:** MACRO `totalPnl` moves off **-$35.82347655**, or a post-mortem names the trigger that opened it.
+
+### Item #3 — the ADR index is missing rows for 0129, 0130 and 0131 (housekeeping, no money cost)
+
+`grep '0129\|0130\|0131' docs/adr/README.md` returns nothing though all three files exist. CLAUDE.md
+requires reading the index before proposing designs, so the gap hides three accepted decisions. Not fixed
+this cycle — one coherent change per run, and this one carries no live cost.
+**VERIFY-BY:** those three rows appear in `docs/adr/README.md`.
+
+---
+
 ## Verification block — 2026-07-30 19:00Z (revert ✅ VERIFIED on a FIFTH JVM — at 5/6, no change made; item #1 is RE-FRAMED: the buffer is NOT inert and the "inverted fallback" is not the defect — the TARGET BOOK is unstable at the re-plan cadence)
 
 **Fifth independent reproduction.** A new process (PID **3646490**, boot **14:34:38.573**–**14:34:47.704**
