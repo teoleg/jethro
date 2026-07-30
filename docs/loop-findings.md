@@ -2547,3 +2547,33 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Attribution this window (honest split):** **neither market nor change.** No loop commit deployed into
   this window and no position was live to be moved; the unchanged PnL is a stale read, not a held position.
   No credit and no blame taken for it.
+
+## 2026-07-30 13:30Z — the book was flat all session because the warm-start seed only ever fired once
+
+- **Rule 111 — a warm-start seed that runs only at boot is scheduled at the worst possible moment.**
+  ADR-0071 replays stored prices into a sensor on FIRST SIGHT of a name. First sight is boot, and a boot
+  is very often preceded by exactly the discontinuity that emptied the store's tail — an outage, a
+  weekend, a pre-market start. `SensorWarmup` then correctly refuses to walk the hole and returns almost
+  nothing (`0 of 193`, `1 of 241`, `0 of 121` live today), and the sensor is abandoned there for the whole
+  process. Counted across the log since the 07:47 ET boot: **39 `trend sensor still cold`, 0 warmed**;
+  same 39/0 for reversion; 9/1 for the σ sensor. **A recovery mechanism that gets one attempt, taken at
+  the moment of maximum failure probability, is not a recovery mechanism.** Fixed by ADR-0131 — a cold
+  sensor re-seeds on its own warm-up cadence and retires once warm.
+- **Rule 112 — when the whole book is flat, read `sources` on `/api/fusion/targets` before anything else.**
+  Every name showed `sources: 1`, `agreement: 0.0`, `combinedForecast: -0.0` and `targetQty: 0` while the
+  raw per-source forecasts underneath were large (MSFT −20.0, AMZN −12.5, AAPL +6.4). That is ADR-0124
+  behaving exactly as designed — one effective source has unestimable dispersion, so it sizes at nothing.
+  The forecasts were never the problem; the *count* was. `forecastScalars` is the fastest confirmation: a
+  source absent from that map has published nothing at all since boot.
+- **Rule 113 — look for the name that worked, it isolates the cause.** NQ was the one instrument whose σ
+  warmed and whose reversion seed returned `232 of 241`. NQ prints overnight; every equity does not. That
+  one contrast ruled out the sensors, the config and the feed, and pinned the cause on the discontinuity
+  in the stored series — in one line of log, without instrumenting anything.
+- **Rule 114 — resetting an estimator is safe exactly when it is cold, and only then.** The re-seed drops
+  per-name state whole (`forget`) before replaying, because the store already contains every print the
+  sensor consumed and replaying on top double-counts. That reset is confined to cold names on purpose: a
+  cold forecast publishes no view and an unmeasured σ arms no ADR-0086 stop, so nothing live can move
+  underneath a live position. **A warm sensor is never re-seeded.**
+- **Attribution this window (honest split):** **neither market nor change.** No loop commit deployed into
+  this window and no position was open, so the unchanged PnL is the absence of activity, not a held
+  position moving. No credit and no blame taken for it.

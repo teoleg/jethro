@@ -56,7 +56,8 @@ public final class IndexTrendForecastLifecycle implements AutoCloseable {
     private final long intervalSeconds;
     /** The broad market index the overlay reads (an INDEX row in the master, ADR-0129). */
     private final String marketIndexId;
-    private final java.util.Set<String> seeded = new java.util.HashSet<>();
+    /** ADR-0131: when a still-cold name replays history again — touched only from the tick thread. */
+    private final SensorReseed reseed;
     private final PrintClock printClock = new PrintClock();
 
     private Future<?> task;
@@ -74,6 +75,7 @@ public final class IndexTrendForecastLifecycle implements AutoCloseable {
         this.history = history;
         this.scheduler = scheduler;
         this.intervalSeconds = Math.max(1, intervalSeconds);
+        this.reseed = new SensorReseed(forecaster.warmupSamples());
         this.marketIndexId = marketIndexId;
     }
 
@@ -102,7 +104,7 @@ public final class IndexTrendForecastLifecycle implements AutoCloseable {
                     continue;
                 }
                 if (!mark.stale()) {
-                    warmIfFirstSight(mark.instrumentId(), mark.providerTimestamp());
+                    warmWhileCold(mark.instrumentId(), mark.providerTimestamp());
                     if (printClock.advanced(mark.instrumentId(), mark.providerTimestamp())) {
                         forecaster.update(mark.instrumentId(), mark.price());
                     }
@@ -138,24 +140,29 @@ public final class IndexTrendForecastLifecycle implements AutoCloseable {
         }
     }
 
-    /** Warm the market index's EWMAC from durable history on first sight (ADR-0071), so the overlay boots
-     *  calibrated instead of spending its whole warm-up silent after every redeploy. */
-    private void warmIfFirstSight(String instrumentId, java.time.Instant providerTimestamp) {
-        if (history == null || !seeded.add(instrumentId)) {
+    /** Warm the market index's EWMAC from durable history (ADR-0071), so the overlay boots calibrated
+     *  instead of spending its whole warm-up silent after every redeploy. Re-seeds while the index is
+     *  still cold (ADR-0131) — a boot-time read of a store that ends in an outage or an overnight gap
+     *  hands over a couple of prices, and seeding once abandoned the overlay there for the whole
+     *  process. The replay goes into a state just dropped ({@code forget}); safe because it is cold. */
+    private void warmWhileCold(String instrumentId, java.time.Instant providerTimestamp) {
+        if (history == null || !reseed.due(instrumentId)) {
             return;
         }
         int needed = forecaster.warmupSamples();
         long anchor = providerTimestamp != null ? providerTimestamp.toEpochMilli() : System.currentTimeMillis();
+        forecaster.forget(instrumentId); // replay into a clean state — never on top of consumed prints
         int n = SensorWarmup.warm(history, instrumentId, anchor,
                 intervalSeconds * 1_000L, needed,
                 price -> forecaster.update(instrumentId, price));
         boolean warm = forecaster.readingFor(instrumentId).warm();
+        reseed.record(instrumentId, warm);
         if (warm) {
             log.info("index-trend sensor warmed {} from {} stored prices (needs {}) — warm", instrumentId, n, needed);
         } else {
             log.warn("index-trend sensor still cold for {} after seeding {} of {} stored prices — no market "
-                    + "overlay until {}'s mark history accumulates its warm-up span", instrumentId, n, needed,
-                    instrumentId);
+                    + "overlay until {}'s mark history accumulates its warm-up span; re-seeding every {} "
+                    + "sightings until it does (ADR-0131)", instrumentId, n, needed, instrumentId, needed);
         }
     }
 

@@ -15,6 +15,86 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 13:30Z (the platform is back UP — and the reason the book is flat is now visible)
+
+**Prior item #1 (V49 boot-blocking migration) → ✅ VERIFIED, struck.** Every part of its VERIFY-BY reads
+green off live telemetry: `/api/risk` returns HTTP 200 with a live `.total` (was `Connection refused`);
+`flyway_schema_history` shows `version 49, world indices, success=t`; `select count(*) from instrument
+where asset_class='INDEX'` returns **12** (was 0); `pg_get_constraintdef` now lists `INDEX` alongside the
+six original classes; `orders_day` contains no INDEX name (it contains no orders at all — see item #1
+below). The JVM booted 07:47 ET and has an uptime of 6158s at report time. Fix landed, fix worked.
+
+**Prior item #2 (ADR-0126, σ-cold veto) → ⚠️ STILL UNMEASURED, but no longer for lack of an app.** It has
+accumulated evaluation cycles at last (`5e35752dd` scored ⚠️ INCONCLUSIVE at 13:30Z, t=+1.49 against a 1.5
+hurdle over 36 cycles) and `.pending-baseline.json` is gone, so a new change is due this cycle. Its veto is
+**directly implicated** in item #1 below and is addressed by the same fix rather than carried separately.
+
+### 🎯 Item #1 (NEW, and it is why the desk has traded nothing all session) — FIXED THIS CYCLE
+
+**The defect.** The ADR-0071 warm-restart seed replays a name's stored prices into a sensor **on first
+sight of that name, and only then**. First sight is boot — and this boot followed a 4h45m outage, so the
+store's recent tail was empty at exactly the moment the one and only read was taken. `SensorWarmup`
+correctly refused to walk across the hole and handed over almost nothing, live in `logs/jethro-app.log`:
+
+```
+07:47:37  trend sensor still cold for BAC  after seeding 0 of 193 stored prices
+07:47:52  reversion sensor still cold for AAPL after seeding 1 of 241 stored prices
+08:56:19  risk-cut σ sensor still cold for GOOG after seeding 0 of 121 stored prices
+```
+
+Under the old rule the sensors were then abandoned there for the life of the process. Counted across the
+whole log since boot: **39 `trend sensor still cold`, 0 `trend sensor warmed`; 39 `reversion … still
+cold`, 0 warmed; 9 `risk-cut σ … still cold`, 1 warmed.** The single σ that warmed is `NQ`, whose tape
+runs overnight and whose reversion seed accordingly returned `232 of 241` — the natural experiment that
+isolates the cause as the discontinuity in the stored series, not the sensor.
+
+**Cost — this is the whole flat book.** With only `xsreversion` publishing per name, every name carries
+`sources: 1`; ADR-0124 sets the agreement scalar to 0 at one effective source; so `/api/fusion/targets`
+reports `combinedForecast` of `-0.0` or `0.0` and `targetQty: 0` for **every** name, against raw source
+forecasts as large as `−20.0` and `+6.38`. `orders_day.total` is **0**, gross exposure **$0.00** against a
+firm cap of $1,500,000, and `forecastScalars` contains only `reversion` and `xsreversion` — the trend
+source has published nothing at all since boot. ADR-0126's open veto is gated on the same failed σ read,
+so it was independently blocking every open for the same reason.
+
+**The fix (ADR-0131).** A cold sensor **re-seeds**: `SensorReseed` re-attempts the replay every
+`warmupSamples()` sightings while the sensor is still cold, and retires a name permanently once it warms.
+The retry cadence is read off the sensor's own warm-up length, so no number is introduced. The replay goes
+into a state just dropped by a new `forget(instrumentId)` on `EwmacTrendForecaster`,
+`RangeReversionForecaster` and `StreamVolatility`, so prints already consumed are never counted twice; the
+reset is confined to cold names, which publish no view and arm no stop, so nothing live is disturbed.
+Applied at all four seed sites: trend, per-name reversion, index trend, and the σ sensor behind the
+ADR-0086 risk cut and the ADR-0126 open veto. `SensorWarmup` itself is untouched — only how often it is
+asked. The store currently holds 378 AAPL prints over 81 minutes at a 1.1s median, comfortably more than
+any of those warm-ups needs, so the first retry should warm them.
+
+**VERIFY-BY (next run).** `/api/fusion/targets` must show at least one name with `sources ≥ 2`,
+`agreement > 0` and a non-zero `combinedForecast` (today: every name `sources: 1`, `agreement: 0.0`,
+`combinedForecast: 0.0`). `forecastScalars` must contain a `trend` key (today: absent). The app log must
+contain `trend sensor warmed …` and `risk-cut σ sensor warmed …` lines timestamped well after boot (today:
+0 and 1 respectively). If those read green, gross exposure should leave $0.00 — but note gross is the
+*consequence*, not the VERIFY-BY: the sensors speaking is what this change claims, and every gate between
+a forecast and a fill is untouched.
+
+### Item #2 (carried, was #4) — two fusion sources carry real weight while measuring NEGATIVE at every horizon
+
+Unchanged and still not taken: `/api/signals/telemetry` shows **xsreversion −6.2427 bps @3600s / +0.3397
+@900s** and **trend −5.9926 @3600s / +0.1771 @900s**, against live fusion weights of **0.4995** and
+**0.3049**. Deliberately deferred again: re-weighting sources is combiner work, and the standing priority
+says combiner tuning ranks below a defect that stops the desk trading at all. Reconsider once item #1 is
+verified and the sources are actually publishing enough to be judged.
+
+**VERIFY-BY:** a source measuring negative at every horizon over a full evaluation window must not hold a
+weight above the floor.
+
+### Item #3 (carried) — the loop's heartbeat reported a dead app as a healthy market-closed cycle
+
+Unchanged, not addressed this cycle. Nine cycles (07:00Z–11:00Z) logged `available: true` with a
+byte-identical `total_pnl 126.87240898`, while `logs/report.md` showed `Connection refused` on every
+endpoint. Ranked below item #1 because it is a reporting defect, not a money defect — but it is what let
+the money defect run for 4.5 hours unnoticed.
+
+**VERIFY-BY:** with the app stopped, `reports/run-status.json` must record `available: false`.
+
 ## Verification block — 2026-07-30 11:30Z (the platform was DOWN — every prior item is unverifiable until it boots)
 
 **Prior item #1 (ADR-0126, σ-cold veto) → ⏸️ UNVERIFIABLE, carried forward unchanged at #2.** Its VERIFY-BY
