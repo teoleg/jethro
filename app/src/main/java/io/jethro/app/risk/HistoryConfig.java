@@ -33,9 +33,10 @@ public class HistoryConfig {
                                 @Value("${jethro.hedge.tiingo-token:}") String token,
                                 @Value("${jethro.hedge.history-seed-days:60}") int windowDays,
                                 @Value("${jethro.hedge.history-range-years:5}") int years,
-                                @Value("${jethro.hedge.history-request-spacing-millis:800}") long spacingMillis) {
+                                @Value("${jethro.hedge.history-request-spacing-millis:800}") long spacingMillis,
+                                @Value("${jethro.hedge.history-refresh-hours:24}") int refreshHours) {
         var client = new TiingoHistoryClient(token, Duration.ofSeconds(15), years);
-        var seeder = new HistorySeeder(jdbc, props, refs, status, client, windowDays, spacingMillis);
+        var seeder = new HistorySeeder(jdbc, props, refs, status, client, windowDays, spacingMillis, refreshHours);
         seeder.start(); // background thread; no-op-ish when a full window already exists / no token
         return seeder;
     }
