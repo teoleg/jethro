@@ -19,6 +19,8 @@ public final class SourceForecasts {
     public static final String REVERSION = "reversion";
     public static final String XS_REVERSION = "xsreversion";
     public static final String LEARNED = "learned";
+    /** Market-index trend (ADR-0130): a name's own claim carried by its region index's EWMAC trend. */
+    public static final String INDEX_TREND = "indextrend";
 
     private SourceForecasts() {
     }
@@ -93,6 +95,23 @@ public final class SourceForecasts {
 
     /** Uncapped trend claim — see {@link #strategyClaim} for why the claim is what gets measured. */
     public static double trendClaim(double score, double targetAbs) {
+        return Double.isFinite(score) ? score * targetAbs : 0.0;
+    }
+
+    /**
+     * Market-index trend (ADR-0130). {@code score} is the region index's own EWMAC trend reading — the
+     * SAME self-normalised score the per-name trend sensor produces, just measured on the broad index
+     * instead of the single name and then carried to each name in that market. Unit market beta: no
+     * per-name beta multiplier is invented (a β placeholder is a money dial we don't set silently); the
+     * source earns its magnitude from its measured expectancy like every other source. Same units mapper
+     * as {@link #fromTrend}, so the sizing dials keep their meaning.
+     */
+    public static Forecast fromIndexTrend(String instrument, double score, double targetAbs) {
+        return Forecast.of(INDEX_TREND, instrument, indexTrendClaim(score, targetAbs));
+    }
+
+    /** Uncapped index-trend claim — identical mapping to {@link #trendClaim}; a trend is a trend. */
+    public static double indexTrendClaim(double score, double targetAbs) {
         return Double.isFinite(score) ? score * targetAbs : 0.0;
     }
 

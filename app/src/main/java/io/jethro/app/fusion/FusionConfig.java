@@ -449,6 +449,38 @@ public class FusionConfig {
     }
 
     /**
+     * The ADR-0130 market-index trend sensor — the same EWMAC as the per-name trend sensor, run on the
+     * broad market index and carried to every equity as a slow market-factor overlay. Same forecast-source
+     * contract: it publishes into the registry and records its calls in telemetry, earning its fusion
+     * weight from measured expectancy; it places no orders and relaxes no gate. Gated on
+     * {@code jethro.fusion.index-trend.enabled} (default true). The market index id must be an INDEX row in
+     * the master (ADR-0129).
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.fusion.index-trend", name = "enabled", havingValue = "true",
+            matchIfMissing = true)
+    IndexTrendForecastLifecycle indexTrendForecastLifecycle(
+            ForecastRegistry registry,
+            ObjectProvider<TradingCoreLifecycle> tradingCore,
+            io.jethro.trading.riskpnl.InstrumentRefSource refs,
+            ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
+            @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
+            @Value("${jethro.fusion.index-trend.fast-span:16}") int fastSpan,
+            @Value("${jethro.fusion.index-trend.slow-span:64}") int slowSpan,
+            @Value("${jethro.fusion.index-trend.normalisation-span:256}") int normalisationSpan,
+            @Value("${jethro.fusion.index-trend.market-index:SPX}") String marketIndexId,
+            ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
+            @Value("${jethro.fusion.index-trend.interval-seconds:15}") long intervalSeconds) {
+        var forecaster = new io.jethro.trading.algo.strategy.EwmacTrendForecaster(
+                new io.jethro.trading.algo.strategy.EwmacTrendForecaster.Params(fastSpan, slowSpan, normalisationSpan));
+        var lifecycle = new IndexTrendForecastLifecycle(forecaster, registry, tradingCore.getIfAvailable(),
+                refs, telemetry.getIfAvailable(), storedPrices(markHistory), scheduler, intervalSeconds,
+                marketIndexId);
+        lifecycle.start();
+        return lifecycle;
+    }
+
+    /**
      * The ADR-0070 mean-reversion sensor — the chop-regime counterpart of the trend sensor above, and
      * under exactly the same contract. It publishes a continuous, self-normalised range-position reading
      * per name into the same registry and records its calls in the phase-1 telemetry, so it must earn a

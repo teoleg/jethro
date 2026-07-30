@@ -81,6 +81,13 @@ public final class ForecastRegistry {
                 SourceForecasts.crossSectionalReversionClaim(score, Forecast.TARGET_ABS));
     }
 
+    /** Market-index trend reading (ADR-0130) carried to a name from its region index; {@code score} is
+     *  the index's self-normalised EWMAC trend — the market factor, blended like any other source. */
+    public void submitIndexTrend(String instrument, double score) {
+        putScaled(SourceForecasts.INDEX_TREND, instrument,
+                SourceForecasts.indexTrendClaim(score, Forecast.TARGET_ABS));
+    }
+
     public void submitLearned(String instrument, double pUp, double pDown, boolean ships) {
         putScaled(SourceForecasts.LEARNED, instrument,
                 SourceForecasts.learnedClaim(pUp, pDown, ships, params.learnedScale()));
