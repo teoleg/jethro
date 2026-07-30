@@ -15,6 +15,115 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 19:00Z (revert ✅ VERIFIED on a FIFTH JVM — at 5/6, no change made; item #1 is RE-FRAMED: the buffer is NOT inert and the "inverted fallback" is not the defect — the TARGET BOOK is unstable at the re-plan cadence)
+
+**Fifth independent reproduction.** A new process (PID **3646490**, boot **14:34:38.573**–**14:34:47.704**
+local `-04:00`) — distinct from the 17:00Z/17:30Z/18:00Z/18:30Z JVMs — re-tests the four pre-registered legs:
+- **No second re-seed wave.** Over the entire running log, keyed by lifecycle+name,
+  `grep -oP '(Trend|Reversion)ForecastLifecycle\s+: \w+ sensor still cold for \S+' | sort | uniq -c |
+  awk '$1>1'` returns **nothing**; **53** cold lines, each unique.
+- **ADR-0071 boot seeding still fires.** **62** `sensor warmed` lines.
+- **No name is warmed twice, proved by count.** Keying on the FULL lifecycle class + name
+  (`grep -oP '\S+Lifecycle\s+:.*sensor warmed \S+' | sort | uniq -c | awk '$1>1'`) returns **nothing**.
+- `grep -rn "SensorReseed" --include=*.java app/` returns nothing.
+
+**Method correction (new Rule 159).** A truncating pattern that keys only on the word *before* `sensor`
+reports **14** false double-warms (AAPL, AMZN, BAC, GOOG, JNJ, KO, MSFT, NEE, NVDA, PFE, PG, UNH, WMT,
+XOM at count 2) because it collapses `i.j.a.f.CrossSectionalReversionLifecycle : cross-sectional reversion
+sensor warmed AAPL` with `i.j.a.fusion.ReversionForecastLifecycle : reversion sensor warmed AAPL`. Rule 158
+said "prove by count"; it must also say **key on the full lifecycle class**, or the count proves nothing.
+
+**Item #1 of the 16:30Z block stays CLOSED.** Five independent JVMs, four legs each.
+
+**No change made this cycle.** `scripts/score-change.py score` prints
+`64a7a6336 still accumulating evidence (5/6 cycles) — held, not scored this run` and
+`reports/.pending-baseline.json` is present, so a new change would destroy the evidence. **The pending
+change scores next cycle**, which is when the re-framed item #1 below becomes actionable.
+
+**Live situation.** The SITUATION header reads total PnL **$117.52**, gross **$37668.89** (**2.5%** of the
+$1,500,000 firm cap, headroom **$1,462,331**), net **$-12290.58** (**1.2%** of the $1,000,000 net cap).
+Flags: **none**. Since last run PnL **-6.43**, gross **-2210.24**; over three runs PnL **+3.04**, gross
+**-17516.73**. `run-status.json` (heartbeat `2026-07-30T18:34:15Z`) reads `pnl_growth_pct` **-12.89** vs
+`pnl_target_pct` **1.0**, `on_track` **false**, `stale` **true**, `underwater` **false** — the objective
+flags flipped off-track since last run. Not DORMANT (20 instruments plus the ES hedge), not in danger.
+
+**Attribution caveat.** A JVM boot at **14:34:38** local sits inside this window and the pending change is
+a *revert* that opens and closes nothing, so the **-6.43** / **-2210.24** move is **not separable** into
+market vs change — claim neither (Rule 141/152).
+
+### 🎯 Item #1 — RE-FRAMED: the fusion TARGET BOOK re-randomises every 30s; the buffer below it is working as designed and cannot absorb it
+
+The previous four blocks ranked this as "ALPHA churns, and the cost-aware no-trade band that should stop it
+is INERT, via an inverted ADR-0101 fallback". **Two of those three claims do not survive this run's
+telemetry, and the queued fix would have been wrong.** Correcting it is this cycle's work.
+
+**❌ The band is NOT inert.** `/api/fusion/targets` exposes `insideBuffer`, which `PositionBuffer.apply`
+increments exactly when a name's planned delta is zero. It reads **13** of **20**. The ADR-0094/0101/0102
+buffer is suppressing the majority of the book every cycle — it is binding, not dormant.
+
+**❌ The ADR-0101 fallback is not "inverted".** `PositionBuffer.widthFor` returns the convention
+`bufferFraction` when `edgeBps <= 0` or `costBps <= 0`. The previous block proposed widening that branch on
+the argument that unmeasured μ makes `2C/μ` unbounded. But **0.10 is Carver's published convention for
+precisely the desk that has NOT measured its edge** (`Systematic Trading` 2015), and the method's contract
+is explicit that with no measurement "there is no claim to make". Widening it would be **authoring a risk
+number where none is measured** — the exact thing invariant 7 / ADR-0016 forbids. **Do not ship that fix.**
+
+**✅ What IS wrong, measured directly.** Sampling `/api/fusion/targets` across three consecutive re-plans
+(`atMillis` **1785438150584**, **1785438180812**, **1785438210932** — 30s apart) the `targetQty` book does
+not drift, it re-randomises:
+
+| name | re-plan 1 | re-plan 2 | re-plan 3 |
+|---|---|---|---|
+| AAPL | -10.75 | **+129.53** | +67.19 |
+| HD | -1.48 | **+42.78** | +1.39 |
+| NVDA | -0.08 | -6.69 | **-50.91** |
+| KO | -324.08 | -231.96 | **-45.38** |
+| GOOG | +0.29 | +1.01 | **-3.44** |
+| PG | -288.30 | -339.67 | -238.00 |
+| MCD | -89.97 | -121.89 | -117.06 |
+
+AAPL flips from short to long and swings ~140 shares in one 30s step; HD flips sign and back; KO sheds 86%
+of its target in 60s. An earlier read the same cycle had MCD at **-0.85** and GOOG at **-75.52**. **No
+buffer width and no adjustment rate can fix a target that is re-drawn this way** — and worse, the buffer's
+own band is `|target|·TARGET_ABS/|forecast|`, so the band swings *with* the target it is meant to filter.
+
+**Why the targets swing.** `weights` reads `reversion` **1.5810674747889952** and `xsreversion`
+**0.9850309963910409** against `trend` **0.39443196542948245** — the book is dominated by two fast
+mean-reversion sources (`reversion.interval-seconds=10` on a 120s range span; `xs-reversion` on a 900s
+lookback) sampled by a 30s re-plan. Meanwhile `strategy_diag.edgeGated` reports `no positive OOS edge` on
+every name it lists (MSFT `momentum -37.36954202 … mean-rev -73.69953186`; AMZN `-46.40665676`; GOOG
+`mean-rev -11.15007399`; SAP `-39.20256473 … -65.12971133`). **The desk is paying round trips to chase
+sources with no measured edge, at a cadence faster than those sources decay.**
+
+**The cost this produces.** `/api/attribution` reads ALPHA `totalPnl` **$17.08569992** on `feesPaid`
+**$79.469996**; `firmTotal` **$116.30055246** is carried entirely by `hedgePnl` **$135.03832909** with
+`hedgeMasking` **true** and `strategyAlpha` **-$18.73777663**. `orders_by_status` reads FILLED **4052**,
+CANCELLED **1364**, and every cancellation in the `recent_orders` tape carries
+`fusion re-plan — passive order superseded by a fresh target (ADR-0084)`. The tape shows HD posted BUY 1 →
+2 → 2 → 3 → 4 across five consecutive re-plans, each cancelled before filling.
+
+**Rule 154 is RETRACTED as a trend.** The four-run monotone ALPHA decline broke this run: `totalPnl` read
+**$15.27790493** then **$17.08569992** against the prior **$7.64428496**. PnL is *rising*. Only the fee leg
+is still monotone (**$73.682486** → **$78.463912** → **$79.469996**). A four-point monotone run was not
+enough to call a trend — see Rule 160.
+
+**VERIFY-BY (next cycle, once the revert scores).** The fix must damp the *target*, not the executor or the
+buffer. Sample `/api/fusion/targets` across ≥3 consecutive `atMillis` re-plans and confirm **no name's
+`targetQty` changes sign, and no name's `|targetQty|` changes by more than the buffer width, between
+adjacent re-plans**; `insideBuffer` should rise from **13**/20; ALPHA `feesPaid` should stop its monotone
+climb from **$79.469996**. The candidate change is to smooth the combined forecast over a horizon matched
+to the source's own decay (or to re-plan at that horizon) — with an ADR in the same commit, since it is a
+cross-cutting change to how every target is formed.
+
+### Item #2 — MACRO holds a frozen directional loss (unchanged, still ranked below #1)
+
+`/api/attribution` reads MACRO `totalPnl` **-$35.82347655**, all realized, on `feesPaid` **$0.169833** —
+bit-identical for a third consecutive run. The book is not trading, so the loss is closed and not growing
+(Rule 157). It needs its own cycle and its own trigger-level post-mortem.
+**VERIFY-BY:** MACRO `totalPnl` moves off **-$35.82347655**, or a post-mortem names the trigger that opened it.
+
+---
+
 ## Verification block — 2026-07-30 18:30Z (revert ✅ VERIFIED on a FOURTH JVM — at 4/6, no change made; item #1's cost ratio has now deteriorated four runs running)
 
 **Fourth independent reproduction.** A new process (PID **3626405**, boot **14:06:34.573**–**14:06:43.934**

@@ -2899,3 +2899,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   on lifecycle+name, every per-name entry is count **1**; the only count>1 is `fusion covariance warmed 19
   of …`, the ADR-0089 rolling matrix rebuild. That is unfalsifiable by clock skew and far cheaper than
   reading each post-boot line — which is what the previous three cycles did.
+
+## 2026-07-30 19:00Z — the revert holds on a fifth JVM; I re-tested my own four-run diagnosis and it was wrong
+
+- **Rule 159 — key a "proved by count" check on the FULL discriminator, or the count proves nothing.**
+  Rule 158 said prove no-double-warm by count. A pattern keyed only on the word *before* `sensor` reports
+  **14** false positives at count 2 (AAPL, AMZN, BAC, GOOG, JNJ, KO, MSFT, NEE, NVDA, PFE, PG, UNH, WMT,
+  XOM) because it collapses `CrossSectionalReversionLifecycle : cross-sectional reversion sensor warmed X`
+  with `ReversionForecastLifecycle : reversion sensor warmed X`. Keyed on the full lifecycle class, count>1
+  is empty. A counting proof is only as strong as its key — print the key before trusting the count.
+- **Rule 160 — four monotone points are NOT a trend on this book; Rule 154 is retracted.** Rule 154
+  upgraded ALPHA's cost ratio to a four-run trend and re-ranked on it. It broke on the very next read:
+  `totalPnl` went **$7.64428496** → **$15.27790493** → **$17.08569992** while only `feesPaid` stayed
+  monotone (**$73.682486** → **$78.463912** → **$79.469996**). Track the two legs separately and require
+  the *ratio* to move, not one leg — a rising-fee/rising-PnL book is not the same defect as rising-fee/
+  falling-PnL, and conflating them is how a blip gets promoted to a trend.
+- **Rule 161 — read the counter that answers the question before asserting a mechanism is inert.** I called
+  the ADR-0094 no-trade band inert for four consecutive runs from indirect evidence. `/api/fusion/targets`
+  exposes `insideBuffer` — incremented in `PositionBuffer.apply` exactly when a planned delta is zero — and
+  it reads **13** of **20**. The band was suppressing most of the book the whole time. When a component has
+  its own telemetry, absence of proof is not proof of absence.
+- **Rule 162 — "fall back to the convention when unmeasured" is the invariant, not a bug; do not widen it.**
+  I had queued a fix to widen `PositionBuffer.widthFor`'s fallback because unmeasured μ makes `2C/μ`
+  unbounded. But **0.10 is Carver's cited convention for precisely the desk that has not measured its
+  edge**, and the method's contract says that with no measurement there is no claim to make. Widening it
+  would author a number that gates money — invariant 7 / ADR-0016. Before "fixing" a conservative fallback,
+  check whether the fallback IS the provenance.
+- **Rule 163 — sample the target book across consecutive re-plans before blaming the executor or the
+  buffer.** Across `atMillis` **1785438150584** / **1785438180812** / **1785438210932** (30s apart) the
+  targets re-randomise rather than drift: AAPL **-10.75** → **+129.53** → **+67.19**, HD **-1.48** →
+  **+42.78** → **+1.39**, NVDA **-0.08** → **-50.91**, KO **-324.08** → **-45.38**, GOOG flips sign twice.
+  The buffer's band is `|target|·TARGET_ABS/|forecast|`, so it swings *with* the target it filters. Under
+  `reversion` **1.5810674747889952** + `xsreversion` **0.9850309963910409** vs `trend`
+  **0.39443196542948245**, and `edgeGated` reading `no positive OOS edge` on every listed name, the churn is
+  a SIGNAL-stability problem upstream of every execution dial. Three cheap endpoint reads beat four cycles
+  of inference — take them first.

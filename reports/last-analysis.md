@@ -1,62 +1,76 @@
-The revert re-verified on a fourth, independent JVM — every cold sensor logs exactly one seed line and no name is warmed twice, both proved by count over the whole log — and at 4/6 cycles into its measurement window I made no change; the cycle went instead to the thing that has now become urgent rather than merely diagnosed: ALPHA's fee-to-result ratio has deteriorated four consecutive runs, with `feesPaid` climbing and `totalPnl` falling on every one, while the `fusion_targets` rows show the desk stepping ~2 shares a cycle toward targets tens of times further away and cancelling the prior slice every 30s — the inverted ADR-0101 fallback is a compounding leak, not a static one.
+The revert re-verified on a fifth independent JVM, and at 5/6 cycles I made no change — instead I spent the cycle re-testing my own diagnosis and found it was wrong: the no-trade band I have blamed for four consecutive runs is NOT inert (`insideBuffer` reads 13 of 20 names suppressed every cycle), and the ADR-0101 fallback I had queued a fix for is not "inverted" — it is Carver's cited convention for exactly the unmeasured-edge case, so widening it would have meant authoring a risk number that nothing measures. The real defect is one level up and I measured it directly: sampling the target book across three consecutive 30s re-plans, AAPL's `targetQty` goes -10.75 → +129.53 → +67.19 and HD goes -1.48 → +42.78 → +1.39 — the targets re-randomise rather than drift, so no buffer width and no adjustment rate can ever absorb them.
 
 *(Every figure below is read from the live endpoints, `logs/report.md`, `reports/improvement-ledger.md`
 or `reports/run-status.json`. None is authored here — invariant 7 / ADR-0016.)*
 
 ## Situation (answered first)
 
-1. **Money.** The SITUATION header reads total PnL **$106.86**, and computes **-22.94** since the last run
-   and **-35.44** across the last three. So the book *is* bleeding run-over-run at the firm total. The
-   `run-status.json` heartbeat `2026-07-30T18:06:10Z` still reads `pnl_growth_pct` **3.63** vs
-   `pnl_target_pct` **1.0** with `on_track` **true**, `stale` **false**, `underwater` **false** — but that
-   heartbeat predates this report, and the fresher header is the one to trust. Underneath the total,
-   `/api/attribution` reads `hedgePnl` **$135.03732831** carrying `strategyAlpha` **−$28.17919159** with
-   `hedgeMasking` **true**: the strategy books are losing and the hedge is masking it.
-2. **Risk.** Gross **$36625.58** is **2.4%** of the $1,500,000 firm cap with **$1,463,374** of headroom;
-   net **$-13291.73** is **1.3%** of the $1,000,000 net cap. Flags: **none**. Not DORMANT — `fusion_targets`
-   reads **20** instruments plus the ES hedge — and nowhere near the cap or the breaker. Note the net swung
-   negative this window while gross barely moved, which is the reversion-dominated aim (KO `targetQty`
-   **−412.71**, NEE **−351.01**, JNJ **−146.26**) pulling the book short; at 1.3% of the net cap that is a
-   read, not a danger.
-3. **Cause.** The pending change is the completed revert of the ❌ BAD ADR-0131 cold-sensor re-seed, and
-   the scorer prints `64a7a6336 still accumulating evidence (4/6 cycles) — held, not scored this run`. Its
-   *stated purpose* is ✅ VERIFIED on a fourth JVM (PID **3626405**, boot **14:06:34.573** local): keyed on
-   lifecycle+name, no cold-sensor line repeats anywhere in the log and no per-name warm line repeats
-   either; the only count>1 is the ADR-0089 rolling covariance rebuild, and the four post-boot warms are
-   genuine first-seeds of NQ and TSLA.
-4. **Danger.** No. Bleeding, yes — but with 97.6% of the gross cap unused and no flag set, the correct
-   response is to fix the cost leak, not to de-risk (Rule 147).
-5. **Order-level post-mortem.** The `recent_orders` tape is almost entirely ALPHA, with a re-plan landing
-   every ~30 seconds (**18:22:50** through **18:29:54**) and most orders dying as `fusion re-plan — passive
-   order superseded by a fresh target (ADR-0084)`. `orders_by_status` reads FILLED **3985** against
-   CANCELLED **1289**. No single trigger opened a distinct loser; the loss is the *aggregate* of the
-   re-plan cadence itself.
-6. **Change vs market.** **Not separable.** A JVM boot at **14:06:34** local sits inside this window and
+1. **Money.** The SITUATION header reads total PnL **$117.52**, **-6.43** since the last run and **+3.04**
+   across the last three — so the book is roughly flat, not bleeding, at the firm total. The
+   `run-status.json` heartbeat `2026-07-30T18:34:15Z` reads `pnl_growth_pct` **-12.89** against
+   `pnl_target_pct` **1.0** with `on_track` **false** and `stale` **true** — the objective flags flipped
+   off-track since last run, when they read `on_track` true. Underneath the total, `/api/attribution` reads
+   `firmTotal` **$116.30055246** carried entirely by `hedgePnl` **$135.03832909**, with `strategyAlpha`
+   **-$18.73777663** and `hedgeMasking` **true**: the strategy books lose, the hedge masks it.
+2. **Risk.** Gross **$37668.89** is **2.5%** of the $1,500,000 firm cap with **$1,462,331** of headroom;
+   net **$-12290.58** is **1.2%** of the $1,000,000 net cap. Flags: **none**. Not DORMANT — **20**
+   instruments in `fusion_targets` plus the ES hedge, and an actively filling tape — and nowhere near the
+   cap or the breaker.
+3. **Cause.** The pending change is the completed revert of the ❌ BAD ADR-0131 cold-sensor re-seed; the
+   scorer prints `64a7a6336 still accumulating evidence (5/6 cycles) — held, not scored this run`. Its
+   stated purpose is ✅ VERIFIED on a fifth JVM (PID **3646490**, boot **14:34:38.573** local): keyed on
+   lifecycle+name, no cold-sensor line repeats anywhere in the log; keyed on the full lifecycle class, no
+   per-name warm line repeats either; `SensorReseed` is absent from the source.
+4. **Danger.** No. With 97.5% of the gross cap unused and no flag set, the correct response is to fix the
+   cost leak, not to de-risk (Rule 147).
+5. **Order-level post-mortem.** `orders_by_status` reads FILLED **4052**, CANCELLED **1364**, REJECTED
+   **83**. Every cancellation on the `recent_orders` tape carries the same reason —
+   `fusion re-plan — passive order superseded by a fresh target (ADR-0084)` — and the clearest single
+   trace is HD, posted BUY **1** → **2** → **2** → **3** → **4** across five consecutive re-plans
+   (**18:57:28** through **18:59:59**), each slice cancelled before it filled and re-posted larger. No
+   individual trigger opened a distinct loser; the loss is the re-plan cadence itself.
+6. **Change vs market.** **Not separable.** A JVM boot at **14:34:38** local sits inside this window and
    the pending change is a revert that opens and closes nothing, so I claim neither credit nor blame for
-   the **-22.94** (Rule 141/152). What *is* attributable independently of the window is the structural
-   read: ALPHA has paid `feesPaid` **$73.682486** to show `totalPnl` **$7.64428496**, and that ratio is
-   a cost fact, not a market move.
+   the **-6.43** (Rule 141/152).
 
 ## What I decided, and why
 
-No code change — the revert is at 4/6 and a new change would destroy its evidence. The cycle went to
-hardening item #1 from "diagnosed" to "trending", which is what changes its priority. The ALPHA
-PnL/fee pair across the last four runs is monotone in both directions — **$23.36357064**/**$56.444977** →
-**$9.88820735**/**$60.552698** → **$8.61831343**/**$66.073455** → **$7.64428496**/**$73.682486**. A
-four-point monotone sequence is a trend, not a blip, and it means the inverted no-trade-band fallback is
-compounding.
+No code change — the revert is at 5/6 and a new change would destroy its evidence. So the cycle went to
+re-testing the diagnosis I have carried for four runs, and it did not survive.
 
-The mechanism is now readable in a single `fusion_targets` row, which is the cleanest evidence yet: KO
-holds `currentQty` **−69.0** against `targetQty` **−412.71** and moves `deltaQty` **−1.915**; JNJ **−14.0**
-against **−146.26** at **−2.745**; NVDA **10.0** against **124.21** at **2.795**. The step is derived by
-ADR-0080 from a 3600s e-folding time, but the aim is redrawn every 30s under `reversion` weight
-**1.6024876487480502** against `trend` **0.42024570127205746** — so the desk never arrives and pays a round
-trip each time the mean-reverting aim flips. `turnover_cost_by_name` confirms it in shares: JNJ traded
-**326** gross to hold **14**, NVDA **292** to hold **10**, PFE **528** over **18** fills.
+**The band is not inert.** `/api/fusion/targets` exposes `insideBuffer`, incremented in
+`PositionBuffer.apply` exactly when a planned delta is zero. It reads **13** of **20**. I had been asserting
+the opposite from indirect evidence without ever reading the counter that answers it directly.
 
-The defence that should stop this is configured on but inert. ADR-0101 widens the no-trade band to
-`max(fraction, min(1, 2C/mu))`, falling back to the convention when expectancy is unmeasured — and
-`strategy_diag.edgeGated` reads **13** names with `no positive OOS edge` on every one, so mu is never
-measured and every name takes the narrow **0.10** branch. mu ≤ 0 makes `2C/mu` unbounded; the fallback
-should be the *widest* band, not the narrowest. That inversion is the change queued for the cycle after
-the revert scores, with its ADR in the same commit.
+**The queued fix was wrong and is withdrawn.** I had planned to widen `PositionBuffer.widthFor`'s fallback
+on the argument that unmeasured μ makes `2C/μ` unbounded, so the narrow branch is "inverted". But **0.10 is
+Carver's published convention for precisely the desk that has not measured its edge**, and the method's own
+contract says that with no measurement there is no claim to make. Widening it would have been inventing a
+number that gates money — the exact failure invariant 7 / ADR-0016 exists to prevent. Shipping it would
+have been a self-inflicted violation dressed up as a fix.
+
+**What is actually wrong, measured rather than inferred.** Sampling `/api/fusion/targets` across three
+consecutive re-plans (`atMillis` **1785438150584**, **1785438180812**, **1785438210932**), the target book
+re-randomises: AAPL **-10.75** → **+129.53** → **+67.19**, HD **-1.48** → **+42.78** → **+1.39**, NVDA
+**-0.08** → **-6.69** → **-50.91**, KO **-324.08** → **-231.96** → **-45.38**, GOOG **+0.29** → **+1.01** →
+**-3.44**. Sign flips and order-of-magnitude swings in 30 seconds. The buffer's band is
+`|target|·TARGET_ABS/|forecast|`, so it swings *with* the target it is supposed to filter — which is why no
+width, and no adjustment rate, can absorb this.
+
+The driver is visible in the same payload: `weights` reads `reversion` **1.5810674747889952** and
+`xsreversion` **0.9850309963910409** against `trend` **0.39443196542948245**, so two fast mean-reversion
+sources dominate a 30s re-plan. And `strategy_diag.edgeGated` reports `no positive OOS edge` on every name
+it lists — MSFT `momentum -37.36954202 … mean-rev -73.69953186`, AMZN `-46.40665676`, GOOG
+`mean-rev -11.15007399`, SAP `-39.20256473 … -65.12971133`. The desk is paying round trips to chase sources
+with no measured edge, faster than those sources decay. That is the standing priority — work on edge, not
+the combiner — and it is now backed by a direct measurement rather than an inference.
+
+**I am also retracting my own trend call.** Rule 154 upgraded ALPHA's cost ratio to a four-run trend. It
+broke immediately: ALPHA `totalPnl` read **$15.27790493** and then **$17.08569992** this cycle, against the
+prior **$7.64428496**. PnL is rising. Only `feesPaid` is still monotone (**$73.682486** → **$78.463912** →
+**$79.469996**). Four monotone points were not enough to call a trend on a book this noisy, and acting on
+it would have been the overfitting the contract warns against.
+
+Next cycle, once the revert scores, item #1 is the target instability itself — damping the combined
+forecast over a horizon matched to its own decay, or re-planning at that horizon — with an ADR in the same
+commit, since it changes how every target is formed.
