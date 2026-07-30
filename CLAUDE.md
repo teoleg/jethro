@@ -12,6 +12,33 @@ risk/PnL per book, with a monitoring UI. Owner: Oleg (strong Java/C++, backend-f
   Accepted ADRs are settled; do not re-litigate them. To change one, propose a
   superseding ADR.
 
+## Runtime reality — there is NO always-on instance (check git before diagnosing "no change")
+
+Learned the hard way (chased "why is behaviour unchanged?" assuming a live app was running my
+commit — nothing was). **Nothing runs continuously.** Before claiming a change is live, or
+explaining why the owner sees no behaviour difference, **read the git commit history first** —
+the `chore(status): run …` commits and `reports/` are the ground truth of what actually ran and when.
+
+- **AWS is dormant by default** (ADR-0013 stop-when-idle) and the deploy pipeline (`deploy.yml`) is a
+  **manual** `workflow_dispatch` — it may never have run. So there is usually no deployed instance
+  serving the UI or working the book. A pushed commit changes **nothing observable** on its own.
+- **The continuous-improvement loop (ADR-0063) is the only thing that runs the app** — *ephemerally*,
+  per ~30-min cycle: build → boot → the scorer reads PnL/exposure → it commits `reports/` +
+  `reports/run-status.json` to **`claude/auto-improve`** → teardown. It is a scoring harness, not a
+  live UI the owner watches change in realtime. All reports live on that branch.
+- **So a code change becomes observable only when something re-runs it:** a loop cycle (for
+  scored PnL/reports) or **AWS brought up / a local `docker compose` run** (for the UI). A **UI**
+  change (e.g. a landing-page edit) is deterministic and shows on the next fresh serve — but only once
+  the app is actually served to the owner. State this plainly instead of implying a change is "live".
+- **Market/session gating:** when the US session is closed the tape is frozen and the loop skips
+  analysis ("Market closed — analysis skipped"); flat/unchanged is expected, not a failure. Check the
+  session state (and `feedMode`) before reading anything into a flat cycle.
+- **A new forecast source earns its weight before it sizes** (ADR-0049/0059/0064): it arrives with no
+  track record at neutral/floor weight and must accumulate measured expectancy through telemetry before
+  the edge gate lets it put risk on. A slow source (e.g. the ADR-0130 index-trend overlay) also needs
+  market-open prints + EWMAC warm-up. So "no dramatic book change immediately after wiring a signal" is
+  the designed behaviour — never present a just-added source as if it should have moved PnL this cycle.
+
 ## Design-first rule
 
 Any architecturally significant choice (hard to reverse, cross-service, cost/latency
