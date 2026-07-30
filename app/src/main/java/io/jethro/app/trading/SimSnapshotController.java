@@ -21,8 +21,9 @@ import java.util.Map;
  * subscription-only) and writes the snapshot the {@code sim-engine=historical} engine reads — turning
  * the labelled synthetic seed into genuine dynamics. A user-triggered ops action (the fetch is blocking
  * and hits an external, rate-limited source), so it's a POST you run deliberately, not on a schedule.
- * Instruments key on the shared {@link HistorySymbols#PROXY} map (SPY→ES etc.); names without a free
- * proxy (Treasury futures, swaps) are simply absent (invariant 2 — internal ids, never provider ones).
+ * Instruments come from the DYNAMIC refdata master and their proxy is derived by
+ * {@link HistorySymbols#proxyFor} (SPY→ES etc.); names without a free proxy (Treasury futures, swaps)
+ * are simply absent (invariant 2 — internal ids, never provider ones).
  */
 @RestController
 public final class SimSnapshotController {
@@ -35,13 +36,16 @@ public final class SimSnapshotController {
     }
 
     private final TradingCoreProperties properties;
+    private final io.jethro.trading.riskpnl.InstrumentRefSource refs;
     private final String tiingoToken;
     private final int years;
 
     public SimSnapshotController(TradingCoreProperties properties,
+                                 io.jethro.trading.riskpnl.InstrumentRefSource refs,
                                  @Value("${jethro.hedge.tiingo-token:}") String tiingoToken,
                                  @Value("${jethro.hedge.history-range-years:5}") int years) {
         this.properties = properties;
+        this.refs = refs;
         this.tiingoToken = tiingoToken;
         this.years = years;
     }
@@ -64,7 +68,7 @@ public final class SimSnapshotController {
         Map<String, String> symbols = proxySymbols();
         if (symbols.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "no history proxy for the sim universe (HistorySymbols.PROXY) — nothing to snapshot");
+                    "no history proxy for the universe (HistorySymbols.proxyFor) — nothing to snapshot");
         }
         var client = new TiingoHistoryClient(tiingoToken, Duration.ofSeconds(15), years);
         if (!client.configured()) {
@@ -95,8 +99,10 @@ public final class SimSnapshotController {
     /** internal instrumentId → Tiingo proxy symbol for the sim universe (invariant 2), proxy-gated. */
     private Map<String, String> proxySymbols() {
         Map<String, String> map = new LinkedHashMap<>();
-        for (String id : properties.simInstruments()) {
-            String sym = HistorySymbols.PROXY.get(id);
+        for (String id : refs.instrumentIds()) { // the DYNAMIC refdata master (invariant 9), not a list
+            String assetClass = refs.find(id)
+                    .map(io.jethro.trading.riskpnl.InstrumentRef::assetClass).orElse(null);
+            String sym = HistorySymbols.proxyFor(id, assetClass);
             if (sym != null) {
                 map.put(id, sym);
             }

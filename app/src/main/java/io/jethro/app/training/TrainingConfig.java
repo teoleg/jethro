@@ -50,12 +50,13 @@ public class TrainingConfig {
 
     @Bean(destroyMethod = "stop")
     @ConditionalOnProperty(prefix = "jethro.training", name = "enabled", havingValue = "true", matchIfMissing = true)
-    TrainingBarsLoader trainingBarsLoader(TrainingBarsStore store, TradingCoreProperties props,
+    TrainingBarsLoader trainingBarsLoader(TrainingBarsStore store,
+                                          io.jethro.trading.riskpnl.InstrumentRefSource refs,
                                           @Value("${jethro.hedge.tiingo-token:}") String token,
                                           @Value("${jethro.training.years:5}") int years,
                                           @Value("${jethro.hedge.history-request-spacing-millis:800}") long spacingMillis) {
         var client = new TiingoHistoryClient(token, Duration.ofSeconds(15), years);
-        var loader = new TrainingBarsLoader(store, client, props, spacingMillis);
+        var loader = new TrainingBarsLoader(store, client, refs, spacingMillis);
         loader.start(); // background; rebuild-on-empty, no-op when already populated / no token
         return loader;
     }

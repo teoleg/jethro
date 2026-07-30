@@ -29,16 +29,19 @@ public final class HistorySeeder {
 
     private final JdbcTemplate jdbc;
     private final TradingCoreProperties props;
+    private final io.jethro.trading.riskpnl.InstrumentRefSource refs;
     private final HistoryStatus status;
     private final HistoryClient client;
     private final int windowDays;
     private final long spacingMillis;
     private volatile Thread worker;
 
-    public HistorySeeder(JdbcTemplate jdbc, TradingCoreProperties props, HistoryStatus status,
+    public HistorySeeder(JdbcTemplate jdbc, TradingCoreProperties props,
+                         io.jethro.trading.riskpnl.InstrumentRefSource refs, HistoryStatus status,
                          HistoryClient client, int windowDays, long spacingMillis) {
         this.jdbc = jdbc;
         this.props = props;
+        this.refs = refs;
         this.status = status;
         this.client = client;
         this.windowDays = Math.max(25, windowDays);
@@ -66,8 +69,10 @@ public final class HistorySeeder {
             }
             LocalDate today = LocalDate.now();
             int names = 0, rows = 0;
-            for (String id : props.simInstruments()) {
-                String sym = HistorySymbols.PROXY.get(id);
+            for (String id : refs.instrumentIds()) { // the DYNAMIC refdata master (invariant 9), not a list
+                String assetClass = refs.find(id)
+                        .map(io.jethro.trading.riskpnl.InstrumentRef::assetClass).orElse(null);
+                String sym = HistorySymbols.proxyFor(id, assetClass);
                 if (sym == null) {
                     continue; // no history proxy for this one (e.g. Treasury futures) — skip
                 }

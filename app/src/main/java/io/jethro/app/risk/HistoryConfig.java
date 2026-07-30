@@ -28,13 +28,14 @@ public class HistoryConfig {
 
     @Bean(destroyMethod = "stop")
     @ConditionalOnProperty(prefix = "jethro.hedge", name = "history-seed", havingValue = "tiingo", matchIfMissing = true)
-    HistorySeeder historySeeder(JdbcTemplate jdbc, TradingCoreProperties props, HistoryStatus status,
+    HistorySeeder historySeeder(JdbcTemplate jdbc, TradingCoreProperties props,
+                                io.jethro.trading.riskpnl.InstrumentRefSource refs, HistoryStatus status,
                                 @Value("${jethro.hedge.tiingo-token:}") String token,
                                 @Value("${jethro.hedge.history-seed-days:60}") int windowDays,
                                 @Value("${jethro.hedge.history-range-years:5}") int years,
                                 @Value("${jethro.hedge.history-request-spacing-millis:800}") long spacingMillis) {
         var client = new TiingoHistoryClient(token, Duration.ofSeconds(15), years);
-        var seeder = new HistorySeeder(jdbc, props, status, client, windowDays, spacingMillis);
+        var seeder = new HistorySeeder(jdbc, props, refs, status, client, windowDays, spacingMillis);
         seeder.start(); // background thread; no-op-ish when a full window already exists / no token
         return seeder;
     }

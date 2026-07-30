@@ -23,15 +23,15 @@ public final class TrainingBarsLoader {
 
     private final TrainingBarsStore store;
     private final TiingoHistoryClient client;
-    private final TradingCoreProperties props;
+    private final io.jethro.trading.riskpnl.InstrumentRefSource refs;
     private final long spacingMillis;
     private volatile Thread worker;
 
     public TrainingBarsLoader(TrainingBarsStore store, TiingoHistoryClient client,
-                              TradingCoreProperties props, long spacingMillis) {
+                              io.jethro.trading.riskpnl.InstrumentRefSource refs, long spacingMillis) {
         this.store = store;
         this.client = client;
-        this.props = props;
+        this.refs = refs;
         this.spacingMillis = Math.max(0, spacingMillis);
     }
 
@@ -57,8 +57,10 @@ public final class TrainingBarsLoader {
             }
             int names = 0;
             int rows = 0;
-            for (String id : props.simInstruments()) {
-                String sym = HistorySymbols.PROXY.get(id);
+            for (String id : refs.instrumentIds()) { // the DYNAMIC refdata master (invariant 9), not a list
+                String assetClass = refs.find(id)
+                        .map(io.jethro.trading.riskpnl.InstrumentRef::assetClass).orElse(null);
+                String sym = HistorySymbols.proxyFor(id, assetClass);
                 if (sym == null) {
                     continue; // no free proxy (Treasury futures / swaps) — skip
                 }
