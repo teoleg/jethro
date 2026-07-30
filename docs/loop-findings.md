@@ -2840,3 +2840,36 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **+$19,147.75** to **$46,057.91** while PnL fell **−$12.17**, which pattern-matches to "bleeding into
   rising risk". It isn't: that gross is **3.1%** of the cap with **$1,453,942** of headroom and **no** flag
   set. Danger requires proximity to the cap or the breaker. De-risking here would have been the error.
+
+## 2026-07-30 18:00Z — the revert holds on a third JVM; ALPHA's churn traced to an inverted band fallback
+
+- **Rule 148 — a designed defence that is CONFIGURED ON can still be inert; check its fallback branch before
+  concluding it doesn't work.** `jethro.fusion.position-buffer.enabled=true` and ADR-0101's cost-aware
+  widening `max(fraction, min(1, 2C/mu))` are both live, yet no name is ever widened: the documented
+  fallback is *"Unmeasured … or non-positive cost or edge ⇒ the convention, unchanged"*, and
+  `strategy_diag.edgeGated` reads **13** names with **`no positive OOS edge`** on every one. mu is never
+  measured, so every name silently takes the **narrow** `fraction=0.10` branch. "Enabled" is not "binding".
+- **Rule 149 — an unmeasured or non-positive expectancy implies an UNBOUNDED no-trade band, not a default
+  one.** `2C/mu` diverges as mu → 0 and is meaningless below it: if the desk has no measured edge on a name,
+  rebalancing that name is *never* worth its cost. Falling back to the narrow convention is the
+  churn-permissive direction and is backwards. When a formula's denominator is unmeasured, ask which way the
+  economics point before picking the fallback — don't default to the tighter one.
+- **Rule 150 — measure churn as gross SHARES TRADED vs SHARES HELD, not as turnover in dollars.** Turnover
+  alone can't distinguish one-way convergence from round-tripping. `turnover_cost_by_name.qty` against
+  `fusion_targets.currentQty` settles it: JNJ traded **299** to hold **13**, AAPL **197** to hold **12**,
+  NVDA **263** over **119** fills. That is round-tripping, and it renamed the defect away from "the re-plan
+  doesn't net against the working slice" (Rule 144) — the slices net fine; the *aim* flips.
+- **Rule 151 — the aim is redrawn ~120× per e-folding time, and that ratio is the churn.** ADR-0080 derives
+  `adjustment-rate` = 1 − exp(−30/3600) = **0.0082987…** (a 3600s time constant) while the fusion loop
+  re-plans every **30s** on a book whose dominant source is `reversion` at weight **1.5417176854024859**
+  against `trend` **0.3723889694091483**. AAPL sits at `currentQty` **−12.0** against `targetQty`
+  **−153.110674** — it never arrives, and pays a round trip each time the mean-reverting aim flips. Compare
+  the re-plan cadence to the convergence time constant before blaming the executor.
+- **Rule 152 — check for a JVM restart inside the window before attributing anything.** This window contains
+  a boot at **13:34:34** local, and PnL **+$16.33** / gross **−$18,702.44** looks like a de-risking result.
+  It isn't attributable: a revert that opens and closes nothing cannot have produced it, and a restart
+  rebuilds the book from warm state. Say "not separable" (Rule 141) rather than crediting the revert.
+- **Rule 153 — MACRO is losing directionally, and the churn fix cannot touch it.** `/api/attribution` reads
+  book MACRO `totalPnl` **−$35.82347655**, all realized, on `feesPaid` of just **$0.169833** — the largest
+  single negative line inside `strategyAlpha` **−$27.20516312**, with essentially no turnover. A cost fix
+  aimed at ALPHA will leave it intact; it needs its own cycle and its own trigger-level post-mortem.

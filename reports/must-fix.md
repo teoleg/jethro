@@ -15,6 +15,128 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-30 18:00Z (revert ✅ VERIFIED on a THIRD JVM — at 3/6, no change made; item #1's mechanism is now pinned to a specific line of config)
+
+**Third independent reproduction.** A new process (PID **3603471**, boot at **13:34:34**–**13:34:37** local
+`-04:00`) — different from the 17:00Z and 17:30Z JVMs — so the four pre-registered legs are re-tested on
+fresh evidence:
+- **No second re-seed wave, proved by count (Rule 142).** Across the *entire* running log, keyed by
+  lifecycle+name, the duplicate check `grep -oP '(Trend|Reversion)ForecastLifecycle\s+: \w+ sensor still
+  cold for \S+' | sort | uniq -c | awk '$1>1'` returns **nothing** — every cold name logs its line exactly
+  **once** (`TrendForecastLifecycle : trend sensor still cold for XOM` 1, `… UNH` 1, `… PG` 1, `… PFE` 1,
+  `… NEE` 1, `… TSLA` 1, `… NQ` 1, `… NFLX` 1, and each of the twelve rates tenors 1). A count of one is
+  unfalsifiable by clock skew; the wave-over-wave regressions that scored ADR-0131 ❌ BAD have no mechanism
+  to recur.
+- **ADR-0071 boot seeding still fires.** **63** `sensor warmed` lines; **58** are stamped **13:34:40**–
+  **13:35:15**, inside the boot window.
+- **Every late line checked individually (Rule 143).** The 11 post-boot `warmed` lines are **7** ADR-0089
+  covariance rebuilds (`fusion covariance warmed 19 of 19 … 20 of 21 … 22 of 24 name(s) from 121
+  synchronised snapshots`) — a rolling matrix rebuild as new names arrive, not a sensor re-seed — plus
+  **4** genuine first-seeds of late-arriving instruments (`risk-cut σ sensor warmed JPM` 13:35:36,
+  `cross-sectional reversion sensor warmed GOOGL` 13:37:56, `… META` 13:38:16, `… AUDUSD` 14:00:22). None
+  re-seeds an already-seeded name.
+- `grep -rn "SensorReseed" --include=*.java app/` returns nothing; the only `re-seed` hits are
+  `PositionBuffer`'s aim re-seed (ADR-0064/0075, unrelated) and the sim control endpoint.
+
+**Item #1 of the 16:30Z block stays CLOSED.** Three independent JVMs, four legs each.
+
+**No change made this cycle.** `scripts/score-change.py score` prints
+`64a7a6336 still accumulating evidence (3/6 cycles) — held, not scored this run` and
+`reports/.pending-baseline.json` is present, so a new change would destroy the evidence.
+
+**Live situation.** `/api/risk` `.total` reads total PnL **$130.80462716**, gross **$36483.18000000**
+(**2.4%** of the $1,500,000 firm cap, headroom **$1,463,517**), net **$2427.90000000** (**0.2%** of the
+$1,000,000 net cap). Flags: **none**. The SITUATION header computes **+$16.33** PnL and **−$18,702.44**
+gross on the run; **+$5.56** and **+$174.35** across the last three. `run-status.json` (heartbeat
+`2026-07-30T17:34:04Z`) reads `pnl_growth_pct` **−19.1** against `pnl_target_pct` **1.0**, `on_track`
+**false**, `stale` **true**, `underwater` **false**. 20 equity positions plus the ES hedge — not DORMANT,
+not in danger (97.6% of the gross cap unused).
+
+**Attribution caveat.** A JVM restart lands inside this window (boot **13:34:34** local = **17:34Z**), and
+the pending change is a *revert* that opens and closes nothing. The **+$16.33** / **−$18,702.44** move is
+therefore **not separable** into market vs change from these numbers — claim neither (Rule 141).
+
+### 🎯 Item #1 — ALPHA churns many times its held position in notional; the cost-aware no-trade band that should stop it is INERT (mechanism now pinned)
+
+Still #1, and this run finally names the *line* rather than the symptom.
+
+**The cost.** `/api/attribution` reads ALPHA `totalPnl` **$8.61831343** against `feesPaid` **$66.073455**
+— the fee-to-result ratio deteriorated for the third consecutive run (17:30Z: **$9.88820735** vs
+**$60.552698**; 17:00Z: **$23.36357064** vs **$56.444977**) exactly as Rule 145 said to track. `firmTotal`
+**$130.80462716** is carried entirely by `hedgePnl` **$158.00979028** with `hedgeMasking` **true**, while
+`strategyAlpha` reads **−$27.20516312**.
+
+**The churn, measured as gross shares traded vs shares held** (`turnover_cost_by_name` `qty` against
+`fusion_targets` `currentQty`) — this is the sharp number, and it is a *round-trip* signature, not
+one-way convergence:
+- JNJ traded **299** shares gross to hold **13**; turnover **$79,572.63** over **60** fills.
+- AAPL traded **197** shares gross to hold **12**; turnover **$66,315.06** over **82** fills.
+- NVDA **263** shares over **119** fills, **$50,956.57**; MSFT **145** over **100** fills, **$60,813.96**;
+  GOOG **216** over **93** fills, **$72,199.39**; JPM **198** over **68** fills, **$69,031.25**.
+All at **1.00** bps, against a firm `grossExposure` of **$36,483.18** — six single names each churning more
+notional in the window than the whole firm has at risk. `orders_by_status` reads FILLED **3895**,
+CANCELLED **1229**.
+
+**The mechanism, from `fusion_targets` + config.** AAPL reads `targetQty` **−153.110674** against
+`currentQty` **−12.0** and `deltaQty` **−1.379481`: the desk is nowhere near its target and steps toward it
+by ~1.4 shares a cycle. That is ADR-0080 working as designed — `jethro.fusion.adjustment-rate=0` derives
+a = 1 − exp(−interval/horizon) = **0.0082987…** at 30s/3600s, i.e. a 3600s e-folding time. But the **aim is
+recomputed every 30s**, and `fusion_targets.weights` reads `reversion` **1.5417176854024859` as the
+dominant source (vs `trend` **0.3723889694091483`) — a mean-reverting view whose sign flips far faster than
+the desk converges. So the desk pays a round trip chasing an aim it re-draws **120 times per e-folding
+time**, which is precisely why gross shares traded ≫ shares held.
+
+**Why the designed defence is not firing.** ADR-0101 already widens the no-trade band to
+`max(fraction, min(1, 2C/mu))` where mu is the gross expectancy of the best source clearing the edge gate —
+and the config comment states the fallback: *"Unmeasured (gate inactive, no passing source, non-positive
+cost or edge) ⇒ the convention, unchanged."* `strategy_diag.edgeGated` reads **13** names, **every one**
+`no positive OOS edge` (e.g. `momentum -137.76114263 over 8 paths, mean-rev -1.56304119 over 8`;
+`momentum -58.18505489 over 4 paths, mean-rev -41.67661313 over 4`). With mu unmeasured or non-positive on
+every name, the measured width **never** applies and every name falls back to
+`jethro.fusion.position-buffer.fraction=0.10` — the *narrow*, churn-permissive branch. The economics say
+the opposite: mu ≤ 0 does not mean "unmeasured, use the convention", it means 2C/mu is **unbounded** —
+rebalancing is *never* worth its cost. **The fallback is inverted.**
+
+**Planned change (next scored cycle, not this one).** In the ADR-0101 width path, treat *non-positive or
+absent* measured expectancy as a **maximal** band for the risk-INCREASING part of a delta (exits keep
+trading in full per ADR-0080), instead of falling back to the 0.10 convention. No new dial, no new number —
+it re-reads the same two measured inputs the edge gate already computes, and it can only ever remove
+turnover. Architecturally significant (it changes when the desk is allowed to add risk) ⇒ ships with its
+ADR at `**Status:** Implemented` in the same commit.
+
+**Risk to watch:** widening the band on every unmeasured name could take the book toward DORMANT. The
+VERIFY-BY below therefore tests turnover **and** that the book keeps positions.
+
+**VERIFY-BY (the cycle after the change ships):**
+1. `turnover_cost_by_name` `qty` against `fusion_targets` `currentQty` for JNJ / AAPL / NVDA / MSFT: the
+   gross-shares-traded-to-shares-held gap must narrow from today's **299 vs 13** and **197 vs 12**.
+2. `/api/attribution` ALPHA `feesPaid` must fall **relative to** `totalPnl` — today **$66.073455** against
+   **$8.61831343**. The ratio is the metric (Rule 145), not the absolute fee.
+3. `/api/risk` `.total` `grossExposure` must **not** collapse toward zero — the book must still hold ~20
+   equity positions. A flat book is a failed fix, not a cheap one.
+4. `orders_by_status` CANCELLED must fall from **1229** against FILLED **3895**.
+
+### Item #2 — MACRO loses money with essentially no turnover (new, promoted from the attribution read)
+
+`/api/attribution` reads book MACRO `totalPnl` **−$35.82347655**, all of it `realizedPnl`, against
+`feesPaid` of only **$0.169833**. That is a *directional* loss, not a cost leak — the churn fix cannot touch
+it, and it is currently the largest single negative line inside `strategyAlpha` **−$27.20516312**. Not
+diagnosed yet; needs its own cycle to attribute to a trigger via `recent_orders`.
+**VERIFY-BY:** MACRO `totalPnl` in `/api/attribution`, and the `reason` on the MACRO orders that opened the
+losing legs.
+
+### Item #3 — reversion at the LONG horizon is the only positively-signed source (carried, Rule 146)
+
+`/api/signals/telemetry` at `horizonSeconds` **3600** reads `reversion` `avgReturnBps`
+**7.040602706195695** on **222** resolved (`hitRate` **0.4797687861271676**), `social`
+**4.320115108384597** on **118**, `xsreversion` **1.591113315140675** on **205** — against `trend`
+**−4.31583873924045** on **250** and `momentum` **−3.1019291527777773** on **22**. Significance is the edge
+gate's to compute, but a positive sign on a large resolved count is where an OOS test is worth a cycle.
+**VERIFY-BY:** an OOS backtest (ADR-0049) on the long-horizon reversion source, and whether the edge gate
+subsequently lets it size.
+
+---
+
 ## Verification block — 2026-07-30 17:30Z (revert ✅ VERIFIED on a second, independent JVM — at 2/6, no change made)
 
 **Independent reproduction of last run's verdict.** This is a different process (PID 3583451,
