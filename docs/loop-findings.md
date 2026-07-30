@@ -2604,3 +2604,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   position was open, and PnL sat at $126.87 for the third consecutive run. ADR-0131 takes no credit for
   the warmed sensors (a clean boot did that) and no blame for the flat book (ADR-0126's σ veto is doing
   that, by design).
+
+## 2026-07-30 14:30Z — the book reopened, and ADR-0131's retry is unreachable code on 3 of its 4 call sites
+
+- **Rule 118 — a retry cadence measured in the sensor's own units can be longer than the process lives.**
+  `SensorReseed` counts *sightings*, one per scheduled tick of the owning lifecycle, at a cadence equal to
+  `warmupSamples()`. Multiplied by each configured interval that is **16.1 min** (trend, 193×5s),
+  **40.2 min** (reversion and xs-reversion, 241×10s) and **60.5 min** (σ, 121×30s) — against a JVM whose
+  `uptimeSeconds` was **1410 (23.5 min)** and whose previous boot was **~17 min** earlier, because the
+  loop redeploys every cycle. The counters are in-heap, so they die with the process. Three of four call
+  sites can *never* reach their retry. Trend was the only source that recovered, and its cadence is the
+  only one shorter than the process lifetime — the arithmetic predicted exactly which one would work.
+  **The warm-up length is the right seed span and the wrong retry period.** When you derive a period from
+  a sensor constant "to avoid inventing a dial", check the product against the process's actual lifetime.
+- **Rule 119 — when a log line fires on every attempt, its ABSENCE is proof, not weak evidence.**
+  `warmWhileCold` logs INFO on warm and WARN on still-cold, unconditionally. So "every boot-cold name has
+  exactly one `still cold` line" is not ambiguity about verbosity — it is positive proof that no second
+  attempt ran. Establish the logging contract *first*; then a missing line is a measurement.
+- **Rule 120 — both VERIFY-BY numbers can go green while the mechanism stays dead.** σ-warmed went 1→2
+  and `deltaQty` went non-zero (NVDA **−4.127545**, MSFT **−0.040934**) — the exact two tests written last
+  cycle. Both were false positives: the second σ line was NQ's *first* seed as a late-arriving instrument
+  (all four of its sensor lines stamped 10:19), MSFT's σ came from the boot seed at 10:07:11, and NVDA's
+  armed off the live tick stream. **Write VERIFY-BY tests that only the mechanism can pass** — the next
+  one is a *second* `still cold` line for a name that already logged one, which nothing else can produce.
+- **Rule 121 — when one lock opens, re-read which lock is now binding; the ranking moves.** With σ no
+  longer universal, `strategy_diag.edgeGated` holds **13 of 20** names out on `no positive OOS edge`
+  (GOOGL momentum **−58.18505489**, PFE **−137.76114263**, PG **−82.99627912**) against large real targets
+  (WMT **+386.53347**, BAC **+535.398702**) all sitting at `deltaQty: 0`. That is ADR-0064 working as
+  designed, not a defect — the answer stays a new signal with measured edge, never a looser gate.
+- **Attribution this window (honest split):** **desk activity, cause not separable.** Total PnL
+  **$147.57045400** (+**$20.70**), gross **$3288.885** from $0.00, on the only two names traded — MSFT
+  **+6** (totalPnl **$77.06615500**) and NVDA **−3** (**$19.29237792**), both opened this window. ADR-0131
+  takes **no credit**: MSFT's σ came from the boot seed and NVDA's from the live stream, neither being the
+  path ADR-0131 added, and that path never ran. How much of the +$20.70 is market drift on two intraday
+  positions versus selection cannot be separated from these numbers, so no cause is claimed.

@@ -15,7 +15,72 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
-## Verification block — 2026-07-30 14:00Z (ADR-0131 at 1/6 cycles — held, no code change made)
+## Verification block — 2026-07-30 14:30Z (ADR-0131 at 2/6 cycles — held, no code change made)
+
+**THE BOOK IS OPEN.** After three runs pinned at $0.00 gross, live `/api/risk` `.total` reads total PnL
+**$147.57045400** and gross exposure **$3288.88500000** (net **$2108.47500000**) — **0.2%** of the firm
+gross cap, headroom **$1,496,711**. Two names carry it: ALPHA **MSFT +6** (totalPnl **$77.06615500**) and
+ALPHA **NVDA −3** (totalPnl **$19.29237792**). No DANGER flag; this is a dormant book coming back on with
+its whole budget still unused, which is the goal, not a risk event.
+
+**Prior item #1 (ADR-0131, the boot-only warm-start seed) → ⚠️ STILL-BROKEN as a mechanism, even though
+both of its VERIFY-BY numbers read green.** Stated precisely, because the distinction is the whole point:
+- (a) `grep -c "risk-cut σ sensor warmed"` since boot = **2** (was 1) — numerically passes. But the two
+  lines are MSFT at **10:07:11** (38s after the 10:06:33 boot — the boot seed) and NQ at **10:19:45**.
+  Every one of NQ's four sensor lines is stamped 10:19, so NQ is a **late-arriving instrument's first
+  seed**, not a re-seed of a previously-cold name.
+- (b) a non-zero `deltaQty` on `/api/fusion/targets` — **passes**: NVDA **−4.127545**, MSFT **−0.040934**.
+  But MSFT's σ came from the boot seed and NVDA's armed off the live tick stream; neither is the retry.
+- **The retry has not fired once.** `TrendForecastLifecycle.warmWhileCold` logs on *every* attempt (INFO
+  when warm, WARN when still cold), so a second attempt is impossible to miss — and every boot-cold name
+  still shows exactly **one** `still cold` line, 24 minutes in.
+
+**Root cause of the non-firing, now located — the cadence is longer than the JVM lives.** `SensorReseed`
+counts *sightings*, and a sighting is one scheduled tick of the owning lifecycle. Multiplying each
+sensor's `warmupSamples()` by its configured interval gives the real retry period:
+
+| sensor | cadence × interval | retry period |
+|---|---|---|
+| trend | 193 × `jethro.fusion.trend.interval-seconds=5` | **16.1 min** |
+| reversion | 241 × `jethro.fusion.reversion.interval-seconds=10` | **40.2 min** |
+| xs-reversion | 241 × `jethro.fusion.xs-reversion.interval-seconds=10` | **40.2 min** |
+| σ / plan | 121 × `jethro.fusion.interval-seconds=30` | **60.5 min** |
+
+This process's `uptimeSeconds` at report time was **1410 (23.5 min)**, and the previous boot was 09:49:40
+against this one at 10:06:33 — **~17 min apart**, because the improvement loop redeploys the JVM every
+cycle. `SensorReseed`'s counters are in-heap and die with the process. So for reversion, xs-reversion and
+σ the retry period **provably exceeds the process lifetime** and the counter is destroyed before it can
+ever elapse — ADR-0131's mechanism is unreachable code for three of its four call sites. Only trend's
+16.1 min is short enough to fire at all, which is exactly why trend is the one source that recovered.
+
+### 🎯 Item #1 (carried, root cause now known) — ADR-0131's re-seed cadence outlives the process
+
+**The fix this implies (next cycle, once the pending scorer window closes):** the retry cadence must be
+anchored to *elapsed sightings that can actually occur within a process*, not to the sensor's warm-up
+length in samples. The warm-up length is the right *seed span*; it is the wrong *retry period*. Either
+retry on a short fixed sighting count independent of `warmupSamples()`, or persist the cold-set across
+boots so the counter survives the redeploy. This is a bug fix, not a new dial — no money/risk number.
+
+**VERIFY-BY (next run):** a **second** `still cold` WARN line for at least one name that logged one at
+boot — i.e. `grep "still cold" logs/jethro-app.log | grep -oE "for [A-Z]+" | sort | uniq -c` must show a
+count **≥ 2** for some name. That, and only that, proves a retry executed.
+
+### Item #2 (raised in importance — it is now the binding constraint on 13 of 20 names)
+
+With σ no longer blocking universally, `strategy_diag.edgeGated` is what holds the rest of the book out:
+**13 names** each annotated `no positive OOS edge` — GOOGL (momentum **−58.18505489**, mean-rev
+**−41.67661313**), PFE (**−137.76114263** / **−1.56304119**), PG (**−82.99627912** / **0.00000000**), BAC,
+HD, JPM, UNH, AMZN, GOOG, SAP, MSFT, EURUSD, GBPUSD. Their fusion targets are large and real — WMT
+**+386.53347**, BAC **+535.398702**, PG **+233.664843** — and every one sits at `deltaQty: 0`.
+
+This is the ADR-0064 gate working **as designed**, not a defect: `signals_telemetry` at 3600s still reads
+trend **−5.992629598477899 bps** and social **−0.16243977111823402 bps** at 900s. The three sources that
+are positive at 3600s — reversion **+6.535654299927848 bps**, xsreversion **+6.0462675948088975 bps**,
+momentum **+5.531570972222222 bps** — are not separable from noise at these cohort counts
+(`stdCohortMeanBps` **35.81 / 46.64 / 33.46** against **45 / 12 / 6** cohorts). Per the standing priority,
+the answer here is **a new signal with genuinely measured edge**, never loosening the gate.
+
+---
 
 **Prior item #1 (ADR-0131, the boot-only warm-start seed) → ⚠️ PARTIALLY VERIFIED — the forecast half is
 green, the mechanism itself is still unexercised.** Its VERIFY-BY was `sources ≥ 2` and a non-zero
