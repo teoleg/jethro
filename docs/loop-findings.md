@@ -3102,3 +3102,31 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   rising tape: that is **market**. The mechanism-attributable cost is turnover — ~**$1.6M** traded notional
   on a **$77.7k** book, `fees` **105.584233 → 129.292241**, FILLED **4495** / CANCELLED **1509** with every
   cancel reasoned *"fusion re-plan — passive order superseded by a fresh target (ADR-0084)"*.
+
+## 2026-07-31 16:05Z — the sign inversion un-flipped with nothing fixed, while coverage got worse (no change; ADR-0133 at 5/6)
+
+- **Rule 189 — a partial-sample sign error can self-clear WITHOUT a fix; track coverage, never sign, as the
+  invariant.** Last cycle `Σ βᵢ·Eᵢ` was **+5,657.02** against a negative book and I ranked the *inversion* as
+  the headline. This cycle it reads **-5,786.42** against net equity **-89,268.235** — correctly signed,
+  nothing changed. The entire difference is NVDA's net going **+10,371.04 → -393.20**: one name at beta
+  **1.75** was carrying the inversion. Meanwhile the real defect worsened — uncovered net
+  **-83,809.485 = 93.9%** of |net| vs **71.3%** last cycle, so the hedge sizes off ~**6.5%** of the
+  systematic risk. Had I written the item as "sign inverted", this cycle would have read as a fix and closed
+  it. Write the defect as the measurable that cannot flip by luck.
+- **Rule 190 — the report's Postgres ERROR log contains the LOOP'S OWN failed psql queries; check the SQL
+  exists in app code before ranking it.** `column "hedge_beta" does not exist` (15:30:46Z) looked like a
+  live app defect gating the betas. It is a past cycle's ad-hoc query against an EAV table
+  (`instrument_attributes` is `instrument_id | name | value`), sibling to `relation "instrument_attribute"
+  does not exist` (15:06:33Z) and `column a.attr_key does not exist` (15:06:40Z). `grep -rn hedge_beta
+  --include=*.java --include=*.sql` hits only `backups/*.sql`. One grep separates a defect from my own shell
+  history.
+- **Rule 191 — "stale" and "absent" are different failures, and a VERIFY-BY written for one cannot grade the
+  other.** Last cycle's item #2 VERIFY-BY was "ES's `providerTimestampMillis` advances between two polls".
+  This cycle ES has **no row at all** in `/api/marks` (**36** marks returned, no ES), so that test is
+  unrunnable — not passing, not failing. State existence before freshness in any VERIFY-BY on a feed.
+- **Rule 192 — before blaming refdata for an unpriceable instrument, check the config already has a
+  fallback.** ES and NQ both carry `yahoo` symbology (**ES=F**, **NQ=F**) and multipliers (**50**, **20**),
+  and `jethro.hedge.equity-proxy-candidates=ES,NQ` already lists a fallback that `HedgeAdvisor.candidates()`
+  filters by live price. NQ **is** priced (**1785512939000**) yet the axis still pins `proxyId` **ES** at
+  `status` **WARMING** with `covarianceReady` **false**. The gap is in the selection path or the covariance
+  gate, not the reference data — a wrong diagnosis here would have shipped a pointless migration.

@@ -15,6 +15,132 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 16:05Z (ADR-0133 is UNDER MEASUREMENT at 5/6 — **no code change made this cycle**, per the pending-baseline rule. **Item #1 stays #1 and its magnitude error got worse**; last cycle's headline sign inversion **un-flipped on its own with nothing fixed**, which is evidence for the item, not against it. Item #2's proxy went from *frozen* to *absent*.)
+
+**Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**
+`scripts/score-change.py score` prints `e61c7f5aa still accumulating evidence (5/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` still exists. Held, unscored; **no new change this
+cycle**.
+
+- **Deployed: ✅ confirmed.** Fresh boot — `ops_jvm.uptimeSeconds` **1078** at report generation and
+  **1127** on a later direct read.
+- **Did it do what it claimed: ⚠️ still unscored.** The band is being exercised across a live book; the
+  sign of its effect is the scorer's at 6/6, not mine.
+- **Regression check: none attributable.** Breaker untripped, `/api/marks/quarantined` **[]**, no new
+  WARN/ERROR classes.
+
+**Live situation.** SITUATION header: total PnL **$457.39**, gross **$124,652.20** (**8.3%** of the
+$1,500,000 firm cap, headroom **$1,375,348**), net **-$86,242.18** (**8.6%** of the $1,000,000 net cap),
+PnL **-74.15** since last run and **-283.28** over three, **Flags: none**. Live `/api/risk` `.total`:
+`totalPnl` **457.61324815**, `realizedPnl` **605.62787143**, `unrealizedPnl` **-148.01462328**, gross
+**122,936.565**, net **-87,970.885**. Heartbeat `2026-07-31T15:41:42Z`: `pnl_growth_pct` **-28.04** vs
+`pnl_target_pct` **1.0**, `on_track` **false**, `stale` **true**, `underwater` **false**. Off target and
+bleeding mildly — but at 8.3% of the gross cap with the breaker untripped, **not** the DANGER state.
+
+**Attribution (change vs market).** No code change this cycle, so nothing is attributable to one. The desk
+is net short equity **-$87,970.89** into a firm tape, and `unrealizedPnl` **-148.01462328** against
+`realizedPnl` **605.62787143** is that mark-to-market — **market, not mechanism**. Gross **+50,996.19**
+run-over-run is the book deploying into a $1.37M headroom, which is the objective.
+
+**Rejected before it cost a cycle — not a defect.** The report's Postgres log shows `column "hedge_beta"
+does not exist` at **15:30:46Z**. That is a *past loop cycle's own* ad-hoc psql query against an EAV table
+(`instrument_attributes` is `instrument_id | name | value`), the same class as `relation
+"instrument_attribute" does not exist` (15:06:33Z) and `column a.attr_key does not exist` (15:06:40Z). No
+app code queries a `hedge_beta` column — `grep -rn hedge_beta --include=*.java --include=*.sql` hits only
+`backups/*.sql` seed data.
+
+### 🎯 Item #1 (UNCHANGED RANK) — the beta-covered subset is not a representative sample of the book: the hedge sizes off ~6.5% of the systematic risk it is meant to neutralise
+
+**Proving numbers, read live this cycle from `/api/risk` positions × the live `hedge_beta` rows:**
+
+- equity net total **-89,268.235**
+- beta-covered net **-5,458.75**; **UNCOVERED net -83,809.485 = 93.9% of |net|** (last cycle **71.3%**)
+- **Σ βᵢ·Eᵢ = -5,786.4225** against a **-89,268.24** book — the hedge sees about **6.5%** of the risk
+- covered contributions: MSFT **-7,138.362**, AMZN **+3,878.064**, GOOG **-2,214.387**, NVDA **-688.100**,
+  AAPL **+376.3625**, JNJ/JPM **0** (flat)
+
+**The sign inversion self-cleared — and that CONFIRMS the item.** Last cycle Σβ·E was **+5,657.02** against
+a negative book; this cycle it is **-5,786.42**, correctly signed. Nothing was fixed. The whole difference
+is NVDA's net going **+10,371.04 → -393.20**: one name, at beta **1.75**, was carrying the inversion. A
+statistic whose *sign* flips on one position's move is not a risk measurement. Coverage, not sign, is the
+invariant to track — and coverage got **worse** (71.3% → 93.9% uncovered).
+
+**Mechanism, unchanged and confirmed in the source.** `HedgeMath.structuralBetaHedge` (lines 168-170):
+`if (beta == null || eUsd == null || eUsd.signum() == 0) { continue; }` — a name with no assigned beta is
+silently dropped from both `systematic` and `netExposure`. Live `instrument_attributes` carries
+`hedge_beta` for exactly **8** rows — AAPL **1.25**, AMZN **1.20**, GOOG **1.05**, JNJ **0.55**, JPM
+**1.10**, MSFT **1.10**, NVDA **1.75**, SAP **1.00** (V32, the sim-era universe) — against **28** equities
+in the master, and the desk currently holds **23** positions across names like HD, CAT, NEE, XOM, WMT, UNH,
+PFE, KO, MCD, BAC, CVX, TSLA, NFLX, META that carry no beta at all.
+
+**Ranking note — this must be fixed BEFORE item #2.** Item #2 (no live proxy price) is currently the only
+reason the mis-sized target is not being traded: the axis reads WARMING and sizes nothing. Restoring the
+proxy price first would convert a passive gap into an active mis-hedge. Sequence matters here.
+
+**The fix must NOT hand-author betas.** CLAUDE.md names a `β=1.0` placeholder as a lesson already paid for;
+a self-chosen beta that sizes a hedge is exactly the invented risk number the house rules forbid. The change
+derives each name's beta **in code** from the durable mark history the platform already stores (stated
+estimator, cited convention), and the axis must refuse to claim neutrality while coverage is partial.
+Architecturally significant → ships with an ADR (`**Status:** Implemented`) in the same commit.
+
+**VERIFY-BY (next run).** On the `/api/hedging` EQUITY axis: (a) a published beta-coverage figure exists and
+reads **≥ 0.95** of `|netExposureUsd|`; (b) `sign(rawTargetNotionalUsd)` is opposite `sign(netExposureUsd)`
+on a live read; and (c) `status` does **not** read ON-TARGET while coverage is partial. In Postgres,
+`select count(*) from instrument_attributes where name='hedge_beta'` covers every equity carrying exposure.
+
+### Item #2 — ⚠️ STILL-BROKEN and WORSE: the equity hedge proxy went from a frozen price to NO price row at all
+
+**Proving numbers this cycle.** ES is **absent from `/api/marks` entirely** — the endpoint returns **36**
+marks (AAPL, AMZN, BAC, CAT, CVX, GOOG, GOOGL, HD, JNJ, JPM, KO, MCD, META, MSFT, NEE, NFLX, **NQ**, NVDA,
+PFE, PG, TSLA, UNH, the SOFR/TSY curve points, WMT, XOM) and **no ES row**. Last cycle ES was present with
+a frozen `providerTimestampMillis` **1785509694000**; now the row is gone, so the staleness test from last
+cycle's VERIFY-BY cannot even be run — a strictly harder failure.
+
+`/api/hedging` EQUITY axis: `status` **WARMING**, `tier` **"—"**, `targetProxyQty` **null**,
+`rawTargetNotionalUsd` **null**, `hedgeRecommended` **false**, `covarianceReady` **false**, on
+`netExposureUsd` **-87,968.53**, rationale *"net equity -87968.53 to hedge, but no tradable proxy can be
+sized yet (price/covariance/betas missing)"*. `/api/marks/quarantined` **[]** — not the ADR-0042 quarantine.
+
+**The held hedge is still carried at zero.** `/api/risk` position: `bookId` **HEDGE**, `instrumentId`
+**ES**, `quantity` **0.022800**, `avgCost` **7478.33667943**, `hasMark` **false**, `mark` **0.00000000**,
+`markAgeMillis` **-1**, `netExposure` **0.00000000**, `grossExposure` **0.00000000**. CLAUDE.md defines
+"total" as the whole book *including* the hedge, so headline gross **$124,652.20** understates money at
+risk by the proxy's notional.
+
+**Sharpened diagnosis — the fallback exists but is not yielding a candidate.** `NQ` **is** priced
+(`providerTimestampMillis` **1785512939000**) and **is** already configured as a fallback:
+`jethro.hedge.equity-proxy-candidates=ES,NQ` with `jethro.hedge.equity-proxy=ES`
+(`app/src/main/resources/application.properties:164,166`). `HedgeAdvisor.candidates()` (line 531-532)
+documents "tradable candidates only (live price, not quarantined)". Yet the axis still reports `proxyId`
+**ES** and sizes nothing — so either the price gate is rejecting NQ too (its mark is itself minutes old) or
+`covarianceReady` **false** is the binding constraint. Refdata is not the cause: both ES and NQ carry
+`yahoo` symbology (**ES=F**, **NQ=F**) and contract multipliers (**50**, **20**) in `/api/instruments`.
+
+**VERIFY-BY (next run).** An ES row **exists** in `/api/marks` and its `providerTimestampMillis` advances
+between two polls 30 s apart; **and** the HEDGE book's ES position reads `hasMark` **true** with
+`grossExposure` **> 0**; **and** the EQUITY axis leaves `status` **WARMING**. If ES genuinely cannot be
+priced on this feed, the axis must say *that* explicitly rather than the generic "price/covariance/betas
+missing", and the candidate list must actually fall through to a proxy the feed does print.
+
+### Item #3 — ⚠️ carried, unchanged: the ADR-0126 σ-cold veto freezes the book after any long market gap
+
+`FusionLifecycle.seedVolatility` still guards on `volSeeded.add(instrument)`, so the seed runs once per
+process; a weekend, an outage or a pre-market start empties the recent tail and the same freeze returns.
+Re-rank to the top the moment a boot logs `still cold` below ~100/121 again.
+**VERIFY-BY.** After the next weekend or multi-hour gap, count the boot's `risk-cut σ sensor still cold`
+lines and their seeded/121 ratios; and read `/api/fusion/targets` for the number of aims at exactly 0.0
+within 10 minutes of boot. Prior remedy ADR-0131 scored ❌ BAD and is retired — a different lever is
+required (Rule 175).
+
+### Item #4 (carried) — ADR-0132's destination clamp has never been observed firing
+
+Unchanged. No clamp telemetry is published, so there is still no live evidence the `onTargetSide` branch
+has ever been reached.
+**VERIFY-BY.** A published counter, or a `/api/fusion/targets` row whose `deltaQty` stops strictly short of
+flat on the target's side while the aim sits across it.
+
+---
+
 ## Verification block — 2026-07-31 15:40Z (ADR-0133 is UNDER MEASUREMENT at 4/6 — **no code change made this cycle**, per the pending-baseline rule. **Item #1 is ESCALATED, not replaced**: last cycle's #1 said the structural hedge under-covers; this cycle the covered subset's sign is INVERTED against the book, and a second defect — the hedge proxy has no live price — is currently the only thing stopping it from trading backwards)
 
 **Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**
