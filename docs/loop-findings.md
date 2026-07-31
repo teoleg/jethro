@@ -2992,3 +2992,30 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   all of them in a separate exact-decimal script written from the ADR's formula; it reproduced the Java
   output digit for digit (3.281482, 1.812000, 0.603106, 103.757400, −27.803973). That makes the test a
   real check rather than a transcription of whatever the code now happens to emit.
+
+## 2026-07-31 14:00Z — the book is liquidated at every boot, and the σ-cold veto blocks only the rebuild (no change; ADR-0133 at 1/6)
+
+- **Rule 172 — before spending a change on a gate, confirm the live book actually REACHES it.** Two cycles
+  running I fixed the position buffer — ADR-0132's destination clamp, ADR-0133's band cap — and both were
+  graded UNVERIFIABLE, for the same structural reason: `mayIncrease` is false for every name (σ-cold), so
+  the reduce-only branch re-seeds `aim` to `held + delta` = 0 *before* either fix is consulted. With aim 0
+  and `currentQty` 0 the gap is zero, so the band is never evaluated. Live: aims **all exactly 0.0**,
+  `insideBuffer` 19/19, 19/19, 18/18, 19/19 across four re-plans. Walk the gate ORDER from the delta
+  backwards and find the first one that zeroes the input; fix that one, not the prettiest one.
+- **Rule 173 — `insideBuffer` at the full name count does NOT mean the buffer vetoed anything.** It counts
+  `delta.signum() == 0`, which is equally true when the gap is zero because nothing is held and nothing is
+  intended. Read `aims` alongside it: a *vetoed* trade has a non-zero aim, a *vacuous* one has aim 0.0. I
+  read this field as a veto last cycle and it was an empty gap.
+- **Rule 174 — an unarmed risk sensor must not be allowed to LIQUIDATE, only to block opening.** ADR-0126's
+  veto is asymmetric in the damaging direction. At boot the σ sensor seeded 38–99 of the **121** prices it
+  needs (`vol-span=120`) and logged `still cold` for **18** names; every name went reduce-only, the desk
+  worked its wrong-side holdings out **in full** (five FILLED orders 19 seconds after start: JPM SELL 4,
+  AAPL SELL 9, AMZN BUY 17, GOOG BUY 7, MSFT BUY 7) and gross went **$17,942.68 → $0.00**. Then it could not
+  rebuild: `streamVolMeasuredNames` **0, 0, 0** for ten minutes, ticking to **1** at ~10.5 minutes — and
+  exactly one aim unfroze with it. The loop reboots about every 30 minutes and the slowest name (MCD, 38 of
+  121) needs ~83 more samples, so the book is destroyed every cycle and only partly rebuilt.
+- **Rule 175 — a graded-BAD fix rules out the REMEDY, not the DEFECT.** ADR-0131 attacked this same root
+  cause by re-seeding the cold sensor on its warm-up cadence and scored ❌ BAD; it was reverted. That does
+  not make the boot liquidation acceptable — it means the next attempt must pick a different lever (here:
+  suppress the boot flatten, rather than accelerate the warm-up). Don't let a reverted remedy quietly
+  retire the problem it failed to solve.

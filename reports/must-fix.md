@@ -15,6 +15,97 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 14:00Z (ADR-0133 is UNDER MEASUREMENT at 1/6 — **no code change made this cycle**, per the pending-baseline rule. Item #1 is RE-RANKED: a gate UPSTREAM of the last two fixes zeroes their input, so neither can be exercised)
+
+**Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**
+`scripts/score-change.py score` prints `e61c7f5aa still accumulating evidence (1/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` still exists. So the change is held, unscored, and
+**this cycle must not make a new one**.
+
+- **Deployed: ✅ confirmed.** The commit landed 13:52:36 and the JVM answering the endpoints booted after it
+  (`ops_jvm.uptimeSeconds` **412** at report generation ⇒ boot ≈13:53:30). The running process is the fix build.
+- **Did it do what it claimed: ⚠️ UNVERIFIABLE — vacuous, not passed.** Its VERIFY-BY was that `insideBuffer`
+  falls below the name count and the desk deploys toward its target book. Live it reads **19/19, 19/19,
+  18/18, 19/19** across four consecutive re-plans (`atMillis` 1785506422370 / 1785506573423 / 1785506603620 /
+  1785506663999) — but **every `aim` is exactly 0.0 and every `currentQty` is 0**, so the gap the band is
+  tested against is *zero* and the band is never consulted. `insideBuffer` is counting a zero gap, not a
+  vetoed trade. The band cap is live and its tests pin it; the live book simply cannot reach it.
+
+**Live situation.** `/api/risk` (14:00:46 and again 14:04:24): total PnL **$738.64968836**, gross
+**$0.00000000**, net **$0.00000000** — **0.0%** of the $1,500,000 firm cap, headroom **$1,500,000**. Flag
+**DORMANT**. Every book's `unrealizedPnl` is **0.00000000** in `/api/attribution` (ALPHA, HEDGE, MACRO) and
+every `currentQty` in `/api/fusion/targets` is 0, so this is a genuinely **flat book**, not an unmarked one.
+The 13:52:55Z heartbeat recorded gross **$17,942.67878750**, net **-$2,402.15121250**, total PnL
+**$731.92411373**, `pnl_growth_pct` **-6.15** vs `pnl_target_pct` **1.0**, `on_track` **false**, `stale`
+**true**. Not in danger — nowhere near a cap or the breaker; this is the *opportunity* case.
+
+**Attribution (change vs market).** The book went from **$17,942.68** gross at 13:52:55 to **$0.00**, and the
+only orders after boot are **five FILLED at 13:53:49** — 19 seconds into the new process: JPM SELL 4, AAPL
+SELL 9, AMZN BUY 17, GOOG BUY 7, MSFT BUY 7. Realized PnL moved **+6.73** (731.92 → 738.65) across that
+liquidation. This is a **boot-sequence** effect, not a market move and not the band cap: ADR-0133 changes
+only the band's scale, and the band is not reached on any of these paths. I claim neither credit nor blame
+for the +6.73 (Rules 141/152).
+
+### 🎯 Item #1 — NEW, ranked top: the desk FLATTENS on boot and then cannot rebuild, because the ADR-0126 σ-cold veto holds every name reduce-only for the first ~10–40 minutes of every process
+
+**Mechanism, read off the code and confirmed against live telemetry.** `FusionLifecycle.stopArmed` is
+`streamVol.sigmaPerSample(instrument).isPresent()`. At boot the sensor is seeded from the durable mark store
+and the process logged **`risk-cut σ sensor still cold` for 18 names** at 13:53:49, each quoting what the
+seed actually found against what it needed — **121** prices (`jethro.fusion.risk-cut.vol-span=120` ⇒
+`warmupPrices() = 121`): MCD **38**, NEE **41**, BAC **41**, WMT **43**, KO **43**, GOOG **46**, NVDA **49**,
+MSFT **61**, AMZN **80**, AAPL **99**. With `stopArmed` false everywhere, `PositionBuffer.mayIncrease` is
+false for **every** name, which takes the reduce-only branch: a wrong-side holding becomes an
+`isTrappedExit` and is worked **in full** (the five fills), and thereafter `aim` is re-seeded to
+`held + delta` = **0** every cycle. That is exactly what the endpoint shows — `streamVolMeasuredNames`
+**0, 0, 0** across the first three samples with **0** non-zero aims and **0** non-zero deltas.
+
+**It is transient, and that is the point.** On the fourth sample (`atMillis` 1785506663999, ~10.5 minutes
+after boot) `streamVolMeasuredNames` ticked **0 → 1**, and **exactly one aim went non-zero with it**. The
+sensor warms one name at a time as marks accumulate at the re-plan cadence. The slowest names are the
+problem: MCD at **38 of 121** needs ~83 further samples. **The loop reboots the app about every 30 minutes**
+— so the book is liquidated at every boot and only the fastest-warming names are ever re-opened before the
+next teardown. The veto is asymmetric in the damaging direction: an unarmed sensor does **not** stop the
+desk from *liquidating* a book, only from rebuilding it.
+
+**Why this outranks everything else:** it is upstream of both of the last two shipped fixes. ADR-0132's
+`onTargetSide` clamp and ADR-0133's band cap both operate on the aim, and this path sets the aim to zero
+before either is consulted — which is precisely why both were graded ⚠️ UNVERIFIABLE/vacuous rather than
+verified. No amount of buffer work can be measured until this is addressed.
+
+**Do NOT re-attempt ADR-0131.** `efccc6502` — "a cold sensor re-seeds on its own warm-up cadence until it
+warms" — is the same root cause and scored **❌ BAD** (risk-adj return/cycle -0.000016 over 7 cycles,
+t=-0.03; gross 0 → 33,743) and was reverted. The next change must attack a **different** lever. The
+untried and better-argued one is the **asymmetry**: a σ sensor that cannot price a stop is a reason not to
+*open* risk, but it is not a reason to *liquidate* a book the desk already holds and was measuring happily
+one process earlier. Whether the boot flatten should be suppressed (rather than the warm-up accelerated) is
+the design question to answer — with an ADR, since it changes when a risk control fires.
+
+**VERIFY-BY (next run, from `/api/fusion/targets` and `/api/risk`):** within the first two re-plans after a
+boot, either (a) `currentQty` is non-zero for the names the previous process held — i.e. no full-book
+liquidation at boot — or (b) `streamVolMeasuredNames` is at the name count rather than 0. Plus: the count of
+`risk-cut σ sensor still cold` WARN lines at boot, which was **18** this cycle. If the book is again $0.00
+gross with every aim 0.0 at boot, this item is **STILL-BROKEN**.
+
+### Item #2 (carried, unchanged) — ADR-0133's band cap has never been observed firing
+Shipped and unit-pinned, but the live book has not once reached the band this process (all four samples had a
+zero gap). **VERIFY-BY:** with aims non-zero, `insideBuffer` strictly below the target count while
+`deltaQty` is non-zero for at least one name whose `|forecast| < 1.0`. Blocked behind item #1.
+
+### Item #3 (carried) — ADR-0132's destination clamp has never been observed firing
+Same reason, one level deeper: it needs a *wrong-side holding*, and every `currentQty` is 0. **VERIFY-BY:**
+a name with `currentQty` and `targetQty` of opposite signs whose `deltaQty` moves it toward flat. Blocked
+behind item #1.
+
+### Item #4 (carried) — MACRO holds a frozen directional loss
+`/api/attribution`: MACRO `totalPnl` **-$35.82347655**, all realized, `unrealizedPnl` **0.00000000**, fees
+**$0.169833**. Ranked below #1.
+
+### Item #5 (carried, housekeeping, no money cost) — the ADR index is missing rows for 0129, 0130, 0131, and 0132 is a duplicated number
+`docs/adr/` contains both `0132-deploy-capital-objective-200k-budget.md` and
+`0132-the-buffers-destination-never-sits-on-the-side-the-target-opposes.md`. Renumber and index.
+
+---
+
 ## Verification block — 2026-07-31 13:30Z (ADR-0132 scored ⚠️ INCONCLUSIVE and was kept, so a change was due; item #1 is a NEW defect found in the same component — the band, not the destination — and shipped as ADR-0133)
 
 **Step 0 — last cycle's change.** `c58e7bb83` (ADR-0132, the destination clamp) scored **⚠️ INCONCLUSIVE**
