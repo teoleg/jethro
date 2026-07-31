@@ -1,0 +1,20 @@
+{
+  "commit": "4f67f05158a4b7cf159180250589c7b48a0ebc59",
+  "fees": "218.796106",
+  "gross_exposure": "90641.36436250",
+  "net_exposure": "-31488.55563750",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "90641.36436250",
+    "hedgePnl": "131.56066913",
+    "netExposure": "-31488.55563750",
+    "realizedPnl": "357.45003931",
+    "strategyAlpha": "70.67944984",
+    "totalFees": "218.796106",
+    "totalPnl": "202.24011897",
+    "unrealizedPnl": "-155.20992034"
+  },
+  "summary": "completed the failed auto-revert of the graded-BAD ADR-0133 band cap \u2014 the rejected mechanism is out of the running code, keeping the loop's memory and the annotated ADR",
+  "total_pnl": "202.24011897",
+  "ts": "2026-07-31T16:35:59Z"
+}
