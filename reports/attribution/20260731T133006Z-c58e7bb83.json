@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-07-31T13:30:06Z",
+    "fees": "101.301225",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "139.49512232",
+      "netExposure": "0.00000000",
+      "realizedPnl": "779.87319017",
+      "strategyAlpha": "640.37806785",
+      "totalFees": "101.301225",
+      "totalPnl": "779.87319017",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "779.87319017"
+  },
+  "before": {
+    "at": "2026-07-30T19:49:20Z",
+    "gross": "50941.78500000",
+    "net": "-14118.31500000",
+    "total_pnl": "224.72693802"
+  },
+  "commit": "c58e7bb8382ab650cf38cb4f7689dd5485cf4425",
+  "delta": {
+    "gross": "-50941.78500000",
+    "net": "14118.31500000",
+    "total_pnl": "555.14625215"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle +0.015004 over 37 cycles, t=+1.45 (hurdle 1.5); gross 50,942\u21920",
+  "revert": false,
+  "revertApplied": null,
+  "scoredAt": "2026-07-31T13:30:06Z",
+  "summary": "the buffer's no-trade destination is held to the side of flat the current target is on, so a position the desk's own forecast contradicts is no longer frozen \u2014 or steered toward another wrong-side stopping point \u2014 by a band scaled off a target it does not hold (ADR-0132)",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 0.0,
+    "gross_start": 50941.785,
+    "mean_ret_per_cycle": 0.01500395,
+    "n": 37,
+    "scale": 1000.0,
+    "t": 1.449
+  }
+}
