@@ -15,6 +15,139 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 15:40Z (ADR-0133 is UNDER MEASUREMENT at 4/6 — **no code change made this cycle**, per the pending-baseline rule. **Item #1 is ESCALATED, not replaced**: last cycle's #1 said the structural hedge under-covers; this cycle the covered subset's sign is INVERTED against the book, and a second defect — the hedge proxy has no live price — is currently the only thing stopping it from trading backwards)
+
+**Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**
+`scripts/score-change.py score` prints `e61c7f5aa still accumulating evidence (4/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` still exists. Held, unscored; **no new change this
+cycle**.
+
+- **Deployed: ✅ confirmed.** `ops_jvm.uptimeSeconds` **1166** at report generation and **1216** on a later
+  direct read — the running process is the fix build.
+- **Did it do what it claimed: ⚠️ still unscored, still being exercised.** `/api/fusion/targets` publishes
+  **22** instruments this cycle (20 last cycle) with non-zero `deltaQty` on MSFT **-1.712278**, CAT
+  **4.165898**, NEE **-60.416979**, and exactly 0.0 on NVDA and XOM whose aim-to-holding gaps are enormous
+  (NVDA `targetQty` **282.837575** vs `currentQty` **45.000000**; XOM **-353.805355** vs **-23.000000**).
+  The band is being consulted across a real book; the sign of its effect is for the scorer, not for me.
+- **Regression check: none attributable.** Breaker untripped, `/api/marks/quarantined` **[]**, no new
+  WARN/ERROR classes.
+
+**Live situation.** SITUATION header: total PnL **$575.87**, gross **$77,739.62** (**5.2%** of the
+$1,500,000 firm cap, headroom **$1,422,260**), net **-$45,265.26** (**4.5%** of the $1,000,000 net cap),
+PnL **-85.28** since last run and **-162.78** over three, **Flags: none**. Live `/api/risk` `.total` a few
+minutes later: `totalPnl` **570.29561460**, `realizedPnl` **796.09988240**, `unrealizedPnl`
+**-225.80426780**. Heartbeat `2026-07-31T15:10:13Z`: `pnl_growth_pct` **-9.67** vs `pnl_target_pct`
+**1.0**, `on_track` **false**, `stale` **true**, `underwater` **false**. Off target and bleeding mildly —
+but nowhere near the cap or the breaker, so this is not the DANGER state.
+
+**Attribution (change vs market).** No code change was made this cycle, so nothing here is attributable to
+one. The book is net **short** equity (**-$38,817.87** net across 21 names on a live read) into a rising
+tape, and `unrealizedPnl` **-225.80426780** against `realizedPnl` **796.09988240** is that mark-to-market —
+**market, not mechanism**. The one mechanism-attributable cost is turnover: `turnover_cost_by_name` totals
+roughly **$1.6M** of traded notional against a **$77.7k** book, and the baseline-to-heartbeat `fees` move
+**105.584233 → 129.292241** is the desk paying for its own 30s re-plan churn (`orders_by_status` FILLED
+**4495** / CANCELLED **1509**, the cancels all reasoned *"fusion re-plan — passive order superseded by a
+fresh target (ADR-0084)"*). That churn is a standing cost, not this cycle's doing.
+
+### 🎯 Item #1 — ESCALATED from "under-covers" to "can size BACKWARDS": the beta-covered subset is not a representative sample of the book, and its sign is currently OPPOSITE the book's net
+
+**Proving numbers, all read live this cycle from `/api/risk` positions × the live `instrument_attributes`
+betas.** Per-name net exposure summed by beta-coverage:
+
+- net equity total **-38,817.87**
+- beta-covered net **-11,126.16**; **UNCOVERED net -27,691.71 = 71.3%** of |net|
+- **Σ βᵢ·Eᵢ = +5,657.02** — **positive**, while the book's net equity is **negative**
+
+**Why that is worse than last cycle's finding.** Last cycle Σβ·E was **-18,856.99** against net
+**-60,974** — under-sized, but correctly *signed*. This cycle NVDA's **+10,371.04** at beta **1.75**
+(**+18,149** of systematic on its own) dominates the eight covered names and flips the covered subset
+positive while the real book is short. `HedgeMath.structuralBetaHedge` sets `hedgeNotional =
+systematic.negate()`, so on these live numbers the structural tier would size a **SELL** of the equity
+proxy against a book that is **already net short equity** — *adding* systematic exposure rather than
+removing it. Under-hedging is a gap; wrong-signed hedging is an anti-hedge.
+
+**Mechanism, unchanged and confirmed in the source.** `HedgeMath.structuralBetaHedge` (line 168-170):
+`if (beta == null || eUsd == null || eUsd.signum() == 0) { continue; }` — a name with no assigned beta is
+silently dropped from both `systematic` and `netExposure`. Live `instrument_attributes` carries
+`hedge_beta` for exactly **8** rows — AAPL **1.25**, AMZN **1.20**, GOOG **1.05**, JNJ **0.55**, JPM
+**1.10**, MSFT **1.10**, NVDA **1.75**, SAP **1.00** (V32, the sim-era universe) — against **28** equities
+in the master. The sampling error is not bounded, so the covered subset's sign carries no guarantee.
+
+**Ranking note — this must be fixed BEFORE item #2.** Item #2 (no live proxy price) is currently the only
+reason the wrong-signed target is not being traded: the axis reads WARMING and sizes nothing. Restoring the
+proxy price first would convert a passive gap into an active anti-hedge. Sequence matters here.
+
+**The fix must NOT hand-author betas.** CLAUDE.md names a `β=1.0` placeholder as a lesson already paid for;
+a self-chosen beta that sizes a hedge is exactly the invented risk number the house rules forbid. The change
+derives each name's beta **in code** from the durable mark history the platform already stores (stated
+estimator, cited convention), and the axis must refuse to claim neutrality while coverage is partial.
+Architecturally significant → ships with an ADR (`**Status:** Implemented`) in the same commit.
+
+**VERIFY-BY (next run).** On the `/api/hedging` EQUITY axis: (a) a published beta-coverage figure exists and
+reads **≥ 0.95** of `|netExposureUsd|`; (b) `sign(rawTargetNotionalUsd)` is opposite `sign(netExposureUsd)`
+on a live read — i.e. a net-short book never gets a SELL-proxy target; and (c) `status` does **not** read
+ON-TARGET while coverage is partial. In Postgres, `select count(*) from instrument_attributes where
+name='hedge_beta'` covers every equity carrying exposure.
+
+### Item #2 — NEW: the equity hedge proxy ES has no live price, so the entire net equity book is unhedged and the held hedge is carried at ZERO exposure
+
+**Proving numbers.** `/api/hedging` EQUITY axis read **six consecutive times over two minutes**: `status`
+**WARMING**, `tier` **"—"**, `targetProxyQty` **null**, `rawTargetNotionalUsd` **null**, rationale *"net
+equity … to hedge, but no tradable proxy can be sized yet (price/covariance/betas missing)"*, on
+`netExposureUsd` **-43039.17 / -43051.55 / -38678.29 / -38674.17 / -38282.08 / -38297.96**. Not a warming
+transient (Rule 183 discharged): ES's `providerTimestampMillis` in `/api/marks` is **frozen at
+1785509694000** across three polls 30 s apart — age **2477.5 s → 2507.5 s → 2537.7 s**, climbing
+monotonically past **42 minutes** — while AAPL ticks at **0.4 s / 1.7 s / 1.1 s**. `/api/marks/quarantined`
+returns **[]**, so this is not the ADR-0042 quarantine; the proxy simply is not printing.
+
+**Two costs, both live.** (a) The whole **-$38,817.87** of net equity is carrying **no hedge at all** —
+`covarianceReady` **false** and the structural fallback cannot produce a candidate, because
+`HedgeAdvisor.candidate()` returns null without a positive price (the ADR-0040 multiplier has a config
+fallback of **50**, so the multiplier is not the missing input — the price is). (b) The HEDGE book's held
+proxy is priced at nothing: `/api/risk` position `bookId` **HEDGE**, `instrumentId` **ES**, `quantity`
+**0.022800**, `hasMark` **false**, `mark` **0.00000000**, `netExposure` **0.00000000**, `grossExposure`
+**0.00000000**, `markAgeMillis` **-1**. So the hedge contributes **$0** to the firm total exposure the loop
+optimizes — and CLAUDE.md is explicit that "total" is the whole book *including the hedge*. The headline
+gross **$77,739.62** understates money at risk by the proxy's notional.
+
+**VERIFY-BY (next run).** ES's `providerTimestampMillis` in `/api/marks` **advances between two polls
+30 s apart**; and the HEDGE book's ES position reads `hasMark` **true** with `grossExposure` **> 0**; and
+the EQUITY axis leaves `status` **WARMING**. If ES genuinely cannot be priced on this feed, the axis must
+say *that* explicitly rather than the generic "price/covariance/betas missing", and the proxy candidate
+list must fall through to one the feed does print (`NQ` advanced **1785511513000 → 1785511603000** in the
+same window, so at least one index proxy is live).
+
+### Item #3 — ⚠️ DOWNGRADED, not closed (was #1 for three cycles): the ADR-0126 σ-cold veto freezes the book after any long market gap
+
+Unchanged from last cycle and still not fixed — it cleared by accumulation, not by a change (Rule 182).
+`FusionLifecycle.seedVolatility` still guards on `volSeeded.add(instrument)`, so the seed runs once per
+process; a weekend, an outage or a pre-market start empties the recent tail and the same freeze returns.
+Re-rank to the top the moment a boot logs `still cold` below ~100/121 again.
+**VERIFY-BY.** After the next weekend or multi-hour gap, count the boot's `risk-cut σ sensor still cold`
+lines and their seeded/121 ratios; and read `/api/fusion/targets` for the number of aims at exactly 0.0
+within 10 minutes of boot. Prior remedy ADR-0131 scored ❌ BAD and is retired — a different lever is
+required (Rule 175).
+
+### Item #4 (carried) — ADR-0132's destination clamp has never been observed firing
+
+Unchanged. No clamp telemetry is published, so there is still no live evidence the `onTargetSide` branch
+has ever been reached.
+**VERIFY-BY.** A published counter, or a `/api/fusion/targets` row whose `deltaQty` stops strictly short of
+flat on the target's side while the aim sits across it.
+
+### Item #5 (carried) — MACRO holds a frozen directional loss
+
+`/api/risk` `.byBook`: MACRO `totalPnl` **-35.82347655**, `grossExposure` **0.00000000**, `positionCount`
+**1** (NQ, `quantity` **0**). Realized, frozen, no live exposure — no bleed.
+**VERIFY-BY.** MACRO `positionCount` reaches 0, or the name reappears in the fusion target book.
+
+### Item #6 (carried, housekeeping, no money cost) — the ADR index is missing rows for 0129, 0130, 0131, 0133, and 0132 is a duplicated number
+
+Unchanged.
+**VERIFY-BY.** `docs/adr/README.md` lists every file present in `docs/adr/`.
+
+---
+
 ## Verification block — 2026-07-31 15:05Z (ADR-0133 is UNDER MEASUREMENT at 3/6 — **no code change made this cycle**, per the pending-baseline rule. **Item #1 is REPLACED**: the old #1 (σ-cold freeze) cleared itself by accumulation and the desk deployed a real book — which immediately exposed that the structural hedge sizes on 8 of 28 equities and calls the result ON-TARGET)
 
 **Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**

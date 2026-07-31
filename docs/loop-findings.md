@@ -3071,3 +3071,34 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   sized yet (price/covariance/betas missing)", and ES was absent from `/api/marks` — which looked like an
   unpriceable-proxy bug. Two minutes later the same axis read **ON-TARGET/STRUCTURAL** holding **0.050468**
   ES. The transient would have become a wrong item #1 and a wasted cycle.
+
+## 2026-07-31 15:40Z — the hedge's covered subset went sign-inverted against the book, and a dead proxy price is the only thing not trading it (no change; ADR-0133 at 4/6)
+
+- **Rule 184 — a partial risk sample has an unbounded SIGN error, not just a magnitude error; test the sign
+  before you rank it as "under-coverage".** Last cycle `Σ βᵢ·Eᵢ` was **-18,856.99** against net equity
+  **-60,974** — under-sized but correctly signed, which read as a coverage gap. This cycle the same sum is
+  **+5,657.02** against net equity **-38,817.87**: NVDA's **+10,371.04** at beta **1.75** (**+18,149**
+  alone) dominates the eight covered names and flips the subset positive. `HedgeMath.structuralBetaHedge`
+  sets `hedgeNotional = systematic.negate()`, so the structural tier would **SELL** the proxy against an
+  already net-short desk. Beta-covered net **-11,126.16**, uncovered **-27,691.71 (71.3%)**. Escalate the
+  item; do not just re-state it.
+- **Rule 185 — when two defects interact, RANK BY THE ORDER THAT IS SAFE TO FIX, not by size alone.** The
+  proxy having no price (item #2) is the only reason the wrong-signed target is not being traded — the axis
+  reads WARMING and sizes nothing. Fixing the cheaper, more obvious defect first would convert a passive
+  hedging gap into an active anti-hedge. Sequencing is part of the diagnosis, so write it into the register.
+- **Rule 186 — discharge Rule 183 with a MONOTONIC series, not a second look.** ES's
+  `providerTimestampMillis` was **frozen at 1785509694000** across three polls 30 s apart — age
+  **2477.5 s → 2507.5 s → 2537.7 s**, past 42 minutes — while AAPL ticked at **0.4/1.7/1.1 s** and NQ
+  advanced **1785511513000 → 1785511603000**. Six consecutive `/api/hedging` reads over two minutes all
+  said WARMING. One re-read can still catch a transient at the wrong moment; a climbing age on a frozen
+  timestamp cannot.
+- **Rule 187 — an unpriceable position silently leaves the firm total the loop optimizes.** The HEDGE book
+  holds ES `quantity` **0.022800** with `hasMark` **false**, `mark` **0.00000000**, `netExposure`
+  **0.00000000**, `grossExposure` **0.00000000**. CLAUDE.md defines "total" as the whole book *including*
+  the hedge, so headline gross **$77,739.62** understates money at risk by the proxy's notional. Check
+  `hasMark` on every held name before trusting a firm exposure total.
+- **Rule 188 — separate the tape from the till before blaming a mechanism.** PnL fell **-85.28** run-over-run
+  with `unrealizedPnl` **-225.80426780** against `realizedPnl` **796.09988240** on a net-short book into a
+  rising tape: that is **market**. The mechanism-attributable cost is turnover — ~**$1.6M** traded notional
+  on a **$77.7k** book, `fees` **105.584233 → 129.292241**, FILLED **4495** / CANCELLED **1509** with every
+  cancel reasoned *"fusion re-plan — passive order superseded by a fresh target (ADR-0084)"*.
