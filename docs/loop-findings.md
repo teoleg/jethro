@@ -2962,3 +2962,33 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   drift (MSFT **-63.86 → -51.60 → -57.99**). What was actually invariant across every sample was
   `currentQty`: GOOG **-9.00**, AAPL **-13.00**, NVDA **-16.00**, KO **+45.00** in all three. Look for what
   does NOT move between samples — a frozen position is a defect; a moving target is a forecast.
+
+## 2026-07-31 13:30Z — the no-trade band was wider than the whole position it policed (ADR-0133)
+
+- **Rule 168 — when two quantities are compared, check that they SCALE the same way with the thing they
+  both depend on.** The ADR-0094 band is `width × |target| × TARGET_ABS / |forecast|`, and the target is
+  linear in the forecast, so the two `|forecast|` factors cancel: the band is the position at a
+  full-strength view **regardless of the current view**. The gap it is tested against lives inside
+  ADR-0102's interval `[flat, target]`, whose width **does** shrink with conviction. Neither ADR is wrong
+  alone; the ratio `band/|target| = width × TARGET_ABS / |forecast|` is what breaks, and past
+  `|forecast| < width × TARGET_ABS` the band swallows the whole interval and the delta is zero **forever**.
+  Live: 6 of 20 names permanently vetoed, `insideBuffer` 19/18/20/20 across four re-plans, the desk holding
+  $14,215 of its own $303,271 target book while flagged DORMANT. Write the ratio out; don't eyeball the
+  two expressions.
+- **Rule 169 — a "DORMANT" header snapshotted at the open is the overnight freeze, not a verdict.** The
+  report was generated at `atMillis` 1785504593354, seven seconds BEFORE the 13:30Z open, after three
+  `market-closed` heartbeats. Gross $0.00 and PnL +0.00 over three runs were both artefacts of the
+  timestamp. Three live endpoint reads after the open showed the book moving. Check the snapshot time
+  against the session before reading anything into a flat header — and re-read the endpoint yourself.
+- **Rule 170 — the fix that matches the cited rule is not automatically the fix to ship.** The class cites
+  Carver, whose buffer is centred on the TARGET; I restructured `bufferedDelta` to match and it broke two
+  paid-for lessons at once — ADR-0107's rated view-change unwind (it dumped a full 104-share holding where
+  the rule demands a rated step) and ADR-0090's unrated same-side de-risking. Reverted, and shipped a
+  one-`min` cap on the band's scale instead: same defect closed, every other semantic byte-identical. When
+  a restructure lights up tests that encode past incidents, the tests are usually right — narrow the fix
+  to the proven defect rather than re-deriving the component from first principles.
+- **Rule 171 — cross-check a component's expected values with an INDEPENDENT implementation of its
+  documented formula, not by running the component.** Six tests needed new band arithmetic. I re-derived
+  all of them in a separate exact-decimal script written from the ADR's formula; it reproduced the Java
+  output digit for digit (3.281482, 1.812000, 0.603106, 103.757400, −27.803973). That makes the test a
+  real check rather than a transcription of whatever the code now happens to emit.

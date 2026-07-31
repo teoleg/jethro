@@ -28,7 +28,7 @@ import java.util.Map;
  * <pre>
  *   aim   ← aim + a·(target − aim)      the ADR-0080 exponential path, kept exactly
  *   aim   ← 0                           when the target is FLAT: an exit is not buffered (ADR-0090)
- *   scale = |target| · TARGET_ABS / |forecast|     the name's position at a typical-strength forecast
+ *   scale = min(|target| · TARGET_ABS / |forecast|, |target|)   position at a typical forecast (ADR-0133)
  *   band  = scale · bufferFraction
  *   gap   = aim − held
  *   |gap| ≤ band → 0                     inside the buffer: the desk is where it means to be
@@ -63,6 +63,12 @@ import java.util.Map;
  * outgrow, or end up on the opposite side of, the target it holds NOW. See {@link #withinTarget}: the
  * aim is clamped into the closed interval between flat and this cycle's target, which can only ever
  * shrink intent or put it back on the side the forecast is on.
+ *
+ * <p><b>And so is the buffer's own SCALE (ADR-0133).</b> The average position does not depend on forecast
+ * strength but the interval ADR-0102 confines the aim to does, so below {@code |forecast| = bufferFraction
+ * × TARGET_ABS} the band was wider than that whole interval and the name could never be opened from flat
+ * at any aim — a permanent veto, on 6 of 20 live names. See {@link #band}: the scale is capped at the
+ * target the buffer polices, which can only ever narrow a band.
  *
  * <p><b>And so is the position it STOPS AT (ADR-0132).</b> Buffering the aim bounds where the desk means
  * to be; it does not bound where the desk actually stops, which is a whole band below that. Because the
@@ -329,6 +335,37 @@ public final class PositionBuffer {
      * says nothing, and the only position at stake is the one already held, so the buffer is taken on
      * {@code |held|}. That keeps an unwind proportionate instead of either freezing it (a zero band
      * cannot happen with a non-zero holding) or inventing a scale for it.
+     *
+     * <h3>The scale is capped at the target it polices (ADR-0133)</h3>
+     * The average position {@code |target| × TARGET_ABS / |forecast|} does <b>not</b> depend on how
+     * strong this cycle's forecast is: the target is linear in the forecast, so the two factors cancel
+     * and the scale is the name's position at a FULL-strength view whatever the current view happens to
+     * be. The quantity it is measured against does depend on it. The band is tested against
+     * {@code aim − held}, and ADR-0102 confines the aim to the closed interval between flat and the
+     * CURRENT target — an interval of width {@code |target| = (|forecast|/TARGET_ABS) × averagePosition}.
+     * So the band consumes a fraction {@code width × TARGET_ABS / |forecast|} of the entire interval the
+     * aim may ever occupy, and once {@code |forecast| < width × TARGET_ABS} it is <b>wider than that
+     * whole interval</b>: from flat, {@code |gap| = |aim| ≤ |target| < band} at every aim the ADR-0080
+     * path can reach, so {@link #bufferedDelta} returns exactly zero forever and the name can never be
+     * opened at all. Not a slow ramp — a permanent veto on every name whose conviction falls below the
+     * threshold, decided by no ADR. Measured live at {@code atMillis} 1785504895225: 20 of 20 names
+     * inside the buffer across four consecutive re-plans, 6 of them (|forecast| &lt; 1.0) permanently
+     * vetoed, the desk holding 4.7% of its own target book while flagged DORMANT.
+     *
+     * <p>Carver's rule cannot produce that, because the distance it measures is {@code |target − held|}
+     * and at a typical-strength forecast the target IS the average position: the band is then at most
+     * {@code width} of the distance it is compared against, commensurate by construction. Buffering the
+     * aim broke that commensurability. The cap restores it in the one direction that can misbehave —
+     * the scale is held to the target the buffer is actually policing:
+     * <pre>
+     *   scale = min(|target| · TARGET_ABS / |forecast|,  |target|)
+     * </pre>
+     * so {@code band ≤ width × |target|} always, and a no-trade half-width can never exceed {@code width}
+     * of the interval it sits inside. Strictly one-way: the cap can only ever NARROW a band, never widen
+     * one, so it can only ever permit a trade the desk's own aim path had already decided to make — it
+     * introduces no number (the bound is the target the planner already computed, the same provenance
+     * ADR-0102 and ADR-0132 use for their bounds) and it leaves every strong-conviction name
+     * ({@code |forecast| ≥ width × TARGET_ABS}) byte-identical.
      */
     BigDecimal band(BigDecimal target, double forecast, BigDecimal held) {
         return band(target, forecast, held, bufferFraction);
@@ -340,6 +377,7 @@ public final class PositionBuffer {
         BigDecimal scale = target.signum() != 0 && f > 0.0
                 ? target.abs().multiply(BigDecimal.valueOf(Forecast.TARGET_ABS))
                         .divide(BigDecimal.valueOf(f), QTY_SCALE, RoundingMode.HALF_EVEN)
+                        .min(target.abs()) // ADR-0133 — never wider than the interval it polices
                 : held.abs();
         return scale.multiply(BigDecimal.valueOf(width))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);

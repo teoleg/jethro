@@ -15,6 +15,84 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 13:30Z (ADR-0132 scored ⚠️ INCONCLUSIVE and was kept, so a change was due; item #1 is a NEW defect found in the same component — the band, not the destination — and shipped as ADR-0133)
+
+**Step 0 — last cycle's change.** `c58e7bb83` (ADR-0132, the destination clamp) scored **⚠️ INCONCLUSIVE**
+(+0.015004 risk-adjusted return/cycle over 37 cycles, t=+1.45 against a 1.5 hurdle) — kept, not reverted.
+`reports/.pending-baseline.json` is gone and `score` prints `no pending change to score`, so this cycle was
+free to make a change. Its own claim — that a wrong-side holding is no longer steered to a wrong-side
+destination — is **⚠️ UNVERIFIABLE this cycle, not verified**: every `currentQty` in `/api/fusion/targets`
+is 0, so there is no wrong-side holding for `onTargetSide` to act on and the check is vacuous. Carried as
+item #2 with its VERIFY-BY intact. It did deploy (the clamp is in the running commit and the shipped tests
+pin it).
+
+**Live situation.** The SITUATION header reads total PnL **$779.87**, gross **$0.00** (**0.0%** of the
+$1,500,000 firm cap, headroom **$1,500,000**), net **$0.00** (0.0% of the $1,000,000 net cap). Flag:
+**DORMANT**. Since last run PnL **+0.00**, gross **+0.00**; over three runs the same. `run-status.json`
+(heartbeat `2026-07-31T13:00:02Z`) reads `pnl_growth_pct` **0.0** vs `pnl_target_pct` **1.0**, `on_track`
+**false**, `stale` **false**, `underwater` **false**. **The header was snapshotted at `atMillis`
+1785504593354 — seven seconds BEFORE the 13:30Z US open, after three `market-closed` heartbeats**, so the
+flat reading is the overnight freeze (Rule 169). Live endpoint reads after the open show the book moving.
+Not in danger: nowhere near a cap or the drawdown breaker.
+
+**Attribution.** The window spans a market-closed stretch and the open, and the scored change opens and
+closes nothing. Market and change are **not separable**; neither is claimed (Rules 141/152).
+
+### ✅ Item #1 — CLOSED and shipped: the no-trade band was wider than the interval it policed (ADR-0133)
+
+Sampled `/api/fusion/targets` at four consecutive re-plans after the open (`atMillis` 1785504804718 /
+1785504834909 / 1785504865091 / 1785504895225): `insideBuffer` **19, 18, 20, 20** of **20** — two re-plans
+planned nothing at all — with the desk holding **$14,215** gross against its own target book of
+**$303,271** (4.7%), a $200k deploy budget unused.
+
+Recomputed from the endpoint's own published fields (Rule 164), reproducing every `deltaQty` exactly. The
+band is `width × |target| × TARGET_ABS / |forecast|`; the target is **linear** in the forecast, so the two
+`|forecast|` factors cancel and the band is the position at a **full-strength** view regardless of the
+current one. The gap it is tested against lives inside ADR-0102's interval `[flat, target]`, whose width
+**does** shrink with conviction. So `band / |target| = width × TARGET_ABS / |forecast|`, and past
+`|forecast| < width × TARGET_ABS` (= 1.0 shipped) the band exceeds the whole interval: from flat,
+`|gap| = |aim| ≤ |target| < band` at **every** aim the hour-long ADR-0080 path can reach, so the delta is
+exactly zero **forever** (Rule 168).
+
+| name | forecast | target | band | gap | planned |
+|---|---|---|---|---|---|
+| PFE | 2.541 | 959.066 | 377.467 | 7.959 | 0.000000 |
+| NEE | 2.305 | 403.475 | 175.021 | 34.533 | 0.000000 |
+| BAC | 1.986 | 263.702 | 132.757 | 22.772 | 0.000000 |
+| AAPL | 8.075 | 102.395 | 12.681 | 11.665 | 0.000000 |
+| CAT / XOM / HD / PG / JNJ / KO | 0.208 / 0.200 / 0.175 / 0.127 / 0.033 / 0.000 | — | **> \|target\|** | — | permanently vetoed |
+
+**Shipped:** `PositionBuffer.band` caps the position scale at `|target|` — one `min`, strictly one-way (it
+can only NARROW a band), inert at `|forecast| ≥ TARGET_ABS`, no number introduced (the bound is the target
+the planner already computed). ADR-0133, `Status: Implemented`, config comment carries the provenance. The
+aim path, ADR-0101 width, ADR-0107 rating, ADR-0090 de-risking, ADR-0118 trapped exit, ADR-0132 destination
+clamp and unbuffered flat-target exits are all byte-identical; the deterministic floor is untouched. A
+larger fix (re-centring the region on the target, as Carver states it) was written and **reverted** — it
+broke ADR-0107 and ADR-0090 (Rule 170). Full `-Pci test` green.
+
+**VERIFY-BY next run:** `/api/fusion/targets` `insideBuffer` materially below **20 of 20**, and
+`/api/risk` `.total.grossExposure` climbing off ~5% of the summed `|targetQty| × price` in the same
+payload. If `insideBuffer` is still 20/20 the fix did not land — ⚠️ STILL-BROKEN.
+
+### Item #2 (carried, was closed prematurely) — ADR-0132's destination clamp has never been observed firing
+
+Not a regression, an absence of evidence: it needs a name held on the side its own target opposes, and the
+book was flat all cycle. **VERIFY-BY:** on a cycle where `/api/fusion/targets` shows a name with
+`sgn(currentQty) != sgn(targetQty)`, its `deltaQty` must resolve the position toward flat rather than to a
+destination still on the held side.
+
+### Item #3 — MACRO holds a frozen directional loss (unchanged, still ranked below #1)
+
+Carried from the 2026-07-30 blocks, unchanged.
+
+### Item #4 — the ADR index is missing rows for 0129, 0130 and 0131, and 0132 is a duplicated number
+
+Housekeeping, no money cost. Two files claim ADR-0132 (`0132-deploy-capital-objective-200k-budget.md` and
+`0132-the-buffers-destination-never-sits-on-the-side-the-target-opposes.md`); one needs renumbering. Not
+touched this cycle to keep the change coherent and attributable.
+
+---
+
 ## Verification block — 2026-07-30 19:30Z (the pending revert SCORED ⚠️ INCONCLUSIVE, so a change was due; item #1 re-diagnosed a THIRD time — this time from the buffer's own published arithmetic, and shipped as ADR-0132)
 
 **Step 0 — last cycle's change.** `64a7a6336` (the completed auto-revert) scored **⚠️ INCONCLUSIVE**
