@@ -3197,3 +3197,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   same guaranteed conflict. Fixing a symptom under time pressure leaves an item OPEN — rank the cause,
   and write the VERIFY-BY against the scorer's stdout and the snapshot's `revertApplied`, not against the
   code that happened to get reverted this once.
+
+## 2026-07-31 17:30Z — the redeploy is a trading strategy nobody wrote: 3.09x turnover per boot, for no change of view
+
+- **Rule 202 — the loop's own 30-minute restart liquidates and re-buys the names whose sensors cold-start,
+  and it is the largest non-market cost on the book.** Grouping today's `fills` by minute, with each of the
+  8 post-13:50Z heartbeats treated as a boot (window `heartbeat…+2min`): post-boot minutes did
+  **$277,330.06** over 11 minutes (**$25,211.82/min**) against **$1,144,024.38** over 140 other minutes
+  (**$8,171.60/min**) — **3.09x**, and **9.9%** of fills carrying **19.5%** of turnover, so the post-boot
+  orders are *large* (whole-position liquidations, not the ADR-0080 incremental path). The 17:12 minute,
+  **39 seconds after boot**, alone did **$81,499.01** of turnover against a whole-book gross of
+  **$81,647.97**. Boot times are set by the loop and are uncorrelated with the tape: none of this is a
+  response to the market.
+- **Rule 203 — three individually-correct decisions compose into an unbuffered liquidation; check the
+  COMPOSITION, not each ADR.** `FusionPlanner.plan` (ADR-0065): a held name with no fresh view gets an
+  *implicit target of zero*. `PositionBuffer` (ADR-0090): a flat target snaps the aim to zero and **an exit
+  is not buffered**. Sensors cold-start on every boot (this run: trend still cold for UNH 143/193, EURUSD
+  17/193, META 17/193, GOOGL 36/193). Chain them and *"my sensor hasn't finished re-seeding"* is executed as
+  *"the desk wants to be flat"* — sold unbuffered, bought back when it warms. ADR-0065 cannot tell **no
+  view** from **not yet warm**; the loop guarantees the latter every 30 minutes. Observed: CAT SELL 12 at
+  17:11:30 → BUY 13 at 17:12:58, a reversal in 88 seconds across the reboot.
+- **Rule 204 — when the realized leg falls by LESS than the fee bill rises, the loss is cost, not
+  direction.** 17:00Z→17:31Z: `realizedPnl` **309.27313292 → 283.29807851** while `totalFees`
+  **229.638225 → 248.070383**. That is the churn thesis quantified, and it is why `totalFees`
+  **248.070383** now exceeds `firmTotal` **118.52242327** (ALPHA: `feesPaid` **241.749416** on `totalPnl`
+  **-5.84496252**). Read the two series together before blaming a signal.
+- **Rule 205 — the combiner is exonerated by its own weights; stop suspecting it.** Fusion already leans on
+  the only two positive-expectancy sources — reversion **1.6796828791749714** (`avgReturnBps`
+  **+4.874804359460039**, 63 cohorts) and social **1.5894668077730054** (**+6.22893692818407**, 21) — and
+  holds down trend **0.6063985334926396** (**-1.884262124055958**) and xsreversion **0.35311503241404785**
+  (**-6.858218349322071**). When the weighting is already correct and the book still loses, the loss is
+  upstream (edge) or downstream (cost). This cycle it was downstream.
+- **Rule 206 — Rule 200 paid out twice.** A second consecutive hold cycle spent on measurement produced the
+  most concrete lever the register has carried in days. A hold is when to run the query you never have time
+  for on a change cycle — the SQL grouping above took one query and replaced two cycles of "worth a
+  targeted read" hand-waving at item #4.

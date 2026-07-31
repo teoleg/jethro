@@ -15,6 +15,162 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 17:30Z (still **HOLD at 2/6 cycles** — **NO code change**. The hold cycle went into measurement, and it found the mechanism behind the churn that has been sitting at the bottom of this register for two cycles: **the loop's own 30-minute redeploy makes the desk liquidate and re-buy names whose sensors cold-start.** Old item #4 is absorbed into the new **item #2**, which now carries a computed dollar cost.)
+
+**HOLD — no change this cycle.** `python3 scripts/score-change.py score` prints
+`score: 4f67f0515 still accumulating evidence (2/6 cycles) — held, not scored this run`, and
+`reports/.pending-baseline.json` is present (commit `4f67f05158a4b7cf159180250589c7b48a0ebc59`,
+`ts` `2026-07-31T16:35:59Z`). A new change now would destroy the evidence on the revert.
+
+### Step 0 — last cycle's change (`4f67f0515`, the manual completion of the failed auto-revert): ✅ VERIFIED (deployed + landed), ⏳ effect still under measurement
+
+- **Deployed: ✅.** `/api/ops/jvm` `uptimeSeconds` **1111** against `/api/risk` `asOfMillis`
+  **1785519050573** puts boot at **2026-07-31T17:12:19Z**; `logs/jethro-app.log` confirms
+  `Starting JethroApplication … PID 334284` at `2026-07-31T13:12:20.633-04:00`. That postdates the
+  16:35:50Z revert commit, so the running code is the reverted code.
+- **Landed in the source: ✅.** `docs/adr/0133-*.md` header reads `**Status:** Reverted`;
+  `PositionBuffer`'s javadoc carries no ADR-0133 band cap.
+- **Effect: ⏳ not gradeable — that is the scorer's job at 6/6, not mine.** Direction since the pending
+  baseline (`totalPnl` **202.24011897**, gross **90641.36436250**) to live now: `totalPnl`
+  **123.87853727**, gross **81647.96500000**.
+
+### Attribution over 17:00Z → 17:31Z — the realized decline is very nearly the fee bill
+
+- `realizedPnl` **309.27313292 → 283.29807851**; over the same interval `totalFees`
+  **229.638225 → 248.070383**. The realized leg fell by less than the fee bill grew — i.e. the desk's
+  *directional* result was roughly flat and **transaction cost is what moved the realized number.**
+- `unrealizedPnl` **-7.47426487 → -159.41954124** on a book whose net went **-33,407.76400000 →
+  -152.51500000**. The book was substantially re-planned inside this window, so the unrealized swing
+  **cannot be cleanly split** into market vs mechanism from these numbers alone — stating that plainly
+  rather than guessing a cause.
+- Per Rule 196, the mechanism's own leg is the realized one, and it says **cost, not direction**.
+
+### Situation triage (live, read — never authored)
+
+1. **Money.** SITUATION: total PnL **$122.48**, **-137.21** since last run, **-385.26** over the last 3.
+   Heartbeat `2026-07-31T17:11:45Z`: `pnl_growth_pct` **-51.14** vs `pnl_target_pct` **1.0**, `on_track`
+   **false**, `stale` **true**. Down this run and down across the window — off target.
+2. **Risk.** Gross **$81,646.13** = **5.4%** of the $1,500,000 firm cap, headroom **$1,418,354**; net
+   **-$153.91** = **0.0%** of the $1,000,000 net cap. `Flags: none`; not near a cap, not near the breaker.
+3. **Cause.** The pending change is the revert of the ❌ BAD ADR-0133; it is verified deployed and is at
+   2/6. The window's *cost* driver is item #2 below.
+4. **Danger: NO.** Not bleeding at the cap, not near the breaker. Not DORMANT either — gross is deployed.
+5. **Order-level post-mortem.** The 17:12 minute — **39 seconds after boot** — fired BAC **BUY 441**,
+   CAT **BUY 13**, JPM **SELL 77**, JNJ **SELL 54**, PG **BUY 1**, all FILLED. CAT had been **SOLD 12** at
+   17:11:30, i.e. **reversed inside 88 seconds across the reboot**. That minute alone did
+   **$81,499.01** of turnover — against a whole-book gross of **$81,647.97**.
+6. **Memory.** Rules 194/195/197 applied: no gate re-arming, no combiner tuning. Rule 200 applied — the
+   hold cycle was spent measuring, and it produced item #2.
+
+---
+
+## Open items, re-ranked most-costly-first
+
+### 🎯 Item #1 — `scripts/score-change.py`'s auto-revert is still not conflict-proof; the next ❌ BAD will fail to revert exactly as the last three did
+
+**⚠️ STILL-BROKEN (unchanged).** `scripts/score-change.py:357` still reverts with plain
+`git("revert", "--no-edit", sha)` and aborts at `:359` on conflict. Because the loop commits its analysis
+into the same commit as its code, every revert attempted a cycle later touches `docs/loop-findings.md`,
+`reports/last-analysis.md` and `reports/must-fix.md` — files rewritten every cycle — so the conflict is
+**structurally guaranteed**. Three occurrences (`efccc6502`, `e61c7f5aa`, plus a `revert-failed`
+heartbeat, and `reports/run-status.json` still carries `"action": "revert-failed"`, `"revert_failed":
+true` at `2026-07-31T17:11:45Z`). **It stays #1 because it is armed right now**: the change under
+measurement is *itself* a revert, so a ❌ BAD verdict on it makes the scorer revert a revert and hit the
+same wall. It is also a non-trading fix, so taking it cannot perturb a live measurement.
+
+- **The fix (per Rule 193, already proven by hand):** `git revert --no-commit`, then restore the loop's
+  memory files from HEAD (`git checkout HEAD -- docs/loop-findings.md reports/…`) keeping the ADR
+  annotated `Status: Reverted`, then commit. Revert the **code**, never the **memory**.
+- **VERIFY-BY:** on the next ❌ BAD verdict the scorer's stdout prints `score: BAD verdict — reverted
+  <sha>` (not `conflicted — NOT reverted; still LIVE`), the ledger note carries **no** `⚠️ REVERT FAILED`
+  string, and the snapshot's `revertApplied` is **true**. Until a real BAD verdict occurs, a targeted test
+  that stages a synthetic conflict in a memory file and asserts the revert still lands is acceptable proof.
+- **Why not this cycle:** the ADR-0116 hold. Take it the moment `4f67f0515` is scored.
+
+### 🆕 Item #2 — every 30-minute redeploy makes the desk liquidate and re-buy the names whose sensors cold-start: **3.09x** the steady-state turnover, for no change of view
+
+This absorbs and explains the old item #4 (BAC round-trip churn). It is no longer "worth a targeted read" —
+the mechanism is confirmed in the source and the cost is measured.
+
+**The mechanism, read out of the code:**
+1. `FusionPlanner.plan` (ADR-0065, in-file comment): *"A held name with no fresh view has an implicit
+   target of ZERO — no view, no position."*
+2. `PositionBuffer` javadoc line 30 (ADR-0090): *`aim ← 0` when the target is FLAT: **an exit is not
+   buffered***. So a zero target snaps the intent to flat and **bypasses the no-trade band entirely**.
+3. `PositionBuffer:105` — `private final Map<String, BigDecimal> aims = new HashMap<>();`, *"Derived
+   state, seeded from the held position"* — in-memory, **lost on every boot**.
+4. On reboot the trend / reversion / risk-cut σ sensors cold-start and re-seed from LMDB. This run's log
+   tail shows them still cold for **UNH** (trend 143 of 193 stored prices), **EURUSD** (17 of 193),
+   **META** (17 of 193), **GOOGL** (36 of 193), and reversion/σ likewise.
+5. A cold sensor publishes **no forecast** → step 1 plans the name **flat** → step 2 liquidates it
+   **unbuffered** → minutes later the sensor warms, the view returns, and the desk **buys it back**.
+
+ADR-0065's rationale ("sources fall silent or the OOS selector drops the name") is sound; it simply cannot
+distinguish *"the desk has decided this name should be flat"* from *"this name's sensor has not finished
+re-seeding since the process restarted 40 seconds ago"* — a condition **the loop itself guarantees every
+30 minutes**.
+
+**The cost, computed by SQL over today's `fills` (not authored):** taking each of the 8 heartbeat times
+after 13:50Z as a boot and the window `heartbeat … +2min`:
+
+| | minutes | fills | turnover | per-minute |
+|---|---|---|---|---|
+| post-boot | 11 | 42 | $277,330.06 | **$25,211.82** |
+| all other | 140 | 382 | $1,144,024.38 | $8,171.60 |
+
+**Ratio 3.09x.** Post-boot minutes are **9.9%** of fills but **19.5%** of turnover — i.e. the post-boot
+orders are far larger than normal, which is the signature of whole-position liquidations rather than the
+ADR-0080 incremental path. Day totals: **470** fills, **$1,459,288.78** turnover, **$148.1502** fees, on a
+book whose gross exposure is **$81,647.97** — the book is turned over many times its own size per day, and
+`/api/attribution` `totalFees` **248.070383** now stands against `firmTotal` **118.52242327**, with the
+ALPHA book at `feesPaid` **241.749416** on `totalPnl` **-5.84496252**.
+
+This is a pure state-reconstruction artifact: the boot schedule is set by the loop and is uncorrelated
+with the tape, so none of this turnover is a response to the market. It is the clearest available
+non-combiner, non-gate lever on risk-adjusted PnL.
+
+- **VERIFY-BY:** re-run the same grouping over `fills` after the fix. The post-boot per-minute turnover
+  ratio must fall from **3.09x** toward **1x**, and the post-boot share of turnover from **19.5%** toward
+  its share of minutes (**7.3%**). Secondary: no name is both SOLD and BOUGHT within 5 minutes of a boot
+  in `recent_orders` (this run: CAT SELL 12 at 17:11:30 → BUY 13 at 17:12:58).
+- **Shape of the fix (next cycle, not now):** distinguish *no view* from *not yet warm*. A held name whose
+  sensors are still in their warm-up span should be **held, not planned flat** — the desk has no fresh
+  information, which is not the same as information that it should be flat. Must not touch the
+  deterministic floor, and must keep ADR-0065's genuine case (a name the selector really dropped) working.
+
+### Item #3 — the desk's conviction is concentrated in exactly the names its own OOS backtest rejects
+
+**⚠️ STILL-BROKEN.** `/api/ops/jvm` `selector`: `measured` **31**, `tradable` **15** — unchanged. Live
+3600s expectancies (`/api/signals/telemetry` `avgReturnBps`): reversion **+4.874804359460039** (63
+cohorts), social **+6.22893692818407** (21 cohorts), trend **-1.884262124055958** (70 cohorts),
+xsreversion **-6.858218349322071** (24 cohorts), momentum **-2.918277546560846** (9 cohorts). The fusion
+weights already lean on the two positive sources (reversion **1.6796828791749714**, social
+**1.5894668077730054**, vs trend **0.6063985334926396**, xsreversion **0.35311503241404785**) — so the
+combiner is *not* the problem, confirming the standing "work on EDGE" priority. The honest fix is a
+**new, OOS-validated predictor** through the ADR-0049 gate — a build, not a dial.
+
+- **VERIFY-BY:** at least one source's `avgReturnBps` positive with `cohorts` large enough to clear the
+  ADR-0064 hurdle **on the gate's own computation**, and `tradable` rises above **15** of `measured`
+  **31**. Do not grade on one window.
+- **Sequencing note:** do **not** attack this by re-arming `require-backtest-support` — Rule 197 showed
+  that path ends in a one-name book.
+
+### Item #4 — the hedge overlay has no covariance estimate, and now cannot even size its proxy
+
+**🔴 REGRESSED.** Last cycle the EQUITY axis was `tier` **STRUCTURAL**; live now `/api/hedging` reports
+`covarianceReady` **false**, axis `status` **WARMING**, `tier` **"—"**, and `hedgeRecommended` **false**
+with rationale *"net equity -7368.29 to hedge, but no tradable proxy can be sized yet (price/covariance/
+betas missing)"* — `effectiveness`, `grossSigmaUsd`, `residualSigmaUsd`, `targetProxyQty` all **null**,
+holding **-0.053455** ES. It ranks below #2 because the HEDGE book is still the profitable one
+(`totalPnl` **160.19086234** on `feesPaid` **6.151134**) — under-instrumented rather than visibly
+bleeding. But an unmeasured hedge is an unfalsifiable one, and it has now stopped sizing altogether.
+
+- **VERIFY-BY:** `/api/hedging` `covarianceReady` flips to **true**, the EQUITY axis publishes non-null
+  `effectiveness`, `grossSigmaUsd`, `residualSigmaUsd` with `residualSigmaUsd < grossSigmaUsd`, and
+  `status` leaves **WARMING**.
+
+---
+
 ## Verification block — 2026-07-31 17:00Z (last cycle's manual revert **✅ VERIFIED** — the graded-BAD ADR-0133 mechanism is out of the running code. That revert is itself **under measurement (1/6 cycles)**, so per the ADR-0116 hold rule this cycle makes **NO code change**. Register re-ranked; the reading done this cycle kills the obvious candidate before it could be shipped.)
 
 **HOLD — no change this cycle.** `scripts/score-change.py score` prints
