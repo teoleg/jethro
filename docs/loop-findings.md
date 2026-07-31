@@ -3308,3 +3308,33 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **40.37358247** + MACRO **-35.82347655**, on `totalFees` **268.179380** of which ALPHA paid
   **261.858413**. Read the decomposition every cycle even when the headline is up — a rising total
   sourced entirely from the hedge is not evidence the strategy works.
+
+## 2026-07-31 19:00Z — the missing trigger has a cause, and the hedge is masking a strategy book that turned negative
+
+- **Rule 218 — the empty `reason` on FILLED orders is not a bug, it is a missing concept, and that
+  changes where the fix goes.** Re-verified ⚠️ STILL-BROKEN: of this window's 60 `recent_orders`,
+  **32 of 32 FILLED** and the **1 ROUTED** carry NULL, while **27 of 27 CANCELLED** carry text. The cause
+  is in `OrderService.routeApproveAndFill`: reasons are written only on failure branches
+  (`gate.reason()`, `"no market data for …"`, `"IOC — not marketable on arrival"`), while the success
+  path is `transition(order, OrderStatus.ROUTED, null)` and submit publishes `publishOrderEvent(order,
+  null)`. `reason` records *why a status changed*, and only failures have a status change worth
+  explaining. So the trigger must be threaded from the deciding call site into `submit` — patching the
+  order layer cannot recover information that was never passed to it. **Before proposing a fix for an
+  empty field, read the write path: "never populated" and "populated with the wrong concept" need
+  different fixes.**
+- **Rule 219 — read the attribution decomposition for *frozen* books, not just for size.** HEDGE
+  **160.19086234** and MACRO **-35.82347655** are byte-identical to last cycle's reading — neither book
+  traded. ALPHA read **40.37358247** last cycle and **-13.33312927** now, so the entire run-over-run fall
+  is the strategy book, and it fell *while gross rose* **+5619.53**. A book whose number does not change
+  at all between cycles is information: it is not hedging, it is ballast. Check for identity, not just
+  magnitude.
+- **Rule 220 — `hedgeMasking: true` plus `covarianceReady: false` means the headline is flattered by a
+  hedge that cannot act.** The firm total **111.03425652** is positive only because a static hedge P&L
+  sits on a strategy book that is now negative net of the **264.094908** in fees it paid. Rule 217 said
+  the strategy books were not covering their fees; one cycle later ALPHA is negative outright. **When a
+  decomposition shows the total sourced entirely from a book that did not trade, promote it to a live
+  bleed in the register — do not wait for the headline to go negative.**
+- **Rule 221 — one cycle from a verdict is the worst moment to get impatient.** The scorer printed
+  `still accumulating evidence (5/6 cycles)`. Five cycles of evidence on the revert would have been
+  thrown away for a change that could have shipped 30 minutes later. The hold is cheap; the evidence is
+  not.

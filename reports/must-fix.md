@@ -15,6 +15,120 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 19:00Z (still **HOLD at 5/6 cycles** — **NO code change**. Item **#1 re-verified ⚠️ STILL-BROKEN, and this cycle found its code cause**: `reason` is a *status-transition* reason, not an *origination* reason — the happy path `NEW → ROUTED → FILLED` passes a literal `null` at every step, so only orders that FAIL can ever carry text. That turns #1 from "a column is empty" into a one-line-per-call-site fix with a known shape, ready to ship the moment the hold clears. Second finding: the whole run-over-run PnL fall is the **ALPHA** book — the HEDGE number is byte-identical to last cycle, so the hedge is frozen, not helping.)
+
+**HOLD — no change this cycle.** `python3 scripts/score-change.py score` prints
+`score: 4f67f0515 still accumulating evidence (5/6 cycles) — held, not scored this run`, and
+`reports/.pending-baseline.json` is present (commit `4f67f05158a4b7cf159180250589c7b48a0ebc59`,
+`ts` `2026-07-31T16:35:59Z`). One cycle from a verdict — a new change now would waste five cycles of
+accumulated evidence on the revert.
+
+### Step 0 — last cycle's change (`4f67f0515`, the manual completion of the failed auto-revert): ✅ VERIFIED (deployed + landed), ⏳ effect still under measurement
+
+- **Deployed: ✅.** `/api/ops/jvm` `uptimeSeconds` **1460** against `/api/risk` `asOfMillis`
+  **1785524432537** puts boot at **2026-07-31T18:36:12Z** — after the 16:35:50Z revert commit, so the
+  running process is running the reverted code.
+- **Landed in the source: ✅ (unchanged).** `docs/adr/0133-…md` reads `**Status:** Reverted`; a grep for
+  `0133` across the Java sources returns no file, so the rejected band cap is absent from the code.
+- **Effect: ⏳ not gradeable — the scorer's job at 6/6, not mine.** Direction since the pending baseline
+  (`total_pnl` **202.24011897**, `gross_exposure` **90641.36436250**) to live now: `totalPnl`
+  **111.03425652**, `grossExposure` **42125.90500000**.
+
+### Item #1 re-verified ⚠️ STILL-BROKEN — and the mechanism is now known
+
+The defect reproduces on this window's `recent_orders` (60 rows): **32 of 32 FILLED** orders and the
+**1 ROUTED** order carry a NULL `reason`; **27 of 27 CANCELLED** carry text, and it is the same string
+each time (`fusion re-plan — passive order superseded by a fresh target (ADR-0084)`).
+
+This cycle traced *why*, which the previous blocks had not:
+
+- `modules/order/src/main/java/io/jethro/order/OrderService.java` `routeApproveAndFill` writes the reason
+  only on the failure branches — `transition(order, OrderStatus.REJECTED, gate.reason())`,
+  `"no market data for " + …`, `"IOC — not marketable on arrival"`. The success branch is
+  `transition(order, OrderStatus.ROUTED, null)`, and the submit path publishes
+  `publisher.publishOrderEvent(order, null)`.
+- `OrderStore.updateStatus(orderId, status, reason, now)` therefore persists `null` on every transition
+  an order makes on its way to FILLED.
+
+So the column is not "failing to populate" — it is **doing exactly what it was built to do**, recording
+why a status *changed* rather than why the desk *wanted the trade*. The order-level post-mortem the
+procedure mandates needs the second thing, and nothing in the system currently carries it from the
+fusion target down to the order. That reframes the fix: the trigger has to be threaded from the call
+site that decides to trade into `submit`, not recovered at the order layer.
+
+### The other thing this cycle found — the hedge is frozen, and ALPHA is the whole move
+
+`/api/attribution` now reads `firmTotal` **111.03425652** = HEDGE **160.19086234** + ALPHA
+**-13.33312927** + MACRO **-35.82347655**, on `totalFees` **270.415875** of which ALPHA paid
+**264.094908** (HEDGE **6.151134**, MACRO **0.169833**).
+
+- The HEDGE figure **160.19086234** and the MACRO figure **-35.82347655** are byte-identical to last
+  cycle's reading. Neither book did anything this window.
+- ALPHA read **40.37358247** last cycle and reads **-13.33312927** now. The entire run-over-run fall the
+  SITUATION header reports (`PnL -47.48`) is the strategy book, and it happened while gross rose
+  (`gross +5619.53`).
+- `hedgeMasking` is **true** while `/api/hedging` `covarianceReady` is **false** — so the book the owner
+  sees as positive is positive only because a frozen hedge P&L is sitting on top of a strategy book that
+  has now gone negative net of its own fees. Rule 217 predicted this last cycle; it has since crossed
+  from "not covering its fees" to "negative outright".
+
+Not a danger state: gross **$38262.24** is **2.6%** of the $1,500,000 firm cap (headroom **$1,461,738**),
+net **$17218.54** is **1.7%** of the $1,000,000 net cap, `Flags: none`.
+
+### Standing priority — still no source with actionable edge
+
+`/api/signals/telemetry` at `horizonSeconds` **3600**: momentum `avgReturnBps` **5.749961141428572**
+over **10** cohorts (`stdCohortMeanBps` **29.247194899516227**), social **5.743293811097191** / **22** /
+**25.910850044717932**, reversion **4.911734698471268** / **63** / **32.17586652023403**, while trend
+**-2.044825086028045** / **71** / **30.426625198598547** and xsreversion **-6.146473850702721** / **25** /
+**33.63312259265042** are negative. Every positive source remains small against its own cohort
+dispersion; the edge gate correctly lets none of them size. Unchanged for six cycles.
+
+### Open items — re-ranked, most-costly first
+
+**#1 — the desk records no origination trigger on any order it actually trades.** ⚠️ STILL-BROKEN.
+32/32 FILLED orders NULL this window. Now with a known cause (above): `reason` is a status-transition
+field written `null` on the success path, so the fix is to thread the deciding trigger from the fusion/
+strategy call site into `submit`, not to patch the order layer. Still the cheapest change with the
+largest downstream leverage — it touches no money math, no sizing, nothing on the deterministic floor —
+and four consecutive cycles have now failed to name a trigger for want of it.
+- **VERIFY-BY:** next run, FILLED orders in the window with a NULL `reason` is **0**, and the distinct
+  FILLED reasons name more than one trigger.
+- **Honest caveat, restated:** this is a telemetry change. It moves no money and will very likely score
+  ⚠️ INCONCLUSIVE. That is the correct outcome for buying evidence, not a failure.
+
+**#2 — ALPHA is negative net of its own fees while a frozen hedge masks it.** NEW, entering at #2.
+ALPHA `totalPnl` **-13.33312927** on `feesPaid` **264.094908**, against HEDGE **160.19086234** that has
+not moved. `hedgeMasking` **true**. This is a live bleed, not a reliability defect — it ranks above #3
+and #4. It is *not* actionable before #1, because fixing it means knowing which trigger opened the
+losers, which is exactly what #1 buys.
+- **VERIFY-BY:** ALPHA `totalPnl` in `/api/attribution` is positive net of `feesPaid`, or its loss
+  narrows while the fee line does not grow.
+
+**#3 — the holding period is shorter than the signal horizon.** `horizonSeconds` **3600** on every
+source against a ~30-minute process recycle. Survives the Rule 213 retraction because it never depended
+on the flatten being universal.
+- **VERIFY-BY:** median position age across a teardown exceeds one cycle for names the desk did not
+  intend to close.
+
+**#4 — the scorer's auto-revert fails on a git conflict and leaves the BAD commit live.** Two ledger
+rows carry `⚠️ REVERT FAILED (git conflict)`. Reliability defect with a manual workaround that has now
+worked twice; ranks below the live bleed.
+- **VERIFY-BY:** a BAD verdict is followed by a clean revert with no manual step and no `revert-failed`
+  heartbeat action.
+
+**#5 — the hedge covariance never converges.** `/api/hedging` `covarianceReady` **false**, EQUITY axis
+`WARMING`, `targetProxyQty` **null**, `utilization` **0.0**, `netExposureUsd` **13246.27** for a sixth
+consecutive cycle. Downstream of #3 (Rule 212) — do not spend a change here first. Note this is also
+what makes #2's masking possible.
+- **VERIFY-BY:** `covarianceReady` **true** with a non-null `targetProxyQty`.
+
+**#6 — the book is under-deployed against the owner budget.** Net at **1.7%** of the net cap. Downstream
+of the edge gate holding every source flat; not independently actionable.
+- **VERIFY-BY:** net-cap utilisation rises while the risk-adjusted return stays positive.
+
+---
+
 ## Verification block — 2026-07-31 18:30Z (still **HOLD at 4/6 cycles** — **NO code change**. This hold cycle **falsified last cycle's own headline**: the desk did **not** flatten at this teardown — six names carried across the reboot. So the flatten is **episodic, not structural**, and Rule 207 overgeneralised from two consecutive cycles. Chasing it further is blocked by a defect found this cycle: **every order that actually traded carries a NULL `reason`**, so the order-level post-mortem the whole procedure depends on has no evidence in it. That becomes **item #1** — it is the reason three consecutive cycles could not name a trigger.)
 
 **HOLD — no change this cycle.** `python3 scripts/score-change.py score` prints
