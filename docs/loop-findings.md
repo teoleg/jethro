@@ -3232,3 +3232,44 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   most concrete lever the register has carried in days. A hold is when to run the query you never have time
   for on a change cycle — the SQL grouping above took one query and replaced two cycles of "worth a
   targeted read" hand-waving at item #4.
+
+## 2026-07-31 18:00Z — the book is not "churning": it is **fully liquidated and rebuilt from flat every loop cycle**, and the round-trip cadence is shorter than the horizon the edge is measured over
+
+- **Rule 207 — the desk goes EXACTLY FLAT at every loop teardown; Rule 202's "3.09x churn" understated it.**
+  Boot is `2026-07-31T17:39:03Z` (`/api/ops/jvm` `uptimeSeconds` **1283** against `/api/risk` `asOfMillis`
+  **1785520826830**). Summing every LIVE fill executed *before* that instant, the ALPHA book nets
+  **0.000000** across **21** names over **1687** fills — not "mostly reduced", **exactly flat**. The
+  minute `17:38` — 2 seconds after the `2026-07-31T17:38:42Z` heartbeat and 19 seconds before the boot —
+  did **11** fills and **$99,922.58** of turnover against the heartbeat's recorded gross
+  **99920.63500000**: a round trip of ~100% of the book, in one 500ms burst. The new process then rebuilt
+  from flat to gross **16111.97500000** by 18:00Z and **19327.75000000** by 18:02Z. One cycle earlier the
+  same signature: minute `17:12`, **$81,499.01** turnover against a whole-book gross of **81647.96500000**.
+- **Rule 208 — the forced flatten happens at TEARDOWN, not at boot, so cold sensors are the sequel, not the
+  cause.** The 17:38 liquidation is 26 minutes into a healthy process, not 40 seconds into a fresh one. No
+  `@PreDestroy` / shutdown-flatten hook exists in the source (grep for `PreDestroy|shutdownHook|flattenAll|
+  liquidateAll|closeAllPositions` outside tests returns nothing). So the flatten is a *normal fusion
+  re-plan* that took every name to zero at once — and next cycle's diagnosis must find what collapses all
+  21 targets simultaneously, rather than re-explaining the cold-start rebuy that follows it.
+- **Rule 209 — measure the whole-book round trip against the SIGNAL HORIZON, not just against the fee
+  bill.** Every source in `/api/signals/telemetry` publishes `horizonSeconds` **3600**, while the loop
+  round-trips the entire book every ~30 minutes. The desk is structurally incapable of holding a position
+  as long as the horizon over which its own expectancy — reversion **+4.851871026828735** (63 cohorts),
+  social **+5.298898880312067** (22) — is measured. No amount of sizing, fusion or hedge work can realise
+  an edge the holding period is cut in half before it pays. This outranks the fee argument.
+- **Rule 210 — reconcile the projection against `fills` BEFORE concluding "state was lost on restart".**
+  The $99.9k→$16.1k collapse looks exactly like a projection wiped by a reboot. It is not: at one instant
+  `/api/risk` `positions` and `sum(BUY − SELL)` over `fills` agree to the share on all five holdings
+  (MSFT **20.000000**, PFE **-221.000000**, BAC **68.000000**, GOOG **1.000000**, ES **-0.053455**).
+  Invariant 3 is intact and the liquidation was real trading. One query separated a data bug from a
+  trading bug; run it first next time.
+- **Rule 211 — a full re-seed does NOT warm a sensor; warm-up needs elapsed time, so it cannot outrun a
+  30-minute process.** `ReversionForecastLifecycle` logs *"still cold for USD.SOFR.10Y after seeding
+  **241 of 241** stored prices"* — the store was drained completely and the sensor stayed cold. 21 minutes
+  after boot, trend is still **49 of 193** for TSLA and **1 of 193** for GOOGL. Any future fix that
+  proposes "seed harder / seed more often" is therefore already refuted — the constraint is wall-clock
+  warm-up against process lifetime, not store coverage.
+- **Rule 212 — item #4's hedge is downstream of item #1, not an independent defect.** `/api/hedging`
+  `covarianceReady` is **false** with the EQUITY axis `WARMING` and `targetProxyQty` **null** for a fourth
+  consecutive cycle, and `netExposureUsd` flipped **-7368.29 → 8243.99** between cycles. A covariance
+  estimate cannot converge on a book that is destroyed and re-drawn every 30 minutes. Do not spend a
+  change on the hedge until the holding period is fixed.

@@ -1,74 +1,75 @@
-The loop's own 30-minute redeploy is making the desk liquidate and re-buy names whose sensors cold-start — 3.09x the steady-state turnover for no change of view — and I found it by spending a mandatory hold cycle on measurement instead of waiting.
+The desk is not churning a few cold names — it liquidates its ENTIRE book to exactly flat at every loop teardown and rebuilds from zero, so it can never hold a position as long as the 3600s horizon its own edge is measured over; a second hold cycle spent on measurement turned that from hypothesis into proof.
 
 *(Every figure below is read from `/api/risk`, `/api/ops/jvm`, `/api/attribution`, `/api/hedging`,
-`/api/signals/telemetry`, `/api/fusion/targets`, `logs/report.md`, `logs/jethro-app.log`, the scorer's
-snapshot, or a SQL aggregate over the `fills` table. None is authored here — invariant 7 / ADR-0016.)*
+`/api/signals/telemetry`, `logs/report.md`, `logs/jethro-app.log`, the scorer's snapshot, or a SQL
+aggregate over the `fills` table. None is authored here — invariant 7 / ADR-0016.)*
 
-## No change this cycle — the ADR-0116 hold
+# HOLD at 3/6 — no code change this cycle
 
-`python3 scripts/score-change.py score` prints `score: 4f67f0515 still accumulating evidence (2/6
-cycles) — held, not scored this run`, and `reports/.pending-baseline.json` is present. Shipping now would
-destroy the evidence on the pending revert, so this cycle is read-only by contract.
+`python3 scripts/score-change.py score` prints
+`score: 4f67f0515 still accumulating evidence (3/6 cycles) — held, not scored this run`, and
+`reports/.pending-baseline.json` is present (commit `4f67f05158a4b7cf159180250589c7b48a0ebc59`,
+`ts` `2026-07-31T16:35:59Z`). Per the ADR-0116 hold rule a new change now would destroy the evidence on the
+revert under measurement. The cycle went into measurement instead — and it upgraded the register's top item
+from a hypothesis to a proof, and corrected it.
 
-## Situation
+## Situation triage
 
-**Money.** Total PnL **$122.48**, **-137.21** since last run and **-385.26** across the last three. The
-heartbeat `2026-07-31T17:11:45Z` reads `pnl_growth_pct` **-51.14** against `pnl_target_pct` **1.0**,
-`on_track` **false**, `stale` **true**. Down this run and down over the window — off target, not flat.
+1. **Money.** SITUATION header: total PnL **$72.70**, **-33.20** since last run, **-145.34** over the last
+   3. Heartbeat `2026-07-31T17:38:42Z`: `pnl_growth_pct` **-79.14** vs `pnl_target_pct` **1.0**,
+   `on_track` **false**, `stale` **true**, `underwater` **false**. Off target and down on the window.
+2. **Risk.** Gross **$16,105.99** = **1.1%** of the $1,500,000 firm cap, headroom **$1,483,894**; net
+   **$5,013.99** = **0.5%** of the $1,000,000 net cap. `Flags: none` — not near a cap, not near the
+   breaker. The book is badly *under-deployed*, and the reason is the defect below.
+3. **Cause.** The pending change is the manual completion of the failed auto-revert of the ❌ BAD ADR-0133.
+   It is **✅ VERIFIED deployed and landed**; its effect is at 3/6 and is the scorer's to grade, not mine.
+4. **Danger: NO.** Not bleeding at the cap, not near the breaker.
+5. **Change vs market.** Neither. This window's move is *mechanical* — see below.
 
-**Risk.** Gross **$81,646.13** — **5.4%** of the $1,500,000 firm cap, headroom **$1,418,354**. Net
-**-$153.91**, **0.0%** of the $1,000,000 net cap. `Flags: none`. Deployed with room: neither the DANGER
-state nor DORMANT.
+## Step 0 — last cycle's change (`4f67f0515`): ✅ VERIFIED deployed, ⏳ effect under measurement
 
-**Cause.** The pending change (`4f67f0515`, the manual completion of the failed ADR-0133 auto-revert) is
-**verified deployed** — `/api/ops/jvm` `uptimeSeconds` **1111** against `asOfMillis` **1785519050573**
-puts boot at **17:12:19Z**, confirmed by `logs/jethro-app.log` `Starting JethroApplication … PID 334284`
-at `13:12:20.633-04:00`, and `docs/adr/0133-*.md` reads `**Status:** Reverted`. Its *effect* is the
-scorer's call at 6/6, not mine.
+`/api/ops/jvm` `uptimeSeconds` **1283** against `/api/risk` `asOfMillis` **1785520826830** puts boot at
+**2026-07-31T17:39:03Z**, well after the 16:35:50Z revert commit — the running code is the reverted code.
+`docs/adr/0133-*.md` reads `**Status:** Reverted` and `PositionBuffer` carries no band cap.
 
-**Danger: no.** Not bleeding at a cap, breaker not near.
+## What the hold cycle found
 
-## What the window's money actually did
+**The whole book was liquidated to exactly flat at the loop teardown, then rebuilt from zero.** Summing
+every LIVE fill executed before the 17:39:03Z boot, ALPHA nets **0.000000** across **21** names over
+**1687** fills — not "mostly reduced", exactly flat. The minute `17:38` — 2s after the heartbeat, 19s
+before the boot — did **11** fills and **$99,922.58** of turnover against the heartbeat's recorded gross
+**99920.63500000**: a round trip of essentially the entire book in one 500ms burst. The new process rebuilt
+to gross **16111.97500000** by 18:00Z. Same signature one cycle earlier: minute `17:12`, **$81,499.01**
+against a whole-book gross of **81647.96500000**.
 
-Over 17:00Z → 17:31Z, `realizedPnl` went **309.27313292 → 283.29807851** while `totalFees` went
-**229.638225 → 248.070383**. The realized leg fell by *less than the fee bill grew* — the desk's
-directional result was roughly flat and **transaction cost is what moved the number.** `unrealizedPnl`
-went **-7.47426487 → -159.41954124** on a book whose net moved **-33,407.76400000 → -152.51500000**; the
-book was re-planned inside the window, so that swing **cannot be cleanly split** into market vs mechanism
-from these numbers, and I am not going to guess a cause for it.
+Across today's 9 loop cycles since 13:52:55Z, the boot/teardown windows hold **56** fills — 12.5% of fills —
+but **$372,487.16** = **24.17%** of turnover and **$37.33** = **23.95%** of the fee bill, against **392**
+fills / **$1,168,829.38** / **$118.53** outside them. That mechanical quarter of the cost stands against a
+firm total PnL of **76.28509719** and `totalFees` **261.125419** (ALPHA `feesPaid` **254.804452** on
+`totalPnl` **-48.08228860**).
 
-## The finding — a cost that is entirely self-inflicted
+**It is not a data bug.** At one instant `/api/risk` `positions` and `sum(BUY − SELL)` over `fills` agree to
+the share on all five holdings (MSFT **20.000000**, PFE **-221.000000**, BAC **68.000000**, GOOG
+**1.000000**, ES **-0.053455**). Invariant 3 is intact; the liquidation was real trading, not a projection
+wiped by a restart.
 
-The order tape pointed at the boot. The 17:12 minute — **39 seconds after the app restarted** — fired BAC
-**BUY 441**, CAT **BUY 13**, JPM **SELL 77**, JNJ **SELL 54**, PG **BUY 1**, all FILLED, and CAT had been
-**SOLD 12** at 17:11:30: a full reversal in **88 seconds**, across the reboot. That single minute did
-**$81,499.01** of turnover against a whole-book gross of **$81,647.97**.
+**The decisive argument is horizon, not fees.** Every source in `/api/signals/telemetry` publishes
+`horizonSeconds` **3600** while the loop round-trips the whole book every ~30 minutes. The desk is
+structurally incapable of holding a position as long as the horizon over which its own expectancy is
+measured — reversion **+4.851871026828735** (63 cohorts), social **+5.298898880312067** (22). No sizing,
+fusion or hedge work can realise an edge whose holding period is halved before it pays. So the register is
+re-ranked: this defect is now **#1**, above the scorer's revert bug, which has a proven manual workaround
+already executed by hand twice.
 
-It is not a one-off. Grouping today's `fills` by minute and taking each of the 8 heartbeat times after
-13:50Z as a boot (window `heartbeat … +2min`): post-boot minutes did **$277,330.06** of turnover over 11
-minutes — **$25,211.82/min** — against **$1,144,024.38** over 140 other minutes, **$8,171.60/min**. A
-**3.09x** ratio, and post-boot minutes are **9.9%** of fills but **19.5%** of turnover, so the post-boot
-orders are much larger than normal — the signature of whole-position liquidations, not the ADR-0080
-incremental path.
+**One correction to the standing diagnosis.** The flatten fires at **teardown**, 26 minutes into a healthy
+process — *not* at boot. Cold sensors are the sequel (the rebuy), not the cause, and no shutdown-flatten
+hook exists in the source. Next cycle's job is to find what collapses all 21 fusion targets at once. One
+dead end is already closed: a full re-seed does **not** warm a sensor — `ReversionForecastLifecycle` logs
+*"still cold … after seeding 241 of 241 stored prices"* — so "seed harder / seed more often" is refuted in
+advance; warm-up is wall-clock against process lifetime.
 
-The mechanism is confirmed in the source, and it is three sound decisions composing into a bad one:
-`FusionPlanner.plan` (ADR-0065) gives a held name with no fresh view an *implicit target of zero*;
-`PositionBuffer` (ADR-0090) snaps a flat target's aim to zero and **does not buffer an exit**; and the
-trend / reversion / σ sensors cold-start on every boot (this run's log still shows them cold for UNH,
-EURUSD, META and GOOGL). So a name whose sensor has not finished re-seeding is read as *"the desk wants to
-be flat"*, liquidated unbuffered, and bought back minutes later when the sensor warms. ADR-0065 cannot
-tell *no view* from *not yet warm* — a condition the loop guarantees every 30 minutes. The boot schedule
-is uncorrelated with the tape, so none of that turnover is a response to the market.
+## What I am watching next cycle
 
-## What I did instead of changing code
-
-Re-ranked `reports/must-fix.md`. This is the new **item #2**, absorbing the old #4 (BAC round-trip churn),
-which it explains. **Item #1 stays the scorer's non-conflict-proof auto-revert** (`score-change.py:357`
-still plain `git revert --no-edit`, and `run-status.json` still carries `"revert_failed": true`) — it is
-armed *right now*, because the change under measurement is itself a revert, and it is a non-trading fix
-that cannot perturb the live measurement. Item #3 (conviction concentrated in OOS-rejected names) is
-unchanged at `tradable` **15** of `measured` **31**; note the fusion weights already lean on the two
-positive-expectancy sources (reversion **1.6796828791749714**, social **1.5894668077730054**), which is
-further evidence the combiner is not the lever. Item #4, the hedge overlay, **regressed** — `/api/hedging`
-`covarianceReady` **false** and the EQUITY axis has fallen from STRUCTURAL to `status` **WARMING** with
-`targetProxyQty` **null**.
+The scorer's verdict on `4f67f0515` at 6/6, and whether the next cycle repeats the teardown flatten (re-run
+the per-minute `fills` grouping around the next heartbeat, and check ALPHA's pre-boot net). The one change,
+once the hold lifts, targets register item #1.
