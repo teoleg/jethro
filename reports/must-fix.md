@@ -15,6 +15,104 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 14:30Z (ADR-0133 is UNDER MEASUREMENT at 2/6 — **no code change made this cycle**, per the pending-baseline rule. Item #1 is ⚠️ STILL-BROKEN and now has its *rate*: the σ seed IS converging across reboots, just far slower than the reboot cadence, so the process always dies with most of the book still frozen)
+
+**Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**
+`scripts/score-change.py score` prints `e61c7f5aa still accumulating evidence (2/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` still exists. Held, unscored; **no new change this
+cycle**.
+
+- **Deployed: ✅ confirmed.** `ops_jvm.uptimeSeconds` **1281** at report generation and **1340** on a later
+  direct read; the JVM booted well after the commit landed. The running process is the fix build.
+- **Did it do what it claimed: ⚠️ UPGRADED from vacuous to ACTIVE-BUT-UNSCORED.** Last cycle every `aim` was
+  exactly 0.0, so the band was never consulted. This cycle `/api/fusion/targets` publishes three non-zero
+  aims — AAPL **-21.458419**, MSFT **5.806959**, AMZN **-6.428999** — and for AAPL the published
+  `currentQty` is **-3.0** while the published `deltaQty` is **-15.939691**, i.e. strictly narrower than the
+  distance between the aim and the holding. The band is being evaluated on the warm names, so ADR-0133's
+  code path is live and reached. It still cannot be graded: 2/6, and only 3 of 21 names ever reach it.
+- **Regression check: none.** `riskCuts` is `[]`, `riskCutStoppedNames` **0**, `bookVolBrake` **1.0**,
+  `portfolioRiskMultiplier` **0.7763148577861426**, breaker untripped, no new WARN/ERROR classes.
+
+**Live situation.** `/api/risk` `.total`: realized **$738.55885736**, unrealized **$1.84500000**, total
+**$740.40385736**; gross **$906.46500000**, net **-$906.46500000**. The SITUATION header reads gross at
+**0.1%** of the $1,500,000 firm cap with **$1,499,091** of headroom, PnL **-0.42** since last run and
+**-41.64** over three, **Flags: none**. The 14:08:16Z heartbeat has `pnl_growth_pct` **-5.29** vs
+`pnl_target_pct` **1.0**, `on_track` **false**, `stale` **true**, `underwater` **false**. Not danger — the
+opportunity case, and a severe one: the entire firm book is a short in a single name.
+
+**Attribution (change vs market).** One order in the whole window: **AAPL SELL 3, FILLED 14:29:27**, ~21
+minutes into a process that boots roughly every 30. Nothing else was held, so there is no market leg to
+speak of — the window's move is that one position plus its cost. Neither ADR-0133 nor any prior change
+caused it; it is the σ-warm clock reaching AAPL. I claim neither credit nor blame (Rules 141/152/174).
+
+### 🎯 Item #1 — ⚠️ STILL-BROKEN, carried at top: the ADR-0126 σ-cold veto freezes most of the book for the whole life of every process, and the seed converges slower than the reboot cadence
+
+**Proving numbers, all read live this cycle.** `streamVolMeasuredNames` = **4** at `uptimeSeconds` **1340**
+(≈22 minutes in) against `volBudgetNames` **19** and `covarianceCoveredNames` **19**. **18 of the 21**
+published `aims` are exactly **0.0** — including the largest targets on the desk: PFE **2848.93**, NEE
+**-1250.11**, WMT **878.21**, BAC **-765.91**, NVDA **-578.31**. `insideBuffer` **19**. Gross is
+**$906.46500000**: the whole firm book is **3 shares of AAPL**, against **$1,499,091** of headroom.
+
+**What is NEW this cycle — the seed is converging, just too slowly.** The boot logged `risk-cut σ sensor
+still cold` for **18** names, each against the **121** prices it needs
+(`jethro.fusion.risk-cut.vol-span=120` ⇒ `warmupPrices() = 121`). Comparing the same names to the previous
+process's boot log: MCD **38 → 57**, KO **43 → 64**, WMT **43 → 64**, BAC **41 → 62**, NEE **41 → 62**,
+GOOG **46 → 67**, NVDA **49 → 71**, MSFT **61 → 83**, AMZN **80 → 101**, AAPL **99 → 103**. So the durable
+mark store IS accumulating and last cycle's read of this as a permanent floor was too pessimistic — but the
+gain is roughly twenty prices per ~35 minutes of elapsed open market, while the loop tears the process down
+every ~30 minutes. The slowest name still needs dozens more samples, and **`SensorWarmup` seeds each name
+exactly once per process** (`volSeeded.add(instrument)` in `FusionLifecycle.seedVolatility`), so within a
+process the only further warming comes from live prints at the 30s re-plan cadence — which is why the count
+crawls 0 → 1 → 4 over twenty minutes instead of arriving.
+
+**The mechanism is unchanged and still upstream of everything else.** `stopArmed` is
+`streamVol.sigmaPerSample(instrument).isPresent()`; false ⇒ `PositionBuffer.mayIncrease` false ⇒ the
+ADR-0064/0075 reduce-only branch, which re-seeds `aim` to `held + delta` and, where the holding is
+wrong-side, classes it `isTrappedExit` and works it out **in full**. That is what emptied the book at 13:53
+(gross **$17,942.67878750 → $0.00000000**, five FILLED orders 19 seconds after boot). ADR-0132's
+destination clamp and ADR-0133's band cap both act on the aim and are simply not reached for the 18 frozen
+names — items #2 and #3 stay blocked behind this.
+
+**Do NOT re-attempt ADR-0131.** `efccc6502` — "a cold sensor re-seeds on its own warm-up cadence until it
+warms" — attacked this same root cause, scored **❌ BAD** (risk-adj return/cycle -0.000016 over 7 cycles,
+t=-0.03; gross 0 → 33,743) and was reverted. A graded-BAD remedy retires the *remedy*, not the *defect*
+(Rule 175). Two untried levers remain, and next cycle picks **one**:
+- **(a) Make the veto asymmetric.** A σ sensor that cannot price a stop is a sound reason not to *open*
+  risk; it is not a reason to *liquidate* a book the desk held and was measuring one process earlier. This
+  suppresses the boot flatten without touching the warm-up. Changes when a risk control fires ⇒ needs an ADR.
+- **(b) Decouple the EWMA span from the warm-up threshold.** `warmupPrices()` is `span + 1` by convention,
+  but an EWMA of span 120 is well defined long before 120 samples; the σ *distance* the ADR-0086 stop uses
+  would keep its span while the sensor is allowed to speak sooner. Also changes when a risk control fires
+  ⇒ needs an ADR, and must not silently widen or narrow a live stop.
+Lever (a) is the better-argued one because it fixes the destructive half of the asymmetry rather than
+trading sensor accuracy for speed, and because it leaves the "cannot open what cannot be stopped" rule —
+the part of ADR-0126 that is right — completely intact.
+
+**VERIFY-BY (next run, `/api/fusion/targets` + `/api/risk` + the boot log):** within the first two re-plans
+after a boot, either (a) `currentQty` is non-zero for names the previous process held — no full-book
+liquidation at boot — or (b) the count of non-zero `aims` exceeds **3** and `streamVolMeasuredNames`
+exceeds **4** at comparable uptime. Also record the `risk-cut σ sensor still cold` WARN count at boot,
+**18** this cycle. If gross is again a single name with 18 aims at 0.0, this item is **STILL-BROKEN**.
+
+### Item #2 (carried, PARTLY ANSWERED) — ADR-0133's band cap now observed active, still unscored
+No longer "never observed": AAPL's published `aim` **-21.458419**, `currentQty` **-3.0** and `deltaQty`
+**-15.939691** show the band trimming a live gap. **VERIFY-BY:** the same three fields on a name whose
+`|combinedForecast| < 1.0`, plus a scored ledger row. Blocked behind item #1 for breadth (3 of 21 names).
+
+### Item #3 (carried, unchanged) — ADR-0132's destination clamp has never been observed firing
+It needs a *wrong-side holding*; AAPL is the only name held and its `targetQty` **-25.19** and `currentQty`
+**-3.0** share a sign. **VERIFY-BY:** a name with `currentQty` and `targetQty` of opposite signs whose
+`deltaQty` moves it toward flat. Blocked behind item #1.
+
+### Item #4 (carried) — MACRO holds a frozen directional loss
+Unchanged; ranked below #1.
+
+### Item #5 (carried, housekeeping, no money cost) — the ADR index is missing rows for 0129, 0130, 0131, and 0132 is a duplicated number
+`docs/adr/` contains both `0132-deploy-capital-objective-200k-budget.md` and
+`0132-the-buffers-destination-never-sits-on-the-side-the-target-opposes.md`. Renumber and index.
+
+---
+
 ## Verification block — 2026-07-31 14:00Z (ADR-0133 is UNDER MEASUREMENT at 1/6 — **no code change made this cycle**, per the pending-baseline rule. Item #1 is RE-RANKED: a gate UPSTREAM of the last two fixes zeroes their input, so neither can be exercised)
 
 **Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**

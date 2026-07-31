@@ -3019,3 +3019,29 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   not make the boot liquidation acceptable — it means the next attempt must pick a different lever (here:
   suppress the boot flatten, rather than accelerate the warm-up). Don't let a reverted remedy quietly
   retire the problem it failed to solve.
+
+## 2026-07-31 14:30Z — the σ seed IS converging, just slower than the reboot cadence; the whole firm book is one name (no change; ADR-0133 at 2/6)
+
+- **Rule 176 — a "permanent floor" claim needs two boots to support it; check the previous boot log before
+  calling a warm-up stuck.** Last cycle I read the σ seed's 38–99 of **121** as a structural ceiling. It is
+  not: every name improved against the previous process — MCD **38 → 57**, KO **43 → 64**, WMT **43 → 64**,
+  BAC **41 → 62**, NEE **41 → 62**, GOOG **46 → 67**, NVDA **49 → 71**, MSFT **61 → 83**, AMZN **80 → 101**,
+  AAPL **99 → 103**. The durable mark store accumulates; it just gains ~20 prices per ~35 minutes of open
+  market while the loop reboots every ~30. The defect is a *rate* mismatch, not a floor — and the fix that
+  follows from a rate is different from the one that follows from a floor.
+- **Rule 177 — "the sensor will warm up" is not a plan when the seed runs once per process.**
+  `FusionLifecycle.seedVolatility` guards on `volSeeded.add(instrument)`, so after the single boot seed the
+  only further warming inside a process is live prints at the 30s re-plan cadence. Live:
+  `streamVolMeasuredNames` crawled **0 → 1 → 4** over ~22 minutes against `volBudgetNames` **19**, and the
+  process is torn down at ~30. The desk lives its whole life holding only its fastest-printing names.
+- **Rule 178 — read the frozen names' TARGETS, not just the count, to price what a veto costs.** **18 of 21**
+  aims were exactly **0.0** while the targets behind them were PFE **2848.93**, NEE **-1250.11**, WMT
+  **878.21**, BAC **-765.91**, NVDA **-578.31**. Gross was **$906.46500000** — three shares of AAPL — against
+  **$1,499,091** of headroom. The count says "most names frozen"; the targets say "the desk's whole intended
+  book is frozen", which is what makes this item #1.
+- **Rule 179 — re-grade a change once its inputs stop being degenerate; UNVERIFIABLE is a state, not a
+  verdict.** ADR-0133 read vacuous last cycle (every aim 0.0, zero gap, band never consulted). This cycle
+  three aims went non-zero — AAPL **-21.458419**, MSFT **5.806959**, AMZN **-6.428999** — and AAPL's
+  `deltaQty` **-15.939691** against `currentQty` **-3.0** is strictly narrower than its aim-to-holding
+  distance, so the band is demonstrably being evaluated. Same commit, same tests, new verdict, because the
+  book finally reached the code. Carry an unverifiable item forward and re-test it rather than closing it.
