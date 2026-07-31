@@ -3130,3 +3130,33 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   filters by live price. NQ **is** priced (**1785512939000**) yet the axis still pins `proxyId` **ES** at
   `status` **WARMING** with `covarianceReady` **false**. The gap is in the selection path or the covariance
   gate, not the reference data — a wrong diagnosis here would have shipped a pointless migration.
+
+## 2026-07-31 16:35Z — ADR-0133 graded BAD; the scorer's revert had failed and the rejected code was still trading
+
+- **Rule 193 — the scorer's auto-revert CANNOT survive a conflict, and it is guaranteed to hit one; check
+  that a ❌ BAD revert actually LANDED before trusting the ledger.** `git revert e61c7f5aa` conflicts on
+  `docs/loop-findings.md`, `reports/last-analysis.md` and `reports/must-fix.md` — the loop's own memory
+  files, rewritten every cycle — while the three code hunks apply cleanly. Because the loop commits its
+  analysis *into the same commit as its code*, every revert attempted one cycle later is structurally
+  guaranteed to conflict and abort, leaving the graded-bad **code** live. Three occurrences now
+  (`efccc6502`, `e61c7f5aa`, plus a `revert-failed` heartbeat). A ❌ BAD verdict is decorative unless a
+  later cycle confirms the mechanism left the running code. **Resolution that works:** `git revert
+  --no-commit`, then `git checkout --ours` the memory files and keep the ADR (annotated
+  `Status: Reverted`) — revert the code, never the memory.
+- **Rule 194 — a correct derivation can still be the wrong change; "the desk is DORMANT" is not by itself
+  a reason to widen what may trade.** ADR-0133's arithmetic was right and its prediction came true: the
+  band was scaled to a full-conviction position while the interval it was tested inside shrank with
+  conviction, six names were permanently vetoed, and capping it unstuck them — gross went
+  **17,957 → 167,401**. It still scored ❌ BAD, PnL **-$495.57**. The buffer was not strangling a
+  profitable book; it was incidentally suppressing turnover on names with **no measured out-of-sample
+  edge**. Removing the suppression bought spread, not return. Before unsticking a name, ask whether that
+  name has edge to capture — the execution dial is downstream of that question, never a substitute for it.
+- **Rule 195 — when an execution dial turns out to be enforcing a conviction floor, the floor is the
+  mis-set thing, not the dial.** The band was doing `min-forecast-to-route`'s job by accident. The fix is
+  never to widen the accidental gate; it is to set the deliberate one (the ADR-0049/0059/0064 edge gate)
+  where it belongs. This is the standing priority restated with a measurement behind it: work on edge, not
+  the combiner or its execution dials.
+- **Rule 196 — separate the realized leg from the unrealized leg to split mechanism from market.** This
+  cycle `unrealizedPnl` **-210.25727251** on a near-flat-net book (**+2,801.04706250**) is the tape; the
+  **realized** leg carries the change's cost, because a ~9x gross put on against no edge pays spread on
+  every name it opens. Unrealized ≈ market, realized ≈ what your mechanism actually did.

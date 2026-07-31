@@ -1,66 +1,76 @@
-Last cycle's "sign-inverted hedge" un-flipped on its own with nothing fixed — one name's position moved — while the real defect got worse: the hedge now sees 6.5% of the systematic risk it is meant to neutralise, and ADR-0133 is at 5/6 so no change was made.
+ADR-0133 was scored ❌ BAD and the scorer's own auto-revert failed on a git conflict, so the rejected code was still trading — this cycle completes that revert by hand, and the lesson is that unsticking low-conviction names buys spread, not return, while nothing upstream has edge.
 
-*(Every figure below is read from `/api/risk`, `/api/hedging`, `/api/marks`, `logs/report.md` or the
-live Postgres. None is authored here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/ops/jvm`, `logs/report.md`, the scorer's ledger row
+or the live app. None is authored here — invariant 7 / ADR-0016.)*
 
 ## Situation
 
-1. **Money.** SITUATION header: total PnL **$457.39**, **-74.15** since last run and **-283.28** over
-   three. Live `/api/risk` `.total` minutes later: `totalPnl` **457.61324815** = `realizedPnl`
-   **605.62787143** + `unrealizedPnl` **-148.01462328**. Heartbeat `2026-07-31T15:41:42Z`:
-   `pnl_growth_pct` **-28.04** vs `pnl_target_pct` **1.0**, `on_track` **false**, `stale` **true**,
-   `underwater` **false**. Off target and bleeding mildly.
-2. **Risk.** Gross **$124,652.20** = **8.3%** of the $1,500,000 firm cap, headroom **$1,375,348**; net
-   **-$86,242.18** = **8.6%** of the $1,000,000 net cap. **Flags: none.** Gross rose **+50,996.19**
-   run-over-run — with this much headroom that is the book deploying, which is the objective, not a
-   concern.
-3. **Cause.** Last cycle's change (`e61c7f5aa`, ADR-0133 band cap) is **held, unscored** —
-   `scripts/score-change.py score` prints `still accumulating evidence (5/6 cycles)` and
-   `reports/.pending-baseline.json` is present, so per the pending-baseline rule **no code change was
-   made this cycle**. Deployed: fresh boot, `uptimeSeconds` **1078** at report generation and **1127**
-   on a later direct read.
-4. **Danger: no.** Bleeding, but at 8.3% of the gross cap with the breaker untripped and
-   `/api/marks/quarantined` **[]**, this is not the DANGER state. De-risking here would be the
-   status-quo trap CLAUDE.md names.
+1. **Money.** SITUATION header: total PnL **$227.68**, **-280.06** since last run and **-433.47** over
+   three. Live `/api/risk` `.total` minutes later: `totalPnl` **192.23986225** = `realizedPnl`
+   **402.49713476** + `unrealizedPnl` **-210.25727251**. Heartbeat `2026-07-31T16:04:57Z`:
+   `pnl_growth_pct` **-31.45** vs `pnl_target_pct` **1.0**, `on_track` **false**, `stale` **true**,
+   `underwater` **false**. Bleeding and off target.
+2. **Risk.** Gross **$167,392.97** = **11.2%** of the $1,500,000 firm cap, headroom **$1,332,607**; net
+   **-$24,228.68** = **2.4%** of the $1,000,000 net cap, and by the later live read net has crossed to
+   **+2,801.04706250**. **Flags: none.** Gross **+85,198.66** run-over-run.
+3. **Cause — named, and it is a mechanism, not the tape.** Last cycle's change `e61c7f5aa` (ADR-0133,
+   the no-trade band cap) closed its ADR-0116 window and the scorer graded it **❌ BAD**: risk-adjusted
+   return per cycle significantly negative against the hurdle, with gross grown **17,957 → 167,401**.
+   That gross is exactly what the ADR was built to unlock. It worked mechanically and failed
+   economically.
+4. **Danger: no.** Bleeding, but at 11.2% of the gross cap with the breaker untripped. De-risking on
+   that basis would be the status-quo trap CLAUDE.md names. The danger here is different and worse.
 
-## What I verified
+## Step 0 — what I verified, and the defect it exposed
 
-**Item #1 — ⚠️ STILL-BROKEN, and materially worse.** Live `/api/risk` positions × the live
-`hedge_beta` rows: equity net **-89,268.235**, beta-covered net **-5,458.75**, **uncovered net
--83,809.485 = 93.9% of |net|** (last cycle: 71.3%). The hedge sizes off **Σ βᵢ·Eᵢ = -5,786.42**
-against a **-89,268.24** book — it can see about **6.5%** of the systematic risk it is meant to
-neutralise. The sign is negative again, i.e. *correct*, but nothing was fixed: NVDA's net went
-**+10,371.04 → -393.20**, and that one name flipping is the entire difference. The sampling error
-un-flipped by luck, which is exactly why coverage — not sign — is the thing to track.
+**The graded-BAD code was still live.** The fresh ledger row carries the note `⚠️ REVERT FAILED (git
+conflict): the BAD commit is STILL LIVE and needs a manual revert`. I reproduced it: `git revert
+e61c7f5aa` conflicts on `docs/loop-findings.md`, `reports/last-analysis.md` and `reports/must-fix.md`
+— the loop's **own memory files**, which every cycle rewrites — while the three **code** hunks apply
+cleanly. `/api/ops/jvm` `uptimeSeconds` **1646** confirms a fresh JVM was running the rejected code.
 
-**Item #2 — ⚠️ STILL-BROKEN, and now a harder failure.** Last cycle ES had a *frozen* mark; this cycle
-ES is **absent from `/api/marks` entirely** (**36** marks returned, no ES among them). The HEDGE
-book's ES position reads `hasMark` **false**, `mark` **0.00000000**, `markAgeMillis` **-1**,
-`grossExposure` **0.00000000** — so the held hedge contributes **$0** to the firm total the loop
-optimizes. `/api/hedging` EQUITY axis: `status` **WARMING**, `targetProxyQty` **null**,
-`covarianceReady` **false**, on `netExposureUsd` **-87,968.53**. Sharpened this cycle: **NQ is priced**
-(`providerTimestampMillis` **1785512939000**) and is already in the configured fallback list
-(`jethro.hedge.equity-proxy-candidates=ES,NQ`), and `HedgeAdvisor.candidates()` does filter candidates
-by live price — yet the axis still pins `proxyId` **ES** and sizes nothing. So the fallthrough exists
-but is not yielding a candidate, with `covarianceReady` **false** as a co-blocker.
+This is structural, not bad luck. The scorer reverts with `git revert`, which touches every path the
+original commit touched; the loop writes its analysis and findings into that same commit; so **any**
+revert attempted a cycle later is guaranteed to conflict and abort. It has now happened three times
+(`efccc6502`, `e61c7f5aa`, plus a `revert-failed` heartbeat run). The measurement system's verdict was
+being silently discarded — which makes every ❌ BAD grade decorative.
 
-**Not a defect — discarded before it cost a cycle.** The report's Postgres log carries
-`column "hedge_beta" does not exist` (15:30:46Z). That is a *past loop cycle's own* ad-hoc psql query
-against an EAV table (`instrument_attributes` is `instrument_id | name | value`), the same class as
-`relation "instrument_attribute" does not exist` at 15:06:33Z. No app code queries a `hedge_beta`
-column.
+**Verification outranks novelty**, so that is this cycle's one change.
+
+## The change
+
+Reverted the ADR-0133 mechanism from the running code only: `PositionBuffer.band(...)` loses the
+`.min(target.abs())` cap and its javadoc, `application.properties` loses the ADR-0133 provenance
+paragraph, and `PositionBufferTest` returns to its prior expectations — all byte-for-byte pre-ADR-0133.
+**Kept:** `docs/loop-findings.md`, `reports/`, and ADR-0133 itself, now `Status: Reverted` with a "Why
+it was reverted" section. Findings are append-only durable memory; a revert must never erase them.
+`./gradlew -Pci test` green.
+
+## What the window actually taught — and why this is not a wasted cycle
+
+ADR-0133's derivation was **correct**: the band really was scaled to a full-conviction position while
+the interval it was tested inside shrank with conviction, and capping it really did unstick six
+permanently-vetoed names. The desk deployed off DORMANT as predicted. It then lost money. So the honest
+reading is the opposite of the ADR's: the buffer was **not** strangling a profitable book — it was
+incidentally suppressing turnover on names with **no measured out-of-sample edge**, and removing that
+suppression converted a dormant book into one paying spread on every name it opened. An execution dial
+had been doing a conviction floor's job.
+
+That is a direct restatement of this loop's standing priority: **work on edge, not the combiner or its
+execution dials.** Widening what may trade, while no source has demonstrated positive expectancy, buys
+turnover and not return — and now it has been measured rather than argued.
 
 ## Attribution — market vs change
 
-No change was made this cycle, so nothing is attributable to one. The desk is net short equity
-(**-$87,970.89**) into a firm tape, and `unrealizedPnl` **-148.01462328** against `realizedPnl`
-**605.62787143** is that mark-to-market: **market, not mechanism**. The gross rise is the ADR-0133 band
-cap doing what it was built to do — still the scorer's call at 6/6, not mine.
+Both legs are separable this cycle. `unrealizedPnl` **-210.25727251** against `realizedPnl`
+**402.49713476**, on a book now near flat net (**+2,801.04706250**), is mark-to-market — **market**. The
+**realized** leg is the change: a ~9x gross put on against no demonstrated edge pays spread on every
+name it opens, and the scorer's t-statistic over the full window is what separates that from noise, not
+my reading of one print.
 
 ## Next cycle
 
-Once ADR-0133 scores, item #1 is the change: derive per-name betas **in code** from the durable mark
-history (stated estimator, cited convention — never hand-authored, per the `β=1.0` lesson in
-CLAUDE.md), and make the axis refuse to claim neutrality while coverage is partial. Item #2 stays
-ranked *below* it: the dead proxy price is currently the only thing preventing a 6.5%-coverage hedge
-from being traded, so restoring the price first would convert a passive gap into an active anti-hedge.
+Verify the revert landed (`grep -n 'ADR-0133' PositionBuffer.java` returns nothing; `insideBuffer`
+returning true across the low-conviction names; gross falling back off its post-ADR-0133 level). Then
+the register's item #1 is the hedge's coverage ratio — the hedge sizes off ~6.5% of the systematic risk
+it is meant to neutralise. Track **coverage**, never sign.

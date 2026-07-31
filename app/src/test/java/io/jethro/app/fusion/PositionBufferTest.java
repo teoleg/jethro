@@ -15,12 +15,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p><b>Worked example (the live AAPL plan this was diagnosed from).</b> forecast −9.64, target
  * −142.319300, held −7, derived rate a = 0.032784 (30 s cycle over a 900 s horizon), buffer 0.10:
  * <pre>
- *   averagePosition = 142.319300 x 10 / 9.64 = 147.634129
- *   scale           = min(147.634129, 142.319300) = 142.319300   (ADR-0133 — never wider than the
- *   band            = 0.10 x 142.319300      =  14.231930         interval ADR-0102 confines the aim to)
+ *   averagePosition = 142.319300 x 10 / 9.64 = 147.634128
+ *   band            = 0.10 x 147.634128      =  14.763413
  *   aim (first)     = −7 + 0.032784 x (−142.319300 − (−7)) = −7 − 4.436294… = −11.436294
  *   gap             = −11.436294 − (−7)      =  −4.436294
- *   |gap| = 4.436294 <= 14.231930            ⇒  NO ORDER
+ *   |gap| = 4.436294 <= 14.763413            ⇒  NO ORDER
  * </pre>
  * The ADR-0080 policy sold 4 shares here, every cycle, for as long as the target stayed out of reach.
  */
@@ -38,49 +37,12 @@ class PositionBufferTest {
     @Test
     void averagePositionIsTheTargetAtATypicalForecast() {
         PositionBuffer buffer = new PositionBuffer(0.10);
-        // Scale-free in the forecast: half the forecast is half the target, so the SAME average
-        // position. |target| x TARGET_ABS / |forecast| = 284.638600 x 10 / 20 = 569.277200 x 10 / 40
-        // = 142.319300, x 0.10. Both are at or above TARGET_ABS, so the ADR-0133 cap is inert.
-        assertThat(buffer.band(new BigDecimal("-284.638600"), -20.0, BigDecimal.ZERO))
-                .isEqualByComparingTo(new BigDecimal("14.231930"));
-        assertThat(buffer.band(new BigDecimal("-569.277200"), -40.0, BigDecimal.ZERO))
-                .isEqualByComparingTo(new BigDecimal("14.231930"));
-        // ADR-0133 — below TARGET_ABS the average position exceeds the target, and the band is tested
-        // inside the interval ADR-0102 confines the aim to, whose width is |target|. So the scale is
-        // capped there: 142.319300 x 10 / 9.64 = 147.634129 > 142.319300 ⇒ scale = 142.319300, x 0.10.
+        // |target| x TARGET_ABS / |forecast| = 142.319300 x 10 / 9.64 = 147.634129…, x 0.10
         assertThat(buffer.band(new BigDecimal("-142.319300"), -9.64, BigDecimal.ZERO))
-                .isEqualByComparingTo(new BigDecimal("14.231930"));
+                .isEqualByComparingTo(new BigDecimal("14.763413"));
+        // Scale-free in the forecast: half the forecast is half the target, so the SAME average position.
         assertThat(buffer.band(new BigDecimal("-71.159650"), -4.82, BigDecimal.ZERO))
-                .isEqualByComparingTo(new BigDecimal("7.115965"));
-    }
-
-    /**
-     * ADR-0133 — the band can never be wider than the interval it polices, so a name can never be
-     * vetoed outright. Below {@code |forecast| = bufferFraction x TARGET_ABS} (= 1.0 at the shipped
-     * width) the uncapped band exceeded {@code |target|} itself, and since ADR-0102 holds
-     * {@code |aim| <= |target|}, from flat {@code |gap| = |aim| <= |target| < band} at EVERY aim the
-     * ADR-0080 path can ever reach: delta exactly zero, forever. These are live names from the DORMANT
-     * book of 2026-07-31 (`/api/fusion/targets`, atMillis 1785504895225).
-     */
-    @Test
-    void aWeakConvictionNameIsNoLongerVetoedOutright() {
-        PositionBuffer buffer = new PositionBuffer(0.10);
-        for (String[] live : new String[][] {
-                {"CAT", "-0.948000", "-0.208"}, {"XOM", "5.860000", "0.200"},
-                {"HD", "4.364000", "0.175"}, {"PG", "4.167000", "0.127"},
-                {"JNJ", "0.719000", "0.033"}}) {
-            BigDecimal target = new BigDecimal(live[1]);
-            double forecast = Double.parseDouble(live[2]);
-            BigDecimal band = buffer.band(target, forecast, BigDecimal.ZERO);
-            // The uncapped average position would have exceeded the whole target interval.
-            assertThat(target.abs().multiply(BigDecimal.valueOf(Forecast.TARGET_ABS))
-                    .divide(BigDecimal.valueOf(Math.abs(forecast)), 6, java.math.RoundingMode.HALF_EVEN)
-                    .multiply(new BigDecimal("0.10"))).isGreaterThan(target.abs());
-            // Capped, it is a tenth of it — so an aim a tenth of the way to target already trades.
-            assertThat(band).isEqualByComparingTo(
-                    target.abs().multiply(new BigDecimal("0.10")).setScale(6, java.math.RoundingMode.HALF_EVEN));
-            assertThat(band).isLessThan(target.abs());
-        }
+                .isEqualByComparingTo(new BigDecimal("14.763413"));
     }
 
     @Test
@@ -164,13 +126,10 @@ class PositionBufferTest {
         buffer.apply(List.of(target("AAPL", -1.0, "-14.766000", "-20")), closed, RATE);
         var result = buffer.apply(List.of(target("AAPL", -1.0, "-14.766000", "-120")), closed, RATE);
         // The EWMA step is −20 + a(−14.766000 + 20) = −19.828409, which overshoots the target it is
-        // decaying toward; ADR-0102 holds the intent at −16.242600. gap = −16.242600 + 120 =
-        // +103.757400, band 1.476600 (ADR-0133: |forecast| 1.0 capped the scale at the target, from
-        // 147.660000 to 14.766000) ⇒ +103.757400 − 1.476600 + ... = +103.757400 to the aim's near
-        // edge, and reduce-only leaves it whole because it never crosses through flat. The clamp
-        // BUYS BACK more of the short, never less: strictly one-way, and the narrower band buys back
-        // MORE of it than before.
-        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("103.757400"));
+        // decaying toward; ADR-0102 holds the intent at −14.766000. gap = −14.766000 + 120 =
+        // +105.234000, band 14.766000 ⇒ +90.468000, and reduce-only leaves it whole because it never
+        // crosses through flat. The clamp BUYS BACK more of the short, never less: strictly one-way.
+        assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("90.468000"));
     }
 
     // --- ADR-0118: a wrong-side holding under a shut gate is an exit, not a rebalance ---------------
@@ -200,10 +159,8 @@ class PositionBufferTest {
     @Test
     void aWrongSideHoldingUnderAShutGateIsExitedNotFrozen() {
         PositionBuffer buffer = new PositionBuffer(0.10);
-        // ADR-0133: uncapped 6.031064 x 10 / 0.436598559661783 x 0.10 = 13.813752, more than twice
-        // the target; capped it is 0.603106. The exit is worked in full either way.
         assertThat(buffer.band(new BigDecimal("6.031064"), 0.436598559661783, new BigDecimal("-1")))
-                .isEqualByComparingTo(new BigDecimal("0.603106"));
+                .isEqualByComparingTo(new BigDecimal("13.813752"));
         var result = buffer.apply(List.of(target("AAPL", 0.436598559661783, "6.031064", "-1")),
                 shutGate(), HOUR_RATE);
         assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("1.000000"));
@@ -275,11 +232,8 @@ class PositionBufferTest {
     @Test
     void theDestinationIsNeverOnTheSideTheTargetOpposes() {
         PositionBuffer buffer = new PositionBuffer(0.10);
-        // ADR-0133: uncapped this was 32.814821 x 10 / 2.618561447358846 x 0.10 = 12.531622, a band
-        // wider than a third of the target; capped at the target it polices it is 3.281482. The
-        // destination clamp below is unaffected — the delta is identical either way.
         assertThat(buffer.band(new BigDecimal("32.814821"), 2.618561447358846, new BigDecimal("-9")))
-                .isEqualByComparingTo(new BigDecimal("3.281482"));
+                .isEqualByComparingTo(new BigDecimal("12.531622"));
         // The old rule, for the record: it stopped at −2.956465, on the wrong side of flat.
         assertThat(PositionBuffer.onTargetSide(new BigDecimal("6.043466"), new BigDecimal("9.575088"),
                 new BigDecimal("-9"), new BigDecimal("32.814821")))
@@ -304,11 +258,8 @@ class PositionBufferTest {
     @Test
     void aWrongSideHoldingInsideTheBandIsNoLongerFrozen() {
         PositionBuffer buffer = new PositionBuffer(0.10);
-        // ADR-0133: uncapped 18.120000 x 10 / 0.31 x 0.10 = 58.451613 — more than THREE TIMES the
-        // target, so no aim could ever leave the band; capped it is 1.812000. The ADR-0132 clamp
-        // still dominates here, so the delta is unchanged.
         assertThat(buffer.band(new BigDecimal("-18.120000"), -0.31, new BigDecimal("45")))
-                .isEqualByComparingTo(new BigDecimal("1.812000"));
+                .isEqualByComparingTo(new BigDecimal("58.451613"));
         var result = buffer.apply(List.of(target("KO", -0.31, "-18.120000", "45")), null, HOUR_RATE);
         assertThat(result.aims().get("KO")).isEqualByComparingTo("0");
         assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-0.373442"));
@@ -634,18 +585,15 @@ class PositionBufferTest {
     @Test
     void aNameThatCannotBeStoppedOutIsNeverOpened() {
         var plan = List.of(target("KO", 2.8267, "-101.879300", "0"));
-        // band = min(101.879300 x 10 / 2.8267, 101.879300) x 0.10 = 10.187930 (ADR-0133: the
-        // uncapped average position 360.417800 gave a band of 36.041780 — a third of the target — so
-        // the aim had to e-fold out 35% of the way before the FIRST order; capped it is a tenth).
-        // The aim still has to clear it: a = 0.032784, aim = target x (1 − (1 − a)^n), so nothing
-        // trades until cycle 4.
+        // band = 101.879300 x 10 / 2.8267 x 0.10 = 36.041780, so the aim has to e-fold out past it
+        // before the first order — 14 cycles at a = 0.032784 (aim = target x (1 − (1 − a)^n)).
         PositionBuffer warm = new PositionBuffer(0.10);
         BigDecimal opened = null;
         for (int cycle = 0; cycle < 14; cycle++) {
             opened = warm.apply(plan, null, RATE, armed(true)).targets().get(0).deltaQty();
         }
         // Armed, cycle 14: aim −37.991903, gap 37.991903 > band ⇒ sell to the band's near edge.
-        assertThat(opened).isEqualByComparingTo(new BigDecimal("-27.803973"));
+        assertThat(opened).isEqualByComparingTo(new BigDecimal("-1.950123"));
 
         // Cold: reduce-only against a flat holding is exactly zero, and it stays zero forever — the
         // intent cannot accumulate either, so nothing is waiting to fire the moment the clamp lifts.

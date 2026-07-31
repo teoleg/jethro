@@ -1,9 +1,18 @@
 # ADR-0133: The no-trade band is never wider than the interval it polices
 
-- **Status:** Implemented
+- **Status:** Reverted
 - **Date:** 2026-07-31
+- **Reverted:** 2026-07-31 — see below
 - **Deciders:** continuous-improvement loop (ADR-0063); Oleg to ratify
 - **Tags:** backend, risk, fusion, execution
+
+> **REVERTED.** `scripts/score-change.py` scored the implementing commit `e61c7f5aa` **❌ BAD** at the
+> close of its ADR-0116 evaluation window; the ledger row carries the computed vector, the t-statistic
+> and the verdict. The scorer's own `git revert` hit a conflict on the loop's report files and did not
+> land, so the code was reverted manually in the next cycle (this change), leaving this record in place
+> rather than deleting it. The mechanism is **not** to be re-attempted as specified. What the evaluation
+> window established is recorded under "Why it was reverted" below; a future ADR that wants to unstick a
+> buffered name must supersede this one and address that defect, not restate the original design.
 
 ## Context
 
@@ -136,3 +145,33 @@ and net exposure caps, the pre-trade guardrail and the firm drawdown breaker all
 on every order.
 
 Exact decimal throughout (invariant 1). Nothing here prices or sizes anything (invariant 7 / ADR-0016).
+
+## Why it was reverted
+
+The evaluation window ran to term and `scripts/score-change.py` graded the implementing commit
+**❌ BAD** — significantly negative risk-adjusted return per cycle against the ADR-0116 hurdle, with
+gross exposure grown by roughly an order of magnitude over the window. The ledger row and the audited
+snapshot under `reports/attribution/` carry every figure; none is restated here, because no number that
+grades money is authored in prose (invariant 7 / ADR-0016).
+
+What the window actually established, and what a superseding ADR must answer:
+
+1. **The arithmetic in "Context" above is not what was wrong with the desk.** The derivation stands —
+   the band genuinely was scaled to a full-conviction position while the interval it was tested inside
+   shrank with conviction, and capping it genuinely did unstick the vetoed names. The desk deployed, as
+   designed. It then lost money doing so. So the buffer was **not** strangling a profitable book; it was
+   incidentally suppressing turnover on names with no measured edge, and removing that suppression
+   converted a dormant book into a paying-spread one.
+2. **An execution dial was doing a conviction floor's job, and removing it exposed that the conviction
+   floor is the thing that is actually mis-set.** The right target is not the band's scale but the gate
+   that decides a weak forecast is worth acting on at all — the ADR-0049/0059/0064 edge gate. Widening
+   what may trade, while nothing upstream has demonstrated positive out-of-sample expectancy, buys
+   turnover and not return. That is the standing priority this loop already carries: work on edge, not
+   on the combiner or its execution dials.
+3. **Therefore: do not re-derive this cap.** A future change that wants a low-conviction name to be able
+   to open must first show that the name has measured edge to capture; the band is downstream of that
+   question, not a substitute for it.
+
+The revert restores `band(...)` to its pre-ADR-0133 form byte for byte and touches nothing else. The
+`docs/loop-findings.md` entries and `reports/` written while this was live are kept — the observations
+are real even though the mechanism was wrong.

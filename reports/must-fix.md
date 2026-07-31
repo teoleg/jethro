@@ -15,6 +15,81 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 16:35Z (ADR-0133 scored **❌ BAD** at the close of its window; the scorer's auto-revert **failed on a git conflict and the bad code was still live**. **This cycle's one change is completing that revert manually** — that outranks every open item, per "verification outranks novelty".)
+
+**Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).** `scripts/score-change.py score`
+now prints `no pending change to score` and `reports/.pending-baseline.json` is **gone** — the window
+closed. The fresh ledger row grades it **❌ BAD** (risk-adjusted return per cycle significantly negative
+against the ADR-0116 hurdle; gross grown roughly an order of magnitude), and carries the note
+**`⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert`**.
+
+- **Deployed: ✅ confirmed.** `/api/ops/jvm` `uptimeSeconds` **1646** — a fresh boot running the graded code.
+- **Did it do what it claimed: ✅ mechanically, 🔴 economically.** It unstuck the vetoed names exactly as
+  derived — the desk deployed off its DORMANT floor. It then lost money doing so. The derivation was
+  right and the conclusion was wrong: the buffer was not strangling a profitable book, it was
+  incidentally suppressing turnover on names with **no measured edge**. Removing the suppression bought
+  spread, not return.
+- **Revert landed: ⚠️ NO — this is the defect this cycle fixes.** Reproduced the scorer's failure
+  directly: `git revert e61c7f5aa` conflicts on `docs/loop-findings.md`, `reports/last-analysis.md` and
+  `reports/must-fix.md` — the loop's own memory files, rewritten every cycle since. The **code** hunks
+  (`PositionBuffer.java`, `application.properties`, `PositionBufferTest.java`) apply **cleanly**. Same
+  failure mode as `efccc6502` and the `revert-failed` heartbeats before it.
+
+**Live situation.** SITUATION header: total PnL **$227.68**, gross **$167,392.97** (**11.2%** of the
+$1,500,000 firm cap, headroom **$1,332,607**), net **-$24,228.68** (**2.4%** of the $1,000,000 net cap),
+PnL **-280.06** since last run and **-433.47** over three, **Flags: none**. Live `/api/risk` `.total` read
+minutes later: `totalPnl` **192.23986225**, `realizedPnl` **402.49713476**, `unrealizedPnl`
+**-210.25727251**, gross **128,959.31706250**, net **+2,801.04706250**. Heartbeat
+`2026-07-31T16:04:57Z`: `pnl_growth_pct` **-31.45** vs `pnl_target_pct` **1.0**, `on_track` **false**,
+`stale` **true**. Bleeding and off target — but at 11.2% of the gross cap with the breaker untripped this
+is **not** the DANGER state.
+
+**Attribution (change vs market).** Both legs point the same way this cycle, which is unusual and worth
+stating. `unrealizedPnl` **-210.25727251** against `realizedPnl` **402.49713476** is mark-to-market on a
+book that is now near flat net (**+2,801.05**) — that part is **market**. But the **realized** leg is
+where the change shows: the scored window turned gross **17,957 → 167,401** and PnL **-$495.57**, and
+that gross is precisely what ADR-0133 was built to unlock. A ~9x book put on against no demonstrated
+edge pays spread on every name it opens. That is **mechanism**, and it is the reverted commit's.
+
+### 🎯 Item #1 THIS CYCLE (pre-empts the standing #1) — the BAD commit `e61c7f5aa` is still in the running code because the scorer's auto-revert cannot survive a conflict in the loop's own memory files
+
+The scorer reverts by `git revert`, which touches **every** path the original commit touched — including
+`docs/loop-findings.md`, `reports/last-analysis.md` and `reports/must-fix.md`, which the loop rewrites
+every single cycle. So a revert is **guaranteed** to conflict once one cycle has passed, and the scorer
+aborts leaving the graded-bad **code** live. This has now happened three times (`efccc6502`,
+`e61c7f5aa`, plus the `revert-failed` heartbeat run). It is the most expensive open defect in the loop
+because it silently keeps mechanisms the measurement already rejected.
+
+**Fixed this cycle by:** reverting the code paths only — `PositionBuffer.java`,
+`application.properties`, `PositionBufferTest.java` restored byte-for-byte to their pre-ADR-0133 form —
+and **keeping** the memory files and the ADR (annotated `Status: Reverted` with what the window taught).
+Findings are append-only durable memory; a revert must never erase them.
+
+**VERIFY-BY (next run):** `git show HEAD --stat` contains no `docs/`/`reports/` memory files, and
+`grep -n 'ADR-0133' app/src/main/java/io/jethro/app/fusion/PositionBuffer.java` returns **nothing**;
+`/api/fusion/targets` shows `insideBuffer` **true** returning across the low-conviction names, and
+`/api/risk` `.total.grossExposure` falling back off its post-ADR-0133 level.
+
+### 🎯 Item #2 (was #1, unchanged and still open) — the beta-covered subset is not a representative sample of the book: the hedge sizes off ~6.5% of the systematic risk it is meant to neutralise
+
+Not re-measured this cycle — verification of the failed revert outranks it, and re-reading the coverage
+ratio against a book that is mid-revert would grade the wrong thing. Carried forward at its last read
+(uncovered net **93.9%** of |net|, `Σ βᵢ·Eᵢ = -5,786.4225` against **-89,268.24**).
+
+**VERIFY-BY:** `/api/risk` positions × live `hedge_beta` rows — uncovered net as a share of |net| falls
+materially below **93.9%**. Track **coverage**, never sign (rule 189).
+
+### 🎯 Item #3 (was #2) — the EQUITY hedge axis pins a proxy that has no mark, while a priced fallback sits in its own candidate list
+
+Carried forward unchanged: ES absent from `/api/marks`, axis `status` **WARMING**, `covarianceReady`
+**false**, while NQ is priced and already in `jethro.hedge.equity-proxy-candidates`.
+
+**VERIFY-BY:** state **existence** before freshness (rule 191) — ES or NQ **has a row** in `/api/marks`,
+then that row's `providerTimestampMillis` advances between two polls, then `/api/hedging` EQUITY
+`targetProxyQty` is non-null.
+
+---
+
 ## Verification block — 2026-07-31 16:05Z (ADR-0133 is UNDER MEASUREMENT at 5/6 — **no code change made this cycle**, per the pending-baseline rule. **Item #1 stays #1 and its magnitude error got worse**; last cycle's headline sign inversion **un-flipped on its own with nothing fixed**, which is evidence for the item, not against it. Item #2's proxy went from *frozen* to *absent*.)
 
 **Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**
