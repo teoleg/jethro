@@ -95,7 +95,10 @@ public final class OrderService {
                 OrderStatus.NEW,
                 Instant.now());
 
-        if (!store.insertIfAbsent(order, Instant.now())) {
+        // ADR-0134: the originating trigger is stamped WITH the row, so it is already durable before
+        // the order can reach any status. It is never re-written afterwards, which is what makes an
+        // order that FILLED — a path with no status reason to record — attributable to what caused it.
+        if (!store.insertIfAbsent(order, command.originReason(), Instant.now())) {
             // Lost an idempotency race — return the row the winner inserted.
             return store.findByIdempotencyKey(command.idempotencyKey()).orElseThrow();
         }
@@ -110,7 +113,7 @@ public final class OrderService {
         BigDecimal signedQty = order.side().signed(order.quantity());
         if (executor.participationRejection(order, preMark).isPresent()
                 && !preTradeCheck.reducesRisk(order.bookId(), order.instrumentId(), signedQty)) {
-            return sliceOverCap(order, preMark);
+            return sliceOverCap(order, preMark, command.originReason());
         }
         return routeApproveAndFill(order, preMark);
     }
@@ -160,8 +163,11 @@ public final class OrderService {
      * back to the parent and shows as a "split" order. Rejected only when a single minimum slice
      * still can't fit the cap, or it would take more than {@value #MAX_SLICES} slices — in which
      * case the order is genuinely too big for the day's volume, said plainly.
+     *
+     * <p>Every slice inherits the parent's origination trigger (ADR-0134): slicing is an execution
+     * decision, so it changes how the desk gets the risk on, never why it wanted it.
      */
-    private Order sliceOverCap(Order parent, BigDecimal preMark) {
+    private Order sliceOverCap(Order parent, BigDecimal preMark, String originReason) {
         Optional<BigDecimal> maxQtyOpt = executor.maxQuantityUnderCap(parent, preMark);
         if (maxQtyOpt.isEmpty()) {
             return transition(parent, OrderStatus.REJECTED,
@@ -186,7 +192,7 @@ public final class OrderService {
                     parent.idempotencyKey() + ":slice:" + i,
                     parent.bookId(), parent.instrumentId(), parent.side(), parent.type(), qty,
                     parent.limitPrice(), parent.timeInForce(), OrderStatus.NEW, Instant.now());
-            if (store.insertChildIfAbsent(child, parent.orderId(), Instant.now())) {
+            if (store.insertChildIfAbsent(child, parent.orderId(), originReason, Instant.now())) {
                 publisher.publishOrderEvent(child, null);
                 routeApproveAndFill(child, preMark);
                 childIds.add(child.orderId());

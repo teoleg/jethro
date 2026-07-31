@@ -108,6 +108,20 @@ public final class FusionExecutor {
      *   NOT relaxed: the firm breaker and the pre-trade guardrail below still apply unchanged.
      */
     public Result route(String instrument, BigDecimal deltaQty, boolean riskReducing) {
+        return route(instrument, deltaQty, riskReducing, null);
+    }
+
+    /**
+     * As above, with the ORIGINATION trigger the planner attached to this delta (ADR-0134) — why the
+     * desk wanted the trade. It is carried on the order command and persisted with the row, so an
+     * order that FILLED is attributable to what caused it; the status {@code reason} answers the
+     * different question of why a status changed and stays empty on the happy path. Telemetry only:
+     * it is never read back by any decision, so a null origin can never change what the desk trades.
+     *
+     * @param originReason the trigger in the planner's own words, or null when the caller has none.
+     */
+    public Result route(String instrument, BigDecimal deltaQty, boolean riskReducing,
+                        String originReason) {
         try {
             // Execution is ALWAYS internal simulated fills (OrderService → SimulatedExecutor); there is no
             // real-broker path in the codebase, so routing under a LIVE feed is PAPER TRADING against real
@@ -154,7 +168,8 @@ public final class FusionExecutor {
             OrderType type = limit == null ? OrderType.MARKET : OrderType.LIMIT;
             var command = new NewOrder(KEY_PREFIX + instrument + ":" + UUID.randomUUID(),
                     book, instrument, side, type, absQty, limit,
-                    limit == null ? TimeInForce.GTC : TimeInForce.DAY);
+                    limit == null ? TimeInForce.GTC : TimeInForce.DAY,
+                    originReason); // ADR-0134: the trigger, stamped with the row at insert
             var order = orderService.submit(command);
             log.info("FUSION routed {} {} {} {} → {} on {} ({}) — ADR-0055 sole-origin (sim)",
                     type, side, absQty.toPlainString(), instrument, order.status(), book, order.orderId());

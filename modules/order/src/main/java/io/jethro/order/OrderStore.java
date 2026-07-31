@@ -15,16 +15,25 @@ import java.util.Optional;
  */
 public interface OrderStore {
 
-    /** Inserts a NEW order unless its idempotency key exists; true if this call created it. */
-    boolean insertIfAbsent(Order order, Instant now);
+    /**
+     * Inserts a NEW order unless its idempotency key exists; true if this call created it.
+     *
+     * <p>{@code originReason} (ADR-0134) is the originating trigger — why the desk wanted the trade.
+     * It is written once, with the row, and is never touched by a status transition, so it survives
+     * the NEW → ROUTED → FILLED path that has no status reason to record. Persistence-only, like the
+     * parent linkage below: it never enters the {@link Order} domain record.
+     */
+    boolean insertIfAbsent(Order order, String originReason, Instant now);
 
     /**
      * Inserts a NEW child slice linked to its parent order (the ADV auto-slicer). The parent
      * linkage is persistence-only — it never enters the {@link Order} domain record. Default
-     * ignores the parent id (fakes keep working); the JDBC store persists it.
+     * ignores the parent id (fakes keep working); the JDBC store persists it. A slice inherits
+     * its parent's origin (ADR-0134): the desk wanted it for the same reason.
      */
-    default boolean insertChildIfAbsent(Order order, String parentOrderId, Instant now) {
-        return insertIfAbsent(order, now);
+    default boolean insertChildIfAbsent(Order order, String parentOrderId, String originReason,
+                                        Instant now) {
+        return insertIfAbsent(order, originReason, now);
     }
 
     void updateStatus(String orderId, OrderStatus status, String reason, Instant now);

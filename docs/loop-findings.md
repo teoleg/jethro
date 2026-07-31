@@ -3338,3 +3338,31 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `still accumulating evidence (5/6 cycles)`. Five cycles of evidence on the revert would have been
   thrown away for a change that could have shipped 30 minutes later. The hold is cheap; the evidence is
   not.
+
+## 2026-07-31 19:30Z — the hold cleared and the missing trigger got fixed where it was actually lost
+
+- **Rule 222 — thread the trigger from the call site that DECIDES; you cannot recover it downstream.**
+  Item #1 re-verified ⚠️ STILL-BROKEN at **36 of 36 FILLED** orders NULL against **24 of 24 CANCELLED**
+  populated, then shipped as ADR-0134. The fix had to go where the information still exists: every
+  deciding call site already held a sentence (`signal.rationale()`, `thesis()`, the hedge advisor's
+  `rationale()`, the fusion target's entry/reduce/exit/stop-cut plus its forecast) and simply never passed
+  it to `submit`. Written into `orders.origin_reason` **at insert**, before any status exists, so no
+  transition can overwrite it. **When a field is empty on the happy path, the fix belongs at the producer,
+  not the persister** — and a second column beats overloading the first when the two answer different
+  questions (a REJECTED row is worth more carrying both the want and the refusal).
+- **Rule 223 — a "no-money" change earns its cycle when it unblocks the money items behind it.** This one
+  moves nothing and should score ⚠️ INCONCLUSIVE by construction. It was still the right spend: four
+  consecutive cycles guessed at mechanisms and falsified them a cycle later (Rule 207 was retracted
+  outright) for want of exactly this evidence, and the register's next item cannot be diagnosed without it.
+  **Count the cycles a missing measurement has already wasted before dismissing a telemetry fix as
+  low-value.**
+- **Rule 224 — the frozen books stayed frozen; ALPHA is the whole move in BOTH directions.** HEDGE
+  **160.19086234** and MACRO **-35.82347655** are byte-identical to last cycle for a second consecutive
+  reading, while ALPHA went **-13.33312927 → 28.99506278**. Last cycle Rule 219 read the same identity on a
+  fall; this cycle it is a rise. **The sign flips, the diagnosis does not: a book whose number never
+  changes is ballast, and a headline sourced from it is flattered either way.** Firm total **153.36244857**
+  with `hedgeMasking` **true** and `covarianceReady` **false**.
+- **Rule 225 — the +31.01 is UNATTRIBUTED, and that is the honest entry until next run.** Breaker clear,
+  regime `CHOP`/`CALM`, `volRatio` **0.99**, and the move sits on ALPHA positions no change of mine
+  touched. With no trigger on any fill, market and change still cannot be separated — the last window that
+  will have to be recorded this way, which is the point of the change.

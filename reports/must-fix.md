@@ -15,6 +15,80 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 19:30Z (**hold cleared — CHANGE SHIPPED**. `4f67f0515` scored **⚠️ INCONCLUSIVE** and `reports/.pending-baseline.json` is gone, so the five-cycle hold is over. Item **#1 re-verified ⚠️ STILL-BROKEN** — 36 of 36 FILLED orders NULL this window against 24 of 24 CANCELLED populated — and **fixed this cycle** (ADR-0134): the origination trigger is threaded from the deciding call sites into `submit` and stamped on the row at insert, where no status transition can overwrite it.)
+
+### Step 0 — last cycle's change (`4f67f0515`, the manual completion of the failed auto-revert): ✅ VERIFIED, and now SCORED
+
+- **Deployed + landed: ✅.** `docs/adr/0133-…md` reads `**Status:** Reverted` and a grep for `0133` across
+  the Java sources still returns no file, so the graded-BAD band cap is absent from the running code.
+- **Scored: ⚠️ INCONCLUSIVE.** The ledger row records risk-adjusted return/cycle **-0.000147** over **7**
+  cycles, **t=-0.37** against the **1.5** hurdle; gross **90,641 → 44,979**. Kept, not reverted. Grading is
+  the scorer's and the ledger row is its output — nothing here is authored.
+- **Consequence:** the hold that blocked cycles 1/6 through 5/6 is over, so item #1 shipped this cycle.
+
+### Item #1 — FIXED this cycle (ADR-0134); the defect first re-verified ⚠️ STILL-BROKEN
+
+Reproduced precisely on this window's 60 `recent_orders` before the change: **36 of 36 FILLED** orders
+carry a NULL `reason`; **24 of 24 CANCELLED** carry text, and it is the same string each time
+(`fusion re-plan — passive order superseded by a fresh target (ADR-0084)`). The only orders explained are
+the ones that never traded — exactly the shape the code predicts.
+
+What shipped, per last cycle's diagnosis that `reason` is a *status-transition* field and cannot be
+patched at the order layer:
+
+- `NewOrder` gains a nullable `originReason`; `OrderStore.insertIfAbsent` writes it into a new
+  `orders.origin_reason` column (migration `V50`) **at insert**, before the order can hold any status, and
+  **no transition ever overwrites it**. So it is present on exactly the orders that FILLED.
+- Separate column, not an overload of `reason`: the two answer different questions, and a REJECTED row is
+  strictly more useful carrying both the want and the refusal.
+- Every deciding call site passes the sentence it already held — `signal.rationale()`, the AI sleeve's
+  `thesis()`, the hedge advisor's `rationale()`, the operator's manual POST. `FusionLifecycle`, which
+  places most of the flow, names four triggers the post-mortem must separate: ADR-0086 trailing-stop cut,
+  entry, reduce-toward-target, and exit-decayed-to-flat.
+- ADV child slices inherit the parent's trigger — slicing changes *how* the risk goes on, not *why*.
+- Persistence-only, so `common-domain` and the messaging contract are untouched (invariant 4). Four new
+  tests cover the FILLED path, the REJECTED path keeping both fields, slice inheritance, and that a null
+  origin never blocks a trade. `-Pci test` green.
+
+- **VERIFY-BY (next run):** in `recent_orders`, FILLED orders with a NULL `origin` is **0**, and the
+  distinct FILLED origins name **more than one** trigger. The report query now selects `origin_reason` as
+  `origin` alongside `reason`, so both are visible and can be told apart.
+- **Honest caveat, restated:** telemetry only — nothing reads the field back, so it moves no money and
+  should be expected to score **⚠️ INCONCLUSIVE**. That is the correct outcome for buying evidence.
+
+### Open items — re-ranked, most-costly first
+
+**#1 (was #2) — ALPHA is not covering its own fees while a frozen hedge masks the headline.** Now the top
+item. `/api/attribution`: ALPHA `totalPnl` **28.99506278** on `feesPaid` **266.333508**, HEDGE
+**160.19086234** on **6.151134**, MACRO **-35.82347655**. ALPHA swung from **-13.33312927** last cycle, so
+the strategy book is the entire run-over-run move in both directions while HEDGE and MACRO sit byte-identical
+— they are ballast, not hedges. `hedgeMasking` **true**. ADR-0134 is what makes this diagnosable next run:
+cross the FILLED origins against per-name PnL and the fee line to find which trigger is paying the fees.
+- **VERIFY-BY:** ALPHA `totalPnl` in `/api/attribution` exceeds its `feesPaid`, or the gap narrows while
+  the fee line does not grow.
+
+**#2 (was #3) — the holding period is shorter than the signal horizon.** `horizonSeconds` **3600** on every
+source against a ~30-minute process recycle.
+- **VERIFY-BY:** median position age across a teardown exceeds one cycle for names the desk did not intend
+  to close.
+
+**#3 (was #4) — the scorer's auto-revert fails on a git conflict and leaves the BAD commit live.** Two
+ledger rows carry `⚠️ REVERT FAILED (git conflict)`. Reliability defect with a manual workaround that has
+now worked twice.
+- **VERIFY-BY:** a BAD verdict is followed by a clean revert with no manual step and no `revert-failed`
+  heartbeat action.
+
+**#4 (was #5) — the hedge covariance never converges.** `/api/hedging` `covarianceReady` **false**, EQUITY
+axis `WARMING`, `targetProxyQty` **null**, `utilization` **0.0**, `netExposureUsd` **24004.97**. Downstream
+of #2 (Rule 212), and what makes #1's masking possible.
+- **VERIFY-BY:** `covarianceReady` **true** with a non-null `targetProxyQty`.
+
+**#5 (was #6) — the book is under-deployed against the owner budget.** Net at **2.4%** of the net cap.
+Downstream of the edge gate holding every source flat; not independently actionable.
+- **VERIFY-BY:** net-cap utilisation rises while the risk-adjusted return stays positive.
+
+---
+
 ## Verification block — 2026-07-31 19:00Z (still **HOLD at 5/6 cycles** — **NO code change**. Item **#1 re-verified ⚠️ STILL-BROKEN, and this cycle found its code cause**: `reason` is a *status-transition* reason, not an *origination* reason — the happy path `NEW → ROUTED → FILLED` passes a literal `null` at every step, so only orders that FAIL can ever carry text. That turns #1 from "a column is empty" into a one-line-per-call-site fix with a known shape, ready to ship the moment the hold clears. Second finding: the whole run-over-run PnL fall is the **ALPHA** book — the HEDGE number is byte-identical to last cycle, so the hedge is frozen, not helping.)
 
 **HOLD — no change this cycle.** `python3 scripts/score-change.py score` prints

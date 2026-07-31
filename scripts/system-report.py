@@ -62,9 +62,12 @@ DB_QUERIES = {
     # Scoped to the current epoch's feed mode (invariant 8) rather than a hardcoded one — a hardcoded 'SIM'
     # showed the previous sim epoch's orders and hid every order the live desk actually placed.
     "recent_orders": "with epoch as (select feed_mode from orders order by created_at desc limit 1) "
+        # ADR-0134: `origin` is why the desk WANTED the trade (written at insert, survives every status
+        # transition); `reason` is why the STATUS changed and so is populated only on the failure
+        # branches. The post-mortem needs the first — an order that FILLED has no status to explain.
         "select o.created_at, o.feed_mode, o.book_id book, o.instrument_id instrument, o.side, "
-        "o.quantity qty, o.status, o.reason from orders o join epoch e on o.feed_mode=e.feed_mode "
-        "order by o.created_at desc limit 60",
+        "o.quantity qty, o.status, o.origin_reason origin, o.reason from orders o "
+        "join epoch e on o.feed_mode=e.feed_mode order by o.created_at desc limit 60",
     "fills_by_day": "select feed_mode, date(executed_at) d, count(*) fills, round(sum(fee)::numeric,2) fee "
         "from fills group by 1,2 order by 2,1",
     "firm_equity_curve": "select * from firm_equity order by 1",

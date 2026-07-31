@@ -46,7 +46,8 @@ public class OrderController {
                     request.limitPrice() == null || request.limitPrice().isBlank()
                             ? null : new BigDecimal(request.limitPrice()),
                     request.timeInForce() == null || request.timeInForce().isBlank()
-                            ? TimeInForce.GTC : TimeInForce.valueOf(request.timeInForce().toUpperCase()));
+                            ? TimeInForce.GTC : TimeInForce.valueOf(request.timeInForce().toUpperCase()),
+                    "manual order (operator, POST /api/orders)"); // ADR-0134 origination trigger
             var order = orderService.submit(command);
             // Return the persisted row view (single-element lookup by re-reading recent).
             var row = repository.recentOrders(50).stream()

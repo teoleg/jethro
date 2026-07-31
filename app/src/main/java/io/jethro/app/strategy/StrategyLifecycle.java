@@ -448,8 +448,11 @@ public final class StrategyLifecycle implements SmartLifecycle {
             return false; // still cooling down for this instrument
         }
         try {
+            // ADR-0134: the signal's own rationale IS the origination trigger — it is the sentence
+            // the strategy used to justify the entry, so record it rather than restating it.
             var command = new NewOrder("auto:" + signal.instrumentId() + ":" + UUID.randomUUID(),
-                    book, signal.instrumentId(), signal.side(), OrderType.MARKET, qty, null);
+                    book, signal.instrumentId(), signal.side(), OrderType.MARKET, qty, null,
+                    "strategy entry (ADR-0019): " + signal.rationale());
             var order = orderService.submit(command);
             lastAutoExec.put(signal.instrumentId(), now);
             recordActivity(new StrategyActivity(now, StrategyActivity.ENTRY, signal.instrumentId(), book,
@@ -581,7 +584,9 @@ public final class StrategyLifecycle implements SmartLifecycle {
         BigDecimal qty = p.quantity().abs();
         try {
             var command = new NewOrder("exit:" + p.instrumentId() + ":" + UUID.randomUUID(),
-                    p.bookId(), p.instrumentId(), side, OrderType.MARKET, qty, null);
+                    p.bookId(), p.instrumentId(), side, OrderType.MARKET, qty, null,
+                    "strategy exit (ADR-0019): " + reason); // ADR-0134: stop/target/loss-cap, as given
+
             var order = orderService.submit(command);
             lastExit.put(key, now);
             recordActivity(new StrategyActivity(now, StrategyActivity.EXIT, p.instrumentId(), p.bookId(),

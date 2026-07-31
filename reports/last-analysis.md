@@ -1,60 +1,63 @@
-HOLD at 5/6 cycles, no change — but I found the code cause of the missing trade-trigger, and that the hedge is frozen while the strategy book has gone negative underneath it.
+Orders now record WHY the desk wanted the trade, not only why a status changed — so the orders that actually fill stop being unattributable (ADR-0134).
 
-*(Every figure below is read from `/api/risk`, `/api/ops/jvm`, `/api/attribution`, `/api/hedging`,
-`/api/signals/telemetry`, `logs/report.md`, the scorer's snapshot, or the repo source. None is authored
+*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/hedging`,
+`/api/signals/telemetry`, `logs/report.md`, the scorer's ledger row, or the repo source. None is authored
 here — invariant 7 / ADR-0016.)*
 
-## Situation
+## Situation triage (live)
 
-1. **Money.** Total PnL **$105.97** on the SITUATION header, **-47.48** since last run and **+0.08**
-   over the last 3; live `/api/risk` `total.totalPnl` reads **111.03425652**. The `2026-07-31T18:35:50Z`
-   heartbeat has `pnl_growth_pct` **-40.91** against `pnl_target_pct` **1.0**, `on_track` **false**,
-   `stale` **true**, `underwater` **false**. Down run-over-run and off target.
-2. **Risk.** Gross **$38262.24** = **2.6%** of the $1,500,000 firm cap (headroom **$1,461,738**); net
-   **$17218.54** = **1.7%** of the $1,000,000 net cap. `Flags: none`. Gross rose **+5619.53** this
-   window — that is deployment with room to spare, not a danger.
-3. **Cause.** The pending change (`4f67f0515`) is **✅ VERIFIED deployed and landed**: `uptimeSeconds`
-   **1460** against `asOfMillis` **1785524432537** puts boot at **2026-07-31T18:36:12Z**, after the
-   revert commit; ADR-0133 reads `**Status:** Reverted` and no Java source mentions `0133`. Its effect
-   is the scorer's to judge at 6/6.
-4. **Danger.** None. Not near a cap, breaker clear. But see below — the headline is being flattered.
+1. **Money.** Total PnL **$153.36**, **+31.01** since last run, **+92.30** over the last 3. The latest
+   heartbeat (`2026-07-31T19:04:53Z`) reads `pnl_growth_pct` **15.54** against `pnl_target_pct` **1.0**,
+   `on_track` **true**, `stale` **false**, `underwater` **false**. Not bleeding, and on the owner target.
+2. **Risk.** Gross **$44,999.32** = **3.0%** of the $1,500,000 firm cap (headroom **$1,455,001**); net
+   **$24,004.97** = **2.4%** of the $1,000,000 net cap. `Flags: none`. Under-deployed against the ADR-0132
+   budget, nowhere near a cap.
+3. **Cause.** The pending change cleared: `4f67f0515` (the manual completion of the failed auto-revert)
+   scored **⚠️ INCONCLUSIVE** — risk-adjusted return/cycle **-0.000147** over **7** cycles, **t=-0.37**
+   against a **1.5** hurdle. Kept, not reverted, and the hold that blocked the last five cycles is over.
+4. **Danger.** None. `/api/risk/breaker` `halted: false`, regime `CHOP`/`CALM`, `volRatio` **0.99**.
+5. **Order post-mortem — still impossible, and that is what I changed.** Of this window's 60
+   `recent_orders`: **36 of 36 FILLED** orders carry a NULL `reason`; **24 of 24 CANCELLED** carry text.
+   The orders that never traded are the only ones explained.
+6. **Books.** `/api/attribution` `firmTotal` **153.36244857** = HEDGE **160.19086234** + ALPHA
+   **28.99506278** + MACRO **-35.82347655**, on `totalFees` **272.654475** (ALPHA **266.333508**). HEDGE
+   and MACRO are again byte-identical to last cycle — neither traded. ALPHA read **-13.33312927** last
+   cycle and **28.99506278** now, so the whole run-over-run move is once more the strategy book, this time
+   upward. `hedgeMasking` **true**, `/api/hedging` `covarianceReady` **false**.
+7. **Change vs market.** The **+31.01** is **unattributed**. It sits entirely in ALPHA, on positions no
+   change of mine touched (the pending change was a revert completion, live since 16:35Z), with the breaker
+   clear and the tape calm. With no trigger on any fill I cannot separate market from change, so per
+   Rule 216 I record it as unattributed rather than crediting it to anything.
 
-## Where the money actually went
+## What I changed and why
 
-`/api/attribution` reads `firmTotal` **111.03425652** = HEDGE **160.19086234** + ALPHA **-13.33312927**
-+ MACRO **-35.82347655**, on `totalFees` **270.415875** of which ALPHA paid **264.094908**.
+Item **#1** in the register, and this cycle it was ripe: last cycle traced the *cause* but was under a
+scoring hold and could not ship. The framing that mattered — `reason` is a **status-transition** field, so
+`OrderService.routeApproveAndFill` writes it only on the failure branches while the happy path
+`NEW → ROUTED → FILLED` passes a literal `null`. The column is not failing; it answers a different
+question. No patch at the order layer can recover a trigger that was never passed into it.
 
-The HEDGE and MACRO figures are **byte-identical to last cycle's reading**. Neither book traded. ALPHA
-read **40.37358247** last cycle and reads **-13.33312927** now, so the entire run-over-run fall is the
-strategy book — and it fell while gross exposure rose. `hedgeMasking` is **true** while `/api/hedging`
-`covarianceReady` is **false**: the firm total is positive only because a *frozen* hedge P&L sits on top
-of a strategy book that has now crossed from "not covering its fees" (Rule 217, last cycle) to negative
-outright. That is the live bleed, and it enters the register at **#2**.
+So the trigger is now threaded from the call sites that decide to trade: `NewOrder` carries a nullable
+`originReason`, written into a new `orders.origin_reason` column **at insert** — before any status exists —
+and never overwritten by a transition. Every deciding call site passes the sentence it already had
+(`signal.rationale()`, the AI sleeve's `thesis()`, the hedge advisor's `rationale()`), and the fusion
+planner, which places most of the flow, names four triggers the post-mortem must tell apart: an ADR-0086
+trailing-stop cut, an entry, a reduce toward a smaller target, and an exit decayed to flat. ADV child
+slices inherit the parent's trigger. A REJECTED order now keeps both the want and the refusal.
 
-## What I learned about #1 — it is not an empty column, it is a missing concept
+**This is telemetry only and it moves no money.** Nothing reads the field back, so a null origin cannot
+change what the desk trades; the deterministic floor, all money math and every sizing path are unchanged.
+It should be expected to score ⚠️ INCONCLUSIVE — the correct outcome for buying evidence, not a failure.
+It is worth a cycle because the register's next item (#2: ALPHA negative net of its own fees while a frozen
+hedge masks it) is not diagnosable without knowing which trigger opened the losers, and four consecutive
+cycles have now burned themselves guessing at that and then falsifying the guess.
 
-I re-verified item #1 and it is ⚠️ STILL-BROKEN: of this window's 60 `recent_orders`, **32 of 32 FILLED**
-and the **1 ROUTED** carry a NULL `reason`, while **27 of 27 CANCELLED** carry text. This cycle I traced
-the cause instead of restating the symptom. In `OrderService.routeApproveAndFill`, reasons are written
-only on failure branches (`gate.reason()`, `"no market data for …"`, `"IOC — not marketable on
-arrival"`); the success path is `transition(order, OrderStatus.ROUTED, null)` and submit publishes
-`publishOrderEvent(order, null)`. So `reason` records **why a status changed**, not **why the desk
-wanted the trade** — and only orders that fail ever have a status change worth explaining.
+## Edge check (the standing priority) — unchanged, still nothing that can size
 
-That reframes the fix and makes it concrete: the trigger must be threaded from the fusion/strategy call
-site that decides to trade into `submit`, not recovered at the order layer. It is ready to ship the
-moment the hold clears.
-
-## Decision
-
-**No change.** `scripts/score-change.py score` prints `still accumulating evidence (5/6 cycles)` and
-`reports/.pending-baseline.json` is present — one cycle from a verdict, and a new change now would throw
-away five cycles of evidence on the revert. On the standing priority nothing moved: at `horizonSeconds`
-**3600**, momentum **5.749961141428572** bps over **10** cohorts, social **5.743293811097191** over
-**22** and reversion **4.911734698471268** over **63** all remain small against their own cohort
-dispersion (**29.247194899516227**, **25.910850044717932**, **32.17586652023403**), while trend
-**-2.044825086028045** and xsreversion **-6.146473850702721** are negative. The edge gate correctly lets
-none of them size. Next cycle's one change is register **#1**, with the trade-off stated up front: it
-moves no money and will most likely score ⚠️ INCONCLUSIVE, which is the right outcome for a change that
-buys evidence — and every money change after it, starting with #2, depends on being able to name the
-trigger that opened the loser.
+`/api/signals/telemetry` at `horizonSeconds` **3600**, as `avgReturnBps` / `cohorts` / `stdCohortMeanBps`:
+momentum **5.749961141428572** / **10** / **29.247194899516227**; social **5.743293811097191** / **22** /
+**25.910850044717932**; reversion **4.911734698471268** / **63** / **32.17586652023403**; trend
+**-2.044825086028045** / **71** / **30.426625198598547**; xsreversion **-6.146473850702721** / **25** /
+**33.63312259265042**. Every positive source remains small against its own cohort dispersion and the edge
+gate correctly lets none of them size. Unchanged for seven cycles — which is precisely why I spent this
+cycle on the evidence gap rather than on another combiner parameter.
