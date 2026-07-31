@@ -3045,3 +3045,29 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `deltaQty` **-15.939691** against `currentQty` **-3.0** is strictly narrower than its aim-to-holding
   distance, so the band is demonstrably being evaluated. Same commit, same tests, new verdict, because the
   book finally reached the code. Carry an unverifiable item forward and re-test it rather than closing it.
+
+## 2026-07-31 15:05Z — the σ freeze cleared by itself and the book deployed; that revealed the hedge sizing on 8 of 28 names (no change; ADR-0133 at 3/6)
+
+- **Rule 180 — a "hedged" status is a claim about COVERAGE, not just about sizing; make it prove what it
+  could see.** `/api/hedging` reported `status` **ON-TARGET**, `tier` **STRUCTURAL**, against
+  `netExposureUsd` **-60979.73** with `rawTargetNotionalUsd` only **18860.33** — a ~31% hedge presented as
+  complete. `HedgeMath.structuralBetaHedge` skips any name with no assigned beta (its own test
+  `structuralBetaHedgeSkipsNamesWithNoAssignedBeta` asserts this), and the live `instrument_attributes` has
+  `hedge_beta` for only **8 of 28** equities — AAPL 1.25, NVDA 1.75, AMZN 1.20, JPM 1.10, MSFT 1.10,
+  GOOG 1.05, SAP 1.00, JNJ 0.55, the original sim-era universe. **-$38,897 of -$60,974 net equity (63.8%)**
+  is invisible to the hedge, **XOM's $24,442 — 28% of firm gross — included**. A missing input must degrade
+  the STATUS, never silently shrink the TARGET.
+- **Rule 181 — reconcile a suspected mechanism against the app's OWN published number before ranking it.**
+  Recomputing `Σ βᵢ·Eᵢ` from live positions × live betas gave **-18,856.99** against the hedger's published
+  `rawTargetNotionalUsd` **18,860.33**. That tie is what turns "probably the betas" into item #1; a
+  hypothesis that cannot be tied to a number the app already prints is not ready to spend a cycle on.
+- **Rule 182 — check a warm-up item again before acting on it: it may have closed itself.** Item #1 for
+  three cycles was the ADR-0126 σ-cold freeze. This boot logged `still cold` at **103–117 of 121** stored
+  prices vs **38–99** one boot earlier, the veto lifted, and the desk went from **3 shares of AAPL** to
+  **21 positions** / gross **$76,657.72 → $86,777.90** with no code change at all. Downgrade, don't close:
+  the store crossed the span by accumulation, so a weekend or outage gap re-freezes it.
+- **Rule 183 — a first read of a warming subsystem is not evidence; re-read it before writing it down.** At
+  15:03 the hedge axis read `status` **WARMING**, `covarianceReady` **false**, "no tradable proxy can be
+  sized yet (price/covariance/betas missing)", and ES was absent from `/api/marks` — which looked like an
+  unpriceable-proxy bug. Two minutes later the same axis read **ON-TARGET/STRUCTURAL** holding **0.050468**
+  ES. The transient would have become a wrong item #1 and a wasted cycle.

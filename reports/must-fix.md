@@ -15,6 +15,109 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 15:05Z (ADR-0133 is UNDER MEASUREMENT at 3/6 — **no code change made this cycle**, per the pending-baseline rule. **Item #1 is REPLACED**: the old #1 (σ-cold freeze) cleared itself by accumulation and the desk deployed a real book — which immediately exposed that the structural hedge sizes on 8 of 28 equities and calls the result ON-TARGET)
+
+**Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**
+`scripts/score-change.py score` prints `e61c7f5aa still accumulating evidence (3/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` still exists. Held, unscored; **no new change this
+cycle**.
+
+- **Deployed: ✅ confirmed.** `ops_jvm.uptimeSeconds` **1427** at report generation and **1748** on a later
+  direct read, against a boot logged at 10:36 EDT. The running process is the fix build.
+- **Did it do what it claimed: ⚠️ still unscored, but no longer starved of input.** Last cycle only 3 of 21
+  names ever reached the band. This cycle `/api/fusion/targets` publishes **20** instruments, **8** with a
+  non-zero `deltaQty` (GOOG **-4.072490**, CVX **-9.325964**, HD **-15.302545**, CAT **-7.000596**, MCD
+  **-26.061341**, XOM **-50.804343**, JNJ **-21.372829**, AAPL **-0.688539**) and the rest at exactly 0.0.
+  The band is being exercised across a real book for the first time.
+- **Regression check: none.** Breaker untripped (`halted` **false**), `var95` **1161.13** on
+  `coveredExposure` **76657.72**, `skippedExposure` **0.00**, no new WARN/ERROR classes.
+
+**Live situation.** `/api/risk` `.total` moved during the run as the desk built: total PnL **$563.79** at
+one read, **$652.57** at a later one; gross **$76,657.72** → **$86,777.90**; net **-$74,838.88** →
+**-$42,118.67**. The SITUATION header reads gross at **5.1%** of the $1,500,000 firm cap with **$1,423,342**
+of headroom, PnL **-163.54** since last run and **-154.79** over three, **Flags: none**. The 14:35:53Z
+heartbeat has `pnl_growth_pct` **-5.03** vs `pnl_target_pct` **1.0**, `on_track` **false**, `stale`
+**true**, `underwater` **false**. Not danger — exposure rising with this much headroom is the goal.
+
+**Attribution (change vs market).** The desk went from **3 shares of AAPL** to **21 equity positions**
+between 14:41Z and 15:00Z. No code change caused that: this boot logged `risk-cut σ sensor still cold` at
+**103–117 of 121** stored prices against **38–99** one boot earlier, so the veto lifted by accumulation.
+The deployment is warm-up; the negative unrealized on it is a rising tape against a short book, i.e.
+market. Neither ADR-0132 nor ADR-0133 gets credit or blame (Rules 141/152/174).
+
+### 🎯 Item #1 — NEW, ranked top: the structural hedge sizes on the 8 equities that have a `hedge_beta` and reports ON-TARGET while 64% of the firm's net equity is invisible to it
+
+**Proving numbers, all read live this cycle.** `/api/hedging` EQUITY axis: `netExposureUsd` **-60979.73**,
+`tier` **STRUCTURAL**, `status` **ON-TARGET**, `rawTargetNotionalUsd` **18860.33**, `heldProxyQty`
+**0.050468** vs `targetProxyQty` **0.050481**, rationale *"largest delta under the 4715.08 no-trade band,
+holding"*. A ~31% hedge ratio, presented to the desk as complete.
+
+**Mechanism, confirmed against the app's own number (Rule 181).** `HedgeMath.structuralBetaHedge` sums
+`Σ βᵢ·Eᵢ` and skips any name with no assigned beta — its own test
+`structuralBetaHedgeSkipsNamesWithNoAssignedBeta` asserts exactly that. The live `instrument_attributes`
+table carries `hedge_beta` for **8 of 28** equities: AAPL **1.25**, NVDA **1.75**, AMZN **1.20**, JPM
+**1.10**, MSFT **1.10**, GOOG **1.05**, SAP **1.00**, JNJ **0.55** — the original sim-era universe. BAC,
+CAT, CVX, HD, KO, MCD, NEE, PFE, PG, UNH, WMT, XOM, plus BRK.B, DIS, GOOGL, GS, META, NFLX, PYPL, TSLA,
+carry none. Recomputing `Σ βᵢ·Eᵢ` from the live positions × the live betas gives **-18,856.99** against the
+hedger's published `rawTargetNotionalUsd` **18,860.33** — the same number to within snapshot drift.
+
+**What it costs.** Of **-$60,974** net equity, **-$22,077** is beta-covered and **-$38,897 (63.8%)** is
+invisible to the hedge. **XOM alone is $24,442 of gross — the largest equity position on the desk and 28%
+of firm gross — with no beta at all.** The firm is carrying an unhedged directional equity bet that its own
+hedge overlay reports as neutralized. A missing input is being read as "no market exposure" rather than
+"unknown market exposure".
+
+**This is a known defect class.** CLAUDE.md already records it from the V31→V34 universe expansion:
+instruments added to the master without their attribute rows backfilled in the same change.
+
+**The fix must NOT hand-author betas.** CLAUDE.md names a `β=1.0` placeholder as a lesson already paid for,
+and a self-chosen beta that sizes a hedge is precisely the invented risk number the house rules forbid. The
+change derives each name's beta **in code** from the durable mark history the platform already stores
+(stated estimator, cited convention), and surfaces the uncovered fraction on the axis so a partially-covered
+book can never report ON-TARGET. Architecturally significant → ships with an ADR (`**Status:** Implemented`)
+in the same commit.
+
+**VERIFY-BY (next run).** On `/api/hedging` EQUITY axis: (a) a published beta-coverage figure exists and
+reads **≥ 0.95** of `|netExposureUsd|`, and (b) `rawTargetNotionalUsd` is within the hedge's own no-trade
+band of the beta-weighted net rather than ~31% of it; and in Postgres, `select count(*) from
+instrument_attributes where name='hedge_beta'` covers every equity carrying exposure. If coverage is still
+partial, `status` must NOT read ON-TARGET.
+
+### Item #2 — ⚠️ DOWNGRADED, not closed (was #1 for three cycles): the ADR-0126 σ-cold veto freezes the book after any long market gap
+
+**Cleared itself this cycle, by accumulation, with no code change (Rule 182).** Boot logged `risk-cut σ
+sensor still cold` at **103–117 of 121** stored prices vs **38–99** one boot earlier; the veto lifted, and
+gross went **$76,657.72 → $86,777.90** across **21** positions where last cycle it was **$906.47** across
+one. The durable mark store crossed the `vol-span=120` warm-up span.
+**Why it is not closed:** nothing was fixed. The store crossed the span because the market has been open
+continuously; a weekend, an outage or a pre-market start empties the recent tail again and the same freeze
+returns. `FusionLifecycle.seedVolatility` still guards on `volSeeded.add(instrument)`, so the seed runs
+once per process. Re-rank to #1 the moment a boot logs `still cold` below ~100/121 again.
+**VERIFY-BY.** After the next weekend or multi-hour gap, count the boot's `risk-cut σ sensor still cold`
+lines and their seeded/121 ratios; and read `/api/fusion/targets` for the number of `aims` at exactly 0.0
+within 10 minutes of boot. Prior remedy ADR-0131 (re-seed on the warm-up cadence) scored ❌ BAD and is
+retired — a different lever is required (Rule 175).
+
+### Item #3 (carried) — ADR-0132's destination clamp has never been observed firing
+
+Unchanged. `riskCuts` **[]** and no clamp telemetry is published, so there is still no live evidence the
+ADR-0132 `onTargetSide` branch has ever been reached.
+**VERIFY-BY.** A published counter, or a `/api/fusion/targets` row whose `deltaQty` stops strictly short of
+flat on the target's side while the aim sits across it.
+
+### Item #4 (carried) — MACRO holds a frozen directional loss
+
+`/api/risk` `.byBook`: MACRO `totalPnl` **-35.82347655**, `grossExposure` **0.00000000**, `positionCount`
+**1** (NQ, quantity **0**). Realized, frozen, no live exposure — no bleed, ranked below the items above.
+**VERIFY-BY.** MACRO `positionCount` reaches 0, or the name reappears in the fusion target book.
+
+### Item #5 (carried, housekeeping, no money cost) — the ADR index is missing rows for 0129, 0130, 0131, and 0132 is a duplicated number
+
+Unchanged. `docs/adr/README.md` still lacks index rows for 0129–0131, and 0133 is now also unindexed.
+**VERIFY-BY.** `docs/adr/README.md` lists every file present in `docs/adr/`.
+
+---
+
 ## Verification block — 2026-07-31 14:30Z (ADR-0133 is UNDER MEASUREMENT at 2/6 — **no code change made this cycle**, per the pending-baseline rule. Item #1 is ⚠️ STILL-BROKEN and now has its *rate*: the σ seed IS converging across reboots, just far slower than the reboot cadence, so the process always dies with most of the book still frozen)
 
 **Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).**
