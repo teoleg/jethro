@@ -15,6 +15,119 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 18:30Z (still **HOLD at 4/6 cycles** — **NO code change**. This hold cycle **falsified last cycle's own headline**: the desk did **not** flatten at this teardown — six names carried across the reboot. So the flatten is **episodic, not structural**, and Rule 207 overgeneralised from two consecutive cycles. Chasing it further is blocked by a defect found this cycle: **every order that actually traded carries a NULL `reason`**, so the order-level post-mortem the whole procedure depends on has no evidence in it. That becomes **item #1** — it is the reason three consecutive cycles could not name a trigger.)
+
+**HOLD — no change this cycle.** `python3 scripts/score-change.py score` prints
+`score: 4f67f0515 still accumulating evidence (4/6 cycles) — held, not scored this run`, and
+`reports/.pending-baseline.json` is present (commit `4f67f05158a4b7cf159180250589c7b48a0ebc59`,
+`ts` `2026-07-31T16:35:59Z`). A new change now would destroy the evidence on the revert.
+
+### Step 0 — last cycle's change (`4f67f0515`, the manual completion of the failed auto-revert): ✅ VERIFIED (deployed + landed), ⏳ effect still under measurement
+
+- **Deployed: ✅.** `/api/ops/jvm` `uptimeSeconds` **1279** against `/api/risk` `asOfMillis`
+  **1785522627137** puts boot at **2026-07-31T18:09:08Z** — after the 16:35:50Z revert commit, so the
+  running code is the reverted code.
+- **Landed in the source: ✅ (unchanged).** `docs/adr/0133-*.md` reads `**Status:** Reverted`; a grep for
+  `0133` across the Java sources returns nothing, so the rejected band cap is absent from the code, not
+  merely disabled.
+- **Effect: ⏳ not gradeable — the scorer's job at 6/6, not mine.** Direction since the pending baseline
+  (`totalPnl` **202.24011897**, gross **90641.36436250**) to live now: `totalPnl` **164.74096826**,
+  gross **33932.54000000**.
+
+### The correction — the teardown flatten is EPISODIC, not every cycle
+
+Last cycle's block asserted the desk "liquidates the entire book to exactly flat at every loop teardown".
+This cycle's telemetry does not support "every":
+
+- **Six names carried across this reboot.** Summing every LIVE ALPHA fill executed before the
+  **2026-07-31T18:09:08Z** boot, the net is non-zero on BAC **68.000000**, GOOG **1.000000**,
+  MCD **-43.000000**, MSFT **37.000000**, NVDA **-30.000000**, PFE **-221.000000**. Not flat.
+- **The heartbeat-minute bursts are outliers, not a cadence.** Minutes over $20k of turnover since
+  12:00Z: the three outsized ones are `16:05` (**3** fills, **$63,599.14**), `17:12` (**6**,
+  **$81,499.01**) and `17:38` (**11**, **$99,922.58**). The teardown minutes of the other cycles are
+  ordinary — `16:37` **$28,990.48**, `18:06` **$20,729.30**, `18:09` **$17,188.13**.
+- **What survives from Rule 209 is the part that never depended on "every".** Every source in
+  `/api/signals/telemetry` still publishes `horizonSeconds` **3600** while the process is recycled every
+  ~30 minutes, so the holding period is still structurally shorter than the horizon the expectancy is
+  measured over. That claim stands on its own; the "flat at every teardown" mechanism does not.
+
+### Why the diagnosis stalled — the post-mortem source is empty
+
+`ops/improve-prompt.md` step 5 requires attributing each move to the **trigger** that opened it. That
+evidence does not exist for any order that traded:
+
+- Of the **523** FILLED orders since 12:00Z, **0** carry a `reason`.
+- All **249** populated reasons belong to CANCELLED orders, and every one is the same string —
+  `fusion re-plan — passive order superseded by a fresh target (ADR-0084)`. The only other is a single
+  REJECTED `no market data for MCD`.
+
+So the register has been asking three consecutive cycles to "name the trigger behind the collapse" using a
+column that is populated only for orders that never traded. That is the binding constraint.
+
+### Situation triage (live, read — never authored)
+
+1. **Money.** SITUATION: total PnL **$164.68**, **+103.62** since last run, **-95.01** over the last 3.
+   Heartbeat `2026-07-31T18:08:44Z`: `pnl_growth_pct` **-72.0** vs `pnl_target_pct` **1.0**, `on_track`
+   **false**, `stale` **true**, `underwater` **false**. Off target, but up run-over-run.
+   `/api/attribution`: `firmTotal` **164.74096826** = HEDGE **160.19086234** + ALPHA **40.37358247** +
+   MACRO **-35.82347655**; `totalFees` **268.179380**, of which ALPHA `feesPaid` **261.858413**.
+   **The strategy books are not paying for their own fees — the hedge is carrying the total.**
+2. **Risk.** Gross **$33,927.71** = **2.3%** of the $1,500,000 firm cap, headroom **$1,466,072**; net
+   **$12,537.56** = **1.3%** of the $1,000,000 net cap. `Flags: none`. Badly under-deployed.
+3. **Cause.** Last cycle's change is the revert completion, still under measurement (4/6). The
+   **+103.62** move is not attributable to it: `/api/risk/breaker` is `halted: false`, regime is
+   `CHOP`/`CALM` with `volRatio` **1.04**, and the window's orders are ordinary-sized. With FILLED
+   orders carrying no `reason`, market vs change **cannot be separated from the numbers** — so it is
+   recorded as unattributed rather than credited.
+4. **Danger.** None. Not bleeding, not near a cap, breaker not halted. The live problem is the inverse:
+   **1.3% net-cap utilisation** with a stale growth flag.
+5. **Edge check (the standing priority).** `/api/signals/telemetry`, longest horizon
+   (`horizonSeconds` **3600**), each as `avgReturnBps` / `cohorts` / `stdCohortMeanBps`:
+   reversion **4.870510576792947** / **63** / **32.18731967290294**;
+   social **5.656591478039339** / **22** / **25.926539977790824**;
+   trend **-1.9332555813332086** / **71** / **30.395970142413756**;
+   momentum **-1.053279287301587** / **9** / **21.01493057213379**;
+   xsreversion **-6.334834134258276** / **25** / **33.59752101445426**.
+   The two positive sources remain small against their own cohort dispersion, and the edge gate still
+   lets none of them size. Unchanged from prior cycles.
+
+### Open items — re-ranked, most-costly first
+
+**#1 — FILLED orders carry no `reason`, so no trade can be attributed to its trigger.** 0 of 523 FILLED
+orders since 12:00Z have a reason; the 249 that do are all CANCELLED. Every diagnosis this register has
+asked for over three cycles — "which trigger opened the loser", "what collapsed the targets" — is
+unanswerable without it, and the loop has instead been guessing mechanisms and then falsifying them
+(Rule 207 this cycle). This is the cheapest change with the largest downstream leverage: it touches no
+money math, no sizing, and nothing on the deterministic floor.
+- **VERIFY-BY:** next run, `select count(*) filter (where reason is null) from orders where status='FILLED'`
+  over the window returns **0**, and the distinct FILLED reasons name more than one trigger.
+- **Honest caveat to record with it:** this is a telemetry fix. It will very likely score
+  ⚠️ INCONCLUSIVE because it moves no money directly. That is the correct outcome, not a failure — it
+  buys the evidence the next *money* change needs.
+
+**#2 — the holding period is shorter than the signal horizon.** `horizonSeconds` **3600** on every source
+against a ~30-minute process recycle. Survives this cycle's correction because it never depended on the
+flatten being universal.
+- **VERIFY-BY:** median position age across a teardown exceeds one cycle for names the desk did not
+  intend to close.
+
+**#3 — the scorer's auto-revert fails on a git conflict and leaves the BAD commit live.** Two ledger rows
+now carry `⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE`. Drops below #1 because the
+manual completion has worked twice; it is a reliability defect, not an active bleed.
+- **VERIFY-BY:** a BAD verdict is followed by a clean revert with no manual step and no `revert-failed`
+  heartbeat action.
+
+**#4 — the hedge covariance never converges.** `/api/hedging` `covarianceReady` **false**, EQUITY axis
+`WARMING`, `targetProxyQty` **null** for a fifth consecutive cycle, `utilization` **0.0**. Still
+downstream of #2 (Rule 212) — do not spend a change here first.
+- **VERIFY-BY:** `covarianceReady` **true** with a non-null `targetProxyQty`.
+
+**#5 — the book is under-deployed against the owner budget.** Net at **1.3%** of the net cap. Downstream
+of the edge gate holding every source flat; not independently actionable.
+- **VERIFY-BY:** net-cap utilisation rises while the risk-adjusted return stays positive.
+
+---
+
 ## Verification block — 2026-07-31 18:00Z (still **HOLD at 3/6 cycles** — **NO code change**. A third hold cycle went into measurement and it **promoted the churn item to #1 and corrected its mechanism**: the desk does not churn a few cold names, it liquidates the **entire book to exactly flat at every loop teardown** and rebuilds from zero. The flatten fires at **teardown**, not at boot — so cold sensors are the sequel, not the cause. The scorer's revert bug drops to #2: it has a manual workaround that has now worked twice; this one has none and is halving the holding period the edge needs.)
 
 **HOLD — no change this cycle.** `python3 scripts/score-change.py score` prints

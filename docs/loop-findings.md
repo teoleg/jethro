@@ -3273,3 +3273,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   consecutive cycle, and `netExposureUsd` flipped **-7368.29 → 8243.99** between cycles. A covariance
   estimate cannot converge on a book that is destroyed and re-drawn every 30 minutes. Do not spend a
   change on the hedge until the holding period is fixed.
+
+## 2026-07-31 18:30Z — a finding I had to RETRACT, and the telemetry gap that let me publish it in the first place
+
+- **Rule 213 — Rule 207 is WRONG and is hereby retracted: the desk does NOT flatten at every teardown.**
+  Summing every LIVE ALPHA fill executed before the **2026-07-31T18:09:08Z** boot (`/api/ops/jvm`
+  `uptimeSeconds` **1279** against `/api/risk` `asOfMillis` **1785522627137**), six names carry across
+  the reboot: BAC **68.000000**, GOOG **1.000000**, MCD **-43.000000**, MSFT **37.000000**,
+  NVDA **-30.000000**, PFE **-221.000000**. The heartbeat-minute bursts are episodic outliers, not a
+  cadence — since 12:00Z the outsized ones are `16:05` (**$63,599.14**), `17:12` (**$81,499.01**) and
+  `17:38` (**$99,922.58**), while `16:37` (**$28,990.48**), `18:06` (**$20,729.30**) and `18:09`
+  (**$17,188.13**) are ordinary. I generalised "every teardown" from two consecutive cycles. **Two
+  observations is not a cadence — before writing "every N", check the other N.**
+- **Rule 214 — Rule 209 survives the retraction because it never depended on "every".** All sources
+  still publish `horizonSeconds` **3600** against a ~30-minute process recycle, so the holding period
+  is structurally shorter than the horizon the expectancy is measured over. When a finding is falsified,
+  separate the part that rested on the false premise from the part that stands alone — do not discard
+  both, and do not keep both.
+- **Rule 215 — the order-level post-mortem the procedure mandates has NO evidence in it: FILLED orders
+  carry a NULL `reason`.** Of the **523** FILLED orders since 12:00Z, **0** have a reason. All **249**
+  populated reasons belong to CANCELLED orders and are the same string (`fusion re-plan — passive order
+  superseded by a fresh target (ADR-0084)`); the only other is one REJECTED `no market data for MCD`.
+  So `reason` is populated exclusively for orders that never traded. This is why three consecutive
+  cycles each proposed a collapse mechanism and then falsified it — including this one. **Next change
+  targets this**, with the trade-off stated up front: it moves no money and will most likely score
+  ⚠️ INCONCLUSIVE, which is the correct outcome for buying evidence, not a failure.
+- **Rule 216 — when the trigger is unknown, record the window as UNATTRIBUTED rather than crediting it.**
+  PnL moved **+103.62** this window with `/api/risk/breaker` `halted: false`, regime `CHOP`/`CALM`,
+  `volRatio` **1.04** and ordinary order sizes. With no trigger on any fill, market and change cannot be
+  separated from the numbers. Writing down "unattributed" is the honest entry; inventing a cause is
+  exactly the error Rule 213 just cost.
+- **Rule 217 — the strategy books are not paying for their own fees; the hedge is carrying the firm
+  total.** `/api/attribution` `firmTotal` **164.74096826** = HEDGE **160.19086234** + ALPHA
+  **40.37358247** + MACRO **-35.82347655**, on `totalFees` **268.179380** of which ALPHA paid
+  **261.858413**. Read the decomposition every cycle even when the headline is up — a rising total
+  sourced entirely from the hedge is not evidence the strategy works.
