@@ -3160,3 +3160,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   cycle `unrealizedPnl` **-210.25727251** on a near-flat-net book (**+2,801.04706250**) is the tape; the
   **realized** leg carries the change's cost, because a ~9x gross put on against no edge pays spread on
   every name it opens. Unrealized ≈ market, realized ≈ what your mechanism actually did.
+
+## 2026-07-31 17:00Z — the manual revert verified out of the code; the hold bought the reading that killed the next change
+
+- **Rule 197 — before "fixing" a gate the desk appears to be ignoring, check whether it is switched off ON
+  PURPOSE, and check what arming it would leave tradable.** The selector reports `measured` **31**,
+  `tradable` **15**, `edgeGated` **16**, while `/api/fusion/targets` routes non-zero deltas in gated names
+  (CVX **0.207468**, GOOG **4.873257**) and holds GOOG **-35**, NVDA **-27**, CVX **-25**. That looks like
+  a leak worth closing against `totalFees` **229.638225** on a `firmTotal` of **293.55386805**. It is not:
+  the ADR-0049/0059 veto exists at `FusionExecutor.java:139`, is already reduce-only-exempt, and is
+  deliberately disabled by `application.properties:414` `require-backtest-support=false` and `:401`
+  `edge-gate.enabled=false` under ADR-0122's exploration mode. **Arming it today leaves ONE tradable
+  name** — of the 13 supported names carrying a target, only JPM (`combinedForecast` **5.921**) clears
+  `min-forecast-to-route=5.0`. That is the DORMANT state ADR-0122 was written to escape. A config flag
+  with an ADR behind it is a decision, not a bug; read the ADR and count the survivors first.
+- **Rule 198 — the desk's conviction is concentrated in exactly the names its own OOS backtest rejects,
+  and that is a verdict on the SOURCES, not the combiner.** Besides JPM, the only names clearing the 5.0
+  floor are both edge-gated: MSFT **5.4686**, CAT **-5.2810**. A forecast stack that loads onto names
+  whose measured history says the algos lose there cannot be repaired by moving the gate or reweighting
+  the fusion — this is the standing "work on EDGE" priority with a mechanism attached. The fix is a new
+  OOS-validated predictor taken through the ADR-0049 gate; every dial downstream of that is noise.
+- **Rule 199 — a ❌ BAD revert's honest credit is the EXPOSURE it removed, not the PnL that happened
+  alongside it.** `4f67f0515` verified out (`uptimeSeconds` **1431** postdates it; `band(...)` back to
+  `scale × width`; ADR-0133 `Status: Reverted`), gross **$167,400.77 → 113683.50400000**, `totalPnl`
+  **$228.93 → 301.79886805**. But applying Rule 196: `unrealizedPnl` **-210.25727251 → -7.47426487** on a
+  net that moved **+2,801.04706250 → -33,407.76400000** is mark-to-market, and the mechanism's own
+  realized leg went the *other* way, **402.49713476 → 309.27313292**. Claim the gross; do not claim the
+  headline.
+- **Rule 200 — the ADR-0116 hold is productive time, not dead time.** With the pending change at
+  **1/6 cycles** the contract forbids a code change, so the cycle went into read-only verification. That
+  is what caught Rule 197 before it shipped as a "fix". Spend a hold cycle reading the code behind the
+  next candidate, not waiting for the window to close.
+- **Rule 201 — the scorer's revert defect is not fixed; only its symptom was.** Last cycle reverted the
+  live BAD code by hand, but `scripts/score-change.py:357` still calls plain `git("revert", "--no-edit",
+  sha)` and aborts at `:359`. The pending change is *itself* a revert, so a ❌ BAD verdict on it hits the
+  same guaranteed conflict. Fixing a symptom under time pressure leaves an item OPEN — rank the cause,
+  and write the VERIFY-BY against the scorer's stdout and the snapshot's `revertApplied`, not against the
+  code that happened to get reverted this once.

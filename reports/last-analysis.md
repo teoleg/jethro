@@ -1,76 +1,65 @@
-ADR-0133 was scored ❌ BAD and the scorer's own auto-revert failed on a git conflict, so the rejected code was still trading — this cycle completes that revert by hand, and the lesson is that unsticking low-conviction names buys spread, not return, while nothing upstream has edge.
+Last cycle's revert is verified out of the running code and is still under measurement (1/6 cycles), so no change this cycle — and the reading I did instead killed the change I would otherwise have shipped: the edge gate the desk appears to be ignoring is switched off on purpose, and re-arming it today would leave exactly one tradable name.
 
-*(Every figure below is read from `/api/risk`, `/api/ops/jvm`, `logs/report.md`, the scorer's ledger row
-or the live app. None is authored here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/ops/jvm`, `/api/attribution`, `/api/hedging`,
+`/api/marks`, `/api/fusion/targets`, `/api/strategy/diagnostics`, `logs/report.md` or the scorer's ledger
+row. None is authored here — invariant 7 / ADR-0016.)*
 
 ## Situation
 
-1. **Money.** SITUATION header: total PnL **$227.68**, **-280.06** since last run and **-433.47** over
-   three. Live `/api/risk` `.total` minutes later: `totalPnl` **192.23986225** = `realizedPnl`
-   **402.49713476** + `unrealizedPnl` **-210.25727251**. Heartbeat `2026-07-31T16:04:57Z`:
-   `pnl_growth_pct` **-31.45** vs `pnl_target_pct` **1.0**, `on_track` **false**, `stale` **true**,
-   `underwater` **false**. Bleeding and off target.
-2. **Risk.** Gross **$167,392.97** = **11.2%** of the $1,500,000 firm cap, headroom **$1,332,607**; net
-   **-$24,228.68** = **2.4%** of the $1,000,000 net cap, and by the later live read net has crossed to
-   **+2,801.04706250**. **Flags: none.** Gross **+85,198.66** run-over-run.
-3. **Cause — named, and it is a mechanism, not the tape.** Last cycle's change `e61c7f5aa` (ADR-0133,
-   the no-trade band cap) closed its ADR-0116 window and the scorer graded it **❌ BAD**: risk-adjusted
-   return per cycle significantly negative against the hurdle, with gross grown **17,957 → 167,401**.
-   That gross is exactly what the ADR was built to unlock. It worked mechanically and failed
-   economically.
-4. **Danger: no.** Bleeding, but at 11.2% of the gross cap with the breaker untripped. De-risking on
-   that basis would be the status-quo trap CLAUDE.md names. The danger here is different and worse.
+**Money.** Total PnL **$293.55**, **+75.52** since last run but **-237.98** across the last three. The
+heartbeat `2026-07-31T16:36:13Z` reads `pnl_growth_pct` **-67.02** against `pnl_target_pct` **1.0**,
+`on_track` **false**, `stale` **true**. Up this run, well off target over the window.
 
-## Step 0 — what I verified, and the defect it exposed
+**Risk.** Gross **$113,691.23** — **7.6%** of the $1,500,000 firm cap, headroom **$1,386,309**. Net
+**-$33,416.01**, **3.3%** of the $1,000,000 net cap. `Flags: none`, breaker `halted` **false**, regime
+**CHOP** / **CALM** at `volRatio` **1.00**. Deployed with room: neither the DANGER state nor DORMANT.
 
-**The graded-BAD code was still live.** The fresh ledger row carries the note `⚠️ REVERT FAILED (git
-conflict): the BAD commit is STILL LIVE and needs a manual revert`. I reproduced it: `git revert
-e61c7f5aa` conflicts on `docs/loop-findings.md`, `reports/last-analysis.md` and `reports/must-fix.md`
-— the loop's **own memory files**, which every cycle rewrites — while the three **code** hunks apply
-cleanly. `/api/ops/jvm` `uptimeSeconds` **1646** confirms a fresh JVM was running the rejected code.
+**Cause.** Last cycle's `4f67f0515` completed the auto-revert the scorer had failed to apply, taking the
+graded-❌-BAD ADR-0133 band cap out of the code. **✅ VERIFIED**: `/api/ops/jvm` `uptimeSeconds` **1431**
+is a boot postdating the revert commit; `PositionBuffer.band(...)` is back to `scale × width` with no
+`min(|target|)` cap; ADR-0133 reads `**Status:** Reverted`. Gross fell from **$167,400.77** at that
+window's close to **113683.50400000** live, and `totalPnl` rose from **$228.93** to **301.79886805**.
 
-This is structural, not bad luck. The scorer reverts with `git revert`, which touches every path the
-original commit touched; the loop writes its analysis and findings into that same commit; so **any**
-revert attempted a cycle later is guaranteed to conflict and abort. It has now happened three times
-(`efccc6502`, `e61c7f5aa`, plus a `revert-failed` heartbeat run). The measurement system's verdict was
-being silently discarded — which makes every ❌ BAD grade decorative.
+**But the revert does not get credit for that PnL.** Splitting the legs per Rule 196: `unrealizedPnl` went
+**-210.25727251 → -7.47426487** while net moved **+2,801.04706250 → -33,407.76400000** — mark-to-market,
+i.e. **market**. The mechanism's own leg is realized, and realized went the other way,
+**402.49713476 → 309.27313292**. The revert's honest, attributable win is the **gross reduction** alone.
 
-**Verification outranks novelty**, so that is this cycle's one change.
+## Why no change
 
-## The change
+`scripts/score-change.py score` prints `4f67f0515 still accumulating evidence (1/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` is present. Piling a change on top would destroy the
+evidence on the revert. This is the ADR-0116 hold — the correct answer, not a rest state.
 
-Reverted the ADR-0133 mechanism from the running code only: `PositionBuffer.band(...)` loses the
-`.min(target.abs())` cap and its javadoc, `application.properties` loses the ADR-0133 provenance
-paragraph, and `PositionBufferTest` returns to its prior expectations — all byte-for-byte pre-ADR-0133.
-**Kept:** `docs/loop-findings.md`, `reports/`, and ADR-0133 itself, now `Status: Reverted` with a "Why
-it was reverted" section. Findings are append-only durable memory; a revert must never erase them.
-`./gradlew -Pci test` green.
+## What the cycle went into instead, and what it saved
 
-## What the window actually taught — and why this is not a wasted cycle
+The obvious defect looked live: the selector reports `measured` **31**, `tradable` **15**, `edgeGated`
+**16**, yet `/api/fusion/targets` routes non-zero deltas in gated names (CVX **0.207468**, GOOG
+**4.873257**) and holds GOOG **-35**, NVDA **-27**, CVX **-25** — all tagged `no positive OOS edge`.
+Against `totalFees` **229.638225** on a `firmTotal` of **293.55386805**, that reads like a plain leak: stop
+paying spread in names you have already measured as edgeless.
 
-ADR-0133's derivation was **correct**: the band really was scaled to a full-conviction position while
-the interval it was tested inside shrank with conviction, and capping it really did unstick six
-permanently-vetoed names. The desk deployed off DORMANT as predicted. It then lost money. So the honest
-reading is the opposite of the ADR's: the buffer was **not** strangling a profitable book — it was
-incidentally suppressing turnover on names with **no measured out-of-sample edge**, and removing that
-suppression converted a dormant book into one paying spread on every name it opened. An execution dial
-had been doing a conviction floor's job.
+**It is not a defect.** The ADR-0049/0059 veto exists at `FusionExecutor.java:139`, is already exempt for
+risk-reducing deltas, and is deliberately switched off — `application.properties:414`
+`require-backtest-support=false` and `:401` `edge-gate.enabled=false` — by ADR-0122's paper-book
+exploration mode. **And re-arming it would go dormant**: of the 13 selector-supported names carrying a
+target, only **JPM** (`combinedForecast` **5.921**) clears `min-forecast-to-route=5.0`, while the
+conviction sits in the *rejected* names (MSFT **5.4686**, CAT **-5.2810**). One risk-increasing name is
+exactly the DORMANT failure ADR-0122 was written to escape. The hold is what created the room to find that
+out before shipping it.
 
-That is a direct restatement of this loop's standing priority: **work on edge, not the combiner or its
-execution dials.** Widening what may trade, while no source has demonstrated positive expectancy, buys
-turnover and not return — and now it has been measured rather than argued.
+That inversion — the forecast stack loading onto the names its own OOS history rejects — is the real
+finding here, and it is a statement about the **sources**, not the combiner. It is now register item #2,
+and it needs a new validated predictor, not a dial.
 
-## Attribution — market vs change
+## Register
 
-Both legs are separable this cycle. `unrealizedPnl` **-210.25727251** against `realizedPnl`
-**402.49713476**, on a book now near flat net (**+2,801.04706250**), is mark-to-market — **market**. The
-**realized** leg is the change: a ~9x gross put on against no demonstrated edge pays spread on every
-name it opens, and the scorer's t-statistic over the full window is what separates that from noise, not
-my reading of one print.
-
-## Next cycle
-
-Verify the revert landed (`grep -n 'ADR-0133' PositionBuffer.java` returns nothing; `insideBuffer`
-returning true across the low-conviction names; gross falling back off its post-ADR-0133 level). Then
-the register's item #1 is the hedge's coverage ratio — the hedge sizes off ~6.5% of the systematic risk
-it is meant to neutralise. Track **coverage**, never sign.
+`reports/must-fix.md` re-ranked. **#1** is the structural one: `scripts/score-change.py:357` still reverts
+with plain `git revert`, which is *guaranteed* to conflict on the loop's own memory files and abort —
+three occurrences so far, and the pending change is itself a revert, so a ❌ BAD verdict on it walks into
+the same wall. That is the one change next cycle, the moment `4f67f0515` is scored. **#2** the edge
+inversion above; **#3** the hedge running `tier` **STRUCTURAL** with `covarianceReady` **false** and
+`effectiveness` null while earning **159.97904013** on `feesPaid` **6.021541** (against ALPHA's
+**169.39830447** on **223.446851**); **#4** BAC's sub-floor round-trip churn. The old ES item is
+**closed** — `/api/marks` prices ES at **7495.000000** (`ageMillis` **781**) and the EQUITY axis reads
+**ON-TARGET** at `trackingRate` **0.999915**.

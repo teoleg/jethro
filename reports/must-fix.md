@@ -15,6 +15,150 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-07-31 17:00Z (last cycle's manual revert **✅ VERIFIED** — the graded-BAD ADR-0133 mechanism is out of the running code. That revert is itself **under measurement (1/6 cycles)**, so per the ADR-0116 hold rule this cycle makes **NO code change**. Register re-ranked; the reading done this cycle kills the obvious candidate before it could be shipped.)
+
+**HOLD — no change this cycle.** `scripts/score-change.py score` prints
+`score: 4f67f0515 still accumulating evidence (1/6 cycles) — held, not scored this run`, and
+`reports/.pending-baseline.json` is present. A new change now would destroy the evidence on the revert.
+
+### Step 0 — last cycle's change (`4f67f0515`, the manual completion of the failed auto-revert): ✅ VERIFIED
+
+- **Deployed: ✅.** `/api/ops/jvm` `uptimeSeconds` **1431** at 17:02Z (**1409** in the report snapshot) — a
+  boot that postdates the 16:35Z revert commit, so the running code is the reverted code.
+- **Landed in the source: ✅.** `PositionBuffer.band(target, forecast, held, width)` is back to
+  `scale × width` with no `min(|target|)` cap; `application.properties` carries no ADR-0133 paragraph;
+  `docs/adr/0133-*.md` header reads `**Status:** Reverted`. The loop's memory files survived intact — the
+  Rule 193 resolution worked exactly as written.
+- **Did what it claimed: ✅.** The claim was "get the rejected mechanism out of the running code", and the
+  mechanism's own signature is gone. ADR-0133's effect was a ~9x gross; at its window close gross was
+  **$167,400.77** with firm total PnL **$228.93**. Live now: `/api/risk` `.total` gross
+  **113683.50400000**, `totalPnl` **301.79886805** (`realizedPnl` **309.27313292**, `unrealizedPnl`
+  **-7.47426487**). Gross came down and PnL came up together — the direction the revert was for.
+- **Attribution (change vs market).** Honest split: the gross reduction is **mechanism** (the wide band is
+  back, so the desk stopped opening into the names ADR-0133 had unstuck). The PnL recovery is **mostly
+  market** — `unrealizedPnl` is now **-7.47426487** against **-210.25727251** last cycle on a book whose
+  net moved from **+2,801.04706250** to **-33,407.76400000**; that is mark-to-market unwinding, not
+  earnings. Per Rule 196 the mechanism's own leg is realized, and realized only moved
+  **402.49713476 → 309.27313292**. Do **not** credit the revert with the headline PnL rise.
+
+### Situation triage (live, read — never authored)
+
+1. **Money.** SITUATION: total PnL **$293.55**, **+75.52** since last run, but **-237.98** over the last 3.
+   Heartbeat `2026-07-31T16:36:13Z`: `pnl_growth_pct` **-67.02** vs `pnl_target_pct` **1.0**, `on_track`
+   **false**, `stale` **true**. Up this run, still well off the owner target across the window.
+2. **Risk.** Gross **$113,691.23** = **7.6%** of the $1,500,000 firm cap, headroom **$1,386,309**; net
+   **-$33,416.01** = **3.3%** of the $1,000,000 net cap. `Flags: none`. `/api/risk` breaker `halted`
+   **false**. Not near a cap, not near the breaker — deployed, with room.
+3. **Cause.** Last cycle's scored verdict was **❌ BAD** on ADR-0133; this cycle's pending change is its
+   revert, verified above.
+4. **Danger: NO.** Not bleeding at the cap and not near the breaker. Regime `trend` **CHOP**, `regime`
+   **CALM**, `volRatio` **1.00**. This is neither the DANGER state nor the DORMANT state.
+5. **Order-level post-mortem.** `recent_orders` 16:35Z–17:00Z is dominated by **BAC** churn: SELL 309/105/
+   79/23 filled across 16:45–16:46 (with 32/87/165/235 CANCELLED as `fusion re-plan — passive order
+   superseded by a fresh target (ADR-0084)`), then BUY 38 at 16:48 and **BUY 3 every 30s** from 16:55 to
+   16:59. A sold-down-then-bought-back round trip in one name inside fifteen minutes. `orders_by_status`:
+   FILLED **4704**, CANCELLED **1631**, REJECTED **84**.
+6. **Cost is the standing leak.** `/api/attribution`: `firmTotal` **293.55386805**, `totalFees`
+   **229.638225**. Split: HEDGE `totalPnl` **159.97904013** on `feesPaid` **6.021541**; ALPHA `totalPnl`
+   **169.39830447** on `feesPaid` **223.446851**; MACRO **-35.82347655**. The hedge overlay is out-earning
+   the alpha book while paying a small fraction of its fees.
+
+### ✅ CLOSED this cycle — ES absent from `/api/marks`, hedge axis pinned WARMING (was item #2)
+
+`/api/marks` now returns **39** marks and ES is among them: `price` **7495.000000**, `source` **alpaca**,
+`ageMillis` **781** (NQ **28374.000000**, `ageMillis` **728**). `/api/hedging` EQUITY axis reads `status`
+**ON-TARGET**, `trackingRate` **0.999915**, `heldProxyQty` **-0.036164** → `targetProxyQty` **-0.032791**.
+Rules 191/192 are discharged: the gap was never refdata, and the price arrived on its own. The **residual**
+is carried below as item #3 — `covarianceReady` is still **false**.
+
+### 🔎 Candidate investigated and REJECTED this cycle (read-only — this is why the hold was worth it)
+
+The obvious-looking defect was: `/api/strategy/diagnostics` reports `measured` **31**, `tradable` **15**,
+`edgeGated` **16** (`lastSelectionMillis` = 16:38:19.623Z), yet `/api/fusion/targets` carries live non-zero
+targets **and non-zero routed deltas** in gated names — CVX `deltaQty` **0.207468**, GOOG **4.873257** —
+holding GOOG **-35**, NVDA **-27**, CVX **-25**, all flagged `no positive OOS edge`.
+
+**It is not a defect. It is deliberate configuration**, and shipping a "fix" would have re-litigated a
+documented decision. The ADR-0049/0059 veto exists at `FusionExecutor.java:139` and is already exempt for
+risk-reducing deltas — it is simply switched **off**: `application.properties:414`
+`jethro.fusion.require-backtest-support=false` and `:401` `jethro.fusion.edge-gate.enabled=false`, per
+ADR-0122's paper-book exploration mode.
+
+**And re-arming it today would re-create DORMANCY** — the exact failure ADR-0122 was written to escape.
+Read from `/api/fusion/targets` against the selector-supported set: of the **13** supported names carrying
+a target, only **JPM** (`combinedForecast` **5.921**) clears `jethro.fusion.min-forecast-to-route=5.0`.
+The conviction sits in the **rejected** names — MSFT **5.4686**, CAT **-5.2810**. Re-arming leaves JPM as
+the desk's only risk-increasing name. **Rule 197** below records what that inversion means.
+
+---
+
+## Open items, re-ranked most-costly-first
+
+### 🎯 Item #1 — `scripts/score-change.py`'s auto-revert is still not conflict-proof; the next ❌ BAD will fail to revert exactly as the last three did
+
+Last cycle fixed the **symptom** (it manually reverted the live BAD code). The **cause** is untouched:
+`scripts/score-change.py:357` reverts with plain `git("revert", "--no-edit", sha)` and aborts at `:359` on
+conflict. Because the loop commits its analysis into the same commit as its code, every revert attempted a
+cycle later touches `docs/loop-findings.md`, `reports/last-analysis.md` and `reports/must-fix.md` — files
+rewritten every cycle — so the conflict is **structurally guaranteed**, not bad luck. Three occurrences
+(`efccc6502`, `e61c7f5aa`, plus a `revert-failed` heartbeat). This is the most expensive open defect
+because it silently lets rejected code keep trading, which is precisely what ADR-0133 did for a full
+window. **It is also live right now**: the pending change under measurement is itself a revert, so if it
+grades ❌ BAD the scorer will try to revert a revert and hit the same wall.
+
+- **The fix (per Rule 193, already proven by hand):** `git revert --no-commit`, then restore the loop's
+  memory files from HEAD (`git checkout --ours` / `git checkout HEAD --`) and keep the ADR annotated
+  `Status: Reverted`, then commit. Revert the **code**, never the **memory**.
+- **VERIFY-BY:** on the next ❌ BAD verdict, the scorer's stdout prints `score: BAD verdict — reverted
+  <sha>` (not `conflicted — NOT reverted; still LIVE`), the ledger note carries **no**
+  `⚠️ REVERT FAILED` string, and the snapshot's `revertApplied` is **true** (not `false`). Additionally,
+  after that run `git log -1 --stat` shows the revert commit touching only code paths, with
+  `docs/loop-findings.md` unchanged by it. Until a real BAD verdict occurs, a targeted test that stages a
+  synthetic conflict in a memory file and asserts the revert still lands is acceptable proof.
+- **Why not this cycle:** the ADR-0116 hold. Take it the moment `4f67f0515` is scored.
+
+### Item #2 — the desk's conviction is concentrated in exactly the names its own OOS backtest rejects
+
+Read this cycle: `edgeGated` **16** of `measured` **31**, and the two names clearing the 5.0 conviction
+floor besides JPM are both gated (MSFT **5.4686**, CAT **-5.2810**). The forecast stack is loading onto
+names whose own OOS history says the algos lose there. That is a statement about the **sources**, not the
+combiner, and it is the standing priority (`work on EDGE, not the combiner`) with a mechanism attached: no
+amount of gate-tuning fixes a forecast that is anti-correlated with measured edge. The honest fix is a
+**new, OOS-validated predictor** taken through the ADR-0049 gate — a build, not a dial.
+
+- **VERIFY-BY:** `/api/signals/telemetry` shows at least one source whose `avgReturnBps` is positive with
+  `cohorts` large enough that the cohort-mean t-statistic clears the ADR-0064 hurdle, **and**
+  `/api/strategy/diagnostics` `tradable` rises above **15** of `measured` **31** on the selector's own run.
+  Sample size before conclusion: do not grade this on one window.
+- **Sequencing note:** do **not** attack this by re-arming `require-backtest-support` — the reading above
+  shows that path ends in a one-name book. Rules 194/195 apply.
+
+### Item #3 — the hedge overlay runs STRUCTURAL with no covariance estimate: it hedges by notional, not by measured beta
+
+`/api/hedging`: `covarianceReady` **false**, and on the EQUITY axis `effectiveness`, `grossSigmaUsd` and
+`residualSigmaUsd` are all **null** while `tier` is **STRUCTURAL**. The overlay is sizing off net notional
+with no measured hedge ratio — so nothing tells the desk whether the hedge is actually removing variance
+or just costing spread. It is currently the *profitable* book (`hedgePnl` **159.97904013** on `feesPaid`
+**6.021541**), which is why this ranks below #2 rather than above it: it is under-instrumented, not
+visibly broken. But an unmeasured hedge is an unfalsifiable one.
+
+- **VERIFY-BY:** `/api/hedging` `covarianceReady` flips to **true** and the EQUITY axis publishes non-null
+  `effectiveness`, `grossSigmaUsd` and `residualSigmaUsd`, with `residualSigmaUsd < grossSigmaUsd`.
+
+### Item #4 — BAC round-trip churn inside one 15-minute window
+
+`recent_orders` shows BAC sold down (309/105/79/23 FILLED, 16:45–16:46) then bought back (38 at 16:48,
+then 3 every 30s to 16:59), against `orders_by_status` CANCELLED **1631** vs FILLED **4704** — most
+cancels tagged `fusion re-plan — passive order superseded by a fresh target (ADR-0084)`. BAC's own
+`combinedForecast` is **-0.878**, far below the 5.0 routing floor, yet it traded both ways. Worth a
+targeted read of why a sub-floor name generated a full round trip; may be an aim-path artifact rather than
+a defect, which is why it ranks last. Do not tune the buffer to chase it (Rules 194/195).
+
+- **VERIFY-BY:** for a name whose `combinedForecast` is below `min-forecast-to-route`, `recent_orders`
+  shows no risk-increasing FILLED order in the following window.
+
+---
+
 ## Verification block — 2026-07-31 16:35Z (ADR-0133 scored **❌ BAD** at the close of its window; the scorer's auto-revert **failed on a git conflict and the bad code was still live**. **This cycle's one change is completing that revert manually** — that outranks every open item, per "verification outranks novelty".)
 
 **Step 0 — last cycle's change (`e61c7f5aa`, ADR-0133, the band cap).** `scripts/score-change.py score`
