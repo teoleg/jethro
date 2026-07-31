@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-07-31T19:30:10Z",
+    "fees": "272.654475",
+    "gross": "44979.26000000",
+    "net": "23983.40000000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "44979.26000000",
+      "hedgePnl": "160.19086234",
+      "netExposure": "23983.40000000",
+      "realizedPnl": "95.31920503",
+      "strategyAlpha": "-28.39341377",
+      "totalFees": "272.654475",
+      "totalPnl": "131.79744857",
+      "unrealizedPnl": "36.47824354"
+    },
+    "total_pnl": "131.79744857"
+  },
+  "before": {
+    "at": "2026-07-31T16:35:59Z",
+    "gross": "90641.36436250",
+    "net": "-31488.55563750",
+    "total_pnl": "202.24011897"
+  },
+  "commit": "4f67f05158a4b7cf159180250589c7b48a0ebc59",
+  "delta": {
+    "gross": "-45662.10436250",
+    "net": "55471.95563750",
+    "total_pnl": "-70.44267040"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.000147 over 7 cycles, t=-0.37 (hurdle 1.5); gross 90,641\u219244,979",
+  "revert": false,
+  "revertApplied": null,
+  "scoredAt": "2026-07-31T19:30:10Z",
+  "summary": "completed the failed auto-revert of the graded-BAD ADR-0133 band cap \u2014 the rejected mechanism is out of the running code, keeping the loop's memory and the annotated ADR",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 44979.26,
+    "gross_start": 90641.3643625,
+    "mean_ret_per_cycle": -0.00014679,
+    "n": 7,
+    "scale": 68554.88,
+    "t": -0.369
+  }
+}
