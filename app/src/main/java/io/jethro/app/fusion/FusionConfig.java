@@ -52,12 +52,14 @@ public class FusionConfig {
                                   io.jethro.trading.riskpnl.PreTradeGuardrail guardrail,
                                   io.jethro.app.risk.TradingHaltSwitch halt,
                                   ObjectProvider<io.jethro.order.OrderService> orderService,
-                                  ObjectProvider<io.jethro.app.strategy.StrategySelector> selector) {
+                                  ObjectProvider<io.jethro.app.strategy.StrategySelector> selector,
+                                  @Value("${jethro.fusion.require-backtest-support:true}")
+                                  boolean requireBacktestSupport) {
         io.jethro.order.OrderService os = orderService.getIfAvailable();
         if (os == null) {
             return null; // no order path — the lifecycle falls back to shadow
         }
-        return new FusionExecutor(props, refs, guardrail, halt, os, selector);
+        return new FusionExecutor(props, refs, guardrail, halt, os, selector, requireBacktestSupport);
     }
 
     @Bean(destroyMethod = "close")
@@ -447,6 +449,38 @@ public class FusionConfig {
     }
 
     /**
+     * The ADR-0130 market-index trend sensor — the same EWMAC as the per-name trend sensor, run on the
+     * broad market index and carried to every equity as a slow market-factor overlay. Same forecast-source
+     * contract: it publishes into the registry and records its calls in telemetry, earning its fusion
+     * weight from measured expectancy; it places no orders and relaxes no gate. Gated on
+     * {@code jethro.fusion.index-trend.enabled} (default true). The market index id must be an INDEX row in
+     * the master (ADR-0129).
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.fusion.index-trend", name = "enabled", havingValue = "true",
+            matchIfMissing = true)
+    IndexTrendForecastLifecycle indexTrendForecastLifecycle(
+            ForecastRegistry registry,
+            ObjectProvider<TradingCoreLifecycle> tradingCore,
+            io.jethro.trading.riskpnl.InstrumentRefSource refs,
+            ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
+            @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
+            @Value("${jethro.fusion.index-trend.fast-span:16}") int fastSpan,
+            @Value("${jethro.fusion.index-trend.slow-span:64}") int slowSpan,
+            @Value("${jethro.fusion.index-trend.normalisation-span:256}") int normalisationSpan,
+            @Value("${jethro.fusion.index-trend.market-index:SPX}") String marketIndexId,
+            ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
+            @Value("${jethro.fusion.index-trend.interval-seconds:15}") long intervalSeconds) {
+        var forecaster = new io.jethro.trading.algo.strategy.EwmacTrendForecaster(
+                new io.jethro.trading.algo.strategy.EwmacTrendForecaster.Params(fastSpan, slowSpan, normalisationSpan));
+        var lifecycle = new IndexTrendForecastLifecycle(forecaster, registry, tradingCore.getIfAvailable(),
+                refs, telemetry.getIfAvailable(), storedPrices(markHistory), scheduler, intervalSeconds,
+                marketIndexId);
+        lifecycle.start();
+        return lifecycle;
+    }
+
+    /**
      * The ADR-0070 mean-reversion sensor — the chop-regime counterpart of the trend sensor above, and
      * under exactly the same contract. It publishes a continuous, self-normalised range-position reading
      * per name into the same registry and records its calls in the phase-1 telemetry, so it must earn a
@@ -468,6 +502,38 @@ public class FusionConfig {
                 new io.jethro.trading.algo.strategy.RangeReversionForecaster.Params(rangeSpan, normalisationSpan));
         var lifecycle = new ReversionForecastLifecycle(forecaster, registry, tradingCore.getIfAvailable(),
                 telemetry.getIfAvailable(), storedPrices(markHistory), scheduler, intervalSeconds);
+        lifecycle.start();
+        return lifecycle;
+    }
+
+    /**
+     * The ADR-0121 cross-sectional residual reversion sensor — the peer-relative counterpart of the two
+     * per-name sensors above, on the identical contract (a forecast source that must earn its measured
+     * expectancy before the edge gate lets it size anything). It publishes the whole cross-section in one
+     * sweep, which is exactly one ADR-0120 cohort, and records every reading in the phase-1 telemetry so
+     * it is judged on its own realised edge. It cannot place an order and cannot relax a gate; while the
+     * gate is reduce-only it can only change how a held position is worked down.
+     */
+    @Bean(destroyMethod = "close")
+    @ConditionalOnProperty(prefix = "jethro.fusion.xs-reversion", name = "enabled", havingValue = "true",
+            matchIfMissing = true)
+    CrossSectionalReversionLifecycle crossSectionalReversionLifecycle(
+            ForecastRegistry registry,
+            ObjectProvider<TradingCoreLifecycle> tradingCore,
+            ObjectProvider<io.jethro.trading.riskpnl.InstrumentRefSource> refs,
+            ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
+            @org.springframework.beans.factory.annotation.Qualifier("sharedScheduler") java.util.concurrent.ScheduledExecutorService scheduler,
+            @Value("${jethro.fusion.xs-reversion.lookback-seconds:900}") long lookbackSeconds,
+            @Value("${jethro.fusion.xs-reversion.min-peers:4}") int minPeers,
+            @Value("${jethro.fusion.xs-reversion.max-abs-z:4.0}") double maxAbsZ,
+            ObjectProvider<io.jethro.uigateway.MarkHistory> markHistory,
+            @Value("${jethro.fusion.xs-reversion.interval-seconds:10}") long intervalSeconds) {
+        var forecaster = new CrossSectionalReversionForecaster(
+                new CrossSectionalReversionForecaster.Params(
+                        Math.max(1, lookbackSeconds) * 1_000L, minPeers, maxAbsZ));
+        var lifecycle = new CrossSectionalReversionLifecycle(forecaster, registry,
+                tradingCore.getIfAvailable(), refs.getIfAvailable(), telemetry.getIfAvailable(),
+                storedPrices(markHistory), scheduler, intervalSeconds);
         lifecycle.start();
         return lifecycle;
     }

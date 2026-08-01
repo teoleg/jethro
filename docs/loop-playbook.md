@@ -5,11 +5,22 @@ to carry, beyond the terse prompt. The loop's `claude -p` starts cold each cycle
 `CLAUDE.md`, the ADRs, and the ledger — *is* your memory. It lives on `claude/auto-improve` (the one
 branch the loop works on), so it stays current with every cycle.
 
-## Mission (what "better" means here)
-Grow the **firm total PnL** (all books incl. hedge — the Overview headline) while holding or **reducing
-total exposure**. Concrete owner target: **total PnL up ≥ 1% every 3 iterations.** Staleness — a flat or
-negative PnL off that target, especially with exposure still high — is a **failure to attack this cycle**,
-never an acceptable "flat".
+## Mission (what "better" means here) — DEPLOY capital, don't preserve the status quo (ADR-0132)
+Grow the **firm total PnL** (all books incl. hedge — the Overview headline) by **deploying capital up to
+the $200k gross budget at moderate volatility** (ADR-0132, owner-set 2026-07-30). **Exposure inside that
+budget is a resource to USE, not a quantity to minimize** — the old "hold or reduce total exposure" framing
+is retired; it kept the book at ~$39k of a $500k allowance and turned 1,222 orders into ~$122. Only **dead
+exposure** (risk that earns nothing) is cut.
+- **Target:** a **$1,000/day run-rate to build toward.** Be honest about the math: $1,000/day on $200k is
+  0.5%/day ≈ 126%/yr — a **strong-day** number, not a daily guarantee at moderate risk. Do not present it
+  as a floor the edge supports (it isn't) or fabricate activity to hit it.
+- **Floor the loop must hold:** **positive PnL expectancy over a rolling 3-day window** at the deployed
+  size. Staleness — flat/negative expectancy while capital sits undeployed under the budget — is a
+  **failure to attack this cycle**.
+- **Ramping toward the $200k budget is the intended direction:** exposure rising toward the budget is NOT
+  the "dead exposure" to cut and NOT a regression to auto-revert, even before PnL responds. Hard risk
+  controls are unchanged — the $500k cap, the drawdown breaker, per-book/instrument caps, conviction floor,
+  edge gate and pre-trade guardrail all still stand. Moderate = **bigger book, same safety floor**.
 
 ## The strategy thesis (how to pursue it) — owner's framing
 This is a **risk-managed trend problem, not a prediction problem.** Do simple, honest math on the stream:

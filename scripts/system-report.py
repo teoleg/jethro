@@ -34,19 +34,42 @@ ENDPOINTS = {
     "strategy_selection": "/api/strategy/selection", "strategy_diag": "/api/strategy/diagnostics",
     "orders_day": "/api/orders/day", "risk": "/api/risk", "llm_runs": "/api/llm/runs",
     "attention": "/api/attention", "attribution": "/api/attribution",
+    "config": "/api/config",  # the owner-set risk limits (firm caps + warn-ratio) — the exposure ceiling
 }
 
 # ---- durable DB aggregates (behaviour over the run; complements the diagnostics fills/tca sheets) ----
 DB_QUERIES = {
-    "turnover_cost_by_name": "select instrument_id instrument, count(*) fills, sum(abs(qty)) shares, "
-        "round(sum(fee)::numeric,2) total_fee from fills group by instrument_id order by fills desc",
+    # Cost/turnover post-mortem, per name, for the CURRENT epoch only. Three things this has to get
+    # right and previously did not:
+    #  - `fills` has no `qty` column (it is `quantity`), so this query errored out and the lens was dark.
+    #  - Turnover is money, not share count: quantity x price x the instrument's contract multiplier
+    #    (a futures fill of 0.001136 lots is not 0.001136 dollars of risk). The multiplier is reference
+    #    data — joined from `instrument`, never assumed.
+    #  - Never pool feed modes (invariant 8): scope to the mode of the most recent fill, so a live epoch
+    #    is not averaged with thousands of sim fills. fee_bps is the explicit commission against that
+    #    turnover; slippage/impact is the separate `tca` lens.
+    "turnover_cost_by_name": "with epoch as (select feed_mode from fills order by executed_at desc limit 1) "
+        "select f.feed_mode, f.instrument_id instrument, count(*) fills, round(sum(f.quantity),6) qty, "
+        "round(sum(f.quantity*f.price*coalesce(i.contract_multiplier,1)),2) turnover_usd, "
+        "round(sum(f.fee),4) fee_usd, "
+        "round(sum(f.fee)*10000/nullif(sum(f.quantity*f.price*coalesce(i.contract_multiplier,1)),0),2) fee_bps "
+        "from fills f join epoch e on f.feed_mode=e.feed_mode "
+        "left join instrument i on i.instrument_id=f.instrument_id "
+        "group by 1,2 order by turnover_usd desc",
     "orders_by_status": "select status, count(*) n from orders group by status order by n desc",
     # Order-level lookback for the post-mortem: recent orders with the REASON that triggered each, so the
     # model can attribute the window's PnL/exposure moves to specific triggers (bad ones to fix, good to keep).
-    "recent_orders": "select created_at, book_id book, instrument_id instrument, side, quantity qty, "
-        "status, reason from orders where feed_mode='SIM' order by created_at desc limit 60",
-    "fills_by_day": "select date(executed_at) d, count(*) fills, round(sum(fee)::numeric,2) fee "
-        "from fills group by 1 order by 1",
+    # Scoped to the current epoch's feed mode (invariant 8) rather than a hardcoded one — a hardcoded 'SIM'
+    # showed the previous sim epoch's orders and hid every order the live desk actually placed.
+    "recent_orders": "with epoch as (select feed_mode from orders order by created_at desc limit 1) "
+        # ADR-0134: `origin` is why the desk WANTED the trade (written at insert, survives every status
+        # transition); `reason` is why the STATUS changed and so is populated only on the failure
+        # branches. The post-mortem needs the first — an order that FILLED has no status to explain.
+        "select o.created_at, o.feed_mode, o.book_id book, o.instrument_id instrument, o.side, "
+        "o.quantity qty, o.status, o.origin_reason origin, o.reason from orders o "
+        "join epoch e on o.feed_mode=e.feed_mode order by o.created_at desc limit 60",
+    "fills_by_day": "select feed_mode, date(executed_at) d, count(*) fills, round(sum(fee)::numeric,2) fee "
+        "from fills group by 1,2 order by 2,1",
     "firm_equity_curve": "select * from firm_equity order by 1",
     "book_equity_curve": "select * from book_equity order by 1",
     # Grouped by horizon too (ADR-0082): a call is graded over every rung of the measurement ladder,
@@ -288,8 +311,15 @@ def _md_table(headers, rows):
 
 def situation_block(ops_raw):
     """A prioritised SITUATION header so the obvious money/risk state is never buried under the section
-    dump. Current PnL + exposure from the live risk endpoint, deltas vs the recent run-status heartbeats,
-    and explicit danger flags (bleeding + exposure rising). All from live data — nothing invented."""
+    dump. Current PnL + exposure from the live risk endpoint, framed against the OWNER-SET firm caps
+    (read live from /api/config — never a number invented here), deltas vs the recent run-status
+    heartbeats, and explicit flags. All from live data — nothing invented.
+
+    Exposure philosophy (owner directive 2026-07-28): the book must NOT stay dormant, so exposure RISING
+    is the goal, not a danger. What must be MONITORED is headroom against the firm caps — "don't let
+    exposure get to ridiculous numbers" means staying under those owner-set limits. So we flag
+    APPROACHING THE CAP (at the configured warn-ratio) and being DORMANT (flat) — not the mere fact that
+    exposure ticked up."""
     total = (ops_raw.get("risk") or {}).get("total") or {}
     try:
         pnl = float(total["totalPnl"]); gross = float(total["grossExposure"]); net = float(total["netExposure"])
@@ -310,8 +340,29 @@ def situation_block(ops_raw):
                 return None
         return None
 
+    # Firm caps + warn-ratio — the owner-set exposure parameters, read LIVE from /api/config so the loop
+    # is measured against the real limits it must stay within, never a number chosen in this script.
+    risk_cfg = (ops_raw.get("config") or {}).get("risk") or {}
+    firm = risk_cfg.get("firm") or {}
+
+    def numf(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    gross_cap = numf(firm.get("maxGrossExposure"))
+    net_cap = numf(firm.get("maxNetExposure"))
+    warn = numf(risk_cfg.get("warnRatio")) or 0.80
+
     lines = ["## ⚠ SITUATION — read this before anything else",
              "Current (live): total PnL **$%.2f**, gross exposure **$%.2f**, net **$%.2f**." % (pnl, gross, net)]
+    if gross_cap:
+        head = (f"Gross is **{100 * gross / gross_cap:.1f}%** of the firm cap ${gross_cap:,.0f} "
+                f"(headroom **${gross_cap - gross:,.0f}**)")
+        if net_cap:
+            head += f"; net is **{100 * abs(net) / net_cap:.1f}%** of the firm net cap ${net_cap:,.0f}"
+        lines.append(head + " — the exposure ceiling to stay within.")
     p1, p3 = prev(0), prev(2)
     dp1 = dg1 = 0.0
     if p1:
@@ -320,12 +371,21 @@ def situation_block(ops_raw):
     if p3:
         lines.append("Over the last 3 runs: PnL **%+.2f**, gross **%+.2f**." % (pnl - p3[0], gross - p3[1]))
     flags = []
-    if dp1 < 0: flags.append("BLEEDING (PnL falling)")
-    if dg1 > 0: flags.append("EXPOSURE RISING")
-    if pnl < 0: flags.append("UNDERWATER")
-    if dp1 < 0 and dg1 > 0:
-        flags.append("**DANGER — bleeding AND adding exposure; de-risk / revert the culprit is the priority this cycle**")
-    lines.append("Flags: " + ("; ".join(flags) if flags else "none (not bleeding, exposure not rising)") + ".")
+    near_cap = gross_cap is not None and gross >= warn * gross_cap
+    if near_cap:
+        flags.append(f"**NEAR FIRM GROSS CAP** ({100 * gross / gross_cap:.0f}% of ${gross_cap:,.0f} — "
+                     f"only ${gross_cap - gross:,.0f} headroom; size new risk carefully)")
+    if net_cap is not None and abs(net) >= warn * net_cap:
+        flags.append(f"**NEAR FIRM NET CAP** ({100 * abs(net) / net_cap:.0f}% of ${net_cap:,.0f})")
+    if pnl < 0:
+        flags.append("UNDERWATER (total PnL negative)")
+    # De-risk is the priority only when LOSING money while ALREADY heavily exposed — not merely because
+    # exposure rose (coming off dormant, adding exposure is exactly what we want).
+    if dp1 < 0 and near_cap:
+        flags.append("**DANGER — losing money while near the exposure cap; de-risk / revert the culprit first**")
+    if gross <= 0:
+        flags.append("**DORMANT** (book flat, no exposure) — staying flat is a FAILURE; put validated risk on")
+    lines.append("Flags: " + ("; ".join(flags) if flags else "none — exposure well within the firm caps") + ".")
     return "\n".join(lines)
 
 

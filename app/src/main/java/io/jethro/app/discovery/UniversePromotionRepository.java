@@ -70,6 +70,35 @@ public final class UniversePromotionRepository implements PromotionAudit {
         return n == null ? 0 : n;
     }
 
+    /**
+     * Distinct instrument ids that were PROMOTED while the process ran a DIFFERENT feed mode than
+     * {@code currentMode} and have NOT been (re-)promoted under {@code currentMode} — the cross-mode
+     * leftovers (invariant 8 / ADR-0029). Because promotion is idempotent-by-existence, a name first
+     * promoted under SIM never gets a fresh PROMOTED row once running LIVE, so its audit mode stays SIM
+     * even though it now sits in the LIVE master; this finds exactly those. Ordered for a stable report.
+     */
+    public List<String> promotedOnlyInForeignMode(String currentMode) {
+        return jdbc.queryForList(
+                "select distinct instrument_id from universe_promotion p where action = 'PROMOTED' "
+                        + "and feed_mode <> ? "
+                        + "and not exists (select 1 from universe_promotion q where q.instrument_id = "
+                        + "p.instrument_id and q.action = 'PROMOTED' and q.feed_mode = ?) "
+                        + "order by instrument_id",
+                String.class, currentMode, currentMode);
+    }
+
+    /** Ids the cross-mode cleanup evicted (action EVICTED, outcome EVICTED_FOREIGN_MODE) that have NOT
+     *  since been PROMOTED again — the restorable set for the cleanup's undo. Ordered for a stable report. */
+    public List<String> foreignModeEvictedRestorable() {
+        return jdbc.queryForList(
+                "select distinct instrument_id from universe_promotion e where e.action = 'EVICTED' "
+                        + "and e.outcome = 'EVICTED_FOREIGN_MODE' "
+                        + "and not exists (select 1 from universe_promotion p where p.instrument_id = "
+                        + "e.instrument_id and p.action = 'PROMOTED' and p.at_millis > e.at_millis) "
+                        + "order by instrument_id",
+                String.class);
+    }
+
     /** Whether a PROPOSED row for this name was already written since {@code sinceMillis} — dedupe so the
      *  daily dry-run (and reboots) don't append a duplicate proposal for the same name every cycle. */
     public boolean proposedSince(String instrumentId, long sinceMillis) {

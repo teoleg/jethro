@@ -61,6 +61,19 @@ public final class UniversePromotionService {
         if (refdata.exists(id)) {
             return false; // already tracked/promoted — nothing to do
         }
+        writeDiscovered(id, now,
+                "score=%.1f days=%d sources=%s".formatted(c.score(), c.distinctDays(), String.join("/", c.sources())));
+        audit.record(now, sessionEpoch, feedMode, id, "PROMOTED", verdict.outcome().name(), c.score(),
+                c.distinctDays(), String.join(",", c.sources()), verdict.reason(), false);
+        refdata.refresh();
+        log.info("ADR-0060 PROMOTED {} → tradable refdata (provisional adv/spread until measured); "
+                + "joins the sim/OOS universe at the next session", id);
+        return true;
+    }
+
+    /** The refdata write for a discovered name (ADR-0060 §2): base row + Yahoo/marker symbology + display
+     *  name + PROVISIONAL, flagged money dials + discovered provenance. Shared by promotion and restore. */
+    private void writeDiscovered(String id, long now, String evidence) {
         String name = companies.displayName(id);
         String displayName = (name != null ? name : id) + " (discovered)";
 
@@ -80,16 +93,35 @@ public final class UniversePromotionService {
         attributes.put("spread_provenance", PROVISIONAL);
         attributes.put(RefDataRepository.ATTR_SOURCE, RefDataRepository.SOURCE_DISCOVERED);
         attributes.put("discovered_at", Long.toString(now));
-        attributes.put("discovery_evidence",
-                "score=%.1f days=%d sources=%s".formatted(c.score(), c.distinctDays(), String.join("/", c.sources())));
+        attributes.put("discovery_evidence", evidence);
 
         refdata.writeMonitored(id, "EQUITY", "USD", BigDecimal.ONE, symbology, attributes);
-        audit.record(now, sessionEpoch, feedMode, id, "PROMOTED", verdict.outcome().name(), c.score(),
-                c.distinctDays(), String.join(",", c.sources()), verdict.reason(), false);
-        refdata.refresh();
-        log.info("ADR-0060 PROMOTED {} → tradable refdata (provisional adv/spread until measured); "
-                + "joins the sim/OOS universe at the next session", id);
-        return true;
+    }
+
+    /**
+     * Undo of a cross-mode cleanup: re-write each id in {@code ids} back into the master as a first-class
+     * discovered name, re-tagged with the CURRENT feed mode (so a name the cleanup evicted for a legacy /
+     * mislabeled SIM tag comes back correctly labeled). Idempotent — a name already present (e.g. discovery
+     * re-promoted it) is skipped, never duplicated. Returns the ids actually restored.
+     */
+    public List<String> restoreDiscovered(List<String> ids, String sessionEpoch, String feedMode, long now) {
+        List<String> restored = new java.util.ArrayList<>();
+        for (String id : ids) {
+            if (refdata.exists(id)) {
+                continue; // already back (discovery re-promoted, or a double restore) — no duplicate
+            }
+            writeDiscovered(id, now, "restored after cross-mode cleanup (re-tagged " + feedMode + ")");
+            audit.record(now, sessionEpoch, feedMode, id, "PROMOTED", "RESTORED", null, null, null,
+                    "restored a name the cross-mode cleanup evicted; re-tagged " + feedMode
+                            + " (corrects a legacy SIM-mislabel)", false);
+            restored.add(id);
+            log.info("ADR-0060 RESTORED {} → tradable refdata, re-tagged {} (undo of cross-mode cleanup)",
+                    id, feedMode);
+        }
+        if (!restored.isEmpty()) {
+            refdata.refresh();
+        }
+        return restored;
     }
 
     /**
@@ -133,6 +165,40 @@ public final class UniversePromotionService {
                         worst, worstScore, cap);
             } else {
                 break; // refused (not discovered) — stop
+            }
+        }
+        if (!evicted.isEmpty()) {
+            refdata.refresh();
+        }
+        return evicted;
+    }
+
+    /**
+     * Clean cross-mode promotion leftovers (invariant 8 / ADR-0029): evict every DISCOVERED name in
+     * {@code foreignPromoted} — names promoted while the process ran a DIFFERENT feed mode — so the current
+     * mode's universe reflects the current mode's discovery only, never a SIM name persisting into LIVE.
+     * Guarded EXACTLY like cap eviction: never a pinned name, never a name that has traded (a held position
+     * is never orphaned) and, by construction, never a core (non-discovered) name. An evicted name is
+     * re-promotable by discovery under the current mode if it still qualifies. Returns the evicted ids.
+     */
+    public List<String> evictForeignModePromotions(Set<String> foreignPromoted, Set<String> pinList,
+                                                    String sessionEpoch, String feedMode, long now) {
+        List<String> evicted = new java.util.ArrayList<>();
+        for (String id : refdata.discoveredInstrumentIds()) {
+            if (!foreignPromoted.contains(id)) {
+                continue; // promoted under the current mode (or not a tracked promotion) — keep
+            }
+            if (pinList.contains(id) || refdata.hasFills(id)) {
+                continue; // pinned or has traded — never evict (don't orphan a position/tape)
+            }
+            if (refdata.evict(id)) {
+                audit.record(now, sessionEpoch, feedMode, id, "EVICTED", "EVICTED_FOREIGN_MODE", null, null,
+                        null, "evicted cross-mode promotion so the " + feedMode + " universe reflects "
+                                + feedMode + " discovery only (invariant 8 / ADR-0029); re-promotable under "
+                                + feedMode, false);
+                evicted.add(id);
+                log.info("ADR-0060 EVICTED {} — promoted under a different feed mode; cleaned so the {} "
+                        + "universe is {}-only (re-promotable under {})", id, feedMode, feedMode, feedMode);
             }
         }
         if (!evicted.isEmpty()) {

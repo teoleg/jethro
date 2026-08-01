@@ -54,6 +54,25 @@ Kelly sizing, ATR/chandelier stops, regime switching, TCA) — reason from the r
 **build it, test it**, and if the postmortem (the ledger verdict) says it didn't work, revert and try a
 different approach. You are **not** limited to the existing two strategies — add new ones freely.
 
+### Work on EDGE, not the combiner (2026-07-28 — the standing priority)
+The plumbing is now solid and the honest problem is in plain sight: **no source has demonstrated positive
+out-of-sample edge** — trend, reversion, momentum, social all measure insignificant on the edge gate, so
+the desk holds almost nothing and the ledger is a wall of INCONCLUSIVE. **Re-weighting or re-tuning
+sources that have no edge cannot create edge.** So spend your one change on the thing that actually gates
+the money:
+1. **First, ask whether ANY signal predicts returns here.** Read `/api/signals/telemetry` and
+   `signal_observations` (per source, per horizon): is any source's measured expectancy positive and
+   significant net of cost? If yes, the work is to *let it size* (why is the edge gate holding it back?).
+2. **If nothing has edge, build and validate a NEW signal** — a genuinely different predictor (a new
+   feature, a regime filter, a cross-sectional selector), taken through the OOS backtest gate (ADR-0049),
+   not another fusion weight. A new source with real measured edge is worth more than any amount of
+   combiner tuning.
+3. **Only tune the fusion/hedge/sensor mechanics when a measured edge exists to be shaped.** Absent edge,
+   that tuning is what produced the INCONCLUSIVE wall — do not add to it.
+If, after genuinely checking, no signal in this universe has edge, **say so plainly** in
+`reports/last-analysis.md` (what you checked, the measured expectancies, why none is actionable) and stop
+with no change — that is the honest, correct answer, not a failure to paper over with a parameter tweak.
+
 **Feed-agnostic by design:** sim or live is just a stream of numbers. Compute signals that
 **self-calibrate to the stream** — z-scores, rolling percentiles, vol-relative thresholds, never
 hardcoded price levels — so the same strategy adapts to any feed's quality and volatility. Never
@@ -85,10 +104,12 @@ than a checklist would. Two conditions on that freedom:
 - **One coherent, self-contained change per run** — so its effect is attributable in the ledger and
   revertable. "Coherent" can be large (a whole new strategy); it must not be five unrelated edits.
 - **Design-first for architecturally-significant changes** (a new strategy, a new risk model, a new
-  data dependency, anything hard to reverse or cross-cutting): implement it *and* write a **Proposed**
-  ADR (`docs/adr/NNNN-*.md`, next number, per the repo's ADR convention) in the **same commit**. You do
-  not wait for approval — but you leave the decision record for Oleg to ratify or reverse. Small,
-  local, reversible tuning does not need an ADR.
+  data dependency, anything hard to reverse or cross-cutting): implement it *and* write its ADR
+  (`docs/adr/NNNN-*.md`, next number, per the repo's ADR convention) in the **same commit**. Because you
+  build it, test it green, and deploy it in that same cycle, the ADR records an **IMPLEMENTED** change,
+  not a speculative proposal — so set its header `**Status:** Implemented` (owner acceptance is a separate
+  step Oleg takes later; you leave the decision record for him to ratify or reverse). You do not wait for
+  approval. Small, local, reversible tuning does not need an ADR.
 
 ## Inputs (already generated this run)
 - `logs/report.md` — model-readable digest. Opens with a **⚠ SITUATION** header (live PnL/exposure +
@@ -110,29 +131,69 @@ than a checklist would. Two conditions on that freedom:
   (mandatory — do not hand-derive money math); **`adr`** when authoring or superseding an ADR;
   **`design-review`** before shipping an architecturally-significant change.
 
-## Scoring is already done for you (by code) before you start
-The loop wrapper runs `scripts/score-change.py score` **before** it invokes you: that script measures
-the previous cycle's change against its recorded baseline, writes the ledger row + snapshot, and
-reverts the change if the verdict was ❌ BAD — all in exact decimal, none of it yours to do. So when
-you start, the ledger (`reports/improvement-ledger.md`) already reflects last cycle. **Read it** — a
-BAD/MIXED verdict on your last idea tells you what NOT to repeat (try a *different* lever). Do not
-touch the ledger, the snapshots, or `reports/.pending-baseline.json` by hand.
+## Scoring is evidence-based and takes several cycles (ADR-0116) — so HOLD a change while it measures
+The loop wrapper runs `scripts/score-change.py score` **before** it invokes you. A single 30-minute PnL
+delta on this book is almost all market noise, so a change is no longer judged on one cycle. Instead it
+is **held live for an evaluation window** (`MIN_CYCLES`, ~6 cycles) and then judged by the **sign and
+statistical significance** of its per-cycle *risk-adjusted* PnL over that window:
+- **✅ GOOD** — significantly positive risk-adjusted return, exposure not grown.
+- **❌ BAD** — significantly negative, or exposure grew for no return → auto-reverted.
+- **⚠️ INCONCLUSIVE** — not enough evidence to distinguish it from noise. **Kept, not reverted.** This is
+  the honest verdict for most micro-changes, and it is telling you the change had *no measurable effect*.
+
+**The rule this creates — read it carefully:** if a pending change is still under measurement, the scorer
+prints `still accumulating evidence (n/MIN_CYCLES)` and **`reports/.pending-baseline.json` still exists**.
+When that is the case you **must NOT make a new code change** this cycle — the previous one is being
+measured, and piling a new change on top destroys the evidence. Write your `reports/last-analysis.md`
+(note it's under evaluation, and what you're watching), append a finding if warranted, and **stop with no
+change**. Only propose a new change once the pending one has been **scored** (a fresh ledger row appears).
+
+Read the ledger every cycle: a repeated **INCONCLUSIVE** streak means you are tuning things that don't
+move the number — change *what* you're working on (see the thesis), not just the parameter. A BAD verdict
+tells you what not to repeat. Never touch the ledger, snapshots, or `.pending-baseline.json` by hand.
+
+## Step 0 — VERIFY LAST RUN before anything new (MANDATORY, do this first)
+The loop's worst failure mode is diagnosing well but never confirming a fix actually LANDED and WORKED —
+so the same defect bleeds money run after run while new changes pile on top. Close that loop FIRST, every
+cycle, before any new diagnosis:
+
+1. **Re-test last run's change, specifically.** Read the previous ledger row, `reports/last-analysis.md`,
+   and the top of `reports/must-fix.md`. For the change deployed last cycle, decide from THIS run's LIVE
+   telemetry whether it did what it CLAIMED — one verdict, each with the exact number that proves it:
+   - ✅ **VERIFIED** — the targeted defect is measurably gone (name the metric that was wrong and now isn't).
+   - ⚠️ **STILL-BROKEN** — deployed, but the metric did not move; the fix was wrong or incomplete.
+   - 🔴 **REGRESSED** — the change made this metric, or another, worse.
+   Also confirm it actually deployed (the running commit matches; the config/threshold is live), so you
+   never grade a change the app never ran.
+2. **Verification OUTRANKS novelty.** If last run's change is STILL-BROKEN or REGRESSED, THIS run's job is
+   to fix or revert THAT — do not chase a new idea while the last one is unconfirmed. Only a ✅ VERIFIED
+   item frees you to pick up the next must-fix.
+3. **Maintain `reports/must-fix.md` — the carried-forward MUST-FIX register** (a checklist, newest block on
+   top). Every cycle: mark each open item ✅/⚠️/🔴 with its proving number, strike the VERIFIED ones, and
+   (re)rank what remains most-costly-first. Every item MUST carry a concrete **VERIFY-BY** — the exact
+   metric / endpoint / number that will prove it fixed next run — so "fixed" is never an opinion. The ONE
+   change you make this cycle targets the **#1 open item**. Every number you quote is read from live
+   telemetry, never authored (invariant 7). Commit `reports/must-fix.md` alongside your reasoning each run.
 
 ## Situation triage — answer these PRECISELY, first, every cycle (before any diagnosis)
 Open every cycle by stating the live money situation in plain numbers — mandatory, and it goes at the TOP
 of `reports/last-analysis.md`. Do not jump to a clever code fix before you have answered:
 1. **Money** — is total PnL higher or lower than the last run, and across the last 3? By how many dollars?
    Is the book **bleeding** (PnL falling run-over-run)?
-2. **Risk** — is gross / net exposure **rising or falling**? Within the firm risk budget? How close to the
-   drawdown breaker?
+2. **Risk** — read the SITUATION headroom line: what **%** of the firm gross / net cap is used, and how
+   many dollars of headroom remain? Exposure **rising is the GOAL** when the book is coming off dormant —
+   it is only a concern when it **approaches the cap** (the `NEAR FIRM …CAP` flag) or the drawdown breaker.
+   A **DORMANT** (flat) book is a FAILURE to fix, not a safe rest state.
 3. **Cause** — did the change deployed **last cycle help or hurt**? State its scored verdict AND the live
    PnL/exposure move since it went in. Name the culprit if there is one.
-4. **Danger** — are we **bleeding AND exposure rising** (or near the breaker)? If yes, that is a live
-   danger state and it **overrides everything else**: the right move this cycle is to **de-risk / cut /
-   revert the culprit**, NOT ship a new signal. Cutting risk that is losing money is always a valid change.
+4. **Danger** — are we **bleeding while near the exposure cap or the drawdown breaker**? THAT is the live
+   danger state (the `DANGER` flag), and it **overrides everything else**: de-risk / cut / revert the
+   culprit, NOT ship a new signal. But note the inverse is NOT danger: adding exposure with room to spare
+   under the cap is exactly what a book off dormant should do — do not de-risk merely because gross rose.
 Only after answering 1–4 in words do you diagnose further. **Trust the numbers over the report narrative**
 — if the live endpoints show deterioration the report did not foreground, *that* is your target. A book
-that is bleeding while adding exposure is the single most important thing to see; never miss it.
+**bleeding while near its exposure cap** is the single most important danger to see; an idle **DORMANT**
+book is the single most important *opportunity* to see. Never miss either.
 
 5. **Order-level post-mortem.** Look back at the window's orders (`recent_orders` in the report — each
    carries the `reason` that triggered it). Attribute the PnL/exposure move to specific triggers: which
@@ -164,8 +225,12 @@ that is bleeding while adding exposure is the single most important thing to see
    **Also APPEND one dated finding to `docs/loop-findings.md`** (append — never overwrite; it is the durable,
    compounding memory): what the window's orders/change did to PnL/exposure, the **trigger** behind any bad
    or good move, and the **rule** for next time. 2–4 lines, specific. Commit it alongside your reasoning.
-4. If there is a clear improvement, make the **one coherent change** (config, code, new strategy/risk
-   model — with a Proposed ADR in the same commit if it is architecturally significant).
+4. Make the **one coherent change** that targets the **#1 open item in `reports/must-fix.md`** (config,
+   code, new strategy/risk model — with its ADR (`**Status:** Implemented`) in the same commit if it is
+   architecturally significant, since you build+test+deploy it this cycle). Its commit message must name the must-fix item it addresses and the metric that will
+   confirm it next run, so Step 0 can grade it. If genuinely nothing is actionable, say so and stop — but
+   an open must-fix item with a live cost is *always* actionable; "nothing to do" while the book bleeds is
+   the failure this whole procedure exists to prevent.
 5. **Verify:** `./gradlew -Pci test` (or the narrowest relevant module). Not green → revert your edit
    and stop. Never commit a red build.
 6. **Commit** to branch `claude/auto-improve` — message = your diagnosis and the change, in words (no

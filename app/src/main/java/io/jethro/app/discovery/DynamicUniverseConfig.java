@@ -4,6 +4,7 @@ import io.jethro.app.risk.RefDataInstrumentRefSource;
 import io.jethro.refdata.RefDataRepository;
 import io.jethro.trading.riskpnl.InstrumentRefSource;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -40,8 +41,9 @@ public class DynamicUniverseConfig {
     @Bean
     UniversePromotionController universePromotionController(ObjectProvider<UniversePromotionLifecycle> lifecycle,
                                                            ObjectProvider<UniversePromotionRepository> repository,
+                                                           ObjectProvider<UniversePromotionService> service,
                                                            DynamicUniverseProperties props) {
-        return new UniversePromotionController(lifecycle, repository, props);
+        return new UniversePromotionController(lifecycle, repository, service, props);
     }
 
     /** Runtime refdata write port (ADR-0060 Phase 2). Present only with persistence + the concrete
@@ -66,6 +68,19 @@ public class DynamicUniverseConfig {
         CompanyDirectory c = companies.getIfAvailable();
         UniversePromotionRepository a = audit.getIfAvailable();
         return (g != null && c != null && a != null) ? new UniversePromotionService(g, c, a, props) : null;
+    }
+
+    /** Hands-off boot healer (runs before trading-core): if an over-aggressive cross-mode cleanup evicted a
+     *  large pile of names that were never re-promoted, restore them re-tagged with the current mode. Only
+     *  fires for a big batch so a deliberate small prune sticks. Gated on persistence + the write path. */
+    @Bean
+    @ConditionalOnProperty(prefix = "jethro.persistence", name = "enabled", havingValue = "true", matchIfMissing = true)
+    CrossModeAutoRestore crossModeAutoRestore(
+            ObjectProvider<UniversePromotionRepository> repo,
+            ObjectProvider<UniversePromotionService> service,
+            @Value("${jethro.universe.auto-restore-cross-mode:true}") boolean enabled,
+            @Value("${jethro.universe.auto-restore-min-batch:5}") int minBatch) {
+        return new CrossModeAutoRestore(repo.getIfAvailable(), service.getIfAvailable(), enabled, minBatch);
     }
 
     @Bean

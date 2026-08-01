@@ -517,7 +517,9 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         Hypothesis h = e.hypothesis();
         try {
             var command = new NewOrder("hypo:" + h.instrumentId() + ":" + UUID.randomUUID(),
-                    e.book(), h.instrumentId(), h.direction(), OrderType.MARKET, quantity, null);
+                    e.book(), h.instrumentId(), h.direction(), OrderType.MARKET, quantity, null,
+                    // ADR-0134: the thesis is the trigger; probation is part of why it was sized so.
+                    "AI-sleeve entry" + (probation ? " [probation size]" : "") + ": " + h.thesis());
             var order = orderService.submit(command);
             lastAutoExec.put(h.instrumentId(), now);
             recordExecuted(e.withQuantity(quantity), now, order.orderId(), String.valueOf(order.status()));
@@ -627,7 +629,8 @@ public final class HypothesisLifecycle implements SmartLifecycle {
         Side side = held.signum() > 0 ? Side.SELL : Side.BUY;
         try {
             var command = new NewOrder("hypo-exit:" + r.id() + ":" + UUID.randomUUID(),
-                    r.book(), r.instrumentId(), side, OrderType.MARKET, qty, null);
+                    r.book(), r.instrumentId(), side, OrderType.MARKET, qty, null,
+                    "AI-sleeve exit at horizon expiry: " + r.id()); // ADR-0134
             var order = orderService.submit(command);
             log.info("AI-sleeve exit at horizon expiry: {} {} {} → {} ({})",
                     side, qty.toPlainString(), r.instrumentId(), order.status(), order.orderId());

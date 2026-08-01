@@ -75,6 +75,19 @@ public final class ForecastRegistry {
                 SourceForecasts.reversionClaim(score, Forecast.TARGET_ABS));
     }
 
+    /** Cross-sectional residual reversion reading (ADR-0121); {@code score} is the robust residual z. */
+    public void submitCrossSectionalReversion(String instrument, double score) {
+        putScaled(SourceForecasts.XS_REVERSION, instrument,
+                SourceForecasts.crossSectionalReversionClaim(score, Forecast.TARGET_ABS));
+    }
+
+    /** Market-index trend reading (ADR-0130) carried to a name from its region index; {@code score} is
+     *  the index's self-normalised EWMAC trend — the market factor, blended like any other source. */
+    public void submitIndexTrend(String instrument, double score) {
+        putScaled(SourceForecasts.INDEX_TREND, instrument,
+                SourceForecasts.indexTrendClaim(score, Forecast.TARGET_ABS));
+    }
+
     public void submitLearned(String instrument, double pUp, double pDown, boolean ships) {
         putScaled(SourceForecasts.LEARNED, instrument,
                 SourceForecasts.learnedClaim(pUp, pDown, ships, params.learnedScale()));

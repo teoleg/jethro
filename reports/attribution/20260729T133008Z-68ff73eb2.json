@@ -1,0 +1,52 @@
+{
+  "after": {
+    "at": "2026-07-29T13:30:08Z",
+    "fees": "0.085756",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "0.95512117",
+      "netExposure": "0.00000000",
+      "realizedPnl": "0.61209817",
+      "strategyAlpha": "-0.34302300",
+      "totalFees": "0.085756",
+      "totalPnl": "0.61209817",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "0.61209817"
+  },
+  "before": {
+    "at": "2026-07-28T19:17:20Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0.61209817"
+  },
+  "commit": "68ff73eb292dc8a4cbfdb190d82bc6eebcca28bf",
+  "delta": {
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0E-8"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle +0.000000 over 38 cycles, t=+0.00 (hurdle 1.5); gross 0\u21920",
+  "revert": false,
+  "scoredAt": "2026-07-29T13:30:08Z",
+  "summary": "a fifth forecast source fades a name's return against its own peer group's median and robust dispersion \u2014 the idiosyncratic residual the reversal literature documents \u2014 instead of against the name's own past, so the market factor the desk hedges away stops being measured as alpha (ADR-0121)",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 0.0,
+    "gross_start": 0.0,
+    "mean_ret_per_cycle": 0.0,
+    "n": 38,
+    "scale": 1000.0,
+    "t": 0.0
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-07-31T16:30:06Z",
+    "fees": "209.375546",
+    "gross": "167400.76706250",
+    "net": "-24227.43293750",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "167400.76706250",
+      "hedgePnl": "132.13445426",
+      "netExposure": "-24227.43293750",
+      "realizedPnl": "436.81608516",
+      "strategyAlpha": "96.79208552",
+      "totalFees": "209.375546",
+      "totalPnl": "228.92653978",
+      "unrealizedPnl": "-207.88954538"
+    },
+    "total_pnl": "228.92653978"
+  },
+  "before": {
+    "at": "2026-07-31T13:52:40Z",
+    "gross": "17957.38378750",
+    "net": "-2409.57621250",
+    "total_pnl": "724.49911373"
+  },
+  "commit": "e61c7f5aa852851228dcebe50101b5e7d50f277a",
+  "delta": {
+    "gross": "149443.38327500",
+    "net": "-21817.85672500",
+    "total_pnl": "-495.57257395"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.001546 over 7 cycles, t=-1.92 (hurdle 1.5); gross 17,957\u2192167,401 [grew] \u2014 \u26a0\ufe0f REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert",
+  "revert": true,
+  "revertApplied": false,
+  "scoredAt": "2026-07-31T16:30:06Z",
+  "summary": "the buffer's no-trade band is capped at the target it polices, so a name whose conviction is weak is no longer vetoed outright by a band scaled to a full-strength position it will never hold (ADR-0133)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": true,
+    "gross_end": 167400.7670625,
+    "gross_start": 17957.3837875,
+    "mean_ret_per_cycle": -0.00154554,
+    "n": 7,
+    "scale": 45806.7,
+    "t": -1.923
+  }
+}

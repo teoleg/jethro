@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-28T14:30:07Z",
+    "fees": "0.042361",
+    "gross": "759.87260000",
+    "net": "83.69260000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "759.87260000",
+      "hedgePnl": "-1.76495732",
+      "netExposure": "83.69260000",
+      "realizedPnl": "-0.04236100",
+      "strategyAlpha": "0.77611000",
+      "totalFees": "0.042361",
+      "totalPnl": "-0.98884732",
+      "unrealizedPnl": "-0.94648632"
+    },
+    "total_pnl": "-0.98884732"
+  },
+  "before": {
+    "at": "2026-07-28T14:12:45Z",
+    "gross": "758.33940000",
+    "net": "86.04940000",
+    "total_pnl": "1.36795268"
+  },
+  "commit": "a85bfc3efb6a12678083ab22171621c7c7b1b3db",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "1.53320000",
+    "net": "-2.35680000",
+    "total_pnl": "-2.35680000"
+  },
+  "note": "no material change (within noise band); risk-adj (PnL/$1 gross) worsened 0.00180\u2192-0.00130",
+  "revert": false,
+  "scoredAt": "2026-07-28T14:30:07Z",
+  "summary": "the warm-restart seed replays one more point than the estimator counts returns, so the risk cut's sigma and the fusion covariance can actually finish warming from stored history at boot instead of landing one return short every time (ADR-0117)",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

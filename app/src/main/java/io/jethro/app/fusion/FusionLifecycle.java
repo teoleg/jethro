@@ -312,9 +312,14 @@ public final class FusionLifecycle implements AutoCloseable {
             // between that and where it is is worth paying spread for. It runs after the risk cut so a
             // flat target reaches it as a flat AIM and is still worked in full, and it re-applies the
             // ADR-0064 gate itself because it re-derives the delta rather than clamping the old one.
+            // ADR-0126: and the buffer is also where the desk refuses to OPEN a name whose ADR-0086
+            // trailing stop has no measured σ yet — the risk cut above cannot protect a position it
+            // cannot price a distance for, so the desk holds no risk it has no exit for. Passed in here
+            // rather than clamped upstream because this step re-derives every delta from the aim, and
+            // evaluated independently of the edge gate so switching that gate off cannot silence it.
             var buffered = positionBuffer == null
                     ? new PositionBuffer.Result(targets, Map.of(), 0, targets.size())
-                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate());
+                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate(), this::stopArmed);
             targets = buffered.targets();
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
                     normalised.multiplier(), normalised.coveredNames(),
@@ -326,6 +331,13 @@ public final class FusionLifecycle implements AutoCloseable {
                     braked.samples());
             if (routeOrders) {
                 int routed = 0;
+                // ADR-0134: the names the ADR-0086 trailing stop flattened this cycle. A stop cut and a
+                // decayed view both arrive here as a reduce, but they are different triggers and the
+                // post-mortem needs to tell them apart, so the distinction is captured where it is known.
+                java.util.Set<String> stopped = new java.util.HashSet<>();
+                for (TrailingRiskCut.Cut c : cut.cuts()) {
+                    stopped.add(c.instrument());
+                }
                 for (FusionPlanner.Target t : targets) {
                     if (t.deltaQty().signum() == 0) {
                         continue; // inside the no-trade band — nothing to do
@@ -337,7 +349,8 @@ public final class FusionLifecycle implements AutoCloseable {
                     if (!reducing && Math.abs(t.combinedForecast()) < minForecastToRoute) {
                         continue; // ADR-0059: below the conviction floor — don't churn a weak/oscillating signal
                     }
-                    if (executor.route(t.instrument(), t.deltaQty(), reducing).routed()) {
+                    if (executor.route(t.instrument(), t.deltaQty(), reducing,
+                            originOf(t, reducing, stopped.contains(t.instrument()))).routed()) {
                         routed++;
                     }
                 }
@@ -362,6 +375,29 @@ public final class FusionLifecycle implements AutoCloseable {
      * an hour of samples and the process lifetime is a fraction of that, so without the seed the sensor
      * would never speak and this control would be dead code.
      */
+    /**
+     * The ORIGINATION trigger for one routed delta (ADR-0134) — why the desk wanted this trade, named
+     * where the planner still knows it. Four triggers the post-mortem must be able to tell apart: a
+     * trailing-stop cut, an exit all the way to flat, a partial reduce toward a smaller target, and an
+     * entry. The forecast and source count are carried along because they are what the desk acted ON;
+     * both are read from the target the planner computed, never authored here (invariant 7).
+     *
+     * <p>Pure telemetry: nothing reads this string back, so it cannot change what is traded.
+     */
+    private static String originOf(FusionPlanner.Target t, boolean reducing, boolean stopped) {
+        String trigger;
+        if (stopped) {
+            trigger = "ADR-0086 trailing risk cut — target flat";
+        } else if (!reducing) {
+            trigger = "fusion entry — target increase";
+        } else if (t.targetQty().signum() == 0) {
+            trigger = "fusion exit — target decayed to flat";
+        } else {
+            trigger = "fusion reduce toward a smaller target";
+        }
+        return trigger + " [forecast=" + t.combinedForecast() + ", sources=" + t.sources() + "]";
+    }
+
     private TrailingRiskCut.Result applyRiskCut(List<FusionPlanner.Target> targets, long now,
                                                 long horizonSeconds, FusionPlanner.Params cycleParams) {
         if (riskCut == null || streamVol == null) {
@@ -372,7 +408,12 @@ public final class FusionLifecycle implements AutoCloseable {
                 continue;
             }
             seedVolatility(t.instrument());
-            streamVol.update(t.instrument(), t.price());
+            // ADR-0116: the σ that sets the cut distance advances on the MARKET's clock, not on ours.
+            // The plan is made once per cycle from a last-value cache, so on a quiet tape the same price
+            // arrives here over and over; absorbing those as zero returns decays σ toward zero and puts
+            // the ADR-0086 trigger at ~0, cutting every name held across the close on the first genuine
+            // move of the next session. Same rule and same clock as ADR-0113 on the forecast sensors.
+            streamVol.update(t.instrument(), t.price(), markInstant(t.instrument()));
         }
         var result = riskCut.apply(targets, now, horizonSeconds, intervalSeconds, streamVol, cycleParams);
         for (TrailingRiskCut.Cut c : result.cuts()) {
@@ -465,8 +506,10 @@ public final class FusionLifecycle implements AutoCloseable {
             }
         }
         long anchor = providerMillis != null ? providerMillis : System.currentTimeMillis();
+        // Snapshots, not joint returns: N snapshots yield N−1 returns for a pair present throughout,
+        // so the replay must be one longer than the estimator's warm-up (ADR-0117).
         var samples = SensorWarmup.jointSeedSamples(markHistory, instruments, anchor,
-                intervalSeconds * 1_000L, streamCov.warmupSamples());
+                intervalSeconds * 1_000L, streamCov.warmupSnapshots());
         for (var s : samples) {
             streamCov.update(s);
         }
@@ -483,6 +526,31 @@ public final class FusionLifecycle implements AutoCloseable {
         }
     }
 
+    /**
+     * This name's mark as timestamped by the FEED (invariant 5), or null when no provider clock is
+     * wired — in which case {@link PrintClock} admits every sample and behaviour is exactly what it was
+     * before ADR-0116, which is what a test harness or a caller without a mark cache needs.
+     */
+    private java.time.Instant markInstant(String instrument) {
+        Long millis = markTimeFor == null ? null : markTimeFor.apply(instrument);
+        return millis == null || millis <= 0 ? null : java.time.Instant.ofEpochMilli(millis);
+    }
+
+    /**
+     * ADR-0126 — can this name be stopped out? True when the ADR-0086 σ sensor has warmed enough to
+     * price a cut distance for it. With no sensor wired there is no claim to make and every name reads
+     * armed, which leaves the book byte-identical to the behaviour before this control existed.
+     *
+     * <p>Read from the sensor's own warm-up state, not from a threshold: the same
+     * {@code sigmaPerSample(...).isPresent()} that {@link #seedVolatility} logs the cold warning from
+     * and that {@link TrailingRiskCut} requires before it will cut. So "the desk may open it" and "the
+     * risk cut can protect it" are the same question answered in one place, and the answer arrives
+     * exactly one cycle after the seed succeeds — no number is introduced (invariant 7 / ADR-0016).
+     */
+    private boolean stopArmed(String instrument) {
+        return streamVol == null || streamVol.sigmaPerSample(instrument).isPresent();
+    }
+
     /** Replays this name's stored recent prices into the σ sensor the first time it is planned. */
     private void seedVolatility(String instrument) {
         if (markHistory == null || !volSeeded.add(instrument)) {
@@ -490,14 +558,17 @@ public final class FusionLifecycle implements AutoCloseable {
         }
         Long providerMillis = markTimeFor == null ? null : markTimeFor.apply(instrument);
         long anchor = providerMillis != null && providerMillis > 0 ? providerMillis : System.currentTimeMillis();
+        // The seed is counted in PRICES, the sensor in RETURNS, and a return needs two prices
+        // (ADR-0117) — asking for warmupSamples() prices lands the replay one return short every time.
         int n = SensorWarmup.warm(markHistory, instrument, anchor, intervalSeconds * 1_000L,
-                streamVol.warmupSamples(), price -> streamVol.update(instrument, price));
+                streamVol.warmupPrices(), price -> streamVol.update(instrument, price));
         if (streamVol.sigmaPerSample(instrument).isEmpty()) {
             // WARN, not INFO: an unmeasured name is one the risk cut can never protect, and that has
-            // to be loud enough to reach the report (the ADR-0071 correction's lesson).
+            // to be loud enough to reach the report (the ADR-0071 correction's lesson). Quoted against
+            // what the seed ASKED FOR, so "n of n, still cold" can only ever mean a genuine cold start.
             log.warn("risk-cut σ sensor still cold for {} after seeding {} of {} stored prices — this "
                     + "name cannot be stopped out until its mark history has accumulated", instrument, n,
-                    streamVol.warmupSamples());
+                    streamVol.warmupPrices());
         } else {
             log.info("risk-cut σ sensor warmed {} from {} stored prices (ADR-0086)", instrument, n);
         }
@@ -518,7 +589,7 @@ public final class FusionLifecycle implements AutoCloseable {
                     : TargetPlanner.reduceOnly(t.deltaQty(), t.currentQty());
             out.add(clamped.compareTo(t.deltaQty()) == 0 ? t
                     : new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
-                            t.diversificationMultiplier(), t.price(), t.targetQty(), t.currentQty(),
+                            t.diversificationMultiplier(), t.agreement(), t.price(), t.targetQty(), t.currentQty(),
                             clamped, t.contributions()));
         }
         return out;

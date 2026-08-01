@@ -51,119 +51,17 @@ push_branch() {
   return 1
 }
 
-# Single-flight: with a short interval, a slow gradle test could still be running when the next cron
-# fires. Take a non-blocking lock and skip this fire rather than stacking overlapping cycles.
-exec 9>"$REPO/.improve-loop.lock"
-if ! flock -n 9; then
-  echo "==== $(date -Is) skipped — previous cycle still running ====" >> "$LOG"
-  exit 0
-fi
-
-echo "==== $(date -Is) cycle start ====" >> "$LOG"
-
-# 0. Market-hours gate. On a LIVE feed outside the US session, the tape is frozen — there is nothing
-#    to analyse, so spending an Opus cycle on it is pure waste (and the frozen book reads as false
-#    "staleness"). Skip the whole cycle — no report, NO Claude/Opus call, no deploy — and write one
-#    distinct "market closed" heartbeat so the Improve page shows why. SIM/REPLAY never skip (their
-#    tape runs continuously). Cron still fires every time; this only gates the expensive work.
-#    Override with JETHRO_LOOP_IGNORE_MARKET_HOURS=1.
-if ! python3 scripts/market-open.py >> "$LOG" 2>&1; then
-  echo "market CLOSED — skipping report + analysis this cycle (no Claude call)" >> "$LOG"
-  git fetch origin >> "$LOG" 2>&1 || true
-  git checkout -B "$BRANCH" >> "$LOG" 2>&1
-  git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 || true
-  BEFORE=$(git rev-parse HEAD)
-  # Deterministic heartbeat only (reads live PnL for the page; no model call). --market-closed labels it.
-  python3 scripts/score-change.py status --market-closed 1 >> "$LOG" 2>&1 \
-    || echo "status writer exited non-zero (see above)" >> "$LOG"
-  if [ "$BEFORE" != "$(git rev-parse HEAD)" ]; then
-    push_branch || true
-  fi
-  echo "==== $(date -Is) cycle end (market closed) ====" >> "$LOG"
-  exit 0
-fi
-
-# 1. Snapshot the LIVE app (writes logs/report.md + jethro-report-*.zip). Do NOT restart first —
-#    the runtime telemetry is in-memory and a restart would wipe it.
-python3 scripts/system-report.py >> "$LOG" 2>&1 || {
-  echo "report generation failed — skipping cycle" >> "$LOG"; exit 0; }
-
-# 2. Work on the single branch. Fast-forward to any maintainer changes pushed to it since last cycle
-#    (one branch, no second "upstream" to merge). A non-ff divergence is left alone — the loop's own
-#    commits below get pushed and reconciled — so a maintainer push never wedges the cycle.
-git fetch origin >> "$LOG" 2>&1 || true
-git checkout -B "$BRANCH" >> "$LOG" 2>&1
-git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 && echo "fast-forwarded to origin/$BRANCH" >> "$LOG" \
-  || echo "no fast-forward from origin/$BRANCH (local has un-pushed commits, or already current)" >> "$LOG"
-BEFORE=$(git rev-parse HEAD)
-
-# Was a prior change awaiting its score at cycle start? Drives the run-status "scored/reverted" state.
-HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
-
-# 2b. Score the PREVIOUS cycle's change — DETERMINISTICALLY, in code, never by the LLM (invariant 7 /
-#     ADR-0016). Measures the live app as it runs now (still on last cycle's code), writes the ledger
-#     row + an audited snapshot, and on a BAD verdict reverts the offending commit. Any commits it
-#     makes fall inside BEFORE..AFTER below, so they get pushed and (if the revert changed code)
-#     trigger the rebuild. All numbers come from /api/attribution + /api/risk, none from Claude.
-python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-zero (see above)" >> "$LOG"
-
-# 2c. Build THIS RUN'S prompt: the stable contract (ops/improve-prompt.md) followed by a generated
-#     "THIS RUN'S LIVE CONTEXT" section that surfaces the freshest situation + memory (the ⚠ SITUATION
-#     header, the latest objective flags, the last few scored ledger rows, recent findings) right in
-#     the prompt, so the obvious money/risk state is never missed. It only QUOTES code-computed numbers
-#     — it invents none (invariant 7). If it fails for any reason, fall back to the static contract so
-#     the cycle still runs.
-PROMPT_FILE="logs/improve-prompt.rendered.md"
-python3 scripts/build-prompt.py >> "$LOG" 2>&1 && [ -s "$PROMPT_FILE" ] \
-  || { echo "prompt build failed — falling back to the static contract" >> "$LOG"; PROMPT_FILE="ops/improve-prompt.md"; }
-
-# 3. Claude Code (headless, on Max) reads the rendered prompt + logs/report.md, diagnoses against the
-#    objective, and ONLY if warranted makes one change, runs the tests, and commits. It does NOT push
-#    or restart — the wrapper owns those so build+restart only happen on a verified commit.
-# 9>&- closes the single-flight lock fd for Claude and everything it spawns — otherwise a persistent
-# child (notably the Gradle DAEMON that `./gradlew -Pci test` leaves running for hours) inherits the
-# lock and holds it long after the cycle ends, wedging every later cycle into "skipped".
-BRAIN_RAN=0
-if ! command -v claude >/dev/null 2>&1; then
-  echo "ERROR: 'claude' not found on PATH — analysis/change step SKIPPED (report + score + heartbeat" \
-       "still ran). Install Claude Code for the cron user, or add its dir to PATH. PATH=$PATH" >> "$LOG"
-else
-  BRAIN_RAN=1
-  claude -p "$(cat "$PROMPT_FILE")" \
-    --allowedTools "Bash Read Edit Grep Glob Skill" \
-    --permission-mode acceptEdits \
-    >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero (see above)" >> "$LOG"
-fi
-
-# 3b. Per-cycle heartbeat for the UI (reports/run-status.json) — DETERMINISTIC, computed in code
-#     (invariant 7): current PnL/exposure, % change vs the previous run, and this cycle's decision.
-#     Runs EVERY cycle, including no-change ones, so the UI shows a line for each run. --changed = the
-#     agent recorded a NEW baseline this cycle; --scored = a prior change was scored at cycle start.
-CHANGED=0; [ -f reports/.pending-baseline.json ] && CHANGED=1
-python3 scripts/score-change.py status --scored "$HAD_PENDING" --changed "$CHANGED" --brain-ran "$BRAIN_RAN" \
-  >> "$LOG" 2>&1 || echo "status writer exited non-zero (see above)" >> "$LOG"
-
-AFTER=$(git rev-parse HEAD)
-if [ "$BEFORE" = "$AFTER" ]; then
-  echo "nothing committed this cycle (even the heartbeat write?) — app left running as-is" >> "$LOG"
-  echo "==== $(date -Is) cycle end ====" >> "$LOG"
-  exit 0
-fi
-
-# 4. Something was committed (ledger score and/or a code change; the prompt requires green
-#    `./gradlew -Pci test` before any code commit). Push so the ledger + any change persist.
-echo "commit(s) this cycle $BEFORE -> $AFTER — pushing" >> "$LOG"
-push_branch || true
-
-# 4b. Rebuild+restart ONLY if code outside reports/ changed. A ledger-only commit (scoring the
-#     previous change) must not bounce the app.
-CODE_CHANGED=$(git diff --name-only "$BEFORE" "$AFTER" | grep -v '^reports/' || true)
-if [ -z "$CODE_CHANGED" ]; then
-  echo "ledger-only update — pushed, no rebuild/restart" >> "$LOG"
-  echo "==== $(date -Is) cycle end ====" >> "$LOG"
-  exit 0
-fi
-echo "code changed:" >> "$LOG"; printf '%s\n' "$CODE_CHANGED" >> "$LOG"
+# ---------------------------------------------------------------------------------------------
+# Deploy (steps 4b + 5), as ONE function both cycle shapes call — open-market and market-closed.
+#
+# It used to be inline at the tail of the open-market path only, which made a code change that
+# arrived while the market was CLOSED undeployable in principle (ADR-0123): the closed branch
+# fast-forwards the working tree to origin and exits before any deploy, and it captured its BEFORE
+# sha AFTER that fast-forward — so the commit was already in HEAD by the time the next open cycle
+# took its own BEFORE, and `git diff BEFORE AFTER` could never see it again. A change pulled in
+# overnight was therefore in the repo, in every later diff's PAST, and never in the JVM. That is
+# exactly the failure §5 below exists to prevent, arriving through the one door §5 did not watch.
+# ---------------------------------------------------------------------------------------------
 
 # 5. Rebuild the binary + restart the app — and VERIFY the running process actually turned over.
 #
@@ -228,19 +126,31 @@ run_deploy() {
   bash -c "$1" >> "$LOG" 2>&1 9>&- || echo "deploy command exited non-zero: $1" >> "$LOG"
 }
 
-if [ "$DEPLOY_CMD" = "none" ]; then
-  echo "JETHRO_DEPLOY_CMD=none — change is committed+pushed but the app was NOT rebuilt/restarted." \
-       "The next cycle will score this commit against a binary that does NOT contain it." >> "$LOG"
-else
-  DEPLOY_STARTED=$(date +%s)
+# 4b. Rebuild+restart ONLY if code outside reports/ changed between $1 and $2. A ledger-only or
+#     heartbeat-only commit (scoring the previous change, or a market-closed status write) must not
+#     bounce the app. Returns 0 either way — a deploy result is logged, never a cycle-killing status.
+deploy_if_code_changed() {
+  local before="$1" after="$2" changed deploy_started
+  changed=$(git diff --name-only "$before" "$after" | grep -v '^reports/' || true)
+  if [ -z "$changed" ]; then
+    echo "no code change $before -> $after — no rebuild/restart" >> "$LOG"
+    return 0
+  fi
+  echo "code changed:" >> "$LOG"; printf '%s\n' "$changed" >> "$LOG"
+  if [ "$DEPLOY_CMD" = "none" ]; then
+    echo "JETHRO_DEPLOY_CMD=none — change is committed+pushed but the app was NOT rebuilt/restarted." \
+         "The next cycle will score this commit against a binary that does NOT contain it." >> "$LOG"
+    return 0
+  fi
+  deploy_started=$(date +%s)
   run_deploy "$DEPLOY_CMD"
-  if wait_for_restart "$DEPLOY_STARTED"; then
+  if wait_for_restart "$deploy_started"; then
     echo "deploy VERIFIED — app is serving on a process that started after the deploy began" >> "$LOG"
   elif [ "$DEPLOY_CMD" != "$DEPLOY_FALLBACK_CMD" ]; then
     echo "deploy NOT verified (no restarted process answering /api/ops/jvm) — falling back to the repo's own restart" >> "$LOG"
-    DEPLOY_STARTED=$(date +%s)
+    deploy_started=$(date +%s)
     run_deploy "$DEPLOY_FALLBACK_CMD"
-    if wait_for_restart "$DEPLOY_STARTED"; then
+    if wait_for_restart "$deploy_started"; then
       echo "deploy VERIFIED via fallback" >> "$LOG"
     else
       echo "deploy FAILED — app did NOT turn over after the fallback either. The next cycle would" \
@@ -250,5 +160,139 @@ else
     echo "deploy FAILED — app did NOT turn over. The next cycle would score this commit against a" \
          "binary that does NOT contain it; treat that verdict as void." >> "$LOG"
   fi
+  return 0
+}
+
+# Single-flight: with a short interval, a slow gradle test could still be running when the next cron
+# fires. Take a non-blocking lock and skip this fire rather than stacking overlapping cycles.
+exec 9>"$REPO/.improve-loop.lock"
+if ! flock -n 9; then
+  echo "==== $(date -Is) skipped — previous cycle still running ====" >> "$LOG"
+  exit 0
 fi
+
+echo "==== $(date -Is) cycle start ====" >> "$LOG"
+
+# NOTE (ADR-0128): the OOS backtest now reads the DB `daily_close` SEED history — the ONE source of
+# truth, Tiingo-seeded and refreshed daily by the app's own HistorySeeder — so there is no separate bars
+# file to fetch here. The previous scripts/fetch_bars.py (Stooq) step was removed: Stooq 404'd every
+# name and it was a second, redundant, unreliable history source. History currency is the app's job now,
+# not the loop's.
+
+# 0. Market-hours gate. On a LIVE feed outside the US session, the tape is frozen — there is nothing
+#    to analyse, so spending an Opus cycle on it is pure waste (and the frozen book reads as false
+#    "staleness"). Skip the ANALYSIS — no report, no Claude/Opus call — and write one distinct
+#    "market closed" heartbeat so the Improve page shows why. SIM/REPLAY never skip (their tape runs
+#    continuously). Cron still fires every time; this only gates the expensive work.
+#    Override with JETHRO_LOOP_IGNORE_MARKET_HOURS=1.
+#
+#    A closed market skips the ANALYSIS, never the DEPLOY (ADR-0123). This branch still fast-forwards
+#    to origin, so a code/config change pushed to the branch overnight lands in the working tree here
+#    — and BEFORE must be taken BEFORE that fast-forward, exactly as §2 does, or the change is
+#    swallowed: it is already in HEAD when the next open-market cycle takes its own BEFORE, so no
+#    later `git diff BEFORE AFTER` can ever see it and the app runs the old jar forever. That is not
+#    hypothetical — it stranded the owner's ADR-0122 exploration-mode directive (committed after the
+#    close) through a full overnight and into the next session, leaving the book dormant at zero gross
+#    against a config the repo said was live.
+if ! python3 scripts/market-open.py >> "$LOG" 2>&1; then
+  echo "market CLOSED — skipping report + analysis this cycle (no Claude call)" >> "$LOG"
+  git fetch origin >> "$LOG" 2>&1 || true
+  git checkout -B "$BRANCH" >> "$LOG" 2>&1
+  BEFORE=$(git rev-parse HEAD)
+  git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 || true
+  # Deterministic heartbeat only (reads live PnL for the page; no model call). --market-closed labels it.
+  python3 scripts/score-change.py status --market-closed 1 >> "$LOG" 2>&1 \
+    || echo "status writer exited non-zero (see above)" >> "$LOG"
+  AFTER=$(git rev-parse HEAD)
+  if [ "$BEFORE" != "$AFTER" ]; then
+    push_branch || true
+    # A closed market is the CHEAPEST time to bounce the JVM: no tape to miss, no live measurement to
+    # wipe, and hours of warm-up before the open. The heartbeat write alone is reports/-only and so
+    # deploys nothing; only a real code/config change pulled in here does.
+    deploy_if_code_changed "$BEFORE" "$AFTER"
+  fi
+  echo "==== $(date -Is) cycle end (market closed) ====" >> "$LOG"
+  exit 0
+fi
+
+# 1. Snapshot the LIVE app (writes logs/report.md + jethro-report-*.zip). Do NOT restart first —
+#    the runtime telemetry is in-memory and a restart would wipe it.
+python3 scripts/system-report.py >> "$LOG" 2>&1 || {
+  echo "report generation failed — skipping cycle" >> "$LOG"; exit 0; }
+
+# 2. Work on the single branch. Fast-forward to any maintainer changes pushed to it since last cycle
+#    (one branch, no second "upstream" to merge). A non-ff divergence is left alone — the loop's own
+#    commits below get pushed and reconciled — so a maintainer push never wedges the cycle.
+git fetch origin >> "$LOG" 2>&1 || true
+git checkout -B "$BRANCH" >> "$LOG" 2>&1
+# Capture BEFORE the fast-forward so maintainer commits pulled in here ALSO count as this cycle's change
+# and are rebuilt+restarted by the deploy step (§4b). A code/config fix pushed to the branch then deploys
+# itself on the next (open-market) cycle — no manual pull/restart. (Bug fixed 2026-07-28: BEFORE used to
+# be taken AFTER the ff, so a pulled maintainer change was invisible to CODE_CHANGED and the app kept
+# running the old jar until the loop happened to make its own code change.)
+BEFORE=$(git rev-parse HEAD)
+git merge --ff-only "origin/$BRANCH" >> "$LOG" 2>&1 && echo "fast-forwarded to origin/$BRANCH" >> "$LOG" \
+  || echo "no fast-forward from origin/$BRANCH (local has un-pushed commits, or already current)" >> "$LOG"
+
+# Was a prior change awaiting its score at cycle start? Drives the run-status "scored/reverted" state.
+HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
+
+# 2b. Score the PREVIOUS cycle's change — DETERMINISTICALLY, in code, never by the LLM (invariant 7 /
+#     ADR-0016). Measures the live app as it runs now (still on last cycle's code), writes the ledger
+#     row + an audited snapshot, and on a BAD verdict reverts the offending commit. Any commits it
+#     makes fall inside BEFORE..AFTER below, so they get pushed and (if the revert changed code)
+#     trigger the rebuild. All numbers come from /api/attribution + /api/risk, none from Claude.
+python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-zero (see above)" >> "$LOG"
+
+# 2c. Build THIS RUN'S prompt: the stable contract (ops/improve-prompt.md) followed by a generated
+#     "THIS RUN'S LIVE CONTEXT" section that surfaces the freshest situation + memory (the ⚠ SITUATION
+#     header, the latest objective flags, the last few scored ledger rows, recent findings) right in
+#     the prompt, so the obvious money/risk state is never missed. It only QUOTES code-computed numbers
+#     — it invents none (invariant 7). If it fails for any reason, fall back to the static contract so
+#     the cycle still runs.
+PROMPT_FILE="logs/improve-prompt.rendered.md"
+python3 scripts/build-prompt.py >> "$LOG" 2>&1 && [ -s "$PROMPT_FILE" ] \
+  || { echo "prompt build failed — falling back to the static contract" >> "$LOG"; PROMPT_FILE="ops/improve-prompt.md"; }
+
+# 3. Claude Code (headless, on Max) reads the rendered prompt + logs/report.md, diagnoses against the
+#    objective, and ONLY if warranted makes one change, runs the tests, and commits. It does NOT push
+#    or restart — the wrapper owns those so build+restart only happen on a verified commit.
+# 9>&- closes the single-flight lock fd for Claude and everything it spawns — otherwise a persistent
+# child (notably the Gradle DAEMON that `./gradlew -Pci test` leaves running for hours) inherits the
+# lock and holds it long after the cycle ends, wedging every later cycle into "skipped".
+BRAIN_RAN=0
+if ! command -v claude >/dev/null 2>&1; then
+  echo "ERROR: 'claude' not found on PATH — analysis/change step SKIPPED (report + score + heartbeat" \
+       "still ran). Install Claude Code for the cron user, or add its dir to PATH. PATH=$PATH" >> "$LOG"
+else
+  BRAIN_RAN=1
+  claude -p "$(cat "$PROMPT_FILE")" \
+    --allowedTools "Bash Read Edit Grep Glob Skill" \
+    --permission-mode acceptEdits \
+    >> "$LOG" 2>&1 9>&- || echo "claude run exited non-zero (see above)" >> "$LOG"
+fi
+
+# 3b. Per-cycle heartbeat for the UI (reports/run-status.json) — DETERMINISTIC, computed in code
+#     (invariant 7): current PnL/exposure, % change vs the previous run, and this cycle's decision.
+#     Runs EVERY cycle, including no-change ones, so the UI shows a line for each run. --changed = the
+#     agent recorded a NEW baseline this cycle; --scored = a prior change was scored at cycle start.
+CHANGED=0; [ -f reports/.pending-baseline.json ] && CHANGED=1
+python3 scripts/score-change.py status --scored "$HAD_PENDING" --changed "$CHANGED" --brain-ran "$BRAIN_RAN" \
+  >> "$LOG" 2>&1 || echo "status writer exited non-zero (see above)" >> "$LOG"
+
+AFTER=$(git rev-parse HEAD)
+if [ "$BEFORE" = "$AFTER" ]; then
+  echo "nothing committed this cycle (even the heartbeat write?) — app left running as-is" >> "$LOG"
+  echo "==== $(date -Is) cycle end ====" >> "$LOG"
+  exit 0
+fi
+
+# 4. Something was committed (ledger score and/or a code change; the prompt requires green
+#    `./gradlew -Pci test` before any code commit). Push so the ledger + any change persist.
+echo "commit(s) this cycle $BEFORE -> $AFTER — pushing" >> "$LOG"
+push_branch || true
+
+# 4b/5. Rebuild+restart if this cycle changed code outside reports/ — the shared deploy defined at
+#       the top of this script, verified against the app's own uptime (ADR-0110, ADR-0123).
+deploy_if_code_changed "$BEFORE" "$AFTER"
 echo "==== $(date -Is) cycle end ====" >> "$LOG"

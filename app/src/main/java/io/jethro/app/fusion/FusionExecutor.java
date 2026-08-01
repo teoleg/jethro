@@ -65,16 +65,34 @@ public final class FusionExecutor {
     private final TradingHaltSwitch halt;
     private final OrderService orderService;
     private final ObjectProvider<StrategySelector> selector;
+    private final boolean requireBacktestSupport;
 
+    /** Back-compat / default: the ADR-0049 backtest-support veto is REQUIRED (the strict, real-capital shape). */
     public FusionExecutor(StrategyProperties props, InstrumentRefSource refs,
                           PreTradeGuardrail guardrail, TradingHaltSwitch halt,
                           OrderService orderService, ObjectProvider<StrategySelector> selector) {
+        this(props, refs, guardrail, halt, orderService, selector, true);
+    }
+
+    /**
+     * @param requireBacktestSupport when false (ADR-0122 exploration mode, paper book only), the
+     *   ADR-0049/0059 backtest-support veto is FAIL-OPEN: a name the OOS selector has not approved is
+     *   NOT vetoed, so the desk may act on the combined forecast alone. Every deterministic floor still
+     *   stands — firm breaker, per-book/firm exposure caps and the pre-trade guardrail below, the
+     *   conviction floor above — so this removes a VALIDATION discipline, never a risk floor. Default
+     *   true restores the strict shape exactly.
+     */
+    public FusionExecutor(StrategyProperties props, InstrumentRefSource refs,
+                          PreTradeGuardrail guardrail, TradingHaltSwitch halt,
+                          OrderService orderService, ObjectProvider<StrategySelector> selector,
+                          boolean requireBacktestSupport) {
         this.props = props;
         this.refs = refs;
         this.guardrail = guardrail;
         this.halt = halt;
         this.orderService = orderService;
         this.selector = selector;
+        this.requireBacktestSupport = requireBacktestSupport;
     }
 
     /** Routes one instrument's fused delta through the gates; returns what happened (never throws). */
@@ -90,6 +108,20 @@ public final class FusionExecutor {
      *   NOT relaxed: the firm breaker and the pre-trade guardrail below still apply unchanged.
      */
     public Result route(String instrument, BigDecimal deltaQty, boolean riskReducing) {
+        return route(instrument, deltaQty, riskReducing, null);
+    }
+
+    /**
+     * As above, with the ORIGINATION trigger the planner attached to this delta (ADR-0134) — why the
+     * desk wanted the trade. It is carried on the order command and persisted with the row, so an
+     * order that FILLED is attributable to what caused it; the status {@code reason} answers the
+     * different question of why a status changed and stays empty on the happy path. Telemetry only:
+     * it is never read back by any decision, so a null origin can never change what the desk trades.
+     *
+     * @param originReason the trigger in the planner's own words, or null when the caller has none.
+     */
+    public Result route(String instrument, BigDecimal deltaQty, boolean riskReducing,
+                        String originReason) {
         try {
             // Execution is ALWAYS internal simulated fills (OrderService → SimulatedExecutor); there is no
             // real-broker path in the codebase, so routing under a LIVE feed is PAPER TRADING against real
@@ -103,6 +135,12 @@ public final class FusionExecutor {
             InstrumentRef ref = refs.find(instrument).orElse(null);
             if (ref == null) {
                 return Result.vetoed(instrument, "not in the instrument master");
+            }
+            // ADR-0129: a spot INDEX is a market-trend/context reference, never tradable spot (its future
+            // is the tradable expression). This is the single order chokepoint, so the veto holds even
+            // with require-backtest-support=false, where the ADR-0049 OOS veto below is off.
+            if ("INDEX".equals(ref.assetClass())) {
+                return Result.vetoed(instrument, "INDEX is a market-trend reference, not tradable spot (ADR-0129)");
             }
             // ADR-0078: round in the instrument's own contract terms. A share/FX unit still rounds to a
             // whole unit; a CONTRACT keeps the quantity scale the order and fill records already carry,
@@ -130,7 +168,8 @@ public final class FusionExecutor {
             OrderType type = limit == null ? OrderType.MARKET : OrderType.LIMIT;
             var command = new NewOrder(KEY_PREFIX + instrument + ":" + UUID.randomUUID(),
                     book, instrument, side, type, absQty, limit,
-                    limit == null ? TimeInForce.GTC : TimeInForce.DAY);
+                    limit == null ? TimeInForce.GTC : TimeInForce.DAY,
+                    originReason); // ADR-0134: the trigger, stamped with the row at insert
             var order = orderService.submit(command);
             log.info("FUSION routed {} {} {} {} → {} on {} ({}) — ADR-0055 sole-origin (sim)",
                     type, side, absQty.toPlainString(), instrument, order.status(), book, order.orderId());
@@ -211,6 +250,9 @@ public final class FusionExecutor {
      * fusion is higher-stakes.) No selector wired (persistence off) → the sim-gate + guardrail still protect.
      */
     private boolean backtestSupported(String instrument) {
+        if (!requireBacktestSupport) {
+            return true; // ADR-0122 exploration mode: fail-open on the OOS veto (paper book only)
+        }
         StrategySelector s = selector.getIfAvailable();
         if (s == null) {
             return true;

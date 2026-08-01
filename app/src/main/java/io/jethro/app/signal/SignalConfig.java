@@ -37,14 +37,13 @@ public class SignalConfig {
                                     @Value("${jethro.signals.horizon-rungs:3}") int horizonRungs,
                                     @Value("${jethro.signals.flat-threshold-bps:10}") double flatThresholdBps,
                                     @Value("${jethro.signals.rolling-days:7}") int rollingDays,
-                                    @Value("${jethro.signals.cohort-limit:500}") int cohortLimit,
-                                    @Value("${jethro.signals.cohort-window-seconds:60}") int cohortWindowSeconds) {
+                                    @Value("${jethro.signals.cohort-limit:500}") int cohortLimit) {
         SignalTelemetry.MarkSource marks = instrument -> markFor(tradingCore, instrument);
         // ADR-0082: every call is graded over a geometric ladder of horizons down from the configured
         // base, so which period this desk's edge is real over is measured rather than assumed. One rung
         // reproduces the pre-ADR-0082 single-horizon behaviour exactly.
         return new SignalTelemetry(store, marks, io.jethro.app.fusion.HorizonLadder.rungs(horizonSeconds, horizonRungs),
-                flatThresholdBps, rollingDays, cohortLimit, cohortWindowSeconds,
+                flatThresholdBps, rollingDays, cohortLimit,
                 badPrintThresholds(tradingProps));
     }
 

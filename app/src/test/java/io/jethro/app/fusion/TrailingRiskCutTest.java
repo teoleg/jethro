@@ -41,7 +41,7 @@ class TrailingRiskCutTest {
 
     private static FusionPlanner.Target target(String instrument, String price, String currentQty,
                                                String deltaQty) {
-        return new FusionPlanner.Target(instrument, -17.0, 2, 1.0, new BigDecimal(price),
+        return new FusionPlanner.Target(instrument, -17.0, 2, 1.0, 1.0, new BigDecimal(price),
                 new BigDecimal("-0.500000"), new BigDecimal(currentQty), new BigDecimal(deltaQty),
                 List.of());
     }

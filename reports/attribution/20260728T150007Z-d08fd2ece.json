@@ -1,0 +1,41 @@
+{
+  "after": {
+    "at": "2026-07-28T15:00:07Z",
+    "fees": "0.042361",
+    "gross": "759.65460000",
+    "net": "85.61460000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "759.65460000",
+      "hedgePnl": "-0.91295732",
+      "netExposure": "85.61460000",
+      "realizedPnl": "-0.04236100",
+      "strategyAlpha": "1.84611000",
+      "totalFees": "0.042361",
+      "totalPnl": "0.93315268",
+      "unrealizedPnl": "0.97551368"
+    },
+    "total_pnl": "0.93315268"
+  },
+  "before": {
+    "at": "2026-07-28T14:36:10Z",
+    "gross": "759.89260000",
+    "net": "83.67260000",
+    "total_pnl": "-1.00884732"
+  },
+  "commit": "d08fd2ece8f40852cf729caea9925ee262f903fd",
+  "deadbands": {
+    "exposureFrac": "0.01",
+    "pnlUsd": "50"
+  },
+  "delta": {
+    "gross": "-0.23800000",
+    "net": "1.94200000",
+    "total_pnl": "1.94200000"
+  },
+  "note": "no material change (within noise band); risk-adj (PnL/$1 gross) improved -0.00133\u21920.00123",
+  "revert": false,
+  "scoredAt": "2026-07-28T15:00:07Z",
+  "summary": "the report's order/cost post-mortem lens is scoped to the current epoch, denominated in money via the contract multiplier, and no longer errors on a column that does not exist",
+  "verdict": "\u26a0\ufe0f MIXED"
+}

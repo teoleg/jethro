@@ -1,0 +1,52 @@
+{
+  "after": {
+    "at": "2026-07-29T16:30:05Z",
+    "fees": "16.906259",
+    "gross": "26879.31000000",
+    "net": "-2933.48000000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "26879.31000000",
+      "hedgePnl": "0.79365317",
+      "netExposure": "-2933.48000000",
+      "realizedPnl": "-37.27893057",
+      "strategyAlpha": "-75.44693386",
+      "totalFees": "16.906259",
+      "totalPnl": "-74.65328069",
+      "unrealizedPnl": "-37.37435012"
+    },
+    "total_pnl": "-74.65328069"
+  },
+  "before": {
+    "at": "2026-07-29T13:47:41Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "0.61209817"
+  },
+  "commit": "d9f8969cca151518c6c88552b14febc371abcfa6",
+  "delta": {
+    "gross": "26879.31000000",
+    "net": "-2933.48000000",
+    "total_pnl": "-75.26537886"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.000627 over 7 cycles, t=-1.83 (hurdle 1.5); gross 0\u219226,879 [grew]",
+  "revert": true,
+  "scoredAt": "2026-07-29T16:30:05Z",
+  "summary": "the loop's market-closed branch now deploys what it fast-forwards in, so a change pushed after the close reaches the JVM instead of being stranded in the repo forever (ADR-0123) \u2014 this deploy also brings the owner's exploration mode live for the first time, which will dominate the window",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": true,
+    "gross_end": 26879.31,
+    "gross_start": 0.0,
+    "mean_ret_per_cycle": -0.00062745,
+    "n": 7,
+    "scale": 17136.41,
+    "t": -1.832
+  }
+}

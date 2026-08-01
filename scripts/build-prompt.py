@@ -34,12 +34,16 @@ REPORT = os.path.join(REPO, "logs", "report.md")
 STATUS = os.path.join(REPO, "reports", "run-status.json")
 LEDGER = os.path.join(REPO, "reports", "improvement-ledger.md")
 FINDINGS = os.path.join(REPO, "docs", "loop-findings.md")
+MUSTFIX = os.path.join(REPO, "reports", "must-fix.md")
 OUT = os.path.join(REPO, "logs", "improve-prompt.rendered.md")
 
 # How much of each memory to surface. Enough to carry the recent thread; not so much it buries the
 # contract. The full artifacts are still on disk for the model to read in depth.
 LEDGER_ROWS = 5
 FINDINGS_TAIL_LINES = 40
+# The must-fix register is the carried-forward backlog Step 0 verifies against — surface its OPEN block in
+# full (capped) so the run cannot skip verification or lose track of what it committed to fix.
+MUSTFIX_HEAD_LINES = 60
 
 
 def read_text(path):
@@ -128,6 +132,18 @@ def ledger_head(n):
     return "\n".join(out)
 
 
+def mustfix_head(n):
+    """The head of the MUST-FIX register (OPEN items live near the top, most-costly first). Surfaced so
+    Step 0's verify-the-previous-run and the 'change targets #1' rule cannot be skipped. Copied verbatim —
+    no numbers invented (invariant 7)."""
+    text = read_text(MUSTFIX)
+    if not text:
+        return ""
+    lines = text.splitlines()
+    head = lines[:n]
+    return "\n".join(head).strip()
+
+
 def findings_tail(n):
     """The most recent lines of the append-only findings memory (newest content is at the END of the
     file — it is appended to)."""
@@ -146,6 +162,10 @@ def build():
         return None
 
     blocks = []
+    mf = mustfix_head(MUSTFIX_HEAD_LINES)
+    if mf:
+        blocks.append(("⛳ MUST-FIX register — STEP 0: verify each open item against THIS run's telemetry "
+                       "(✅/⚠️/🔴) BEFORE any new idea; your one change targets item #1", mf))
     sit = situation_from_report()
     blocks.append(("Live situation (from this run's report — read FIRST)", sit or
                    "_(report.md had no SITUATION block this run — read logs/report.md directly.)_"))

@@ -101,6 +101,78 @@ public final class SignalScoring {
     }
 
     /**
+     * One resolved observation plus the NAME it was called on — the fact sweep grouping needs and
+     * {@link Observation} does not carry (ADR-0120).
+     */
+    public record Call(long entryEpochMillis, String instrument, double directionalReturn) {
+    }
+
+    /**
+     * Mean directional return per emission SWEEP — the ADR-0120 cohort identity, and the reference
+     * implementation of the grouping {@code SignalTelemetryStore.resolvedCohorts} performs in SQL.
+     *
+     * <p><b>What a cohort is.</b> ADR-0077 makes one draw of the market — one pass of a source over its
+     * cross-section — the estimator's unit, because the names in a pass are correlated views of the
+     * same interval rather than independent samples. ADR-0077 identified that pass by a CLOCK GAP, on
+     * the stated assumption that a source emits its whole cross-section "in one ~200ms burst". This
+     * desk's sensors do not: they publish per name as each name's mark updates, so one pass is spread
+     * over minutes and a gap rule cuts it into several "independent" cohorts. That inflates the degrees
+     * of freedom of a gate that governs exposure — the anti-conservative direction, and precisely the
+     * √(1+(n−1)ρ̄) understatement ADR-0077 exists to prevent, readmitted through the grouping instead of
+     * through the averaging.
+     *
+     * <p><b>The identity, stated without a dial.</b> A pass is the set of calls between successive
+     * repeats: a name appears AT MOST ONCE per cohort, and cohorts are contiguous in time. Equivalently
+     * — and this is what both implementations compute — a call that is the {@code k}-th on its name
+     * belongs to cohort {@code k} at the earliest, so the cohort index is the running maximum of the
+     * per-name occurrence count. That is the coarsest partition satisfying the rule, it needs no
+     * window to be chosen, and it is immune to how fast the scheduler happens to walk the universe.
+     *
+     * <p>It also handles a name that joins late — a sensor still warming (see
+     * {@code TrendForecastLifecycle}'s cold-start) — without special-casing: its first call carries
+     * occurrence 1, which never raises the running maximum, so it simply joins the pass in progress
+     * instead of opening a spurious cohort of its own.
+     *
+     * <p>Returns one mean per sweep, in sweep order. A call with no name carries no sweep identity —
+     * placing it would fabricate either independence or merging — so it is dropped. That cannot arise
+     * from the store ({@code signal_observations.instrument} is {@code not null} and
+     * {@code SignalTelemetry.record} rejects a null name); it is defensive, and dropping is the
+     * conservative direction, since fewer independent draws widen the standard error.
+     */
+    public static List<Double> sweepCohortMeans(List<Call> calls) {
+        List<Double> out = new ArrayList<>();
+        if (calls == null || calls.isEmpty()) {
+            return out;
+        }
+        List<Call> sorted = new ArrayList<>(calls);
+        sorted.sort(Comparator.comparingLong(Call::entryEpochMillis));
+        var occurrences = new java.util.HashMap<String, Long>();
+        List<Double> sums = new ArrayList<>();
+        List<Long> counts = new ArrayList<>();
+        long cohort = 0;
+        for (Call c : sorted) {
+            if (c.instrument() == null) {
+                continue; // no name, so no place in a sweep — see the contract above
+            }
+            long occurrence = occurrences.merge(c.instrument(), 1L, Long::sum);
+            if (occurrence > cohort) {
+                // Each name's occurrence rises one at a time and the previous one already lifted the
+                // maximum to at least occurrence−1, so this opens exactly one new sweep, never a gap.
+                cohort = occurrence;
+                sums.add(0.0);
+                counts.add(0L);
+            }
+            int i = (int) cohort - 1;
+            sums.set(i, sums.get(i) + c.directionalReturn());
+            counts.set(i, counts.get(i) + 1);
+        }
+        for (int i = 0; i < sums.size(); i++) {
+            out.add(sums.get(i) / counts.get(i));
+        }
+        return out;
+    }
+
+    /**
      * One emission cohort already reduced to its sufficient statistics (ADR-0108) — the shape a store
      * returns when the grouping was done where the rows live, rather than by shipping every observation
      * to be grouped in memory.

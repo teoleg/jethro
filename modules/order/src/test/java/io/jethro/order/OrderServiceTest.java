@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -309,5 +310,69 @@ class OrderServiceTest {
 
         assertEquals(OrderStatus.REJECTED, parent.status(), "too big for the day's volume — rejected");
         assertTrue(store.fills.isEmpty(), "nothing fills when the order can't be sliced sanely");
+    }
+
+    // ---- Origination trigger: why the desk WANTED the trade (ADR-0134) ----
+
+    /** The defect this fixes: an order that reaches FILLED makes no status transition worth
+     *  explaining, so {@code reason} is null on every step and the trade was unattributable. The
+     *  origin is written with the row instead, so it is there on exactly the orders that traded. */
+    @Test
+    void aFilledOrderCarriesTheTriggerThatOriginatedItEvenThoughItHasNoStatusReason() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+
+        Order filled = service.submit(new NewOrder("idem-origin", "ALPHA", "AAPL", Side.BUY,
+                OrderType.MARKET, new BigDecimal("10"), null, "fusion entry — target increase"));
+
+        assertEquals(OrderStatus.FILLED, filled.status());
+        assertEquals("fusion entry — target increase", store.origins.get(filled.orderId()),
+                "the happy path must not lose the trigger");
+    }
+
+    /** A rejected order keeps BOTH: why the desk wanted it and why the gate refused it. The two are
+     *  different questions, which is why the origin is a separate field rather than an overload. */
+    @Test
+    void aRejectedOrderKeepsItsOriginAlongsideTheGatesRejectionReason() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        PreTradeCheck rejectAll = (book, instrument, qty) -> PreTradeCheck.Decision.reject("gross limit");
+        var gated = new OrderService(store, new SimulatedExecutor(ExecutionCostSource.FREE), prices,
+                publisher, rejectAll);
+
+        Order rejected = gated.submit(new NewOrder("idem-origin-rej", "ALPHA", "AAPL", Side.BUY,
+                OrderType.MARKET, new BigDecimal("10"), null, "ADR-0086 trailing risk cut — target flat"));
+
+        assertEquals(OrderStatus.REJECTED, rejected.status());
+        assertEquals("ADR-0086 trailing risk cut — target flat", store.origins.get(rejected.orderId()),
+                "a status reason must never overwrite the origin");
+    }
+
+    /** Slicing is an execution decision: it changes how the desk gets the risk on, not why it
+     *  wanted it — so every child slice carries the parent's trigger. */
+    @Test
+    void everyChildSliceInheritsTheParentsOriginationTrigger() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+        var executor = new SimulatedExecutor(advCosts("1000000"), new BigDecimal("0.02"));
+        var svc = new OrderService(store, executor, prices, publisher, approving(false));
+
+        svc.submit(new NewOrder("idem-slice-origin", "ALPHA", "AAPL", Side.BUY, OrderType.MARKET,
+                new BigDecimal("500"), null, "fusion entry — target increase"));
+
+        assertTrue(store.fills.size() > 1, "the ADV cap must have split this order");
+        assertTrue(store.origins.size() > 1, "each slice is its own row");
+        for (var entry : store.origins.entrySet()) {
+            assertEquals("fusion entry — target increase", entry.getValue(),
+                    "slice " + entry.getKey() + " lost the parent's trigger");
+        }
+    }
+
+    /** A caller with no trigger to state is never blocked — the origin is telemetry, not a gate. */
+    @Test
+    void anOrderWithoutAnOriginStillTrades() {
+        prices.update("AAPL", new BigDecimal("150.00"));
+
+        Order filled = service.submit(market("idem-no-origin", Side.BUY, "10"));
+
+        assertEquals(OrderStatus.FILLED, filled.status());
+        assertNull(store.origins.get(filled.orderId()));
     }
 }

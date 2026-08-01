@@ -1,20 +1,20 @@
 {
-  "commit": "c5cd7e8beeb01193d473789691a25a66814b1f1d",
-  "fees": "481.442117",
-  "gross_exposure": "0E-8",
-  "net_exposure": "0E-8",
+  "commit": "ad6c42c881be1ab86efdb5759c8d8077e31d9a2e",
+  "fees": "279.458638",
+  "gross_exposure": "65194.58500000",
+  "net_exposure": "-20406.77500000",
   "source": {
-    "feedMode": "SIM",
-    "grossExposure": "0.00000000",
-    "hedgePnl": "-3093.30503794",
-    "netExposure": "0.00000000",
-    "realizedPnl": "5654.20784226",
-    "strategyAlpha": "8747.51288020",
-    "totalFees": "481.442117",
-    "totalPnl": "5654.20784226",
-    "unrealizedPnl": "0.00000000"
+    "feedMode": "LIVE",
+    "grossExposure": "65194.58500000",
+    "hedgePnl": "160.19086234",
+    "netExposure": "-20406.77500000",
+    "realizedPnl": "152.55690252",
+    "strategyAlpha": "-26.68152517",
+    "totalFees": "279.458638",
+    "totalPnl": "133.50933717",
+    "unrealizedPnl": "-19.04756535"
   },
-  "summary": "the warm-start seed's lookback and hole tolerance are counted in the step at which the live sensor actually consumes a name \u2014 the slower of our poll cadence and that name's own median inter-print gap \u2014 so an instrument whose ordinary print interval exceeds our poll interval stops having every one of those intervals read as an outage, and can seed and warm at all (ADR-0114)",
-  "total_pnl": "5654.20784226",
-  "ts": "2026-07-27T23:14:26Z"
+  "summary": "orders record the trigger that originated them \u2014 the origination reason is threaded from the deciding call sites and stamped on the row at insert, so orders that fill are attributable (ADR-0134)",
+  "total_pnl": "133.50933717",
+  "ts": "2026-07-31T19:44:06Z"
 }

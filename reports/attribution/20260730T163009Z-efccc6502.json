@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-07-30T16:30:09Z",
+    "fees": "54.339315",
+    "gross": "33743.41500000",
+    "net": "-6390.47500000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "33743.41500000",
+      "hedgePnl": "150.21218440",
+      "netExposure": "-6390.47500000",
+      "realizedPnl": "164.83117924",
+      "strategyAlpha": "-25.50041499",
+      "totalFees": "54.339315",
+      "totalPnl": "124.71176941",
+      "unrealizedPnl": "-40.11940983"
+    },
+    "total_pnl": "124.71176941"
+  },
+  "before": {
+    "at": "2026-07-30T13:48:58Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "126.87240898"
+  },
+  "commit": "efccc650220c57f3eaab3eee5c388475619b7e36",
+  "delta": {
+    "gross": "33743.41500000",
+    "net": "-6390.47500000",
+    "total_pnl": "-2.16063957"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.000016 over 7 cycles, t=-0.03 (hurdle 1.5); gross 0\u219233,743 [grew] \u2014 \u26a0\ufe0f REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert",
+  "revert": true,
+  "revertApplied": false,
+  "scoredAt": "2026-07-30T16:30:09Z",
+  "summary": "a sensor that is still cold re-seeds from the durable price store on its own warm-up cadence until it warms, instead of getting one attempt at boot \u2014 the moment an outage, a weekend or a pre-market start has guaranteed the store's recent tail is empty \u2014 after which it was abandoned silent for the whole process, leaving every name with one effective source, every combined forecast at zero and the book flat (ADR-0131)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": true,
+    "gross_end": 33743.415,
+    "gross_start": 0.0,
+    "mean_ret_per_cycle": -1.604e-05,
+    "n": 7,
+    "scale": 19240.44,
+    "t": -0.035
+  }
+}

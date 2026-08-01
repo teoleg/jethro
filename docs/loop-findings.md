@@ -1557,3 +1557,1812 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   the HEDGE book still holds `−$3,093.31` realised against ALPHA's `+$8,382.25` — note its fees are only
   `$49.79`, so that drag is **directional, not churn**: the overlay was short ES into a rising tape doing
   its job. Judging whether it is worth its cost needs the desk forming views again first.
+
+## 2026-07-28 13:30Z — the book didn't lose money, it was replaced; and the stop distance was decaying to zero
+
+- **The finding.** `total PnL $0.00, gross $0.00` is not a drawdown and not staleness. The Alpaca feed was
+  mis-tagged `SIM` and was corrected to `LIVE` overnight (`2c5b6d2`), so invariant 8 / ADR-0029 opened a new
+  epoch and the SIM `$5,665.94` correctly does not carry across. Fresh flat live book; last fill
+  `2026-07-27 19:54:38Z`; `orders_day: 0`. No trigger to post-mortem this window and no market effect on a
+  book holding nothing — **neither** market nor change, and I said so rather than inventing an attribution.
+- **What I shipped (ADR-0116).** `StreamVolatility`, the per-name σ that ADR-0086's risk cut measures its
+  stop distance in, was fed once per 30 s cycle from a last-value mark cache, absorbing every republished
+  price as `r = ln(p/p) = 0`. σ *is* the cut distance, so at span 4 a name warmed on ±1 % steps carries a 3σ
+  trigger of 32.70 % over an hour — and twenty republished marks (ten minutes of quiet) take that to 0.198 %.
+  Every name held across a close would be stopped out on the first genuine move of the next session, at full
+  spread, then held reduce-only for a holding horizon. Gated on the ADR-0113 `PrintClock`.
+- **Rule 31: a class that documents a rule it does not enforce is a bug, and the javadoc is the tell.**
+  `StreamVolatility` already said a fabricated zero return "would bias the estimate toward *this name does
+  not move*, which is the dangerous direction for a control that decides when to cut" — and then guarded only
+  the NULL price, while the real source of fabricated zeros walked past. When a class states its own
+  invariant, check the enumeration of cases it enforces it over before trusting it.
+- **Rule 32: a decayed statistic and an absent one are opposite failures — find which one the consumer
+  treats as safe.** `sigmaPerSample` is empty when variance is exactly 0, so a *long enough* freeze underflows
+  to silence and the cut correctly stands down. The danger band is the partial decay in between — minutes to
+  ~11 h — where σ is small, positive and believed. A weekend was safe by accident; a lunch lull, a halt and a
+  thin name were not. Do not reason about the extreme case and assume the middle is milder.
+- **Rule 33: `$0.00` means read the equity curve's `feed_mode` column before calling it a loss.** The whole
+  triage turned on `firm_equity_curve` carrying a `LIVE` row at `0.00` beside SIM rows at `5,665.94`. A
+  headline that resets to zero is an epoch boundary until proven otherwise.
+- **Still open, unchanged.** `turnover_cost_by_name` has errored for a **fourteenth** consecutive cycle.
+  `/api/market/regime` reads `volRatio 4.6e21` / `ELEVATED` on a calm CHOP tape — the SAME cycle-clock defect
+  in `VolatilityRegime`, made permanent by ADR-0051's deliberate freeze against upward baseline moves; it is
+  dormant only because fusion is the sole order origin, and it is now a register row (not a third fix in one
+  cycle). The desk holds a view on 1 name of 35 while the LIVE sensors warm — that self-heals with prints and
+  is the thing to re-check next cycle, along with whether σ survives the 20:00Z close.
+- **Predicted next, so it can be checked rather than re-derived.** A still-flat book scoring MIXED. The
+  check is the reopen, not the P&L.
+
+## 2026-07-28 14:00Z — the desk reopened, traded twice, and shut itself; the seed that could never finish
+
+- **The window.** First LIVE positions of the epoch: `ALPHA AAPL SELL 1` at 13:40:44Z and `HEDGE ES BUY
+  0.001136` ten seconds behind it. AAPL is the **winner** (`+$1.28` unrealized), the ES hedge leg is
+  `-$1.44`; both names fell almost the same percentage, so a `hedge_beta 1.25` overlay (refdata, ADR-0040)
+  necessarily lost a shade more than the short made. **Market, not change** — nothing I shipped opened,
+  closed or resized either leg, and one hour of two co-moving names says nothing about the hedge ratio. PnL
+  `-$0.21` (up `+$0.42`), gross `$759.72` and falling, breaker clear. No danger state.
+- **Why it then stopped, and why that is correct.** `mayIncrease: false`. The edge gate went ACTIVE the
+  moment the first fill gave it a measured cost — before that it was open only for want of one
+  (`roundTripCostBps == null` ⇒ "gate inactive"). Now `resolved` is 0–5 against `minSample 30` and trend's
+  expectancy is negative, so it refuses to pay. It self-heals: observations accrue from published
+  forecasts, not from fills. I did not touch it.
+- **Rule 34: the desk's one free trading window is the one before its first fill.** A fresh epoch's gate is
+  open because nothing has been measured, not because something was proven. Whatever the desk puts on in
+  that window is what it holds until it earns 30 resolved observations. Read `orders_day` against
+  `edgeGate.sources[].resolved` before concluding the desk "decided" anything.
+- **What I shipped (ADR-0117).** `StreamVolatility` and `StreamCovariance` count **returns**; the ADR-0071
+  seed replays `warmupSamples()` **prices**; N prices are N−1 returns. The seed therefore landed exactly one
+  return short — every time, every name, any depth of history, since `seedPrices` caps the walk at the count
+  it is handed. Both now expose `warmupPrices()` / `warmupSnapshots()` = `warmupSamples() + 1`.
+- **Rule 35: a log line reading "n of n, and still not ready" is an off-by-one until proven otherwise.**
+  `still cold for NQ after seeding 120 of 120 stored prices` and `still cold after seeding 120 synchronised
+  snapshots` were the bug printing its own diagnosis. Every *other* cold name was history-bound (62, 71, 99
+  of 120) and looked identical in the log — the two that got everything they asked for were the tell. When
+  scanning warm-up warnings, sort by whether the supply met the demand, not by how many are cold.
+- **Rule 36: a one-sample error is only harmless while samples are cheap.** This was invisible while a
+  cycle produced a sample every 30 s. ADR-0113/0116 re-denominated both estimators in PRINTS, and the same
+  one sample became ~90 s on NQ, ~13 min on GBPUSD, ~20 min on ES — against a 30-minute process life. When
+  a change re-bases a unit, re-audit the ±1s that were rounding errors in the old unit.
+- **Still open, unchanged.** `turnover_cost_by_name` has errored for a **fifteenth** consecutive cycle
+  (`column "qty" does not exist`) — the cost/turnover lens the loop contract names as its order post-mortem
+  source has been dark since 2026-07-26; it is a report-SQL fix, not a money change, and it is now the
+  strongest candidate for a cycle where nothing better presents itself. `/api/market/regime` reads
+  `volRatio 0.65 / CALM` this run, so the `4.6e21` reading has cleared on its own — the `VolatilityRegime`
+  cycle-clock defect behind it is still register-only and still dormant.
+- **Predicted next, so it can be checked rather than re-derived.** MIXED again on a reduce-only book. The
+  check is the **WARN log at the next boot**: the σ and covariance seeds should log *warmed* rather than
+  cold, and `streamVolMeasuredNames` should rise off 1 toward `covarianceCoveredNames: 6`. If they do not,
+  the remaining cold names are genuinely history-bound and ADR-0117 is done its part.
+
+## 2026-07-28 14:30Z — the post-mortem lens was reading yesterday's epoch
+
+- **The window.** Zero orders. PnL `-$0.88` (down `-$2.07`), gross `$759.76` (up `+$1.25`) — both moves are
+  mark drift on two legs that have not changed size since 13:40:54Z. AAPL short `+$0.92`, ES hedge leg
+  `-$1.76`; the names co-moved and a beta-1.25 overlay necessarily lost a shade more than the short made.
+  **100% market, 0% change.** The header's DANGER flag (bleeding + exposure rising) was a **false positive**:
+  the desk added no risk, so cutting here would only crystallise a loss and pay the spread.
+- **Rule 37: "exposure rising" with zero orders is a mark, not a decision.** Check `orders_day.total`
+  before you believe an exposure delta. Only a delta with an order behind it is a risk decision you can
+  attack; the rest is the tape moving under a position you already hold.
+- **ADR-0117 verified as predicted.** Every risk-cut σ WARN now demands `121` and is met with less
+  (`109/121`, `86/121`, `104/121`, `73/121`) — remaining cold names are genuinely history-bound, and the
+  `n of n, and still cold` lines are gone, covariance included. Rule 35 held.
+- **What I shipped.** The cost/turnover post-mortem lens in `scripts/system-report.py`, dark for sixteen
+  cycles. Three faults, one lens: `sum(abs(qty))` on a table whose column is `quantity` (the error row);
+  share count published under a header saying *turnover cost* (now `quantity × price × contract_multiplier`,
+  the multiplier joined from `instrument` refdata, plus `fee_bps`); and `recent_orders` **hardcoded to
+  `feed_mode='SIM'`**. All three are now scoped to the mode of the most recent row.
+- **Rule 38: a hardcoded `feed_mode` in a diagnostic is a time bomb that goes off at the epoch boundary.**
+  It fails silently and in the worst direction — the lens kept returning 60 confident rows of the *previous*
+  sim epoch while the two orders that built the live book were invisible in it. When a report filters on
+  mode, derive the mode from the data (`order by created_at desc limit 1`), never spell it out. Same rule
+  for any aggregate: `fills_by_day` was pooling 2,770 sim fills with 2 live ones on one date row —
+  invariant 8 applies to the *report*, not only to the platform.
+- **Why not a money change.** The desk is reduce-only and correctly so: on LIVE data trend@225s is `118`
+  resolved at `-1.11` avg bps and reversion@225s is `58` at `-0.60` — negative expectancy *before* cost.
+  Forcing the edge gate open is the one move here that reliably loses money.
+- **Predicted next, so it can be checked rather than re-derived.** MIXED (report-only change; the scorer
+  reads live endpoints and cannot see it). The check is that `turnover_cost_by_name` and `recent_orders` in
+  `logs/report.md` show **LIVE** rows — at which point per-name cost becomes a loop input for the first time.
+
+## 2026-07-28 15:00Z — the desk held a short its own model wanted long, and could not close it
+
+- **The window.** Zero orders again. PnL `$0.87` (up `+$2.04`), gross `$759.71` (down `-$0.34`) — mark
+  drift on the same two legs, unchanged since 13:40:54Z. **100% market, 0% change.** Rule 37 applied
+  cleanly: `orders_day.total: 2` means no exposure delta here is a decision.
+- **Last cycle's prediction verified.** `turnover_cost_by_name` and `recent_orders` now carry LIVE rows.
+  Per-name cost is a loop input for the first time, exactly as forecast.
+- **What I found.** `/api/fusion/targets`: AAPL `targetQty +6.031064`, `currentQty -1.0`, `deltaQty 0`.
+  The desk was SHORT a name its own combined forecast wanted LONG, forbidden by the shut edge gate to
+  rebuild it, and frozen out of closing it — then hedging that unwanted short with ES, so it paid gross
+  exposure on BOTH legs for a position no control wanted.
+- **Rule 39: `deltaQty: 0` is ambiguous, and one of its meanings is a trap.** It reads identically whether
+  a position is inside its buffer by design or stuck in it forever. When intent (`aim`) and holding are on
+  opposite sides and the delta is zero, the desk is not winding down — it is frozen. Check the *aim*
+  against the *holding*, not just the delta, before believing a book is being managed.
+- **Rule 40: a no-trade band must be scaled by a position the desk is PERMITTED to hold.** ADR-0094 sizes
+  the band from the target's implied average position; under a reduce-only gate that target is
+  unreachable, so the band was a no-trade region derived from a position the gate forbids. Any wrong-side
+  holding smaller than it never traded. Whenever a control's threshold is scaled by a quantity another
+  control has vetoed, expect exactly this class of freeze.
+- **What I shipped (ADR-0118).** A flat aim in a gate-shut name is an EXIT, worked in full. Conjunctive on
+  purpose: reduce-only alone must not liquidate a book merely on hold, and a flat aim alone is ADR-0090's
+  churn case — which needs the ability to REBUILD, and a shut gate removes it. A test pins that an OPEN
+  gate is byte-identical. Band 13.813752 vs gap 1.000000 asserted as exact decimals.
+- **Honest cost, recorded so it is not forgotten.** The exit crystallises the short's unrealised PnL, and
+  on a wrong-side position that is most likely a loss. Accepted: carrying $760 of gross across two legs to
+  earn mark noise is worse risk-adjusted PnL than being flat.
+- **Predicted next, so it can be checked rather than re-derived.** The desk buys back 1 AAPL, goes flat,
+  and the ES hedge unwinds behind it — gross exposure falls on both legs toward zero, PnL moves only by
+  the round trip. Likely scored ⚠️ MIXED with "risk-adj n/a (zero gross)". The check is
+  `recent_orders`: a LIVE `ALPHA / AAPL / BUY 1` followed by a `HEDGE / ES / SELL`. If AAPL is still short
+  1 with `deltaQty: 0` next cycle, the branch did not fire and the diagnosis is wrong.
+
+## 2026-07-28 15:30Z — the desk's only position was the one name its sensors disagreed about
+
+- **The window.** Zero orders again; `orders_day.total: 2`, both from 13:40:54Z. PnL `$-0.05`
+  (up `+$1.32`), gross `$763.08` (up `+$1.12`) — mark drift on two unchanged legs. **100% market, 0%
+  change.** Not bleeding, but underwater and off the growth target.
+- **Last cycle's prediction FAILED, and the failure was informative.** I predicted ADR-0118 would buy
+  back 1 AAPL and go flat. It did not fire — and correctly so: AAPL's aim had flipped from `+6.031064`
+  LONG to `−14.915227` SHORT in one thirty-minute cycle, so the aim was no longer wrong-side. The branch
+  is sound; its *input* was unstable.
+- **Rule 41: when an aim flips sign between cycles, do not fix the control that reads the aim — go look
+  at what the aim is made of.** Two cycles were spent on the machinery downstream of a number whose sign
+  was noise.
+- **What I found.** AAPL's combined forecast is the residual of two sensors fighting: trend `+11.222357`
+  against reversion `−10.408273`, netting `−1.522972`. Every other name in the cross-section had its
+  sources pointing the same way. The desk sized `−14.915227` shares off that residual and hedged it with
+  ES — gross exposure on both legs for a view that did not exist.
+- **Rule 42: a mean is not a conviction.** Two sources agreeing on +1.5 and two sources fighting to a net
+  +1.5 give the same mean and, until now, the same position — with nothing like the same confidence about
+  the sign. Averaging shrinks the posterior mean under conflict but nothing was widening the posterior
+  variance, so sizing off the mean alone over-sizes worst exactly where the desk knows least. Whenever
+  a control consumes a combination of estimates, ask what it does when they *disagree*, not just what it
+  does on average.
+- **Rule 43: a diversification multiplier must not be applied to a residual.** ADR-0076's DM restores
+  scale removed by averaging *correlated* forecasts. Under disagreement the averaging revealed a
+  contradiction, not a rescaling, and multiplying the survivor back up is leverage the data contradicts.
+  Note the trap in the tempting fix: `DM = 1/√(h + (1−h)ρ)` is *increasing* as ρ falls, so feeding it a
+  measured anti-correlation makes it LARGER. Breadth and confidence are different terms.
+- **Rule 44: derivable is not seen.** `agreement` was computable from the `contributions` already
+  published on `/api/fusion/targets` for every one of these cycles, and neither I nor the owner computed
+  it — which is why the AAPL diagnosis was wrong twice. A number that decides position size gets its own
+  field.
+- **What I shipped (ADR-0119).** `combined ×= |Σwᵢfᵢ| / Σwᵢ|fᵢ|` — the ADR-0113/0100 efficiency ratio
+  read across sources instead of over time. No dial, no threshold. One-way by the triangle inequality and
+  exactly `1` when the sources share a sign, so agreeing names are byte-identical. Composes with
+  ADR-0118: as sources converge on cancellation the aim goes flat and that exit branch finally becomes
+  reachable.
+- **Honest cost, recorded.** Trend and reversion are structurally opposed at different horizons, so a
+  genuine trend fighting a genuine reversion is sized down even when one was right. Correct while LIVE
+  expectancy is negative; revisit if the edge gate opens and the book is systematically under-sized.
+- **Predicted next, so it can be checked rather than re-derived.** AAPL's target falls to about an eighth
+  (`agreement 0.12321282549722257` on this cycle's readings) — still same-side and still above the 1 share
+  held, so **no order and likely ⚠️ MIXED again**. The check is `/api/fusion/targets`: an `agreement` field
+  near `1.0` on AMZN/NVDA/JNJ and far below it on AAPL, with `targetQty` an order of magnitude smaller
+  than `−14.915227`. If AAPL reads `agreement: 1.0`, the sensors stopped disagreeing and this diagnosis
+  has expired.
+
+## 2026-07-28 16:00Z — the desk went flat and profitable; the gate that keeps it flat was miscounting its own evidence
+
+- **The window.** ADR-0119 fired and composed with ADR-0118 exactly as designed: AAPL's agreement
+  collapsed its target BELOW the wrong-side holding, which made the flat-aim-under-a-shut-gate exit
+  reachable for the first time. `ALPHA / AAPL / BUY 1` at 15:50:37, `HEDGE / ES / SELL` at 15:50:41.
+  Book flat: gross `$763.54` → `$0.00`, PnL `-$0.51` → `+$0.61`, all realized. **~100% change, 0% market**
+  — a realized round trip on the two legs the change closed, seconds apart, not mark drift.
+- **Rule 45: a prediction that fails in the RIGHT direction still falsifies the model, and you must say
+  which.** I predicted "target falls to an eighth, stays above the holding, no order". The target fell
+  FURTHER than that and tripped the exit. The mechanism was right; my estimate of its magnitude was not.
+- **Rule 46: check the hypothesis against the data BEFORE building on it.** I was one edit away from
+  shipping cross-sectional demeaning of cohort returns — on the thesis that the gate's standard error is
+  dominated by the market factor the desk hedges away. One read-only query killed it: **cohorts are almost
+  all singletons**, so there is no cross-section inside a cohort to demean. Ten minutes of SQL beat a
+  well-argued but wrong ADR.
+- **What that query actually found (the real defect, ADR-0120).** ADR-0077 makes one PASS over the
+  cross-section the estimator's unit, but identifies it by a 60-second CLOCK GAP — on the assumption,
+  written into the javadoc and the dial's own comment, that a source emits its cross-section "in one
+  ~200ms burst". This desk's sensors publish per name as each mark updates, so a pass takes MINUTES:
+  live `trend`@3600s, 13:34:36 NQ → 14:02:32 JPM is ONE 28-minute pass, and the gap rule cut it and the
+  next into eleven cohorts. Every source and horizon: **≈2.2× more cohorts than passes.**
+- **Rule 47: a heuristic that stands in for a concept will eventually measure something else.** The gap
+  rule was measuring how fast the scheduler walks the universe, not how often the market was drawn. Tune
+  a sensor to publish faster and the gate's apparent evidence multiplies with zero new observations. When
+  a proxy gates money, periodically re-derive it from the thing it is proxying for.
+- **Rule 48: check which DIRECTION a measurement error runs before calling it harmless.** This one ran
+  anti-conservative — more cohorts narrows the standard error AND inflates the Student-t degrees of
+  freedom ADR-0081 was installed to get right. It was the exact √(1+(n−1)ρ̄) understatement ADR-0077
+  exists to prevent, readmitted through the grouping instead of the averaging.
+- **The fix is dial-free.** A name appears at most once per cohort ⇒ cohort index = running maximum of
+  each name's occurrence count. `cohort-window-seconds` RETIRED, not retuned. Retroactive (re-scores
+  stored history, no migration). Late joiners and lone repeaters fall out with no special case.
+- **Honest cost, recorded.** It makes the gate HARDER: `trend`@3600s goes 16 cohorts @ `-2.41` bps → 7 @
+  `-8.40` bps. The desk looks worse because it now counts each draw once. Correct, and free to do while
+  the book is flat — which is exactly when to fix a measurement, not when it is gating a live position.
+- **Predicted next, so it can be checked rather than re-derived.** The gate stays SHUT and the book stays
+  flat, so expect **no orders and likely ⚠️ MIXED with "risk-adj n/a (zero gross)"**. The check is
+  `signals_telemetry` in the next report: `cohorts` should roughly HALVE at every source/horizon (trend
+  @3600s ≈7 not 15, @900s ≈25 not 59, @225s ≈68 not 131) while `resolved` is unchanged. If `cohorts` is
+  unchanged, the SQL did not take effect; if `resolved` moved too, something other than grouping changed.
+- **The natural successor, deliberately NOT done here.** Now that a cohort really holds ~8 names from one
+  interval, the demeaning question becomes askable: is a source's expectancy skill, or the market factor
+  times its net directional tilt? The desk hedges net equity toward flat (ADR-0019), so beta is not P&L
+  it keeps. Do NOT attempt this until the next report confirms cohorts actually merged.
+- **Also seen, not fixed (one change per run).** `jethro.fusion.edge-gate.min-sample=30` is expressed in
+  OBSERVATIONS while ADR-0108 deliberately moved the estimator's sample bound to COHORTS. Both units
+  block today's readings, so it changes nothing now — but it is a unit mismatch in the gate's own
+  admission test and worth a look once evidence accumulates.
+
+## 2026-07-28T16:30Z — held under evaluation; ADR-0120 confirmed; the min-sample unit mismatch is now load-bearing
+
+- **No change: the evidence window is open.** `reports/.pending-baseline.json` exists for `9be1633`
+  (ADR-0120) at `16:17:48Z`, one heartbeat accrued against `MIN_CYCLES=6`, no ledger row. Diagnosed,
+  verified, stopped. Book flat: gross `$0.00`, net `$0.00`, VaR95 `$0.00`, breaker clear, PnL
+  `$0.61209817` unchanged on the run. Zero orders — nothing attributable to market OR to code.
+- **Rule 49: with a flat book, PnL is frozen at realized — a `+0.00` window is not stability, it is
+  absence.** No positions ⇒ no marks to drift ⇒ the number cannot move until the gate reopens. Do not
+  read a flat delta on a flat book as evidence about anything.
+- **Rule 50: state the prediction with a number so the next cycle can CHECK it, not re-derive it.**
+  Last cycle's check fired perfectly. Predicted `trend` cohorts ≈7 / ≈25 / ≈68 at 3600s / 900s / 225s;
+  live reads **7 / 27 / 71**. The decisive one: pre-ship SQL said `trend`@3600s → 7 cohorts at `-8.40`
+  bps, and the gate now publishes `cohorts: 7`, `avgReturnBps: -8.40379205357143`. A cohort-weighted
+  mean lands on a pre-computed value only if the grouping changed and nothing else did. ADR-0120 is
+  confirmed in production, and the gate is honestly harder.
+- **Rule 51: a bound you dismissed as inert can be ARMED by your own next change — re-check the
+  dismissals.** I logged `min-sample=30` last cycle as a units bug that "changes nothing now". ADR-0120
+  coarsened the cohorts and made it load-bearing. `momentum`@3600s: `resolved: 5`, `cohorts: 2`,
+  `stdErrorBps: 0.944` against `stdReturnBps: 95.96` — two cohort means that happened to land close
+  together, not precision. `tStat: 18.15` against `tHurdle: 2.0`, `pValue: 0.0175` (exactly df=1).
+  **The significance test PASSES.** The sole thing keeping the desk out is `minSample: 30` vs
+  `resolved: 5` — a bound in observations standing in for a bound in cohorts.
+- **Why that is dangerous, precisely.** `resolved` grows ~3–4× faster than `cohorts` here (trend@225s:
+  332 vs 71). So `resolved` crosses 30 while `cohorts` is still single digits — the exact regime where
+  a degenerate 2–3-cohort standard error clears a t-hurdle on noise and the gate opens on nothing.
+  It is ADR-0108's cohort-denominated sample bound defeated by the one test that never got converted.
+- **Queued next (NOT shipped — one change per run, and the window is open):** denominate the edge
+  gate's admission test in **cohorts**, the unit its standard error and Student-t degrees of freedom
+  already use. Ship only once `9be1633` has a ledger row.
+- **Deliberately still deferred:** cross-sectional demeaning of cohort returns. Its precondition —
+  cohorts genuinely merging — is now confirmed, so it is askable at last, but the units bug sits on the
+  admission test that gates exposure and outranks it.
+- **Predicted next, so it can be checked rather than re-derived.** Gate stays shut, book stays flat,
+  zero orders, PnL pinned at `$0.61209817` barring a fill. Expect the scorer to keep printing `still
+  accumulating evidence (n/6)` for several cycles and **no ledger row until ~6 heartbeats past
+  16:17:48Z**. If a row appears sooner, or PnL moves off `$0.61209817` with no order in
+  `recent_orders`, something outside the loop touched the book.
+
+## 2026-07-28T17:00Z — held (2/6); the flagged "gate is one draw from opening" reading self-destructed, which proves the units bug rather than retiring it
+
+- **No change: the evidence window is open.** `reports/.pending-baseline.json` still exists for
+  `9be1633` (ADR-0120) at `16:17:48Z`; two heartbeats accrued (`16:18:09Z`, `16:33:45Z`) against
+  `MIN_CYCLES=6`; newest attribution snapshot is still `160006Z-b2a569f32.json`. Diagnosed, verified,
+  stopped. Book flat: gross `$0.00`, net `$0.00`, VaR95 `$0.00`, breaker clear, PnL `$0.61209817`
+  unchanged. Zero orders — nothing attributable to market OR to code.
+- **Every prediction from last cycle landed.** Gate shut (`mayIncrease: false`), book flat, zero
+  orders, PnL pinned to the cent, scorer at `2/6`, no ledger row, cohorts growing as observations
+  resolve (`trend` 7 / 27 / 71 → **8 / 28 / 75**). Nothing outside the loop touched the book.
+- **Rule 52: a t-statistic built on 2 cohorts is not a finding in either direction — do not escalate
+  on one, and do not stand down when one evaporates.** Last cycle I reported `momentum`@3600s at
+  `resolved: 5`, `cohorts: 2`, `tStat: 18.151`, `pValue: 0.0175` — significance PASSING, held out only
+  by `minSample: 30`. One observation later the same row reads `resolved: 6`, `cohorts: 2`,
+  `avgReturnBps: 6.386`, `stdErrorBps: 12.154`, `tStat: 0.487`, `pValue: 0.356`. **t fell 18.15 → 0.49
+  on a single draw.** My urgency framing was wrong; the diagnosis is now *demonstrated* instead of
+  argued. A two-cohort standard error is where two means happened to land, and it crosses the hurdle
+  freely in both directions. It landed harmlessly this time; nothing in the gate makes that general.
+- **Rule 53: check whether a latent unit bug is about to become live, and date it.** `resolved`/`cohorts`
+  runs ~3.4× on every row (`trend`@3600s 27/8, `reversion`@3600s 20/6, `trend`@225s 386/75), so
+  `resolved` crosses `minSample: 30` while `cohorts` is still ~9. `trend`@3600s is at `resolved: 27`
+  after ~4h of LIVE session — admission on single-digit cohorts is a cycle or two away, not hypothetical.
+- **Queued next (still NOT shipped — one change per run):** denominate the edge gate's admission test
+  in **cohorts**, the unit its standard error and Student-t df already use (ADR-0108's bound, defeated
+  by the one test never converted). Ship only once `9be1633` has a ledger row.
+- **Edge mission re-checked, still honestly negative.** All four sources fail the confidence demand:
+  `reversion` `p=0.243`, `momentum` `p=0.356`, `social` `p=0.468`, `trend` `p=0.829`, against a
+  `0.628` bps round trip. None is close. The binding constraint is sample — 27 resolved 3600s
+  observations in this LIVE epoch, and invariant 8 forbids borrowing SIM history. A fifth signal into a
+  measurement that cannot separate four from zero would grow the INCONCLUSIVE wall, not escape it.
+- **Predicted next, so it can be checked.** Gate shut, book flat, zero orders, PnL `$0.61209817`,
+  scorer `3/6`. `trend`@3600s `resolved` crosses 30 with `cohorts` 8–10 and is admitted to the t-test;
+  its `tStat` is `-1.02` so it still fails and the gate stays shut for the right reason. **If it is
+  admitted and PASSES on single-digit cohorts, the queued fix is urgent, not merely correct.**
+
+## 2026-07-28T17:30Z — held (3/6); the 2-cohort momentum row completed its walk 18.15 → 0.49 → −0.45, and `trend`@3600s is now ONE observation from the bad admission
+
+- **No change: the evidence window is open.** `score` prints `9be1633c2 still accumulating evidence
+  (3/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120) at `16:17:48Z`;
+  newest attribution snapshot is still `160006Z-b2a569f32.json`. Diagnosed, verified, stopped. Book flat:
+  gross `$0.00`, net `$0.00`, breaker clear, marks live (`markAgeMillis: 768`), PnL `$0.61209817`
+  unchanged. Zero orders — nothing attributable to market OR to code, in either direction.
+- **Rule 52 is now proven, not argued.** The same `momentum`@3600s row has read, on three consecutive
+  single observations: `cohorts: 2` `tStat: 18.151` `p=0.0175` → `cohorts: 2` `tStat: 0.487` `p=0.356` →
+  `cohorts: 3` `tStat: -0.447` `p=0.651`. It travelled from far above `tHurdle: 2.0` to plainly negative
+  in three draws. A 2–3-cohort standard error is not precision; it is where a couple of means landed,
+  and it crosses the hurdle freely in both directions. **Never escalate on, and never stand down from, a
+  t built on single-digit cohorts.**
+- **Rule 54: locate a unit bug at its line before the sample reaches it.** `EdgeGate.clears`
+  (`app/src/main/java/io/jethro/app/fusion/EdgeGate.java:171`) rejects on `resolved < minSample` and on
+  `cohorts < 2`, then the next line computes `Significance.studentTUpperTail(t, cohorts - 1.0)`. Standard
+  error and df are in **cohorts**; the admission bound alone is in **observations**. `resolved`/`cohorts`
+  runs ~3.6× on every row (`trend`@3600s 29/8, `reversion`@3600s 26/7, `trend`@225s 434/79), so `resolved`
+  clears `minSample: 30` with `cohorts` still single-digit.
+- **Prediction miss worth recording:** I said `trend`@3600s would cross `resolved: 30` this cycle. It reads
+  `resolved: 29`, `cohorts: 8` — one short. Everything else landed to the cent. The 3600s horizon resolves
+  roughly one observation per cycle, so admission is genuinely next cycle, not "a cycle or two".
+- **Queued next (still NOT shipped — one change per run):** denominate the edge gate's admission test in
+  **cohorts**, the unit its standard error and Student-t df already use (ADR-0108's bound, defeated by the
+  one test never converted). Ship only once `9be1633` has a ledger row.
+- **Edge mission re-checked, still honestly negative.** All four sources fail at the demanded confidence
+  against a `0.6278` bps round trip: `reversion` `p=0.327`, `social` `p=0.580`, `momentum` `p=0.651`,
+  `trend` `p=0.818`. The two with the most sample (`trend` 29, `reversion` 26) are the two with negative
+  net edge. Binding constraint is sample, and invariant 8 forbids borrowing SIM history. A fifth signal
+  would grow the INCONCLUSIVE wall, not escape it.
+- **Predicted next, so it can be checked.** Gate shut, book flat, zero orders, PnL `$0.61209817`, scorer
+  `4/6`, no ledger row, regime `CHOP`/`CALM`. `trend`@3600s crosses `resolved: 30` at `cohorts` 8–9 and is
+  admitted to the t-test; at `tStat -0.97` it fails and the gate holds for the right reason. **If any
+  source is admitted and PASSES on single-digit cohorts before `9be1633` scores, the queued fix is what
+  stands between the desk and exposure taken on two data points.**
+
+## 2026-07-28T18:00Z — held (4/6); the predicted bad admission ARRIVED — `trend`@3600s judged on 35 observations that are 9 sweeps
+
+- **No change: the evidence window is open.** `score` prints `9be1633c2 still accumulating evidence
+  (4/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120) at `16:17:48Z`.
+  Diagnosed, verified, stopped. Book flat: gross `$0.00`, net `$0.00`, both position rows at `quantity: 0`,
+  VaR `0.00` (`note: "no positions"`), breaker clear, feed live (`lastUpdateAgeMillis: 848`), PnL
+  `$0.61209817` unchanged for a third consecutive run. `orders_day` `total: 7`, newest `15:50:41Z` — zero
+  orders this window, so the PnL move is `+0.00` from market AND `+0.00` from code. Attribution is exact,
+  not estimated, this cycle.
+- **Prediction landed.** I said `trend`@3600s crosses `resolved: 30` at `cohorts` 8–9, is admitted, and
+  fails near `tStat -0.97`. It reads `resolved: 35`, `cohorts: 9`, `tStat: -0.9491041554975994`,
+  `pValue: 0.8148231827460571`, `passes: false`. Gate shut for the right reason.
+- **Rule 54 is now observed, not predicted.** A source was admitted to the significance test on 35
+  observations that are only 9 independent sweeps, then judged on 8 df. It failed ONLY because
+  `avgReturnBps: -6.333250868827161` is negative — the sample size was never the thing that stopped it.
+  `EdgeGate.clears` (`app/src/main/java/io/jethro/app/fusion/EdgeGate.java:171`) rejects on
+  `resolved < minSample` (observations) and then hands `cohorts - 1.0` to `studentTUpperTail`. ADR-0108
+  moved the evidence *budget* to cohorts and explicitly left `min-sample` in rows; that sentence is the bug.
+- **Rule 55: a gate that only holds because the sign came out wrong is not holding.** Do not read "gate
+  shut, no exposure" as evidence the gate is sound. Check WHICH clause rejected. If the rejecting clause is
+  the measured sign rather than the sample bound, the sample bound is untested and the next positive draw
+  is the one that spends money.
+- **Queued next (still NOT shipped — one change per run):** denominate the admission bound in cohorts.
+  Honest consequence to state when shipping: no 3600s row has `cohorts` ≥ 30 (best is `trend` at 9), so the
+  3600s rung shuts entirely until more sweeps accumulate; 225s (`trend` 81, `reversion` 68) is unaffected.
+- **Edge mission re-checked, still honestly negative.** Against `roundTripCostBps: 0.6278285714285714`:
+  `reversion` `p=0.3096`, `social` `p=0.4992`, `momentum` `p=0.6507`, `trend` `p=0.8148`. The two
+  best-sampled rows are the two with the worst net edge. `strategy_diag` reports `signals: 0`,
+  `executed: 0`, and 10 of 18 measured names carry `no positive OOS edge`.
+- **Predicted next, so it can be checked.** Gate shut, book flat, zero orders, PnL `$0.61209817`, scorer
+  `5/6`, still no ledger row, regime `CHOP`/`CALM`. `trend`@3600s stays admitted with `cohorts` 9–10 and
+  keeps failing on its negative mean; `reversion`@3600s (`resolved` 27, `cohorts` 7) is the row to watch —
+  it is the only positive-mean source with real sample, and it reaches `resolved: 30` on roughly
+  single-digit cohorts. **If `reversion` is admitted and PASSES on ~8 cohorts, the queued fix stops being
+  correctness housekeeping and becomes the thing standing between the desk and sized exposure.**
+
+## 2026-07-28T18:30Z — held (5/6); the queued fix failed its own test — **retracted**, and Rule 55 corrected
+
+- **No change: the evidence window is open.** `score` prints `9be1633c2 still accumulating evidence
+  (5/6 cycles)`; `reports/.pending-baseline.json` still exists for `9be1633` (ADR-0120) at `16:17:48Z`.
+  Book flat: gross `$0.00`, net `$0.00`, HEDGE `+0.95512117` / ALPHA `-0.34302300`, breaker clear, feed live
+  (`lastUpdateAgeMillis: 62`), PnL `$0.61209817` unchanged for a fourth consecutive run. Newest order is
+  `159.9` minutes old — zero orders this window, so the move is `+0.00` from market AND `+0.00` from code.
+- **Prediction landed exactly.** I named `reversion`@3600s as the row to watch and said it would cross
+  `resolved: 30` on single-digit cohorts with a positive mean. It reads `resolved: 34`, `cohorts: 8`,
+  `avgReturnBps: 7.374500649147727`, `tStat: 0.6763382074979686`, `pValue: 0.26026966244441807`,
+  `passes: false` — admitted on observations, positive-signed, and stopped by the **significance** clause.
+- **Rule 56 (supersedes the alarm in Rule 55): before "fixing" a sample bound, compute what the reference
+  distribution already demands at that df.** Re-implementing the gate's Student-t tail reproduced its
+  published p-values (`0.26027` vs `0.26026966`; `0.793545` vs `0.79354495`), so the required `tStat` at
+  α = `0.00758337731605974` (`tHurdle: 2.0`, `hypotheses: 3`) is: df 1 → `41.97`, 2 → `8.03`, 3 → `5.03`,
+  7 → `3.195`, 32 → `2.566`, 85 → `2.479`. The t-distribution already punishes small cohorts savagely — it
+  IS the textbook correction for a standard error estimated from few draws. `reversion`@3600s would need
+  ~`33` bps against the `7.37` it measures. The `resolved < minSample` unit mismatch is **cosmetic, not a
+  safety hole**.
+- **Queued change RETRACTED — do not ship it, and do not re-propose it.** A cohort-denominated
+  `min-sample: 30` would shut **9 of 12** source×horizon rows (all four at 3600s, best `cohorts: 9`; three
+  of four at 900s, only `trend` at `33` surviving; two of four at 225s) to buy protection the reference
+  distribution already provides. Rule 55 was right that "which clause rejected" matters; it was wrong to
+  infer the bound was dangerous. **A two-cycle-old alarm still has to pass a quantitative check before it
+  becomes a commit.**
+- **Edge mission — one real structure, honestly discounted.** `reversion` is the only source positive at
+  every horizon: `225s +0.533252798747244`, `900s +1.2789941648057297`, `3600s +7.374500649147727`, rising
+  with horizon while `roundTripCostBps: 0.6278285714285714` is fixed — net of cost negative at 225s,
+  positive at 900s and 3600s. That is cost amortisation over a longer hold. **But the three rows measure the
+  same signal over overlapping windows — not three independent confirmations** — and none is significant.
+  Every other source is negative-mean at its best-sampled horizon.
+- **Predicted next, so it can be checked.** `9be1633` reaches 6/6 and **scores** — expect the first ledger
+  row in six cycles, most likely `⚠️ INCONCLUSIVE` on a flat book with zero orders. Gate stays shut, PnL
+  stays `$0.61209817` absent orders. `reversion`@3600s stays admitted, `cohorts` 8–10, still failing on
+  significance. **The lever I intend to take up once scored is the horizon ladder** — whether the desk
+  should prefer the hold at which `reversion`'s expectancy clears its cost — not another admission-bound edit.
+
+## 2026-07-28T19:00Z — the pending change SCORED, so I shipped a new SIGNAL instead of another mechanic: cross-sectional residual reversion (ADR-0121)
+
+- **Window attribution is exact, not estimated.** `9be1633c2` (ADR-0120) scored `⚠️ INCONCLUSIVE`
+  (`+0.000000 risk-adj/cycle over 7 cycles, t=+0.00`), `reports/.pending-baseline.json` is gone, so the
+  evidence window is closed and a new change is allowed. Book flat: gross `$0.00`, net `$0.00`, VaR
+  `0.00` (`note: "no positions"`), breaker clear, feed live (`lastUpdateAgeMillis: 10`), PnL
+  `$0.61209817` for a fifth consecutive run. `orders_day.total: 7`, newest hours old — **zero orders**,
+  so the move is `+0.00` from market AND `+0.00` from code.
+- **Rule 57: the horizon-ladder lever is DEAD — do not take it up.** I said last cycle I would pursue
+  whether the desk should prefer the rung where `reversion`'s expectancy clears its cost. Before
+  building it I computed all three rungs' t-stats from the published cohort dispersions
+  (`stdCohortMeanBps / √cohorts`) rather than assuming: `reversion`@900s ≈ `0.27` on 29 cohorts,
+  @225s ≈ `0.25` on 77, against the gate's own `0.6344345168075892` at 3600s. **No rung is close**, and
+  the best t anywhere on the desk is `0.6564771217276463` (`social`@3600s, 5 cohorts). Switching the
+  gate's measurement rung would not open it. Second cycle running that a queued lever failed a
+  quantitative pre-check before becoming a commit — that check is now the habit, not the exception.
+- **Rule 58: when every measurement is null, the only honest lever is a NEW MEASUREMENT.** Five
+  consecutive cycles of `INCONCLUSIVE` came from tuning the combiner, the gate and the sensor mechanics
+  while the underlying expectancies stayed indistinguishable from zero. Re-weighting sources with no
+  edge cannot create edge. Spend the change on a predictor, not on the plumbing that ranks predictors.
+- **The structure I acted on, and why it is not a fishing trip.** `reversion` is the ONLY source
+  positive-signed at every rung (`0.6500729504188325` bps @225s/77 cohorts, `1.2532288851764135`
+  @900s/29, `6.940456315814394` @3600s/8); `trend` is negative on both its best-sampled rungs
+  (`-0.21794567180606306` @225s/87, `-8.299129091035356` @3600s/10). The reversal literature's reading
+  of exactly that shape is that the documented effect is **idiosyncratic** (Lehmann 1990, Lo–MacKinlay
+  1990, Khandani–Lo 2007): fading a name that is down because the whole cross-section is down is a bet
+  on the market factor — ~zero expectancy over an hour plus full turnover cost — and ADR-0019 hedges
+  that factor toward flat anyway, so it is exposure the desk does not keep, measured as if it were alpha.
+- **Shipped:** `xsreversion`, a fifth forecast source that fades `(r − peer median)/(1.4826·MAD)` where
+  `r = ln(P_last/P_first)/√span`, peers = asset class from the instrument master, admission = the name
+  printed in **both halves** of the window (dial-free). One sweep = one ADR-0120 cohort. It cannot add
+  exposure while the gate is reduce-only; the cost of being wrong is measurement time, not money.
+- **Predicted next, so it can be checked.** Scorer at `1/6`; expect no ledger row for six cycles and PnL
+  to stay `$0.61209817` absent orders. `xsreversion` should appear in `signals_telemetry` within a cycle
+  or two with `cohorts` in the low single digits at 225s and nothing yet at 3600s; the EQUITY group
+  should be the only one clearing `min-peers: 4` on this universe (18 measured / 8 tradable), so FX and
+  futures rows may stay absent — **if `xsreversion` never appears at all, the peer groups are too thin
+  and the diagnosis is `min-peers`, not the signal.** Gate stays shut. **If it measures null once it has
+  real cohorts, that is evidence this universe has no short-horizon reversal to capture, and the honest
+  next move is a different feed — not a sixth source.**
+- **Queued follow-up (NOT this change):** the gate's Bonferroni divides α by RUNGS only
+  (`hypotheses: 3`), not by sources. A fifth source makes the un-corrected source multiplicity worse, so
+  a passing `xsreversion` reading deserves more scepticism than the gate expresses.
+
+## 2026-07-28T19:30Z — held (1/6); ADR-0121 landed on every predicted clause, and single-source names turn out to be max-conviction with no stop
+
+- **No change — evidence window open.** `score`: `68ff73eb2 still accumulating evidence (1/6 cycles)`;
+  `reports/.pending-baseline.json` present for `68ff73eb2`, stamped `2026-07-28T19:17:20Z`. Book flat
+  (gross `$0.00`, net `$0.00`, VaR `note: "no positions"`), breaker clear, feed live
+  (`lastUpdateAgeMillis: 10`). PnL `$0.61209817` for a sixth consecutive run. `orders_day.total: 7`,
+  newest ~3.5 h old — **zero orders**, so the move is `+0.00` from market AND `+0.00` from code.
+- **Last cycle's prediction landed on every clause.** `xsreversion` is live and publishing:
+  `resolved: 17`, `cohorts: 2`, `open: 9` @225s; `cohorts: 0`, `open: 10` @900s and @3600s. All eight of
+  its `fusion_targets` contributions are equities; `NQ` (the only non-equity routed name) carries none.
+  So it is correctly EQUITY-scoped and the **`min-peers` failure branch is closed** — from here the
+  diagnosis is the signal itself, not the plumbing. Weight sits mid-pack at `1.0113609266093764`.
+- **Rule 59: do not read a 2-cohort row's sign, not even your own new source's.** `xsreversion`@225s
+  reads `avgReturnBps -2.857963236111111`, `hitRate 0.25` — on one degree of freedom, where the gate
+  demands `t ≈ 41.97`. This desk already watched a 2-cohort row walk from far above the hurdle to
+  negative. The temptation to grade your own change early is exactly what the 6-cycle window exists to
+  resist; the falsification standard is "null once it has REAL cohorts", and that has not happened yet.
+- **Rule 60: coverage is not conviction — the combiner rewards breadth but never discounts thinness.**
+  `ForecastCombiner.combine` (`ForecastCombiner.java:104`) forms `average × dm × agreement`; at one
+  source the average IS that source's raw reading (no cross-source shrinkage), `dm = 1.0`,
+  `agreement = 1.0`. So a name held up by ONE source with two cohorts of measurement is scaled exactly
+  like GOOG, where four sources agree. `xsreversion` is currently the sole source on **TSLA** and
+  **NFLX**, and TSLA carries the largest `|combinedForecast|` (`-19.482833721224054`, near the clamp)
+  and the largest notional target in the book.
+- **The uncomfortable overlap, and why it is the next lever.** Those two names are single-source
+  *because* their own-history sensors are cold (`trend` seeded `66 of 193` for TSLA, `34 of 193` for
+  NFLX) — and the same WARN log says `risk-cut σ sensor still cold` for both: "this name cannot be
+  stopped out until its mark history has accumulated". **The thinnest-conviction, largest-target names
+  are the ones with no working stop.** Harmless today only because `mayIncrease: false` pins every
+  `deltaQty` to 0. This is a risk-control asymmetry, not an edge question — legitimate to act on under
+  the edge-first priority — but it gets a quantitative pre-check before it becomes a commit, not before.
+- **Predicted next, so it can be checked.** Scorer at `2/6`; no ledger row for five more cycles, PnL flat
+  at `$0.61209817` absent orders. `xsreversion`@900s should resolve its first cohorts within a cycle or
+  two, 3600s later. If it measures null once it has real cohorts, the honest next move is a different
+  feed — not a sixth source.
+
+## 2026-07-29T13:30Z — the dormancy was never a signal problem: the owner's directive never reached the JVM (ADR-0123)
+
+- **Scorer cleared** (`68ff73eb2` → ⚠️ INCONCLUSIVE, 38 cycles, `$0.61209817` → `$0.61209817`, gross
+  `0` → `0`), no `.pending-baseline.json`, so a change was permitted. Book `DORMANT`: gross `$0.00` =
+  0.0% of the $1,500,000 firm cap, VaR `no positions`, breaker clear. **Zero orders** in the window
+  (7 LIVE orders ever, newest `2026-07-28 15:50:41Z`) ⇒ the move is `+$0.00` from market AND `+$0.00`
+  from code. That INCONCLUSIVE verdict is about a book that placed no trades — it is not evidence
+  about ADR-0121.
+- **Rule 61: before diagnosing a signal, prove the JVM is running the code you are reading.** The repo
+  said `jethro.fusion.edge-gate.enabled=false` (ADR-0122, owner-directed, committed 22:24Z 2026-07-28).
+  The live app said `edgeGate.mayIncrease:false` **with a populated `sources` list** — which only
+  happens when `gateSupplier != null`, i.e. the gate ENABLED. `ps` gave the process start as
+  `Tue Jul 28 15:35:00 2026`, seven hours before the commit. Ten minutes into the open session every
+  `deltaQty` was exactly `0` against non-zero targets. Two cycles of reading fusion telemetry would
+  have been wasted chasing a combiner that was never the constraint.
+- **The trigger, and why it was permanent not merely slow.** `ops/improve-loop.sh`'s ADR-0115
+  market-closed branch fetches, fast-forwards to origin — so the change lands in the tree — then
+  `exit 0`s before any deploy, having taken its `BEFORE` sha AFTER the merge. By the next open cycle
+  the commit is already an ancestor of HEAD, so `git diff BEFORE AFTER` can never see it and
+  `CODE_CHANGED` is empty forever. **A change pushed after the close was undeployable in principle.**
+  Same bug §2 of the open path fixed for itself on 2026-07-28, left standing in the closed path.
+- **Shipped:** ADR-0123 — closed branch takes `BEFORE` before the fast-forward and calls the same
+  deploy; the deploy block is now one shared `deploy_if_code_changed` used by both paths. Tests green.
+- **Rule 62: name the conflation BEFORE the window opens, not after the verdict.** This commit triggers
+  a deploy that also brings ADR-0122 live for the first time. The next scored row therefore contains
+  TWO deployments and exploration mode will dominate it. **Credit/blame belongs to ADR-0122, not to
+  this plumbing fix** — do not read that row as evidence about either alone.
+- **Predicted next, so it can be checked.** After the restart the running app should report
+  `edgeGate` absent-or-inactive on `/api/fusion/targets` (`gateSupplier=null`), and `deltaQty` should
+  go non-zero on the names clearing `min-forecast-to-route=5.0` (MSFT/AAPL/NVDA at the 13:30Z reading).
+  Gross should leave `$0.00` within a cycle or two. **If it does NOT** — if deltas stay 0 with the gate
+  demonstrably off — the next suspects are, in order: whole-share truncation in
+  `TargetPlanner.tradableQuantity` against a per-cycle delta of `a·gap` at `a = 1 − e^(−30/3600) =
+  0.0083`, and the ADR-0094 buffer measured against an aim that `aims.clear()` resets to flat every
+  time the book goes stale overnight. Both are arithmetic, both are checkable before they are commits.
+- **Deferred row 76 has FIRED** (`docs/deferred-register.md`): a ledger verdict was found to describe
+  undeployed code. ADR-0123 makes stranding rarer; teaching `scripts/score-change.py` to refuse to
+  score a commit it cannot prove was deployed is what makes the verdicts honest, and is now the
+  higher-priority half.
+
+## 2026-07-29T14:00Z — the desk woke up; the loss sits in the one source measuring negative edge (no change — pending at 1/6)
+
+- **No change permitted.** `scripts/score-change.py score` → `d9f8969cc still accumulating evidence
+  (1/6 cycles)`, `.pending-baseline.json` present. Analysis + memory only, per contract.
+- **Last cycle's prediction landed in full.** `ps` → JVM start `13:48:18Z` (fresh, minutes after
+  `fea8dac`); `/api/fusion/targets` now returns **`edgeGate: null`** with `routing:true`, 11 instruments,
+  non-zero deltas. First LIVE order in 22 hours at `13:54:00Z`; 13 fills today vs 7 in the book's entire
+  prior history. Gross `$0.00` → **`$10,772.39`** (0.7% of the $1.5M cap), PnL `$0.61209817` → **`-$23.21`**.
+  **The dormancy was a delivery bug (ADR-0123), not a signal problem** — the diagnosis is now verified,
+  not merely argued. Per Rule 62 this window is ADR-0122's behaviour, not the plumbing fix's.
+- **Not danger.** 0.7% of the exposure cap, `-$23` against a `maxFirmDrawdown` of `$50,000`, breaker
+  clear, `riskCuts: []`. A book coming off zero into 0.7% of cap is the goal, not a reason to de-risk.
+- **Rule 63: when a fade is the *sole* source on a name, a falling price makes it buy more.**
+  **JPM +14sh, gross `$4,893`, PnL `-$18.05` — ~78% of the whole firm loss in one name**, drip-accumulated
+  1 share/30s from 13:54. Its target is `sources: 1` — `xsreversion` alone, `combinedForecast 15.02`,
+  `trend` not contributing at all. As JPM falls below its peer median the residual grows, so the forecast
+  grows, so `targetQty` grows (89.68 vs `currentQty` 12). Self-reinforcing accumulator, no trend filter,
+  no per-name stop (`riskCutStoppedNames: 0`). NQ (`+$2,301` gross, `-$5.28`) is the same shape. The two
+  *shorts* — AAPL `-$0.16`, JNJ `-$0.47` — are at entry cost, i.e. fine. The damage is specifically in
+  the names being accumulated into.
+- **Rule 64: 12 minutes of live PnL is not evidence about a signal — the multi-day telemetry is.** The
+  book was flat when the window opened, so 100% of the move is on code-opened positions with zero
+  untouched inventory; that makes it cleanly attributable and still statistically worthless. The durable
+  read, t computed by script from the gate's own cohort dispersions (`avg/(sdCohort/√cohorts)`):
+  **`reversion` +0.39 / +1.76 / +1.39** at 225/900/3600s — the only source positive at every horizon and
+  the only one clearing the 1.5 hurdle anywhere (900s: +3.17bps, 291 resolved, 88 cohorts). `trend`
+  −0.09/−0.02/−0.88, `momentum` −0.04/+0.31/−1.45, `social` −0.43/−0.49/+0.21, and **`xsreversion`
+  −0.25/−0.74/−8.32 — negative at every horizon**, yet weighted 0.52 and sole driver of JPM/NVDA/NFLX.
+  The live loss is a *consistent illustration* of what the telemetry already said, not the proof.
+- **This answers the standing "work on EDGE" question:** yes, one signal here predicts returns —
+  `reversion`. That is no longer an open question, and re-weighting is no longer combiner-tuning-without-
+  edge; there is now a measured edge to shape.
+- **Predicted next, so it can be checked:** demote/gate `xsreversion` on its own measured expectancy and
+  let `reversion` carry the size. **Check first** whether JPM's loss persisted or mean-reverted across the
+  full window — that distinguishes "the fade was early" from "the fade was wrong," and only the second
+  justifies the demotion.
+
+## 2026-07-29T14:30Z — the agreement scaler is degenerate at n=1; the loss rotated from JPM to NQ (no change — pending at 2/6)
+
+- **No change permitted.** `scripts/score-change.py score` → `d9f8969cc still accumulating evidence
+  (2/6 cycles)`, `.pending-baseline.json` present. Analysis + memory only, per contract.
+- **Last cycle's question is answered, and the answer is neither option I offered.** I asked whether JPM's
+  loss *persisted* or *mean-reverted*. It did neither: **the model reversed its own sign in 18 minutes and
+  realized the loss.** +14 sh long → `SELL 14 FILLED` 14:11:58 → SELL 2, SELL 1 → now **−3 sh, realized
+  −$11.53**, unrealized only −$1.57. `xsreversion` was *wrong*, not early. It flipped because `reversion`
+  arrived as a source on JPM (−11.54 @ w2.10 vs `xsreversion` −3.79) and overrode it — the system
+  self-corrected, but only after paying the loss plus two spread crossings.
+- **Rule 65: `agreement = |Σwᵢfᵢ| / Σwᵢ|fᵢ|` is identically 1.0 at one source — so ADR-0119's scaler gives
+  FULL conviction to the names with NO corroboration.** Confirmed in `ForecastCombiner.java:39,124-128`.
+  Live proof, and it is the next JPM queued larger: **GOOGL `sources:1`, agreement 1.0, target −147.25 sh**
+  (already ratcheting: SELL 1→2→…→8, ROUTED 14:29:34) and **TSLA `sources:1`, agreement 1.0, target
+  +329.96 sh** — both driven solely by `xsreversion`, the source measuring negative edge at every horizon.
+  n=1 is absence of evidence and must score near-minimum conviction. **This is the next change**, with an
+  ADR — it is a degenerate formula, not a parameter tweak, so it is not combiner-tuning-without-edge.
+- **Rule 66: a data gap silently converts an exit into an add.** The loss rotated off JPM onto **NQ:
+  +0.007661, gross $4,239, −$24.55 = 81% of the firm loss.** Between 14:10:28–14:13:29 the desk tried to
+  exit NQ **eight times** (`SELL 0.004134`, the whole position) and every one returned `REJECTED — no
+  market data for NQ`. When the mark returned the target had flipped to BUY and it **accumulated**
+  (`BUY 0.003527 FILLED` 14:24:02). The guardrail was right to refuse; what is missing is above the floor
+  — a refused *exit* intent must be retained and retried, not re-derived from a fresh forecast. ES marks
+  at `ageMillis` ≈ 1.05M, so futures feed gaps are routine, not a one-off.
+- **Telemetry (t by script, `avg/(sdCohort/√cohorts)`) at 225/900/3600s:** `reversion` **+0.57/+1.31/+1.36**
+  (939/294/86 resolved) — still the only source positive at every horizon. `xsreversion` **−0.09/−1.43/−1.32**
+  — negative at every horizon, yet sole driver of the book's two biggest targets. `trend` −0.33/+0.34/−1.10,
+  `momentum` −0.04/+0.31/−1.45, `social` −0.89/−1.55/+0.21.
+- **Watch, don't act yet:** AAPL is the only winner (short −4 sh, **+$9.25**) and its target is now
+  **+87.54** — the combiner is about to flip a winner, the mirror of the JPM whipsaw. If corroboration-aware
+  agreement does not settle the sign churn, holding-period discipline (targets re-planned every 30s against
+  signals measured over 225–3600s) is the cycle after.
+
+## 2026-07-29T15:00Z — the loss is 100% in round-trips; the open book is up (no change — pending at 3/6)
+
+- **No change permitted.** `scripts/score-change.py score` → `d9f8969cc still accumulating evidence
+  (3/6 cycles)`, `.pending-baseline.json` present. Analysis + memory only, per contract.
+- **Rule 67 — split the book by open vs closed before blaming anything else. Every dollar of the loss is
+  in round-trips.** Script over `/api/risk` `.positions`: names now FLAT (NQ, JPM, GOOGL, ES) total
+  **−$68.12**; names still OPEN (MSFT, JNJ, AAPL, NVDA, AMZN) total **+$7.21**; firm **−$60.91** — they
+  reconcile exactly. The desk's *views* make money; its *churn* loses it. This also settles change-vs-market
+  with no guessing: a realized round-trip loss is 100% trading logic, there is no untouched inventory to
+  blame the market for. **Cost rate:** LIVE turnover **$64,453 on a $18,238 gross book = 3.53× the book**
+  in ~70 min; firm realized = **−9.80 bps of turnover** vs fees **0.88 bps** — the loss is ~11× commission,
+  so it is the *direction* of the round trips, not execution cost. Per name: NQ −42.19bps, GOOGL −14.86bps,
+  JPM −10.46bps; while MSFT/NVDA/AMZN — built but never round-tripped — are each exactly −1.00bps, i.e.
+  pure fee. That contrast is the proof.
+- **Rule 68 — a newly-promoted name is structurally n=1, structurally full-conviction, and structurally
+  un-stoppable. All three at once.** GOOGL took the book's largest turnover ($13,991) while the log shows
+  `trend` cold (2 of 193), `reversion` cold (2 of 241) **and** `risk-cut σ` cold (2 of 121 — *"this name
+  cannot be stopped out until its mark history has accumulated"*). Only `xsreversion` was warm, because a
+  cross-sectional fade needs one snapshot rather than history — and it is the source measuring negative
+  expectancy at every horizon. Add rule 65 (`agreement ≡ 1.0` at n=1) and the least-informed name in the
+  book gets maximum size with the stop switched off. **TSLA (10 of 241) and ORCL (0–3) are queued in the
+  same state.** The fix must couple corroboration *and* a warm risk sensor: no stop ⇒ no size.
+- **Last cycle's prediction landed exactly.** I flagged that the combiner was about to flip the book's only
+  winner: AAPL short −4 sh at **+$9.25**, target +87.54. It flipped to **long +10** — realized +$8.38
+  banked, unrealized −$9.19, total **−$0.81**. A winner converted to a scratch. Third instance of the same
+  sign-reversal whipsaw after JPM and GOOGL.
+- **NQ's rule-66 failure completed and it is the worst single line.** Eight `REJECTED — no market data`
+  exits at 14:10, then a flip to BUY and an *add*, then `SELL 0.007661 FILLED` at 14:51:50 — the exit the
+  desk wanted was executed 40 minutes and one accumulation later, for **−$35.82**.
+- **Telemetry (t by script, LIVE) at 225/900/3600s:** `reversion` **+0.38/+1.26/+0.73** (984/305/88
+  resolved) — still the only source positive at every horizon. `xsreversion` **−0.35/−0.41/−1.36** —
+  negative at every horizon. `trend` −0.14/+0.08/−0.52, `momentum` −0.04/+0.31/−1.45, `social` −0.50/−1.75/−0.79.
+- **Falsifiable check before the next change ships:** META is `sources:1`, agreement 1.0, target +62.79,
+  with **13 consecutive posted-and-cancelled BUYs** ratcheting 1→8 and not one fill. If it round-trips at a
+  double-digit-bps loss, that is the fourth instance and rule 68 is confirmed. If it fills and holds
+  profitably, the mechanism is wrong and holding-period discipline against the 30s re-plan is the target
+  instead.
+
+## 2026-07-29T15:30Z — the loss is a FEED split: 82% of it is in the 15-min-delayed cohort (no change — pending at 4/6)
+
+- **No change permitted.** `scripts/score-change.py score` → `d9f8969cc still accumulating evidence
+  (4/6 cycles)`, `.pending-baseline.json` present. Analysis + memory only, per contract.
+- **Rule 69 — split the book by MARKET-DATA FEED before blaming the signal. It is the sharpest cut yet.**
+  Script over `/api/risk` `.positions`, cohorts from `instrument_symbology`: names with real-time `alpaca`
+  symbology (AAPL, AMZN, GOOG, JNJ, JPM, MSFT, NVDA) realized **+$11.13**, total **−$12.60**, **+1.81 bps**
+  of $61,481 turnover. Names priced only by the delayed `yahoo` poll (GOOGL, NQ, TSLA, ES) realized
+  **−$56.67**, total **−$56.44**, **−23.04 bps** of $24,592 turnover. They reconcile exactly to firm
+  **−$69.04**. **29% of turnover, 82% of the loss** — and it is almost all *realized*, so it is trading
+  logic, not market drift on untouched inventory.
+- **Rule 70 — the limit price IS the last mark, with no age check, so a delayed feed posts orders at a
+  price the market left 15 minutes ago.** `FusionExecutor.passiveLimitPrice` (`FusionExecutor.java:180-190`)
+  = `LastPriceCache` mid (`LastPriceCache.java:21-37`, a last-value map, no TTL). Decisive statistic —
+  distinct limit prices vs reposts over 3h: **GOOGL 19 orders → 1 price, ORCL 16 → 1, NFLX 5 → 1, META 29
+  over 52.9 min → 2**, fill rates 5/0/0/0%; versus **NVDA 11 → 11, JPM 18 → 18, MSFT 22 → 21, AAPL 13 → 11**,
+  fill rates 100/83/77/77%. Same market, same 30s cadence — that is a feed property, not a market property.
+  `distinct_px == reposts` ⇒ 56–100% fill; frozen price ⇒ 0–9%. A stale limit only trades when the market
+  comes **back** to it — i.e. when the move went against the view — so **fills are adversely selected by
+  construction**. This is why `MarkPublisher` republishing at 1 Hz makes `/api/marks` `ageMillis` read
+  fresh (~700ms) for META while its price steps once per ~15 min: staleness is invisible in the endpoint.
+- **Rule 71 — this supersedes rule 68's explanation.** The newly-promoted names are not primarily losing
+  because they are `sources:1` and un-stoppable; they are losing because
+  `UniversePromotionService.java:67-73` **deliberately writes yahoo-only symbology**, so every
+  discovery-promoted name (GOOGL, META, ORCL, NFLX, TSLA) lands in the delayed cohort **by design**.
+  Corroboration was the symptom; feed latency is the cause. Do not spend the next change on agreement.
+- **Rule 72 — the edge gate is being fed frozen non-observations, so "no source has edge" is partly a
+  data artifact.** `signal_observations` LIVE, 6h: **29.7%** of resolved rows on delayed names have
+  `exit_mark = entry_mark` **exactly** (70 of 236) vs **3.7%** on real-time names (40 of 1080). A third of
+  the evidence on those names is a frozen price booked as a flat return — it drags expectancy toward zero
+  and inflates the gate's degrees of freedom. You cannot measure a 225–3600s expectancy on a price that
+  steps every 15 min. TCA is blind too: `arrival_price` is written from the same stale mark, so measured
+  slippage on those names is ~0 **by construction** while the true adverse selection goes unmeasured.
+- **Last cycle's falsifiable check on META resolved — and it FALSIFIED the predicted mechanism.** META did
+  not round-trip at a double-digit-bps loss; it **never filled at all** (29 orders, 0 fills, 100% cancelled,
+  all at 588.51 while the mark is now 591.18 — a bid 45 bps below the market). ORCL likewise: 16 offers at
+  120.325 against a 117.69 mark, 224 bps above the market, 0 fills. Both views were *right* and captured
+  nothing. That non-fill is the evidence that produced rules 69–72.
+- **Next change (queued, needs an ADR — architecturally significant):** gate tradability on **price age** —
+  a name whose mark is older than the horizon the desk plans on goes reduce-only, and/or a discovery-promoted
+  name must earn real-time symbology before it becomes tradable; and discard zero-move resolutions on stale
+  feeds from the edge evidence. **Falsifiable check:** if the delayed cohort is made reduce-only, firm
+  realized bps should move toward the real-time cohort's +1.81 bps. If it does not, the feed thesis is wrong
+  and the target reverts to holding-period discipline against the 30s re-plan.
+
+## 2026-07-29 16:00Z — the execution scheme is one-sided by design, and fees are NOT the churn cost
+
+- **Rule 73 — reconstruct round-trips FIFO from `fills`⋈`orders` before blaming "churn". It reframes the
+  loss.** Over the LIVE epoch: **61 of 65** round-trips are **LIMIT-entry → MARKET-exit**, aggregating
+  **−11.6 bps** on **$39,363** of round-tripped notional (**−$45.53** pre-fee), median holding period
+  **27.4 min**. That is `FusionExecutor.route` doing exactly what ADR-0084 says — *"an entry POSTS, an exit
+  CROSSES"*: risk-increasing rests as a DAY LIMIT at the mid, risk-reducing goes MARKET. So the desk pays
+  the crossing cost on **100%** of exits and captures spread on **0%** of entries. Changing it needs a
+  superseding ADR, not a dial.
+- **Rule 74 — this KILLS the "round-trip *cost* is the loss" framing (which had been must-fix #1).**
+  Explicit fees are **$10.83** of the **$51.61** realized loss — **21%**, or **0.89 bps** on **$122,221** of
+  turnover. The other **79%** is adverse price movement between entry and exit. A limit resting at the mid
+  only fills when the market comes *to* it, i.e. when the move went against the view: the fills are
+  adversely selected by construction, and that dwarfs commission. Never diagnose "we trade too much and pay
+  too much cost" from turnover alone — split fee from price movement first.
+- **Rule 75 — the feed split survived re-test: the delayed cohort is still >100% of realized loss.** DELAYED
+  (ES, GOOGL, NQ, TSLA) is **27.6%** of turnover but **67.5%** of total loss (was 29% / 82%) — **2.4×** its
+  share. Its realized loss is **three round-trips**: NQ **−84.3 bps** (2 RTs) + GOOGL **−27.7 bps** (1 RT) =
+  **−$55.04**, versus the firm's entire realized loss of **−$51.61**. The rest of the book is net positive
+  on realized. Rule 72's TCA-blindness corollary re-confirmed hard: NQ's measured `avgSlippageBps` is
+  **0.033** against a realized −84.3 bps, because `arrival_price` is stamped from the same stale mark.
+- **Rule 76 — the agreement scaler is INVERTED, not just degenerate (rule from must-fix #3, sharpened).**
+  `/api/fusion/targets`: single-source names carry `agreement` **1.000** and `|combinedForecast|` **20.00**
+  (the cap) / **18.95** / **18.55**; three-source names carry **0.993 → 10.33**, **0.981 → 6.62**,
+  **0.832 → 5.80**. Uncorroborated views size **2–3× LARGER** than corroborated ones, because `agreement`
+  returns 1.0 when there is nothing to disagree with. And every single-source name is driven by
+  `xsreversion` alone — which are the discovery-promoted, hence yahoo-delayed, names (rule 71). **The two
+  defects compound: maximum conviction is handed to exactly the names priced on a 15-minute delay.**
+  Downstream symptom: TSLA target **192** shares vs current **1**, repeatedly cancelled/replanned and
+  rejected with `no market data for TSLA`.
+- **Rule 77 — resist the holding-period story; n is too small.** Bucketing the 65 round-trips by holding
+  period is NOT monotone — 20–30 min is **+7.7 bps** while 30–60 min is **−32.1 bps**. That is noise, not a
+  regime. Log it; do not spend a change on it until the round-trip count is materially above 65.
+- **Attribution this window (honest split):** no code change has been made for three cycles — the pending
+  one is at 5/6 — so **none** of the −$6.42 run-over-run move is attributable to a new change of mine. It is
+  the standing exploration-mode configuration trading against the market. Do not credit or blame a change
+  for it.
+
+## 2026-07-29 16:30Z — the feed thesis was wrong about the mechanism and right about the names
+
+- **Rule 78 — re-test a thesis against the metric that IS the mechanism, not the one that correlates with
+  it.** Two cycles were spent building the case that GOOGL/NQ/TSLA/ES lose money because they are priced
+  off a 15-minute Yahoo poll. The case rested on order-book *behaviour* (reposts collapsing onto one
+  price) and a startup log line. The direct measurement — `/api/marks` `ageMillis` and `/api/risk`
+  `markAgeMillis` — was never read. Read live this cycle it says GOOGL **1.0s**, NQ **0.9s**, TSLA
+  **0.7s**, META **0.5s**, all `source=alpaca`, and `markAgeMillis` **50** on every open position. Only
+  GBPUSD and ES are stale (**1383s**) and both hold **zero** exposure. The thesis is falsified. **Before
+  building a fix, read the metric the mechanism is literally made of.**
+- **Rule 79 — the cohort was right, the reason was wrong: those names are SINGLE-SOURCE, not delayed.**
+  META and TSLA are called by `xsreversion` alone. `UniversePromotionService` promotes names with no
+  history, so the discovery-promoted set is simultaneously the yahoo-symbology set *and* the
+  one-sensor-has-warmed set — two explanations perfectly confounded in the same names. The loss share is
+  still real (**26.7%** of turnover, **58%** of gross losses); the cause is breadth, not latency.
+- **Rule 80 — a ratio that is 1 "by construction" is not a safety property, it is a blind spot.**
+  ADR-0119 sized conviction by `|Σwᵢfᵢ|/Σwᵢ|fᵢ|` and recorded "every single-source name is byte-identical"
+  as *safe*. Live it inverted the book: META `sources=1, agreement=1.000, |forecast| 15.41` — the largest
+  conviction on the desk, **1.8×** the best-corroborated name (NVDA, 3 sources, 0.812 → 8.44) — against a
+  DM of only 1.000 vs 1.155 pushing the other way. Whenever a scalar has a degenerate case, check which
+  END of its range the degenerate case lands on. This one landed on maximum size.
+- **Rule 81 — "unestimable" is not "zero".** The repair (ADR-0124) sizes on the sources' dispersion
+  `s² = Σŵᵢ(fᵢ−μ̂)²/(1 − Σŵᵢ²)`; the denominator is the residual degrees of freedom and is **zero** at one
+  effective source. The old code implicitly read that as zero dispersion (full confidence); the honest
+  reading is no measurement, hence scalar 0. Same trap to watch for anywhere a variance, a standard error
+  or a correlation is computed from a single observation.
+- **Rule 82 — a mechanical ❌ BAD can be the right thing to keep.** `d9f8969cc` scored BAD on
+  "gross grew 0 → $26,879 with no return" — but that commit IS the wake-up from dormant, and it carries
+  the deploy fix without which no later change reaches the JVM. Its auto-revert conflicted and did not
+  land; left un-reverted deliberately. **Read what a BAD change actually did before honouring the revert
+  — and note that the scorer records `"revert": true` even when the revert failed.**
+- **Attribution this window (honest split):** no change of mine has been live for three cycles, so
+  **none** of the +$13.76 PnL or the −$11,145 gross is attributable to one. It is the standing
+  exploration configuration trading against the market.
+
+## 2026-07-29 17:00Z — no-change (ADR-0124 at 1/6): the fix landed exactly as specified
+
+- **Rule 83 — a VERIFY-BY written as a *sign or ordering* test, not a PnL test, is what let this be graded
+  in one cycle.** ADR-0124's VERIFY-BY named the exact rows: *every `sources=1` name reads `agreement
+  0.000` / `combinedForecast 0.0`, and the largest conviction belongs to a corroborated name*. Live:
+  **META `sources=1`, `agreement 0.000`, `fc 0.000`, `tgt 0.000`** (was `1.000` / `15.41` / **−78.3**
+  shares against a holding of 0); top of book is **MSFT `sources=2`, `agreement 0.958`, `fc −10.381`**.
+  ✅ VERIFIED with no appeal to money, which is still the scorer's at 1/6. Write mechanism VERIFY-BYs.
+- **Rule 84 — check deployment by process start time, not by `git log`.** The JVM started **12:45:40
+  local**, 45 s after commit `3e7817e` (12:44:55). That one line is what separates "graded the change"
+  from "graded code the app never ran" — and the loop has been burned by exactly that before.
+- **Rule 85 — a restart re-cuts the tradable set, so any post-restart "the churn stopped" claim is
+  confounded.** The second half of the VERIFY-BY (cancellation runs stop) passed — zero `fusion re-plan`
+  cancels post-restart — but `selector` went to `measured 19, tradable 9` in the same minute and ORCL, the
+  name that had been ramping, left the routed set entirely. Recorded as confounded, not as evidence.
+  Warm-up and the fix change the same observable; only the *first* check discriminates.
+- **Rule 86 — the ORCL ramp is the TSLA pathology with a different ticker, and it indicts ADR-0084, not
+  fusion.** Pre-restart: 15 consecutive `fusion re-plan` cancels, SELL size ramping **5 → 12 → 18 → … →
+  94**, **zero** fills. A DAY LIMIT resting at the mid, re-planned every 30 s, simply never transacts —
+  the entry side of one-sided execution failing *silently*, so the desk holds nothing while believing it
+  is working an order. Promoted to must-fix **#1**.
+- **Rule 87 — resist re-adopting the fee framing rule 74 already killed, even when it looks compelling.**
+  `/api/attribution` reads ALPHA `totalPnl` **−$18.66** against `feesPaid` **$21.10** — the strategy book
+  is positive before commission, which is a very tempting "cost is the whole loss" story. But rule 74
+  measured fees at only **21%** of the firm realized loss. Fee and adverse selection are both *execution*
+  costs; split them before blaming either, and note the firm figure is dominated by **NQ −$35.82** and
+  **GOOGL −$40.71**, which are frozen (byte-identical run-over-run, zero exposure, not trading).
+- **Attribution this window (honest split):** ADR-0124 touches only META and TSLA, both at `quantity 0`
+  with no new PnL. Everything that moved — JPM **−$24.88** over 41 fills ending flat, JNJ **+$42.64** over
+  44 fills ending flat, AMZN **−$14.79**, GOOG **−$8.28** — is a multi-source name the change did not
+  silence. So **none** of the −$31.33 is attributable to it. The gross fall $28,332.63 → $9,651.27 is
+  claimed for **neither** side: ADR-0124 shrinks targets book-wide *and* the restart re-cut the universe,
+  in the same minute, and these numbers cannot separate them.
+
+## 2026-07-29 17:30Z — no-change (ADR-0124 at 2/6): the fix holds, but the churn it was blamed for is back
+
+- **Rule 88 — a "the symptom stopped" check taken right after a restart must be RE-TESTED a cycle later,
+  not just flagged as confounded.** Rule 85 correctly refused to credit ADR-0124 for the post-restart
+  silence. This cycle re-tested it and the silence was indeed warm-up: **3 of 17** post-restart orders are
+  `fusion re-plan` cancels, with **AAPL** running the ORCL ramp in miniature — SELL **1 FILLED → 1 FILLED
+  → 1 CANCELLED → 2 CANCELLED → 3 ROUTED**, re-planned 30 s apart at a growing size. Flagging a confound
+  is only half the job; the other half is scheduling the re-test.
+- **Rule 89 — that re-test is what NARROWED the diagnosis, and narrowing is worth a cycle.** The
+  cancellation churn is now proven **independent of the agreement scaler**: it recurs on a three-source
+  name with the scaler working correctly. It belongs wholly to must-fix #1 (one-sided execution,
+  ADR-0084), and the AAPL ramp is the *second* named instance of a mid-resting limit that never
+  transacts. A held cycle that removes a wrong attribution is not a wasted cycle.
+- **Rule 90 — before blaming the buffer for holding tiny positions, check whether anything has EDGE.**
+  `/api/fusion/targets` shows NVDA aiming **+148.27** against **−3.0** held with `deltaQty 0.0`, JPM
+  **−69.89** against **0** with `deltaQty 0.0` — which reads as a refusal to trade. It is not:
+  `PositionBuffer` is under a reduce-only edge gate, and cohort-clustered t on `/api/signals/telemetry`
+  (LIVE 3600 s) says why — **reversion +8.783 bps on 29 cohorts, t = +1.22**, the only positive
+  expectancy in the book and short of the 1.5 hurdle; trend **−8.634**, xsreversion **−11.524**, social
+  **−4.370**, momentum **−13.257**. The gate is correct. The desk holds little because it has measured
+  little, and reversion needs **more cohorts, not more tuning**.
+- **Rule 91 — a gross rise on a hedged book is two legs, not more risk.** Gross **+$7,742.82** on the
+  window looked like risk-taking; `/api/risk` says EQUITY gross **$9,288.86** at net **−$9,288.86** (nine
+  shorts) against one ES leg of **$9,125.84** long, firm net **−$163.02**, `/api/hedging`
+  `status: ON-TARGET`. Read net alongside gross before calling a gross rise a risk event.
+- **Attribution this window (honest split):** every name that traded — JNJ (44 fills, $58,850), JPM (41,
+  $28,661), AAPL (37, $27,964), GOOG (30, $27,041), MSFT (36, $22,487) — is **three-source**, i.e. a name
+  ADR-0124 does not touch; the three names it silences (TSLA, META, GOOGL) sat at `targetQty 0` and did
+  not trade. So **none** of the **+$1.74** is attributable to the change; it is the standing exploration
+  configuration against the market. The gross rise is attributable to the **hedge**, not to the change.
+
+## 2026-07-29 18:00Z — no-change (ADR-0124 at 3/6): the re-measurement killed must-fix #1
+
+- **Rule 92 — apply the small-sample rule to the HEADLINE number, not just to the sub-buckets.** Must-fix
+  #1 carried an explicit "do not chase the holding-period buckets, n=65 and not monotone" caveat for three
+  cycles — while the **−11.6 bps** headline that ranked the item #1 rested on *the same 65 round-trips*.
+  Re-measured this cycle by FIFO reconstruction over all **276** LIVE fills: LIMIT-in → MARKET-out is
+  **n=186 at +1.68 bps**, and clustered by instrument the ALPHA book is **+1.220 mean bps, t = +0.13** —
+  statistically zero. The item was closed rather than acted on. Had the loop not re-measured, the next
+  change would have been an ADR superseding ADR-0084 to fix a cost that does not exist.
+- **Rule 93 — a re-measurement is only trustworthy if it RECONCILES to a live endpoint; check that first.**
+  The reconstruction initially understated futures by their contract multiplier (NQ 20×, ES 50×), which
+  showed up as MACRO **−$1.95** against `/api/risk` `MACRO.realizedPnl` **−35.82347655**. With the
+  multiplier applied it returns **−$35.82** — an exact match, which is what licenses quoting the equity
+  cohort figures at all. Reconcile the derived number to a number the app publishes, or don't use it.
+- **Rule 94 — "the desk executes for free and earns nothing" is the proof that the problem is EDGE.** 189
+  equity round-trips, **$106,291.89** of closed notional, **+$20.30** net. That is the standing priority
+  stated as a measurement rather than an assertion: cost is not the constraint, so no amount of execution
+  or combiner work can help. Reversion remains the only source positive at **every** horizon, with
+  expectancy scaling in horizon as a real signal does — **+0.144 bps (266 cohorts, t +0.40) at 225 s,
+  +2.300 (101, t +1.38) at 900 s, +9.066 (29, t +1.26) at 3600 s** — and needs **cohorts, not tuning**.
+- **Rule 95 — decompose the firm loss by BOOK before diagnosing anything.** The firm's realized loss is
+  **entirely** two NQ round-trips (MACRO **−$35.82**, −84.02 bps, now closed and flat) against ALPHA
+  equities at **+$20.30**. The obvious hypothesis — futures sized without their contract multiplier — was
+  **falsified** by reading `TargetPlanner` (`unitValue = price × contractMultiplier`). n=2: log, don't chase.
+- **Attribution this window (honest split):** the three names ADR-0124 silences (TSLA, META, GOOGL) all sat
+  at `targetQty 0.00` and did not trade; every name that traded is multi-source and untouched by it. So
+  **none** of the **−$31.16** is attributable to the change. It is **−$31.54** of unrealized mark on 9 open
+  equity shorts — market. The gross rise is the hedge leg (EQUITY net **−$8,734.41** against ES
+  **+$9,114.16**, firm net **$379.75**), not added risk (rule 91).
+
+## 2026-07-29 18:30Z — no-change (ADR-0124 at 4/6): the desk's weight-discipline rules have never fired
+
+- **Rule 96 — a rule guarded by `if (!anyAdmitted) return` is OFF, not conservative, once the gate that
+  sets `anyAdmitted` is disabled.** `TelemetryWeights.compute` classifies sources ADMITTED / UNPROVEN
+  (ADR-0097 → held at `weights.min`) / CONTRADICTED (ADR-0111 → stood down to 0), and both demotions sit
+  behind that guard. ADR-0122 disabled the edge gate on this paper book, so nothing ever clears admission,
+  `anyAdmitted` is permanently **false**, and **neither rule has ever fired here**. Proven live rather
+  than inferred: `/api/fusion/targets` `weights` = `reversion 2.2992, social 1.1056, momentum 0.6265,
+  xsreversion 0.5275, trend 0.4412` (Σ 5.0000) — **no source at the `weights.min=0.25` floor, none at 0**.
+  When you disable a gate, audit every rule downstream that reads its verdict.
+- **Rule 97 — check WHICH SIDE of the vote the weight actually sits on before calling the combiner tuned.**
+  Cohort-clustered t on `/api/signals/telemetry`: reversion **+0.488 / +1.611 / +1.239** at 225 / 900 /
+  3600 s is the only source positive at every rung, yet it carries **45.98%** of Σweights while the four
+  sources non-positive at the selected rung carry **54.02%**. The Φ(t) statistic down-weights losers but
+  never removes them, and removal is what the two inert rules were for.
+- **Rule 98 — expectancy that SCALES with horizon is the signature that separates a signal from noise.**
+  Reversion reads **+0.174 → +2.708 → +8.614 bps** across the three rungs, roughly in proportion to the
+  period, and its best-rung t has risen **+1.406 (102 cohorts) → +1.611 (103)** in one cycle. Noise does
+  not scale that way. This is the first cycle where the standing priority's precondition — *a measured
+  edge exists to be shaped* — is actually met, which is what licenses touching the combiner at all.
+- **Falsified this cycle, do not re-chase:** *"the edge gate measures the wrong horizon"* — `HorizonLadder`
+  (ADR-0082) already evaluates 3600 / 900 / 225 (`jethro.signals.horizon-rungs=3`) and selects by best
+  p-value; the lever exists and is exercised. And *"Bonferroni across 3 nested rungs is over-conservative"*
+  is true in the literature but changes nothing about what sizes this book while ADR-0122 holds the gate off.
+- **Attribution this window (honest split):** the four names ADR-0124 silences (TSLA, META, GOOGL, and
+  newly ORCL) all sat at `targetQty 0` and did not trade, so **none** of the **−$4.47** is the change's.
+  It is **−$71.91** of unrealized mark on four equity shorts against **−$10.42** realized — market. The
+  **−$1,634.51** gross fall is the hedge tracking down (EQUITY net **−$6,409.26** vs one ES leg at
+  **+$6,507.25**, firm net **$98.00**, `status: ON-TARGET`), not a de-risking (rule 91).
+
+## 2026-07-29 19:00Z — no-change (ADR-0124 at 5/6): the desk cannot get out of its own positions
+
+- **Rule 99 — a no-trade band scaled by the TARGET, not by the HOLDING, freezes every small position the
+  desk actually has.** `PositionBuffer.band()` = `|target| × Forecast.TARGET_ABS ÷ |forecast| ×
+  buffer-fraction`, with `TARGET_ABS = 10.0` and `buffer-fraction = 0.5`. This book's live
+  `|combinedForecast|` runs **0.045–8.338**, so the `10 ÷ |fc|` ratio inflates the band 1.2×–222×. Every
+  held name computed from `/api/fusion/targets` in exact decimal is inside its own band — AMZN band
+  **87.89** vs gap **13.00**, AAPL **118.99** vs **9.00**, MSFT **45.06** vs **8.00**, GOOG **47.49** vs
+  **5.97**, NVDA **62.90** vs **2.00** — so `bufferedDelta` returns **0.0000** every cycle, indefinitely.
+  GOOG is the clean proof it is not a stalled entry: target and holding are the **same side** (short 2.03
+  wanted, short 8.00 held) and the desk still cannot cut the difference.
+- **Rule 100 — this is the SECOND rule found gated behind the disabled edge gate; treat that as a class,
+  not a coincidence.** ADR-0118 diagnosed this exact trap and wrote the escape (`isTrappedExit` → close
+  the holding in full), but the call sits inside `if (gate != null && !gate.mayIncrease(...))` and
+  `jethro.fusion.edge-gate.enabled=false` (ADR-0122). So the fix exists in source and is unreachable in
+  the configuration the desk runs — exactly like rule 96's `anyAdmitted`. **When a gate is disabled, audit
+  every rule whose body reads that gate's verdict; the ones that matter most are the ones that get out.**
+- **Rule 101 — the frozen names ARE the loss.** `/api/risk` positions: AMZN **−$42.33**, MSFT **−$26.49**,
+  GOOG **−$22.81** unrealized against a firm unrealized of **−$83.90**. The desk is holding its losers
+  because the band will not let it out, not because a model chose to.
+- **Rule 102 — a commit is not a deployment, and an out-of-band commit can poison a pending measurement.**
+  `ecf079c` (ADR-0125, V48, ~12 new equities) was committed **18:54:55Z** by a non-loop session after the
+  **18:46:05Z** boot; Flyway tops out at **version 47** and the boot log still reads `Alpaca real-time WS
+  for 7 equities`, so it is NOT running. `.pending-baseline.json` still names **3e7817e4f (ADR-0124)**,
+  which scores next cycle — if the app restarts first, V48's universe change lands inside ADR-0124's
+  window and the scorer credits/blames the wrong commit. Discount that row in words; never hand-edit the
+  ledger or the baseline to compensate.
+- **Attribution this window (honest split):** the three names ADR-0124 silences (TSLA, META, GOOGL) do not
+  appear in `recent_orders` at all, so **none** of the **−$26.18** is the change's. The window's trading is
+  three build-then-dump round trips in a `CHOP` regime that roughly offset — JNJ **+$15.98**, NVDA
+  **+$37.40**, JPM **−$35.20** realized — and the rest is **−$83.90** of unrealized mark on the five frozen
+  shorts: market, on positions the desk is structurally unable to close. The **+$154.97** gross rise is the
+  ES hedge tracking (`ON-TARGET`, `trackingRate 0.992506`), not added risk (rule 91).
+
+## 2026-07-29 19:30Z — ADR-0126: the desk was sizing its biggest bets in names it could not stop out
+
+- **Rule 103 — a WARN nothing consumes is not a control, it is a confession.** `FusionLifecycle` has
+  logged `risk-cut σ sensor still cold for {} — this name cannot be stopped out` since ADR-0086 shipped,
+  and no code ever read it. ADR-0125's widening turned that into the desk's dominant risk: **KO
+  −101.879300** and **WMT −74.222500**, the two largest absolute targets in the whole book, were both in
+  names that had never armed a stop (3 of 121 prices seeded), against a largest *protected* target of
+  NVDA 37.621300. **When a log line states a risk control cannot protect something, something in the
+  code must branch on that same condition — grep for the predicate behind every WARN you write.**
+- **Rule 104 — verify a register item's CONSTANT before acting on it, not just its symptom.** Last
+  cycle's must-fix #1 computed the no-trade band with `jethro.fusion.buffer-fraction=0.5`; `PositionBuffer`
+  is wired from `jethro.fusion.position-buffer.fraction=0.10` (`FusionConfig:211`). Five times too wide,
+  and the whole "every position is frozen" diagnosis was an artefact of it — live `deltaQty` is
+  **1.495053 GOOG / 2.704668 AAPL / 0.506787 JPM**, nothing frozen. Two same-named dials in one
+  properties file is enough to invalidate a cycle's work; **read the wiring, not the property name.**
+- **Rule 105 — the dead-branch class now has three members; assume it, do not discover it.** ADR-0075's
+  reduce-only clamp, ADR-0118's trapped-exit escape and (nearly) this control all want to live inside
+  `if (gate != null && !gate.mayIncrease(...))`, which is unreachable while ADR-0122 holds
+  `edge-gate.enabled=false`. ADR-0126 is therefore a **conjunction that returns a verdict when
+  `gate == null`**. Bonus: for a σ-cold name, ADR-0118's escape becomes reachable with the gate off.
+  **Any new rule that vetoes risk must be written to work with every optional gate absent.**
+- **Rule 106 — a clamp applied before `PositionBuffer` is a no-op.** That step re-derives every delta
+  from the aim and discards whatever was computed upstream, which is why ADR-0064's clamp had to be
+  re-applied inside it. Put the veto where the delta is finally decided.
+- **Attribution this window (honest split):** **none** of the **+$68.30** is a loop change's — no loop
+  commit was deployed into this window; the ~19:09Z JVM restart brought ADR-0125's V48 universe live
+  (`instruments 49`) and that is what moved the book. Realised: two closed-out losers (**GOOGL −$40.71**
+  at 6.0 bps slippage, **MACRO/NQ −$35.82**) against **NVDA +$42.15 / AAPL +$24.41 / GOOG +$21.30 /
+  JNJ +$15.98** and **HEDGE +$10.50**. ALPHA is **+$8.56 net of $27.22 fees**; the firm is negative
+  only because MACRO gave back **−$35.82**. Market and mix, not code.
+- **Edge check (still no):** reversion is the only source positive at all three horizons (**+7.6173 bps
+  @3600s t≈1.1**, +2.1683 @900s t≈1.3, +0.1366 @225s) and clears neither the 1.5 hurdle nor the ~3 bps
+  round trip. **xsreversion is negative at every horizon (−3.5725 / −0.8669) on weight 0.860** and
+  **social negative at every horizon on weight 1.030** — queued as must-fix #2, not taken, because
+  re-weighting is combiner work and ranks below a hole that lets the desk open unclosable risk.
+
+## 2026-07-30 11:30Z — the platform had been dead for 4.5 hours and the heartbeat called it "market-closed"
+
+- **Rule 107 — a new enum value is a two-sided change: the language enum AND the schema constraint.**
+  ADR-0129 added `INDEX` to `AssetClass.java` and shipped `V49__world_indices.sql` inserting twelve index
+  rows, but never widened `instrument_asset_class_check` (last set by `V7__rates_and_swaps.sql:9` for
+  `SWAP`). Result: `SQLSTATE 23514` on the first insert → Flyway aborts → `PersistenceConfig.flyway` fails
+  → Spring context aborts → **the JVM never boots**. A migration that only ever ran in a test that doesn't
+  exercise the constraint is not tested. **When adding a value to an enum that is persisted, grep for a
+  CHECK on that column in the same change.**
+- **Rule 108 — a boot-blocking migration outranks the no-new-change-while-pending rule.** That rule
+  protects measurement evidence; a dead app produces none. ADR-0126 sat at zero accumulated cycles with
+  `.pending-baseline.json` still holding `5e35752dd`, and would have sat there forever. Restoring service
+  is not a strategy change — it touches no signal, dial or risk model — so it ships, the pending baseline
+  is left alone, and the scorer's own refusal to record a baseline against an unreachable app keeps it
+  honest. **Availability is prerequisite to the objective, not competing with it.**
+- **Rule 109 — edit an unapplied migration in place; never "fix it forward" with a later version.** Flyway
+  runs in version order, so a `V50` widening is unreachable while `V49` fails first. Check
+  `flyway_schema_history` before deciding: it topped out at **V48**, `count(*) where asset_class='INDEX'`
+  was **0**, and Postgres had rolled the failed transaction back with no history row to repair — so V49 was
+  never published and editing it breaks no checksum. Verify by piping the migration through psql inside
+  `BEGIN … ROLLBACK` (got `INSERT 0 12 / 0 12 / 0 24`) — green tests do not exercise Flyway against the
+  real constraint.
+- **Rule 110 — a frozen number reported as `available: true` is worse than an error.** Nine cycles
+  (07:00Z–11:00Z) logged `action: market-closed`, `available: true`, and the identical
+  `total_pnl 126.87240898 / gross 0E-8` — the last thing the app said before dying, indistinguishable from
+  a quiet closed session. `logs/report.md` *did* show `Connection refused` on every endpoint. **Trust the
+  endpoint errors over the status summary; when PnL is byte-identical across cycles, check for a pulse
+  before concluding the book is flat.** Queued as must-fix #3.
+- **Attribution this window (honest split):** **neither market nor change.** No loop commit deployed into
+  this window and no position was live to be moved; the unchanged PnL is a stale read, not a held position.
+  No credit and no blame taken for it.
+
+## 2026-07-30 13:30Z — the book was flat all session because the warm-start seed only ever fired once
+
+- **Rule 111 — a warm-start seed that runs only at boot is scheduled at the worst possible moment.**
+  ADR-0071 replays stored prices into a sensor on FIRST SIGHT of a name. First sight is boot, and a boot
+  is very often preceded by exactly the discontinuity that emptied the store's tail — an outage, a
+  weekend, a pre-market start. `SensorWarmup` then correctly refuses to walk the hole and returns almost
+  nothing (`0 of 193`, `1 of 241`, `0 of 121` live today), and the sensor is abandoned there for the whole
+  process. Counted across the log since the 07:47 ET boot: **39 `trend sensor still cold`, 0 warmed**;
+  same 39/0 for reversion; 9/1 for the σ sensor. **A recovery mechanism that gets one attempt, taken at
+  the moment of maximum failure probability, is not a recovery mechanism.** Fixed by ADR-0131 — a cold
+  sensor re-seeds on its own warm-up cadence and retires once warm.
+- **Rule 112 — when the whole book is flat, read `sources` on `/api/fusion/targets` before anything else.**
+  Every name showed `sources: 1`, `agreement: 0.0`, `combinedForecast: -0.0` and `targetQty: 0` while the
+  raw per-source forecasts underneath were large (MSFT −20.0, AMZN −12.5, AAPL +6.4). That is ADR-0124
+  behaving exactly as designed — one effective source has unestimable dispersion, so it sizes at nothing.
+  The forecasts were never the problem; the *count* was. `forecastScalars` is the fastest confirmation: a
+  source absent from that map has published nothing at all since boot.
+- **Rule 113 — look for the name that worked, it isolates the cause.** NQ was the one instrument whose σ
+  warmed and whose reversion seed returned `232 of 241`. NQ prints overnight; every equity does not. That
+  one contrast ruled out the sensors, the config and the feed, and pinned the cause on the discontinuity
+  in the stored series — in one line of log, without instrumenting anything.
+- **Rule 114 — resetting an estimator is safe exactly when it is cold, and only then.** The re-seed drops
+  per-name state whole (`forget`) before replaying, because the store already contains every print the
+  sensor consumed and replaying on top double-counts. That reset is confined to cold names on purpose: a
+  cold forecast publishes no view and an unmeasured σ arms no ADR-0086 stop, so nothing live can move
+  underneath a live position. **A warm sensor is never re-seeded.**
+- **Attribution this window (honest split):** **neither market nor change.** No loop commit deployed into
+  this window and no position was open, so the unchanged PnL is the absence of activity, not a held
+  position moving. No credit and no blame taken for it.
+
+## 2026-07-30 14:00Z — ADR-0131 held at 1/6 cycles; the forecast sensors woke, the σ sensor did not
+
+- **Rule 115 — a metric that moves in the right direction is not proof your mechanism moved it.** After
+  ADR-0131 deployed, `/api/fusion/targets` went from every name at `sources: 1` to **15 of 20 at
+  `sources: 2`**, agreement up to **0.870**, 15 non-zero `targetQty`, and a `trend` scalar present where
+  the source had published nothing. Tempting to call it verified. But every `sensor warmed` line is
+  stamped within 90 seconds of the 09:49:40 boot and every still-cold name logged exactly **one** seed
+  line — the retry cadence (193 sightings / 121 plans) had not elapsed. The sensors warmed because this
+  restart followed two hours of uptime rather than a 4h45m outage, so the store's tail was full. **Check
+  the timestamps against the cadence before crediting a retry that has not run yet.**
+- **Rule 116 — when targets are non-zero and exposure is still zero, read `deltaQty`, then read what
+  gates it.** All 20 targets showed `deltaQty: 0` against `targetQty` up to **+378.11**.
+  `PositionBuffer.mayIncrease` needs the ADR-0064 edge gate **and** ADR-0126's `stopArmed`, and
+  `stopArmed` is `sigmaPerSample(id).isPresent()`. With **1 `risk-cut σ sensor warmed`** (NQ) against
+  **19 `still cold`**, every name with a real view was vetoed from opening. Two independent locks on the
+  same door: fixing the forecast sensors could never open the book on its own.
+- **Rule 117 — a pending change that is itself the remedy for the live blocker earns its evaluation
+  window.** The σ seeds are short but close (MSFT **106 of 121**, AAPL **79 of 121**, AMZN **75 of 121**),
+  which is precisely what ADR-0131's retry exists to clear. Shipping a second change on top would both
+  destroy the scorer's evidence and pre-empt the fix already in flight. Held with no change; next run's
+  test is `risk-cut σ sensor warmed` > 1 and any non-zero `deltaQty`. If the retries fire and σ stays
+  cold, the defect is the **seed span**, not the cadence.
+- **Attribution this window (honest split):** **neither market nor change.** `orders_day.total` is 0, no
+  position was open, and PnL sat at $126.87 for the third consecutive run. ADR-0131 takes no credit for
+  the warmed sensors (a clean boot did that) and no blame for the flat book (ADR-0126's σ veto is doing
+  that, by design).
+
+## 2026-07-30 14:30Z — the book reopened, and ADR-0131's retry is unreachable code on 3 of its 4 call sites
+
+- **Rule 118 — a retry cadence measured in the sensor's own units can be longer than the process lives.**
+  `SensorReseed` counts *sightings*, one per scheduled tick of the owning lifecycle, at a cadence equal to
+  `warmupSamples()`. Multiplied by each configured interval that is **16.1 min** (trend, 193×5s),
+  **40.2 min** (reversion and xs-reversion, 241×10s) and **60.5 min** (σ, 121×30s) — against a JVM whose
+  `uptimeSeconds` was **1410 (23.5 min)** and whose previous boot was **~17 min** earlier, because the
+  loop redeploys every cycle. The counters are in-heap, so they die with the process. Three of four call
+  sites can *never* reach their retry. Trend was the only source that recovered, and its cadence is the
+  only one shorter than the process lifetime — the arithmetic predicted exactly which one would work.
+  **The warm-up length is the right seed span and the wrong retry period.** When you derive a period from
+  a sensor constant "to avoid inventing a dial", check the product against the process's actual lifetime.
+- **Rule 119 — when a log line fires on every attempt, its ABSENCE is proof, not weak evidence.**
+  `warmWhileCold` logs INFO on warm and WARN on still-cold, unconditionally. So "every boot-cold name has
+  exactly one `still cold` line" is not ambiguity about verbosity — it is positive proof that no second
+  attempt ran. Establish the logging contract *first*; then a missing line is a measurement.
+- **Rule 120 — both VERIFY-BY numbers can go green while the mechanism stays dead.** σ-warmed went 1→2
+  and `deltaQty` went non-zero (NVDA **−4.127545**, MSFT **−0.040934**) — the exact two tests written last
+  cycle. Both were false positives: the second σ line was NQ's *first* seed as a late-arriving instrument
+  (all four of its sensor lines stamped 10:19), MSFT's σ came from the boot seed at 10:07:11, and NVDA's
+  armed off the live tick stream. **Write VERIFY-BY tests that only the mechanism can pass** — the next
+  one is a *second* `still cold` line for a name that already logged one, which nothing else can produce.
+- **Rule 121 — when one lock opens, re-read which lock is now binding; the ranking moves.** With σ no
+  longer universal, `strategy_diag.edgeGated` holds **13 of 20** names out on `no positive OOS edge`
+  (GOOGL momentum **−58.18505489**, PFE **−137.76114263**, PG **−82.99627912**) against large real targets
+  (WMT **+386.53347**, BAC **+535.398702**) all sitting at `deltaQty: 0`. That is ADR-0064 working as
+  designed, not a defect — the answer stays a new signal with measured edge, never a looser gate.
+- **Attribution this window (honest split):** **desk activity, cause not separable.** Total PnL
+  **$147.57045400** (+**$20.70**), gross **$3288.885** from $0.00, on the only two names traded — MSFT
+  **+6** (totalPnl **$77.06615500**) and NVDA **−3** (**$19.29237792**), both opened this window. ADR-0131
+  takes **no credit**: MSFT's σ came from the boot seed and NVDA's from the live stream, neither being the
+  path ADR-0131 added, and that path never ran. How much of the +$20.70 is market drift on two intraday
+  positions versus selection cannot be separated from these numbers, so no cause is claimed.
+
+## 2026-07-30 15:02Z — the re-seed retry fired, disproved my own root cause, and is moving sensors backwards
+
+- **Rule 122 — a retry that re-derives from a sliding window is not a retry; it is a coin flip.**
+  ADR-0131's `warmWhileCold` calls `forecaster.forget(...)` and replays whatever the re-read returns.
+  The seed anchors on the *current* mark's provider timestamp and walks newest-first, so the window
+  **slides** with the anchor instead of accumulating. Wave 1 → wave 2 seeded counts went **down** for six
+  tradable names — **HD 164→140**, **JPM 188→161**, **MCD 171→162**, **JNJ 186→182**, **PFE 178→175**,
+  **XOM 170→169** — and up for four (**UNH 153→183**, **PG 176→183**, **CAT 150→159**, **CVX 157→162**).
+  For the six, the retry threw away ~16 min of consumed live prints *and* replayed less history than the
+  boot seed had. **Waiting moves the window; it does not fill it.** Any retry that discards accumulated
+  state must first prove the replacement is at least as large — make re-seeding monotone or don't retry.
+- **Rule 123 — check the discriminating test's OTHER branch; last cycle's root cause was half wrong.**
+  I concluded the retry cadence outlives the process on 3 of 4 call sites. For trend that is **false**:
+  16.1 min (193 × 5 s) fits inside this process (`uptimeSeconds` **1506**) and it fired — **52** still-cold
+  lines across **27 distinct names**, XOM at **10:36:25.022** then **10:52:34.778**, **16 min 9 s** apart,
+  matching the prediction to the second. It held only for reversion (**22** lines / **22** distinct, zero
+  duplicates) and xs-reversion (**0** lines). A cadence table that is arithmetically right can still be
+  the wrong *diagnosis* — confirm which call sites the arithmetic actually indicts.
+- **Rule 124 — "seeded N of N and still cold" means the count is not the predicate.** Twelve rate/swap
+  names (USD.TSY.\*, USD.SOFR.\*, USD_IRS_\*) replayed **193 of 193** in *both* waves and `warm()` is
+  still false. Their stored series does not move, so the scale estimator has nothing to absorb. Re-seeding
+  a name whose seed is already complete is unfixable-by-retry — such names must be declared **unwarmable**,
+  not retried forever. When a "not enough data" remedy is applied to a full dataset, the diagnosis is wrong.
+- **Rule 125 — a pre-registered discriminator is worth more than a confident diagnosis.** Last cycle wrote
+  *"if the retries fire and σ stays cold, the defect is the seed span, not the cadence."* That one sentence
+  converted this cycle from re-arguing a hypothesis into reading off an answer, and it redirected the fix
+  away from "shorten the cadence" — which would only have regressed Class B faster. Write the branch you
+  do *not* expect.
+- **Attribution this window (honest split):** **desk activity, cause not separable, and not ADR-0131's.**
+  Total PnL **$167.76973099** (later read **$178.02603045**), gross **$24383.04512500** from $3288.885,
+  net **$6210.52512500** — **1.5%** of the firm cap, no flags, `on_track=true` at **13.06%** vs the **1.0%**
+  target. Eight ALPHA names plus HEDGE traded. The enabling event was the **boot seed** warming **7** σ
+  sensors at **10:36:40** (NVDA, MSFT, KO, AAPL, GOOG, AMZN, NQ) against one in the prior process — the
+  ADR-0071 path, untouched by ADR-0131 — which lifted the ADR-0126 σ veto. ADR-0131's retry ran only after
+  that and every name it touched stayed cold, so it takes **no credit**. Market drift versus selection on
+  freshly-opened intraday positions cannot be separated from these numbers; no cause is claimed.
+  `/api/attribution` reads `firmTotal` **$167.04598599** = ALPHA **$57.15161336** + HEDGE **$145.71784918**
+  + MACRO **−$35.82347655** — the hedge book carries most of the firm total, and MACRO is the one loser.
+
+## 2026-07-30 15:30Z — the pre-registered test failed on a fresh JVM, and the one success on the tape names the fix
+
+- **Rule 126 — a mechanism that helps some names and hurts others is not "partly working"; it is
+  non-monotone, and that is a single fixable defect.** ADR-0131's retry reproduced on a *different*
+  process (booted 11:06:51, `uptimeSeconds` **1392**): 8 names advanced (CAT **136→180**, HD 150→156,
+  PFE 159→166, TSLA 3→8, GOOGL 0→1, EURUSD 1→27, META 1→3, NFLX 1→3), **4 regressed** — XOM **179→151**,
+  CVX **165→146**, JNJ **160→149**, JPM **150→148** — and 12 stood still. The cause is one line:
+  `warmWhileCold` calls `forecaster.forget(...)` **before** it knows what the replay yields, while
+  `SensorWarmup` reads `step × samples × LOOKBACK_MULTIPLE` back from the *current* mark's provider
+  timestamp and re-derives `step` from that same read. Both ends of the window and the stride move
+  between waves. **Never destroy accumulated state before the replacement is in hand and measured.**
+- **Rule 127 — the one success is worth more than the four failures, because it tells you what NOT to
+  revert.** PG logged `still cold ... 190 of 193` at 11:07:04 and `trend sensor warmed PG from 193 stored
+  prices (needs 193) — warm` at 11:23:14. Nothing but the ADR-0131 retry emits that line. So the answer
+  is not "revert ADR-0131" — it is a strict-improvement guard: compute `seedPrices` first (it is already
+  pure), replay only when strictly larger than this name's best. PG's 190→193 passes; the four
+  regressions are refused; and the **12** rate names sitting at `193 of 193` are already at their maximum,
+  so they retire from retrying with **no separate unwarmable rule**. One condition, both classes.
+- **Rule 128 — when PnL falls, split realized from unrealized before you look for a culprit.** Total PnL
+  **$128.22843661** is down **−$57.35** on the run, but realized *rose* to **$177.46496415** (from
+  **$159.63438842**) while unrealized swung **+$18.39164203 → −$49.23652754**. Nothing was lost in a closed
+  trade. Two names carry it — NVDA **−$27.85750000** and UNH **−$24.72000000** — together more than the
+  whole firm unrealized figure, on positions opened this window. A book that opens 19 positions will mark
+  against you on some of them; that is not a defect to chase.
+- **Attribution this window (honest split): market on fresh positions, and again NOT ADR-0131's doing.**
+  Gross **$40994.69587500** / net **$49.80412500** — 19 equities net long **$13298.56500000** against one
+  ES short **−$13248.76087500**, i.e. gross with essentially no directional net, **2.7%** of the firm cap,
+  no flags. The enabler was once more the **boot seed**: **19** σ sensors warmed at 11:07:29 against 7 last
+  cycle and 1 before that — the ADR-0071 path ADR-0131 never touches — which lifted the ADR-0126 veto.
+  ADR-0131's only attributable effects are one warmed sensor and four regressed warm-up counters, none of
+  which is a position. Market drift versus selection on 30 minutes of new marks cannot be separated here;
+  no cause is claimed. `/api/attribution` reads `firmTotal` **$120.16705892** = ALPHA **$20.35473620** +
+  HEDGE **$135.63579927** + MACRO **−$35.82347655**, `hedgeMasking` **true**.
+
+## 2026-07-30 16:00Z — third reproduction on a third JVM, and the second success proves the fix rather than the defect
+
+- **Rule 129 — when a non-monotone mechanism succeeds twice, check whether both successes share a
+  precondition; if they do, that precondition IS the fix.** ADR-0131's retry warmed **PFE 192→193** this
+  cycle (11:36:35 `still cold ... 192 of 193` → 11:52:45 `trend sensor warmed PFE from 193 stored prices
+  (needs 193) — warm`) after warming **PG 190→193** last cycle. Both are *strict improvements* in seed
+  count. Meanwhile the six regressions — **HD 171→133, PG 181→143, CAT 174→139, UNH 156→141,
+  MCD 159→145, GOOG 191→180** — are all cases where the replay returned *less* than the sensor held.
+  The strict-improvement guard is not a compromise between the wins and the losses; it is the exact
+  boundary between them. Third JVM (PID 3523413, boot 11:36:18, `uptimeSeconds` 1425), third distinct set
+  of victims, one defect. **Class A reconfirmed a third time:** the same 12 rate/swap names seeded
+  `193 of 193` in both waves and stayed cold, so they retire under the same one condition.
+- **Rule 130 — an unrealized swing on freshly-opened positions is a mark, not a loss; wait one cycle
+  before calling it anything.** Last cycle's unrealized **−$49.23652754** (NVDA −$27.85750000, UNH
+  −$24.72000000) now reads **−$6.20316872**, with realized up to **$180.21540531** and total PnL
+  **$174.01223659** (**+$25.70** on the run). I declined to chase it as a defect and it reverted on its
+  own. This is Rule 128 paying off — record the split, don't act on it.
+- **Rule 131 — gross falling while PnL rises is the objective moving, and it deserves the same
+  attribution discipline as a loss.** Gross **$32990.96481250** is down **−$18,049.05** on the run
+  (2.1% of the firm cap, **$1,467,797** headroom, no flags) while PnL rose. The driver is visible in
+  `recent_orders`: ALPHA SELLs across PG/KO/BAC/GOOG/AMZN/XOM/NEE/AAPL/NVDA plus a run of small HEDGE
+  **ES BUYs** covering the short leg — fusion re-planning, **not** ADR-0131, whose only attributable
+  effects on this tape are one warmed sensor and six regressed counters, none of which is a position.
+  **Carry forward:** net moved **+$49.80412500 → −$8,634.83518750**, so the market-neutral book of last
+  cycle is now net short. At 0.9% of the net cap that is not a danger — but note it now rather than
+  rediscover it later. `/api/attribution`: `firmTotal` **$174.01223659** = ALPHA **$59.63435276** +
+  HEDGE **$150.20136038** + MACRO **−$35.82347655**, `hedgeMasking` flipped **true → false**.
+
+## 2026-07-30 16:30Z — the window closed BAD, the auto-revert silently failed, and the memory files were the reason
+
+- **Rule 132 — a failed auto-revert is the highest-priority defect on the board, above any queued fix.**
+  The ledger row for `efccc6502` reads ❌ BAD with the note `⚠️ REVERT FAILED (git conflict): the BAD
+  commit is STILL LIVE and needs a manual revert`. The scorer attempts a revert **once**; nothing retries
+  it. So a BAD change can keep running indefinitely while the loop moves on to new ideas — exactly the
+  failure mode Step 0 exists to prevent, arriving through the automation rather than through diagnosis.
+  **Read the ledger note, not just the verdict**, every cycle.
+- **Rule 133 — never `git revert` a loop commit whole; revert its code paths and leave the memory files.**
+  The conflict was mechanical and predictable: of the 13 files in `efccc6502`, exactly three had moved
+  since — `docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md` — each touched by all
+  five hold-cycle doc commits. Every loop change carries those three, so **every** loop revert will
+  conflict on them, and a revert that "succeeded" would have erased five cycles of findings. Correct
+  procedure: `git checkout <bad>^ -- <code paths>`, `git rm` the added sources, confirm with
+  `git diff --cached <bad>^` returning empty over the code trees and a `grep` for the removed class
+  returning none, and mark the ADR **Status: Reverted** rather than deleting the decision record.
+- **Rule 134 — an ADR consequence bullet that pre-emptively excuses a defect is where to look when the
+  change fails.** ADR-0131 accepted its own non-monotonicity in advance: *"the worst case discards state
+  that was earning nothing and would have kept earning nothing."* The second clause does not follow from
+  the first — a sensor at 191 of 193 prints publishes nothing **now** but is two prints from publishing.
+  Three JVMs, three different victim sets, one defect, all predicted by that one sentence. When writing an
+  ADR, treat "accepted deliberately and not guarded against" as a claim requiring evidence, not a waiver.
+- **Rule 135 — a BAD verdict can be driven entirely by the exposure leg, and it still stands.** The note
+  reads `risk-adj return/cycle -0.000016 over 7 cycles, t=-0.03 (hurdle 1.5); gross 0→33,743 [grew]`. The
+  t-statistic is indistinguishable from zero; the verdict came from gross rising off a **dormant** book,
+  which is the outcome the loop had been trying to produce. Record the tension honestly — then revert
+  anyway. The scorer owns the verdict; arguing the book out of its own measurement is how a loop with no
+  human in it goes wrong.
+- **Rule 136 — five cycles in sensor plumbing ended at BAD; the standing priority was right.** Live now:
+  `firmTotal` **$125.43676941** = ALPHA **$11.04806156** + HEDGE **$150.21218440** + MACRO
+  **−$35.82347655**, `hedgeMasking` **true** — the hedge carries the whole firm total while
+  `strategyAlpha` reads **−$24.77541499** net of ALPHA's **$51.332169** fees against `totalFees`
+  **$54.339315** on a **$125.44** total. `strategy_diag` still reads `measured` **29**, `tradable` **16**,
+  **13** names `no positive OOS edge`. **Next actionable item is a new signal with measured edge — and
+  ALPHA's fee-to-PnL ratio — not more sensor mechanics.**
+
+## 2026-07-30 17:00Z — the hand revert verified on every leg; the next leak is notional churn, not edge
+
+- **Rule 137 — a revert is verified by the ABSENCE of a log line, which is the cheapest VERIFY-BY there
+  is; pre-register it.** The ADR-0131 WARN text appears **zero** times this run against a JVM that logged
+  it last run, and every `trend sensor warmed … from … stored prices` line sits between **12:36:32** and
+  **12:36:57** against a boot at **12:36:29** — inside the boot window, so ADR-0071 seeding still fires
+  and the reverted retry does not. Two greps closed a five-cycle defect with no judgement call in the
+  loop. When a change adds or removes a log line, make that line the VERIFY-BY.
+- **Rule 138 — closing item #1 does NOT free you to act when the pending baseline exists.** The scorer
+  printed `still accumulating evidence (1/6 cycles)` and `reports/.pending-baseline.json` was present, so
+  the correct move was to rank the next item and stop. A verified fix and a scored fix are different
+  things; only the second lifts the hold. Rank the next target in `must-fix.md` so the freed slot isn't
+  re-derived next cycle.
+- **Rule 139 — fees are bps of NOTIONAL, so fill count is a decoy; measure turnover_usd against gross
+  exposure.** `turnover_cost_by_name` reads JNJ **$75,222.83**, JPM **$67,623.49**, GOOG **$64,535.97**,
+  AAPL **$61,986.59**, MSFT **$56,713.32** at **1.00** bps, on a book whose entire `grossExposure` is
+  **$33,028.89** — five single names each churned more notional in one window than the firm has at risk.
+  MSFT's 93 fills and NVDA's 109 look like the problem and aren't; the ADR-0084 re-plan re-issuing
+  targets every ~30s is. **A cost leak beats an edge hunt: it converts to risk-adjusted PnL without
+  needing a signal to work first.**
+- **Rule 140 — ALPHA's book line turned positive while `strategyAlpha` stayed negative; read both.**
+  `/api/attribution` reads ALPHA `totalPnl` **$23.36357064** (from **$11.04806156**) but `strategyAlpha`
+  **−$12.45990591**, with `feesPaid` **$56.444977** — the book made money gross and gave more than all of
+  it back in fees. `firmTotal` **$145.76317190** is still carried by `hedgePnl` **$158.22307781** with
+  `hedgeMasking` **true**. The alpha book does not need a better forecast before it needs a cheaper one.
+- **Rule 141 — do not credit a revert for a good window.** PnL rose **$20.51** and gross fell
+  **$3,279.94**, but the reverted mechanism opened and closed nothing — it only discarded sensor state.
+  One cycle cannot separate market drift from sensors staying warm, so claim neither. That is what the
+  6-cycle window is for; say "not separable" rather than inventing a cause.
+
+## 2026-07-30 17:30Z — the revert re-verified on a second JVM; the order tape renamed the churn defect
+
+- **Rule 142 — "exactly one log line per name" is a stronger revert proof than "all lines inside the boot
+  window"; prefer the count over the timestamp.** Last cycle inferred no-second-wave from timestamps. This
+  cycle proved it directly: keyed by lifecycle+name, every cold name logs its `still cold for … after
+  seeding N of 193 stored prices` line exactly **once** (`TrendForecastLifecycle|XOM` 1, `|PG` 1, `|CAT` 1,
+  `|MCD` 1, `|UNH` 1, `|HD` 1). A count of one is unfalsifiable by clock skew or a slow boot; a timestamp
+  window is not. When the reverted mechanism emitted a per-attempt line, **count it, don't time it**.
+- **Rule 143 — check the late log lines individually before calling a boot-window verification clean.**
+  **48** of **66** `sensor warmed` lines fell in the boot window at **13:04:33**–**13:04:59**; **9** did
+  not, which on a naive read looks like the retry surviving the revert. Each was a late-arriving instrument
+  taking its *first* seed (NQ 13:08:34–13:09:00, TSLA 13:07:09, META 13:21:32, GOOGL 13:28:04). A prior
+  cycle already logged this exact false positive with NQ (Rule from the 10:19 block) — the memory paid off.
+- **Rule 144 — the ALPHA churn defect is the re-plan's *absolute targets*, not its cadence.** `recent_orders`
+  shows PG running BUY 10 FILLED → 4 FILLED → 3 CANCELLED → 4 CANCELLED → 13 FILLED → 2 ROUTED in ~2
+  minutes, and NEE 1 → 2 → 2 → 13 → 13, on a ~30s ADR-0084 re-plan. The cancels work; the problem is that
+  superseded slices **fill first**, so the book pays 1.00 bps on the full notional of every partial
+  re-approach to a target it was already walking toward. **Fixing the cadence would not fix this — netting
+  the new target against the slice already working would.** Don't tune the timer.
+- **Rule 145 — a worsening fee-to-PnL ratio is the signal, not the fee level.** ALPHA reads `totalPnl`
+  **$9.88820735** against `feesPaid` **$60.552698**, from **$23.36357064** against **$56.444977** last run:
+  fees rose slightly while the book's result fell by more than half. `firmTotal` **$130.12772736** is still
+  carried by `hedgePnl` **$156.06299656** with `hedgeMasking` **true** and `strategyAlpha`
+  **−$25.93526920**. Track the ratio run-over-run; the absolute fee number hides the deterioration.
+- **Rule 146 — reversion at the LONG horizon is the only positively-signed place left; look there for
+  item #2.** `/api/signals/telemetry` at 3600s reads `reversion` `avgReturnBps` **+7.215148481777953** on
+  **213** resolved and `xsreversion` **+2.7840649126009924** on **189** (`hitRate` **0.5592105263157895**),
+  against `trend` **−4.104976474445127** and `momentum` **−3.1019291527777773**. The edge gate still says
+  `no positive OOS edge` on **13** names and significance is its to compute — but a positive sign with a
+  large resolved count is where an OOS test is worth spending a cycle, and the short horizons are not it.
+- **Rule 147 — gross rising while PnL falls is not danger; read the headroom before reacting.** Gross rose
+  **+$19,147.75** to **$46,057.91** while PnL fell **−$12.17**, which pattern-matches to "bleeding into
+  rising risk". It isn't: that gross is **3.1%** of the cap with **$1,453,942** of headroom and **no** flag
+  set. Danger requires proximity to the cap or the breaker. De-risking here would have been the error.
+
+## 2026-07-30 18:00Z — the revert holds on a third JVM; ALPHA's churn traced to an inverted band fallback
+
+- **Rule 148 — a designed defence that is CONFIGURED ON can still be inert; check its fallback branch before
+  concluding it doesn't work.** `jethro.fusion.position-buffer.enabled=true` and ADR-0101's cost-aware
+  widening `max(fraction, min(1, 2C/mu))` are both live, yet no name is ever widened: the documented
+  fallback is *"Unmeasured … or non-positive cost or edge ⇒ the convention, unchanged"*, and
+  `strategy_diag.edgeGated` reads **13** names with **`no positive OOS edge`** on every one. mu is never
+  measured, so every name silently takes the **narrow** `fraction=0.10` branch. "Enabled" is not "binding".
+- **Rule 149 — an unmeasured or non-positive expectancy implies an UNBOUNDED no-trade band, not a default
+  one.** `2C/mu` diverges as mu → 0 and is meaningless below it: if the desk has no measured edge on a name,
+  rebalancing that name is *never* worth its cost. Falling back to the narrow convention is the
+  churn-permissive direction and is backwards. When a formula's denominator is unmeasured, ask which way the
+  economics point before picking the fallback — don't default to the tighter one.
+- **Rule 150 — measure churn as gross SHARES TRADED vs SHARES HELD, not as turnover in dollars.** Turnover
+  alone can't distinguish one-way convergence from round-tripping. `turnover_cost_by_name.qty` against
+  `fusion_targets.currentQty` settles it: JNJ traded **299** to hold **13**, AAPL **197** to hold **12**,
+  NVDA **263** over **119** fills. That is round-tripping, and it renamed the defect away from "the re-plan
+  doesn't net against the working slice" (Rule 144) — the slices net fine; the *aim* flips.
+- **Rule 151 — the aim is redrawn ~120× per e-folding time, and that ratio is the churn.** ADR-0080 derives
+  `adjustment-rate` = 1 − exp(−30/3600) = **0.0082987…** (a 3600s time constant) while the fusion loop
+  re-plans every **30s** on a book whose dominant source is `reversion` at weight **1.5417176854024859**
+  against `trend` **0.3723889694091483**. AAPL sits at `currentQty` **−12.0** against `targetQty`
+  **−153.110674** — it never arrives, and pays a round trip each time the mean-reverting aim flips. Compare
+  the re-plan cadence to the convergence time constant before blaming the executor.
+- **Rule 152 — check for a JVM restart inside the window before attributing anything.** This window contains
+  a boot at **13:34:34** local, and PnL **+$16.33** / gross **−$18,702.44** looks like a de-risking result.
+  It isn't attributable: a revert that opens and closes nothing cannot have produced it, and a restart
+  rebuilds the book from warm state. Say "not separable" (Rule 141) rather than crediting the revert.
+- **Rule 153 — MACRO is losing directionally, and the churn fix cannot touch it.** `/api/attribution` reads
+  book MACRO `totalPnl` **−$35.82347655**, all realized, on `feesPaid` of just **$0.169833** — the largest
+  single negative line inside `strategyAlpha` **−$27.20516312**, with essentially no turnover. A cost fix
+  aimed at ALPHA will leave it intact; it needs its own cycle and its own trigger-level post-mortem.
+
+## 2026-07-30 18:30Z — the revert holds on a fourth JVM; ALPHA's cost ratio is now a four-run trend
+
+- **Rule 154 — a monotone four-point sequence upgrades a diagnosis to a trend; re-rank on it.** ALPHA's
+  `/api/attribution` pair moved the wrong way on both legs four runs running — `totalPnl`/`feesPaid`
+  **$23.36357064**/**$56.444977** → **$9.88820735**/**$60.552698** → **$8.61831343**/**$66.073455** →
+  **$7.64428496**/**$73.682486**. PnL down and fees up on every step is not noise. A defect that is merely
+  *present* can wait behind a bigger one; a defect that is *compounding* cannot. Track the pair, not the fee.
+- **Rule 155 — the convergence gap and the step size sit in the SAME `fusion_targets` row; read them
+  together before blaming the executor.** KO `currentQty` **−69.0**, `targetQty` **−412.71**, `deltaQty`
+  **−1.915`; JNJ **−14.0** / **−146.26** / **−2.745**; NVDA **10.0** / **124.21** / **2.795**. The step is
+  ADR-0080's 3600s e-folding rate; the aim is redrawn every 30s under `reversion` weight
+  **1.6024876487480502** vs `trend` **0.42024570127205746**. A desk that never arrives pays a round trip
+  per flip — that one row is the whole churn story, no cross-referencing needed.
+- **Rule 156 — net exposure can swing sign hard while gross barely moves; read both, and read the headroom
+  before calling it.** Gross moved **-1385.11** to **$36625.58** while net went to **$-13291.73** — a
+  reversion-dominated aim (KO **−412.71**, NEE **−351.01**, JNJ **−146.26**) pulling the book short. At
+  **1.3%** of the $1,000,000 net cap with no flag set, that is a read, not a danger (Rule 147 again).
+- **Rule 157 — a frozen loss ranks below a compounding one.** MACRO `totalPnl` **−$35.82347655** on
+  `feesPaid` **$0.169833** is bit-identical to last run: the book is not trading, so the loss is a closed
+  directional position that is not growing. It stays item #2 behind ALPHA's churn for exactly that reason —
+  "largest single negative line" is not the same as "most costly going forward".
+- **Rule 158 — prove "no name warmed twice" by count, not by inspecting the late lines.** Keying warm lines
+  on lifecycle+name, every per-name entry is count **1**; the only count>1 is `fusion covariance warmed 19
+  of …`, the ADR-0089 rolling matrix rebuild. That is unfalsifiable by clock skew and far cheaper than
+  reading each post-boot line — which is what the previous three cycles did.
+
+## 2026-07-30 19:00Z — the revert holds on a fifth JVM; I re-tested my own four-run diagnosis and it was wrong
+
+- **Rule 159 — key a "proved by count" check on the FULL discriminator, or the count proves nothing.**
+  Rule 158 said prove no-double-warm by count. A pattern keyed only on the word *before* `sensor` reports
+  **14** false positives at count 2 (AAPL, AMZN, BAC, GOOG, JNJ, KO, MSFT, NEE, NVDA, PFE, PG, UNH, WMT,
+  XOM) because it collapses `CrossSectionalReversionLifecycle : cross-sectional reversion sensor warmed X`
+  with `ReversionForecastLifecycle : reversion sensor warmed X`. Keyed on the full lifecycle class, count>1
+  is empty. A counting proof is only as strong as its key — print the key before trusting the count.
+- **Rule 160 — four monotone points are NOT a trend on this book; Rule 154 is retracted.** Rule 154
+  upgraded ALPHA's cost ratio to a four-run trend and re-ranked on it. It broke on the very next read:
+  `totalPnl` went **$7.64428496** → **$15.27790493** → **$17.08569992** while only `feesPaid` stayed
+  monotone (**$73.682486** → **$78.463912** → **$79.469996**). Track the two legs separately and require
+  the *ratio* to move, not one leg — a rising-fee/rising-PnL book is not the same defect as rising-fee/
+  falling-PnL, and conflating them is how a blip gets promoted to a trend.
+- **Rule 161 — read the counter that answers the question before asserting a mechanism is inert.** I called
+  the ADR-0094 no-trade band inert for four consecutive runs from indirect evidence. `/api/fusion/targets`
+  exposes `insideBuffer` — incremented in `PositionBuffer.apply` exactly when a planned delta is zero — and
+  it reads **13** of **20**. The band was suppressing most of the book the whole time. When a component has
+  its own telemetry, absence of proof is not proof of absence.
+- **Rule 162 — "fall back to the convention when unmeasured" is the invariant, not a bug; do not widen it.**
+  I had queued a fix to widen `PositionBuffer.widthFor`'s fallback because unmeasured μ makes `2C/μ`
+  unbounded. But **0.10 is Carver's cited convention for precisely the desk that has not measured its
+  edge**, and the method's contract says that with no measurement there is no claim to make. Widening it
+  would author a number that gates money — invariant 7 / ADR-0016. Before "fixing" a conservative fallback,
+  check whether the fallback IS the provenance.
+- **Rule 163 — sample the target book across consecutive re-plans before blaming the executor or the
+  buffer.** Across `atMillis` **1785438150584** / **1785438180812** / **1785438210932** (30s apart) the
+  targets re-randomise rather than drift: AAPL **-10.75** → **+129.53** → **+67.19**, HD **-1.48** →
+  **+42.78** → **+1.39**, NVDA **-0.08** → **-50.91**, KO **-324.08** → **-45.38**, GOOG flips sign twice.
+  The buffer's band is `|target|·TARGET_ABS/|forecast|`, so it swings *with* the target it filters. Under
+  `reversion` **1.5810674747889952** + `xsreversion` **0.9850309963910409** vs `trend`
+  **0.39443196542948245**, and `edgeGated` reading `no positive OOS edge` on every listed name, the churn is
+  a SIGNAL-stability problem upstream of every execution dial. Three cheap endpoint reads beat four cycles
+  of inference — take them first.
+
+## 2026-07-30 19:30Z — the buffer was steering wrong-side positions to a destination that is also wrong-side (ADR-0132)
+
+- **Rule 164 — recompute the component's published arithmetic before theorising about it.** Four cycles of
+  inference produced three different wrong diagnoses of the same symptom (band inert → ADR-0101 fallback
+  inverted → targets re-randomise). `/api/fusion/targets` publishes `aims` alongside `targetQty`,
+  `currentQty` and `combinedForecast` — enough to recompute the whole ADR-0094/0101/0102 chain. Done once,
+  it reproduced the published `deltaQty` **exactly on all 13 planned names** (GOOG
+  `6.043466 × 0.008298707 = 0.050153`, AMZN `22.379233 × 0.008298707 = 0.185720`) and the defect was
+  visible in the intermediate value nobody had printed: the DESTINATION, `held + delta`. An exact
+  reproduction of a component's output is a stronger instrument than any number of samples of its input.
+- **Rule 165 — bounding the INTENT does not bound where the desk STOPS.** ADR-0102 clamps the aim into
+  [flat, target]. But ADR-0094 trades to the near EDGE of the no-trade region, a whole band below the aim,
+  and the band is scaled by the average position at the TARGET — so early on ADR-0080's hour-long aim path
+  the band exceeds the aim and the region straddles flat. GOOG's destination computed to **-2.956534**
+  against a target of **+32.814821**. When a policy clamps an intermediate quantity, check every quantity
+  DOWNSTREAM of it that inherits none of the clamp.
+- **Rule 166 — a fix scoped to a branch is worth nothing if the shipped config never enters that branch.**
+  ADR-0118 diagnosed this identical AAPL plan (short 1 vs target +6.031064) and fixed it — inside
+  `!mayIncrease`. With `jethro.fusion.edge-gate.enabled=false` (ADR-0122) and the ADR-0126 σ sensors warm,
+  that branch never runs, so the remedy has been dead code and its own test pinned the live-configuration
+  case at `deltaQty` 0 as correct. When writing or reading a fix, state which config reaches it — and when
+  a test asserts "0" for a state an ADR calls a defect, that test is pinning the bug.
+- **Rule 167 — "same six names, unchanged, across N re-plans" is the signal; the targets moving is not.**
+  Rule 163 read sign flips in `targetQty` and concluded the book re-randomises. Re-sampled, the targets
+  drift (MSFT **-63.86 → -51.60 → -57.99**). What was actually invariant across every sample was
+  `currentQty`: GOOG **-9.00**, AAPL **-13.00**, NVDA **-16.00**, KO **+45.00** in all three. Look for what
+  does NOT move between samples — a frozen position is a defect; a moving target is a forecast.
+
+## 2026-07-31 13:30Z — the no-trade band was wider than the whole position it policed (ADR-0133)
+
+- **Rule 168 — when two quantities are compared, check that they SCALE the same way with the thing they
+  both depend on.** The ADR-0094 band is `width × |target| × TARGET_ABS / |forecast|`, and the target is
+  linear in the forecast, so the two `|forecast|` factors cancel: the band is the position at a
+  full-strength view **regardless of the current view**. The gap it is tested against lives inside
+  ADR-0102's interval `[flat, target]`, whose width **does** shrink with conviction. Neither ADR is wrong
+  alone; the ratio `band/|target| = width × TARGET_ABS / |forecast|` is what breaks, and past
+  `|forecast| < width × TARGET_ABS` the band swallows the whole interval and the delta is zero **forever**.
+  Live: 6 of 20 names permanently vetoed, `insideBuffer` 19/18/20/20 across four re-plans, the desk holding
+  $14,215 of its own $303,271 target book while flagged DORMANT. Write the ratio out; don't eyeball the
+  two expressions.
+- **Rule 169 — a "DORMANT" header snapshotted at the open is the overnight freeze, not a verdict.** The
+  report was generated at `atMillis` 1785504593354, seven seconds BEFORE the 13:30Z open, after three
+  `market-closed` heartbeats. Gross $0.00 and PnL +0.00 over three runs were both artefacts of the
+  timestamp. Three live endpoint reads after the open showed the book moving. Check the snapshot time
+  against the session before reading anything into a flat header — and re-read the endpoint yourself.
+- **Rule 170 — the fix that matches the cited rule is not automatically the fix to ship.** The class cites
+  Carver, whose buffer is centred on the TARGET; I restructured `bufferedDelta` to match and it broke two
+  paid-for lessons at once — ADR-0107's rated view-change unwind (it dumped a full 104-share holding where
+  the rule demands a rated step) and ADR-0090's unrated same-side de-risking. Reverted, and shipped a
+  one-`min` cap on the band's scale instead: same defect closed, every other semantic byte-identical. When
+  a restructure lights up tests that encode past incidents, the tests are usually right — narrow the fix
+  to the proven defect rather than re-deriving the component from first principles.
+- **Rule 171 — cross-check a component's expected values with an INDEPENDENT implementation of its
+  documented formula, not by running the component.** Six tests needed new band arithmetic. I re-derived
+  all of them in a separate exact-decimal script written from the ADR's formula; it reproduced the Java
+  output digit for digit (3.281482, 1.812000, 0.603106, 103.757400, −27.803973). That makes the test a
+  real check rather than a transcription of whatever the code now happens to emit.
+
+## 2026-07-31 14:00Z — the book is liquidated at every boot, and the σ-cold veto blocks only the rebuild (no change; ADR-0133 at 1/6)
+
+- **Rule 172 — before spending a change on a gate, confirm the live book actually REACHES it.** Two cycles
+  running I fixed the position buffer — ADR-0132's destination clamp, ADR-0133's band cap — and both were
+  graded UNVERIFIABLE, for the same structural reason: `mayIncrease` is false for every name (σ-cold), so
+  the reduce-only branch re-seeds `aim` to `held + delta` = 0 *before* either fix is consulted. With aim 0
+  and `currentQty` 0 the gap is zero, so the band is never evaluated. Live: aims **all exactly 0.0**,
+  `insideBuffer` 19/19, 19/19, 18/18, 19/19 across four re-plans. Walk the gate ORDER from the delta
+  backwards and find the first one that zeroes the input; fix that one, not the prettiest one.
+- **Rule 173 — `insideBuffer` at the full name count does NOT mean the buffer vetoed anything.** It counts
+  `delta.signum() == 0`, which is equally true when the gap is zero because nothing is held and nothing is
+  intended. Read `aims` alongside it: a *vetoed* trade has a non-zero aim, a *vacuous* one has aim 0.0. I
+  read this field as a veto last cycle and it was an empty gap.
+- **Rule 174 — an unarmed risk sensor must not be allowed to LIQUIDATE, only to block opening.** ADR-0126's
+  veto is asymmetric in the damaging direction. At boot the σ sensor seeded 38–99 of the **121** prices it
+  needs (`vol-span=120`) and logged `still cold` for **18** names; every name went reduce-only, the desk
+  worked its wrong-side holdings out **in full** (five FILLED orders 19 seconds after start: JPM SELL 4,
+  AAPL SELL 9, AMZN BUY 17, GOOG BUY 7, MSFT BUY 7) and gross went **$17,942.68 → $0.00**. Then it could not
+  rebuild: `streamVolMeasuredNames` **0, 0, 0** for ten minutes, ticking to **1** at ~10.5 minutes — and
+  exactly one aim unfroze with it. The loop reboots about every 30 minutes and the slowest name (MCD, 38 of
+  121) needs ~83 more samples, so the book is destroyed every cycle and only partly rebuilt.
+- **Rule 175 — a graded-BAD fix rules out the REMEDY, not the DEFECT.** ADR-0131 attacked this same root
+  cause by re-seeding the cold sensor on its warm-up cadence and scored ❌ BAD; it was reverted. That does
+  not make the boot liquidation acceptable — it means the next attempt must pick a different lever (here:
+  suppress the boot flatten, rather than accelerate the warm-up). Don't let a reverted remedy quietly
+  retire the problem it failed to solve.
+
+## 2026-07-31 14:30Z — the σ seed IS converging, just slower than the reboot cadence; the whole firm book is one name (no change; ADR-0133 at 2/6)
+
+- **Rule 176 — a "permanent floor" claim needs two boots to support it; check the previous boot log before
+  calling a warm-up stuck.** Last cycle I read the σ seed's 38–99 of **121** as a structural ceiling. It is
+  not: every name improved against the previous process — MCD **38 → 57**, KO **43 → 64**, WMT **43 → 64**,
+  BAC **41 → 62**, NEE **41 → 62**, GOOG **46 → 67**, NVDA **49 → 71**, MSFT **61 → 83**, AMZN **80 → 101**,
+  AAPL **99 → 103**. The durable mark store accumulates; it just gains ~20 prices per ~35 minutes of open
+  market while the loop reboots every ~30. The defect is a *rate* mismatch, not a floor — and the fix that
+  follows from a rate is different from the one that follows from a floor.
+- **Rule 177 — "the sensor will warm up" is not a plan when the seed runs once per process.**
+  `FusionLifecycle.seedVolatility` guards on `volSeeded.add(instrument)`, so after the single boot seed the
+  only further warming inside a process is live prints at the 30s re-plan cadence. Live:
+  `streamVolMeasuredNames` crawled **0 → 1 → 4** over ~22 minutes against `volBudgetNames` **19**, and the
+  process is torn down at ~30. The desk lives its whole life holding only its fastest-printing names.
+- **Rule 178 — read the frozen names' TARGETS, not just the count, to price what a veto costs.** **18 of 21**
+  aims were exactly **0.0** while the targets behind them were PFE **2848.93**, NEE **-1250.11**, WMT
+  **878.21**, BAC **-765.91**, NVDA **-578.31**. Gross was **$906.46500000** — three shares of AAPL — against
+  **$1,499,091** of headroom. The count says "most names frozen"; the targets say "the desk's whole intended
+  book is frozen", which is what makes this item #1.
+- **Rule 179 — re-grade a change once its inputs stop being degenerate; UNVERIFIABLE is a state, not a
+  verdict.** ADR-0133 read vacuous last cycle (every aim 0.0, zero gap, band never consulted). This cycle
+  three aims went non-zero — AAPL **-21.458419**, MSFT **5.806959**, AMZN **-6.428999** — and AAPL's
+  `deltaQty` **-15.939691** against `currentQty` **-3.0** is strictly narrower than its aim-to-holding
+  distance, so the band is demonstrably being evaluated. Same commit, same tests, new verdict, because the
+  book finally reached the code. Carry an unverifiable item forward and re-test it rather than closing it.
+
+## 2026-07-31 15:05Z — the σ freeze cleared by itself and the book deployed; that revealed the hedge sizing on 8 of 28 names (no change; ADR-0133 at 3/6)
+
+- **Rule 180 — a "hedged" status is a claim about COVERAGE, not just about sizing; make it prove what it
+  could see.** `/api/hedging` reported `status` **ON-TARGET**, `tier` **STRUCTURAL**, against
+  `netExposureUsd` **-60979.73** with `rawTargetNotionalUsd` only **18860.33** — a ~31% hedge presented as
+  complete. `HedgeMath.structuralBetaHedge` skips any name with no assigned beta (its own test
+  `structuralBetaHedgeSkipsNamesWithNoAssignedBeta` asserts this), and the live `instrument_attributes` has
+  `hedge_beta` for only **8 of 28** equities — AAPL 1.25, NVDA 1.75, AMZN 1.20, JPM 1.10, MSFT 1.10,
+  GOOG 1.05, SAP 1.00, JNJ 0.55, the original sim-era universe. **-$38,897 of -$60,974 net equity (63.8%)**
+  is invisible to the hedge, **XOM's $24,442 — 28% of firm gross — included**. A missing input must degrade
+  the STATUS, never silently shrink the TARGET.
+- **Rule 181 — reconcile a suspected mechanism against the app's OWN published number before ranking it.**
+  Recomputing `Σ βᵢ·Eᵢ` from live positions × live betas gave **-18,856.99** against the hedger's published
+  `rawTargetNotionalUsd` **18,860.33**. That tie is what turns "probably the betas" into item #1; a
+  hypothesis that cannot be tied to a number the app already prints is not ready to spend a cycle on.
+- **Rule 182 — check a warm-up item again before acting on it: it may have closed itself.** Item #1 for
+  three cycles was the ADR-0126 σ-cold freeze. This boot logged `still cold` at **103–117 of 121** stored
+  prices vs **38–99** one boot earlier, the veto lifted, and the desk went from **3 shares of AAPL** to
+  **21 positions** / gross **$76,657.72 → $86,777.90** with no code change at all. Downgrade, don't close:
+  the store crossed the span by accumulation, so a weekend or outage gap re-freezes it.
+- **Rule 183 — a first read of a warming subsystem is not evidence; re-read it before writing it down.** At
+  15:03 the hedge axis read `status` **WARMING**, `covarianceReady` **false**, "no tradable proxy can be
+  sized yet (price/covariance/betas missing)", and ES was absent from `/api/marks` — which looked like an
+  unpriceable-proxy bug. Two minutes later the same axis read **ON-TARGET/STRUCTURAL** holding **0.050468**
+  ES. The transient would have become a wrong item #1 and a wasted cycle.
+
+## 2026-07-31 15:40Z — the hedge's covered subset went sign-inverted against the book, and a dead proxy price is the only thing not trading it (no change; ADR-0133 at 4/6)
+
+- **Rule 184 — a partial risk sample has an unbounded SIGN error, not just a magnitude error; test the sign
+  before you rank it as "under-coverage".** Last cycle `Σ βᵢ·Eᵢ` was **-18,856.99** against net equity
+  **-60,974** — under-sized but correctly signed, which read as a coverage gap. This cycle the same sum is
+  **+5,657.02** against net equity **-38,817.87**: NVDA's **+10,371.04** at beta **1.75** (**+18,149**
+  alone) dominates the eight covered names and flips the subset positive. `HedgeMath.structuralBetaHedge`
+  sets `hedgeNotional = systematic.negate()`, so the structural tier would **SELL** the proxy against an
+  already net-short desk. Beta-covered net **-11,126.16**, uncovered **-27,691.71 (71.3%)**. Escalate the
+  item; do not just re-state it.
+- **Rule 185 — when two defects interact, RANK BY THE ORDER THAT IS SAFE TO FIX, not by size alone.** The
+  proxy having no price (item #2) is the only reason the wrong-signed target is not being traded — the axis
+  reads WARMING and sizes nothing. Fixing the cheaper, more obvious defect first would convert a passive
+  hedging gap into an active anti-hedge. Sequencing is part of the diagnosis, so write it into the register.
+- **Rule 186 — discharge Rule 183 with a MONOTONIC series, not a second look.** ES's
+  `providerTimestampMillis` was **frozen at 1785509694000** across three polls 30 s apart — age
+  **2477.5 s → 2507.5 s → 2537.7 s**, past 42 minutes — while AAPL ticked at **0.4/1.7/1.1 s** and NQ
+  advanced **1785511513000 → 1785511603000**. Six consecutive `/api/hedging` reads over two minutes all
+  said WARMING. One re-read can still catch a transient at the wrong moment; a climbing age on a frozen
+  timestamp cannot.
+- **Rule 187 — an unpriceable position silently leaves the firm total the loop optimizes.** The HEDGE book
+  holds ES `quantity` **0.022800** with `hasMark` **false**, `mark` **0.00000000**, `netExposure`
+  **0.00000000**, `grossExposure` **0.00000000**. CLAUDE.md defines "total" as the whole book *including*
+  the hedge, so headline gross **$77,739.62** understates money at risk by the proxy's notional. Check
+  `hasMark` on every held name before trusting a firm exposure total.
+- **Rule 188 — separate the tape from the till before blaming a mechanism.** PnL fell **-85.28** run-over-run
+  with `unrealizedPnl` **-225.80426780** against `realizedPnl` **796.09988240** on a net-short book into a
+  rising tape: that is **market**. The mechanism-attributable cost is turnover — ~**$1.6M** traded notional
+  on a **$77.7k** book, `fees` **105.584233 → 129.292241**, FILLED **4495** / CANCELLED **1509** with every
+  cancel reasoned *"fusion re-plan — passive order superseded by a fresh target (ADR-0084)"*.
+
+## 2026-07-31 16:05Z — the sign inversion un-flipped with nothing fixed, while coverage got worse (no change; ADR-0133 at 5/6)
+
+- **Rule 189 — a partial-sample sign error can self-clear WITHOUT a fix; track coverage, never sign, as the
+  invariant.** Last cycle `Σ βᵢ·Eᵢ` was **+5,657.02** against a negative book and I ranked the *inversion* as
+  the headline. This cycle it reads **-5,786.42** against net equity **-89,268.235** — correctly signed,
+  nothing changed. The entire difference is NVDA's net going **+10,371.04 → -393.20**: one name at beta
+  **1.75** was carrying the inversion. Meanwhile the real defect worsened — uncovered net
+  **-83,809.485 = 93.9%** of |net| vs **71.3%** last cycle, so the hedge sizes off ~**6.5%** of the
+  systematic risk. Had I written the item as "sign inverted", this cycle would have read as a fix and closed
+  it. Write the defect as the measurable that cannot flip by luck.
+- **Rule 190 — the report's Postgres ERROR log contains the LOOP'S OWN failed psql queries; check the SQL
+  exists in app code before ranking it.** `column "hedge_beta" does not exist` (15:30:46Z) looked like a
+  live app defect gating the betas. It is a past cycle's ad-hoc query against an EAV table
+  (`instrument_attributes` is `instrument_id | name | value`), sibling to `relation "instrument_attribute"
+  does not exist` (15:06:33Z) and `column a.attr_key does not exist` (15:06:40Z). `grep -rn hedge_beta
+  --include=*.java --include=*.sql` hits only `backups/*.sql`. One grep separates a defect from my own shell
+  history.
+- **Rule 191 — "stale" and "absent" are different failures, and a VERIFY-BY written for one cannot grade the
+  other.** Last cycle's item #2 VERIFY-BY was "ES's `providerTimestampMillis` advances between two polls".
+  This cycle ES has **no row at all** in `/api/marks` (**36** marks returned, no ES), so that test is
+  unrunnable — not passing, not failing. State existence before freshness in any VERIFY-BY on a feed.
+- **Rule 192 — before blaming refdata for an unpriceable instrument, check the config already has a
+  fallback.** ES and NQ both carry `yahoo` symbology (**ES=F**, **NQ=F**) and multipliers (**50**, **20**),
+  and `jethro.hedge.equity-proxy-candidates=ES,NQ` already lists a fallback that `HedgeAdvisor.candidates()`
+  filters by live price. NQ **is** priced (**1785512939000**) yet the axis still pins `proxyId` **ES** at
+  `status` **WARMING** with `covarianceReady` **false**. The gap is in the selection path or the covariance
+  gate, not the reference data — a wrong diagnosis here would have shipped a pointless migration.
+
+## 2026-07-31 16:35Z — ADR-0133 graded BAD; the scorer's revert had failed and the rejected code was still trading
+
+- **Rule 193 — the scorer's auto-revert CANNOT survive a conflict, and it is guaranteed to hit one; check
+  that a ❌ BAD revert actually LANDED before trusting the ledger.** `git revert e61c7f5aa` conflicts on
+  `docs/loop-findings.md`, `reports/last-analysis.md` and `reports/must-fix.md` — the loop's own memory
+  files, rewritten every cycle — while the three code hunks apply cleanly. Because the loop commits its
+  analysis *into the same commit as its code*, every revert attempted one cycle later is structurally
+  guaranteed to conflict and abort, leaving the graded-bad **code** live. Three occurrences now
+  (`efccc6502`, `e61c7f5aa`, plus a `revert-failed` heartbeat). A ❌ BAD verdict is decorative unless a
+  later cycle confirms the mechanism left the running code. **Resolution that works:** `git revert
+  --no-commit`, then `git checkout --ours` the memory files and keep the ADR (annotated
+  `Status: Reverted`) — revert the code, never the memory.
+- **Rule 194 — a correct derivation can still be the wrong change; "the desk is DORMANT" is not by itself
+  a reason to widen what may trade.** ADR-0133's arithmetic was right and its prediction came true: the
+  band was scaled to a full-conviction position while the interval it was tested inside shrank with
+  conviction, six names were permanently vetoed, and capping it unstuck them — gross went
+  **17,957 → 167,401**. It still scored ❌ BAD, PnL **-$495.57**. The buffer was not strangling a
+  profitable book; it was incidentally suppressing turnover on names with **no measured out-of-sample
+  edge**. Removing the suppression bought spread, not return. Before unsticking a name, ask whether that
+  name has edge to capture — the execution dial is downstream of that question, never a substitute for it.
+- **Rule 195 — when an execution dial turns out to be enforcing a conviction floor, the floor is the
+  mis-set thing, not the dial.** The band was doing `min-forecast-to-route`'s job by accident. The fix is
+  never to widen the accidental gate; it is to set the deliberate one (the ADR-0049/0059/0064 edge gate)
+  where it belongs. This is the standing priority restated with a measurement behind it: work on edge, not
+  the combiner or its execution dials.
+- **Rule 196 — separate the realized leg from the unrealized leg to split mechanism from market.** This
+  cycle `unrealizedPnl` **-210.25727251** on a near-flat-net book (**+2,801.04706250**) is the tape; the
+  **realized** leg carries the change's cost, because a ~9x gross put on against no edge pays spread on
+  every name it opens. Unrealized ≈ market, realized ≈ what your mechanism actually did.
+
+## 2026-07-31 17:00Z — the manual revert verified out of the code; the hold bought the reading that killed the next change
+
+- **Rule 197 — before "fixing" a gate the desk appears to be ignoring, check whether it is switched off ON
+  PURPOSE, and check what arming it would leave tradable.** The selector reports `measured` **31**,
+  `tradable` **15**, `edgeGated` **16**, while `/api/fusion/targets` routes non-zero deltas in gated names
+  (CVX **0.207468**, GOOG **4.873257**) and holds GOOG **-35**, NVDA **-27**, CVX **-25**. That looks like
+  a leak worth closing against `totalFees` **229.638225** on a `firmTotal` of **293.55386805**. It is not:
+  the ADR-0049/0059 veto exists at `FusionExecutor.java:139`, is already reduce-only-exempt, and is
+  deliberately disabled by `application.properties:414` `require-backtest-support=false` and `:401`
+  `edge-gate.enabled=false` under ADR-0122's exploration mode. **Arming it today leaves ONE tradable
+  name** — of the 13 supported names carrying a target, only JPM (`combinedForecast` **5.921**) clears
+  `min-forecast-to-route=5.0`. That is the DORMANT state ADR-0122 was written to escape. A config flag
+  with an ADR behind it is a decision, not a bug; read the ADR and count the survivors first.
+- **Rule 198 — the desk's conviction is concentrated in exactly the names its own OOS backtest rejects,
+  and that is a verdict on the SOURCES, not the combiner.** Besides JPM, the only names clearing the 5.0
+  floor are both edge-gated: MSFT **5.4686**, CAT **-5.2810**. A forecast stack that loads onto names
+  whose measured history says the algos lose there cannot be repaired by moving the gate or reweighting
+  the fusion — this is the standing "work on EDGE" priority with a mechanism attached. The fix is a new
+  OOS-validated predictor taken through the ADR-0049 gate; every dial downstream of that is noise.
+- **Rule 199 — a ❌ BAD revert's honest credit is the EXPOSURE it removed, not the PnL that happened
+  alongside it.** `4f67f0515` verified out (`uptimeSeconds` **1431** postdates it; `band(...)` back to
+  `scale × width`; ADR-0133 `Status: Reverted`), gross **$167,400.77 → 113683.50400000**, `totalPnl`
+  **$228.93 → 301.79886805**. But applying Rule 196: `unrealizedPnl` **-210.25727251 → -7.47426487** on a
+  net that moved **+2,801.04706250 → -33,407.76400000** is mark-to-market, and the mechanism's own
+  realized leg went the *other* way, **402.49713476 → 309.27313292**. Claim the gross; do not claim the
+  headline.
+- **Rule 200 — the ADR-0116 hold is productive time, not dead time.** With the pending change at
+  **1/6 cycles** the contract forbids a code change, so the cycle went into read-only verification. That
+  is what caught Rule 197 before it shipped as a "fix". Spend a hold cycle reading the code behind the
+  next candidate, not waiting for the window to close.
+- **Rule 201 — the scorer's revert defect is not fixed; only its symptom was.** Last cycle reverted the
+  live BAD code by hand, but `scripts/score-change.py:357` still calls plain `git("revert", "--no-edit",
+  sha)` and aborts at `:359`. The pending change is *itself* a revert, so a ❌ BAD verdict on it hits the
+  same guaranteed conflict. Fixing a symptom under time pressure leaves an item OPEN — rank the cause,
+  and write the VERIFY-BY against the scorer's stdout and the snapshot's `revertApplied`, not against the
+  code that happened to get reverted this once.
+
+## 2026-07-31 17:30Z — the redeploy is a trading strategy nobody wrote: 3.09x turnover per boot, for no change of view
+
+- **Rule 202 — the loop's own 30-minute restart liquidates and re-buys the names whose sensors cold-start,
+  and it is the largest non-market cost on the book.** Grouping today's `fills` by minute, with each of the
+  8 post-13:50Z heartbeats treated as a boot (window `heartbeat…+2min`): post-boot minutes did
+  **$277,330.06** over 11 minutes (**$25,211.82/min**) against **$1,144,024.38** over 140 other minutes
+  (**$8,171.60/min**) — **3.09x**, and **9.9%** of fills carrying **19.5%** of turnover, so the post-boot
+  orders are *large* (whole-position liquidations, not the ADR-0080 incremental path). The 17:12 minute,
+  **39 seconds after boot**, alone did **$81,499.01** of turnover against a whole-book gross of
+  **$81,647.97**. Boot times are set by the loop and are uncorrelated with the tape: none of this is a
+  response to the market.
+- **Rule 203 — three individually-correct decisions compose into an unbuffered liquidation; check the
+  COMPOSITION, not each ADR.** `FusionPlanner.plan` (ADR-0065): a held name with no fresh view gets an
+  *implicit target of zero*. `PositionBuffer` (ADR-0090): a flat target snaps the aim to zero and **an exit
+  is not buffered**. Sensors cold-start on every boot (this run: trend still cold for UNH 143/193, EURUSD
+  17/193, META 17/193, GOOGL 36/193). Chain them and *"my sensor hasn't finished re-seeding"* is executed as
+  *"the desk wants to be flat"* — sold unbuffered, bought back when it warms. ADR-0065 cannot tell **no
+  view** from **not yet warm**; the loop guarantees the latter every 30 minutes. Observed: CAT SELL 12 at
+  17:11:30 → BUY 13 at 17:12:58, a reversal in 88 seconds across the reboot.
+- **Rule 204 — when the realized leg falls by LESS than the fee bill rises, the loss is cost, not
+  direction.** 17:00Z→17:31Z: `realizedPnl` **309.27313292 → 283.29807851** while `totalFees`
+  **229.638225 → 248.070383**. That is the churn thesis quantified, and it is why `totalFees`
+  **248.070383** now exceeds `firmTotal` **118.52242327** (ALPHA: `feesPaid` **241.749416** on `totalPnl`
+  **-5.84496252**). Read the two series together before blaming a signal.
+- **Rule 205 — the combiner is exonerated by its own weights; stop suspecting it.** Fusion already leans on
+  the only two positive-expectancy sources — reversion **1.6796828791749714** (`avgReturnBps`
+  **+4.874804359460039**, 63 cohorts) and social **1.5894668077730054** (**+6.22893692818407**, 21) — and
+  holds down trend **0.6063985334926396** (**-1.884262124055958**) and xsreversion **0.35311503241404785**
+  (**-6.858218349322071**). When the weighting is already correct and the book still loses, the loss is
+  upstream (edge) or downstream (cost). This cycle it was downstream.
+- **Rule 206 — Rule 200 paid out twice.** A second consecutive hold cycle spent on measurement produced the
+  most concrete lever the register has carried in days. A hold is when to run the query you never have time
+  for on a change cycle — the SQL grouping above took one query and replaced two cycles of "worth a
+  targeted read" hand-waving at item #4.
+
+## 2026-07-31 18:00Z — the book is not "churning": it is **fully liquidated and rebuilt from flat every loop cycle**, and the round-trip cadence is shorter than the horizon the edge is measured over
+
+- **Rule 207 — the desk goes EXACTLY FLAT at every loop teardown; Rule 202's "3.09x churn" understated it.**
+  Boot is `2026-07-31T17:39:03Z` (`/api/ops/jvm` `uptimeSeconds` **1283** against `/api/risk` `asOfMillis`
+  **1785520826830**). Summing every LIVE fill executed *before* that instant, the ALPHA book nets
+  **0.000000** across **21** names over **1687** fills — not "mostly reduced", **exactly flat**. The
+  minute `17:38` — 2 seconds after the `2026-07-31T17:38:42Z` heartbeat and 19 seconds before the boot —
+  did **11** fills and **$99,922.58** of turnover against the heartbeat's recorded gross
+  **99920.63500000**: a round trip of ~100% of the book, in one 500ms burst. The new process then rebuilt
+  from flat to gross **16111.97500000** by 18:00Z and **19327.75000000** by 18:02Z. One cycle earlier the
+  same signature: minute `17:12`, **$81,499.01** turnover against a whole-book gross of **81647.96500000**.
+- **Rule 208 — the forced flatten happens at TEARDOWN, not at boot, so cold sensors are the sequel, not the
+  cause.** The 17:38 liquidation is 26 minutes into a healthy process, not 40 seconds into a fresh one. No
+  `@PreDestroy` / shutdown-flatten hook exists in the source (grep for `PreDestroy|shutdownHook|flattenAll|
+  liquidateAll|closeAllPositions` outside tests returns nothing). So the flatten is a *normal fusion
+  re-plan* that took every name to zero at once — and next cycle's diagnosis must find what collapses all
+  21 targets simultaneously, rather than re-explaining the cold-start rebuy that follows it.
+- **Rule 209 — measure the whole-book round trip against the SIGNAL HORIZON, not just against the fee
+  bill.** Every source in `/api/signals/telemetry` publishes `horizonSeconds` **3600**, while the loop
+  round-trips the entire book every ~30 minutes. The desk is structurally incapable of holding a position
+  as long as the horizon over which its own expectancy — reversion **+4.851871026828735** (63 cohorts),
+  social **+5.298898880312067** (22) — is measured. No amount of sizing, fusion or hedge work can realise
+  an edge the holding period is cut in half before it pays. This outranks the fee argument.
+- **Rule 210 — reconcile the projection against `fills` BEFORE concluding "state was lost on restart".**
+  The $99.9k→$16.1k collapse looks exactly like a projection wiped by a reboot. It is not: at one instant
+  `/api/risk` `positions` and `sum(BUY − SELL)` over `fills` agree to the share on all five holdings
+  (MSFT **20.000000**, PFE **-221.000000**, BAC **68.000000**, GOOG **1.000000**, ES **-0.053455**).
+  Invariant 3 is intact and the liquidation was real trading. One query separated a data bug from a
+  trading bug; run it first next time.
+- **Rule 211 — a full re-seed does NOT warm a sensor; warm-up needs elapsed time, so it cannot outrun a
+  30-minute process.** `ReversionForecastLifecycle` logs *"still cold for USD.SOFR.10Y after seeding
+  **241 of 241** stored prices"* — the store was drained completely and the sensor stayed cold. 21 minutes
+  after boot, trend is still **49 of 193** for TSLA and **1 of 193** for GOOGL. Any future fix that
+  proposes "seed harder / seed more often" is therefore already refuted — the constraint is wall-clock
+  warm-up against process lifetime, not store coverage.
+- **Rule 212 — item #4's hedge is downstream of item #1, not an independent defect.** `/api/hedging`
+  `covarianceReady` is **false** with the EQUITY axis `WARMING` and `targetProxyQty` **null** for a fourth
+  consecutive cycle, and `netExposureUsd` flipped **-7368.29 → 8243.99** between cycles. A covariance
+  estimate cannot converge on a book that is destroyed and re-drawn every 30 minutes. Do not spend a
+  change on the hedge until the holding period is fixed.
+
+## 2026-07-31 18:30Z — a finding I had to RETRACT, and the telemetry gap that let me publish it in the first place
+
+- **Rule 213 — Rule 207 is WRONG and is hereby retracted: the desk does NOT flatten at every teardown.**
+  Summing every LIVE ALPHA fill executed before the **2026-07-31T18:09:08Z** boot (`/api/ops/jvm`
+  `uptimeSeconds` **1279** against `/api/risk` `asOfMillis` **1785522627137**), six names carry across
+  the reboot: BAC **68.000000**, GOOG **1.000000**, MCD **-43.000000**, MSFT **37.000000**,
+  NVDA **-30.000000**, PFE **-221.000000**. The heartbeat-minute bursts are episodic outliers, not a
+  cadence — since 12:00Z the outsized ones are `16:05` (**$63,599.14**), `17:12` (**$81,499.01**) and
+  `17:38` (**$99,922.58**), while `16:37` (**$28,990.48**), `18:06` (**$20,729.30**) and `18:09`
+  (**$17,188.13**) are ordinary. I generalised "every teardown" from two consecutive cycles. **Two
+  observations is not a cadence — before writing "every N", check the other N.**
+- **Rule 214 — Rule 209 survives the retraction because it never depended on "every".** All sources
+  still publish `horizonSeconds` **3600** against a ~30-minute process recycle, so the holding period
+  is structurally shorter than the horizon the expectancy is measured over. When a finding is falsified,
+  separate the part that rested on the false premise from the part that stands alone — do not discard
+  both, and do not keep both.
+- **Rule 215 — the order-level post-mortem the procedure mandates has NO evidence in it: FILLED orders
+  carry a NULL `reason`.** Of the **523** FILLED orders since 12:00Z, **0** have a reason. All **249**
+  populated reasons belong to CANCELLED orders and are the same string (`fusion re-plan — passive order
+  superseded by a fresh target (ADR-0084)`); the only other is one REJECTED `no market data for MCD`.
+  So `reason` is populated exclusively for orders that never traded. This is why three consecutive
+  cycles each proposed a collapse mechanism and then falsified it — including this one. **Next change
+  targets this**, with the trade-off stated up front: it moves no money and will most likely score
+  ⚠️ INCONCLUSIVE, which is the correct outcome for buying evidence, not a failure.
+- **Rule 216 — when the trigger is unknown, record the window as UNATTRIBUTED rather than crediting it.**
+  PnL moved **+103.62** this window with `/api/risk/breaker` `halted: false`, regime `CHOP`/`CALM`,
+  `volRatio` **1.04** and ordinary order sizes. With no trigger on any fill, market and change cannot be
+  separated from the numbers. Writing down "unattributed" is the honest entry; inventing a cause is
+  exactly the error Rule 213 just cost.
+- **Rule 217 — the strategy books are not paying for their own fees; the hedge is carrying the firm
+  total.** `/api/attribution` `firmTotal` **164.74096826** = HEDGE **160.19086234** + ALPHA
+  **40.37358247** + MACRO **-35.82347655**, on `totalFees` **268.179380** of which ALPHA paid
+  **261.858413**. Read the decomposition every cycle even when the headline is up — a rising total
+  sourced entirely from the hedge is not evidence the strategy works.
+
+## 2026-07-31 19:00Z — the missing trigger has a cause, and the hedge is masking a strategy book that turned negative
+
+- **Rule 218 — the empty `reason` on FILLED orders is not a bug, it is a missing concept, and that
+  changes where the fix goes.** Re-verified ⚠️ STILL-BROKEN: of this window's 60 `recent_orders`,
+  **32 of 32 FILLED** and the **1 ROUTED** carry NULL, while **27 of 27 CANCELLED** carry text. The cause
+  is in `OrderService.routeApproveAndFill`: reasons are written only on failure branches
+  (`gate.reason()`, `"no market data for …"`, `"IOC — not marketable on arrival"`), while the success
+  path is `transition(order, OrderStatus.ROUTED, null)` and submit publishes `publishOrderEvent(order,
+  null)`. `reason` records *why a status changed*, and only failures have a status change worth
+  explaining. So the trigger must be threaded from the deciding call site into `submit` — patching the
+  order layer cannot recover information that was never passed to it. **Before proposing a fix for an
+  empty field, read the write path: "never populated" and "populated with the wrong concept" need
+  different fixes.**
+- **Rule 219 — read the attribution decomposition for *frozen* books, not just for size.** HEDGE
+  **160.19086234** and MACRO **-35.82347655** are byte-identical to last cycle's reading — neither book
+  traded. ALPHA read **40.37358247** last cycle and **-13.33312927** now, so the entire run-over-run fall
+  is the strategy book, and it fell *while gross rose* **+5619.53**. A book whose number does not change
+  at all between cycles is information: it is not hedging, it is ballast. Check for identity, not just
+  magnitude.
+- **Rule 220 — `hedgeMasking: true` plus `covarianceReady: false` means the headline is flattered by a
+  hedge that cannot act.** The firm total **111.03425652** is positive only because a static hedge P&L
+  sits on a strategy book that is now negative net of the **264.094908** in fees it paid. Rule 217 said
+  the strategy books were not covering their fees; one cycle later ALPHA is negative outright. **When a
+  decomposition shows the total sourced entirely from a book that did not trade, promote it to a live
+  bleed in the register — do not wait for the headline to go negative.**
+- **Rule 221 — one cycle from a verdict is the worst moment to get impatient.** The scorer printed
+  `still accumulating evidence (5/6 cycles)`. Five cycles of evidence on the revert would have been
+  thrown away for a change that could have shipped 30 minutes later. The hold is cheap; the evidence is
+  not.
+
+## 2026-07-31 19:30Z — the hold cleared and the missing trigger got fixed where it was actually lost
+
+- **Rule 222 — thread the trigger from the call site that DECIDES; you cannot recover it downstream.**
+  Item #1 re-verified ⚠️ STILL-BROKEN at **36 of 36 FILLED** orders NULL against **24 of 24 CANCELLED**
+  populated, then shipped as ADR-0134. The fix had to go where the information still exists: every
+  deciding call site already held a sentence (`signal.rationale()`, `thesis()`, the hedge advisor's
+  `rationale()`, the fusion target's entry/reduce/exit/stop-cut plus its forecast) and simply never passed
+  it to `submit`. Written into `orders.origin_reason` **at insert**, before any status exists, so no
+  transition can overwrite it. **When a field is empty on the happy path, the fix belongs at the producer,
+  not the persister** — and a second column beats overloading the first when the two answer different
+  questions (a REJECTED row is worth more carrying both the want and the refusal).
+- **Rule 223 — a "no-money" change earns its cycle when it unblocks the money items behind it.** This one
+  moves nothing and should score ⚠️ INCONCLUSIVE by construction. It was still the right spend: four
+  consecutive cycles guessed at mechanisms and falsified them a cycle later (Rule 207 was retracted
+  outright) for want of exactly this evidence, and the register's next item cannot be diagnosed without it.
+  **Count the cycles a missing measurement has already wasted before dismissing a telemetry fix as
+  low-value.**
+- **Rule 224 — the frozen books stayed frozen; ALPHA is the whole move in BOTH directions.** HEDGE
+  **160.19086234** and MACRO **-35.82347655** are byte-identical to last cycle for a second consecutive
+  reading, while ALPHA went **-13.33312927 → 28.99506278**. Last cycle Rule 219 read the same identity on a
+  fall; this cycle it is a rise. **The sign flips, the diagnosis does not: a book whose number never
+  changes is ballast, and a headline sourced from it is flattered either way.** Firm total **153.36244857**
+  with `hedgeMasking` **true** and `covarianceReady` **false**.
+- **Rule 225 — the +31.01 is UNATTRIBUTED, and that is the honest entry until next run.** Breaker clear,
+  regime `CHOP`/`CALM`, `volRatio` **0.99**, and the move sits on ALPHA positions no change of mine
+  touched. With no trigger on any fill, market and change still cannot be separated — the last window that
+  will have to be recorded this way, which is the point of the change.

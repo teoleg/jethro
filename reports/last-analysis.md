@@ -1,62 +1,63 @@
-ADR-0113 changed the unit the sensors count in — prints, not cycles — and the warm-start seed was left counting in the old one, so no name whose tape prints slower than we poll can ever warm; ADR-0114 re-denominates the seed into each name's own print cadence.
+Orders now record WHY the desk wanted the trade, not only why a status changed — so the orders that actually fill stop being unattributable (ADR-0134).
 
-*Every figure below is quoted from the live endpoints, `logs/report.md` or the ledger; none is authored
-here (invariant 7 / ADR-0016 — the scorer owns every number that gates money).*
+*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/hedging`,
+`/api/signals/telemetry`, `logs/report.md`, the scorer's ledger row, or the repo source. None is authored
+here — invariant 7 / ADR-0016.)*
 
-## Situation, in plain numbers
+## Situation triage (live)
 
-**Money.** Total PnL **$5,665.94**, up **$11.81** on the run and **$11.72** across the last three. Not
-bleeding — but the growth flag reads **stale**: −1.27% over three iterations against the +1% target, and
-it reads stale for the obvious reason that the desk is inert.
+1. **Money.** Total PnL **$153.36**, **+31.01** since last run, **+92.30** over the last 3. The latest
+   heartbeat (`2026-07-31T19:04:53Z`) reads `pnl_growth_pct` **15.54** against `pnl_target_pct` **1.0**,
+   `on_track` **true**, `stale` **false**, `underwater` **false**. Not bleeding, and on the owner target.
+2. **Risk.** Gross **$44,999.32** = **3.0%** of the $1,500,000 firm cap (headroom **$1,455,001**); net
+   **$24,004.97** = **2.4%** of the $1,000,000 net cap. `Flags: none`. Under-deployed against the ADR-0132
+   budget, nowhere near a cap.
+3. **Cause.** The pending change cleared: `4f67f0515` (the manual completion of the failed auto-revert)
+   scored **⚠️ INCONCLUSIVE** — risk-adjusted return/cycle **-0.000147** over **7** cycles, **t=-0.37**
+   against a **1.5** hurdle. Kept, not reverted, and the hold that blocked the last five cycles is over.
+4. **Danger.** None. `/api/risk/breaker` `halted: false`, regime `CHOP`/`CALM`, `volRatio` **0.99**.
+5. **Order post-mortem — still impossible, and that is what I changed.** Of this window's 60
+   `recent_orders`: **36 of 36 FILLED** orders carry a NULL `reason`; **24 of 24 CANCELLED** carry text.
+   The orders that never traded are the only ones explained.
+6. **Books.** `/api/attribution` `firmTotal` **153.36244857** = HEDGE **160.19086234** + ALPHA
+   **28.99506278** + MACRO **-35.82347655**, on `totalFees` **272.654475** (ALPHA **266.333508**). HEDGE
+   and MACRO are again byte-identical to last cycle — neither traded. ALPHA read **-13.33312927** last
+   cycle and **28.99506278** now, so the whole run-over-run move is once more the strategy book, this time
+   upward. `hedgeMasking` **true**, `/api/hedging` `covarianceReady` **false**.
+7. **Change vs market.** The **+31.01** is **unattributed**. It sits entirely in ALPHA, on positions no
+   change of mine touched (the pending change was a revert completion, live since 16:35Z), with the breaker
+   clear and the tape calm. With no trigger on any fill I cannot separate market from change, so per
+   Rule 216 I record it as unattributed rather than crediting it to anything.
 
-**Risk.** Gross **$0.00**, net **$0.00**. Every position row is flat, unrealized is zero, the drawdown
-breaker is nowhere in sight. Exposure is not rising. The problem this cycle is the opposite of danger.
+## What I changed and why
 
-**Cause.** Last cycle's ADR-0113 scored **⚠️ MIXED** and did reach the JVM (boot 22:26Z against a 22:25Z
-commit; `PrintClock` gating both sensors). It behaved exactly as predicted — it narrows the observed
-universe and lowers exposure by design. No culprit to name.
+Item **#1** in the register, and this cycle it was ripe: last cycle traced the *cause* but was under a
+scoring hold and could not ship. The framing that mattered — `reason` is a **status-transition** field, so
+`OrderService.routeApproveAndFill` writes it only on the failure branches while the happy path
+`NEW → ROUTED → FILLED` passes a literal `null`. The column is not failing; it answers a different
+question. No patch at the order layer can recover a trigger that was never passed into it.
 
-**Danger.** No. Not bleeding, zero exposure. The live danger state does not apply.
+So the trigger is now threaded from the call sites that decide to trade: `NewOrder` carries a nullable
+`originReason`, written into a new `orders.origin_reason` column **at insert** — before any status exists —
+and never overwritten by a transition. Every deciding call site passes the sentence it already had
+(`signal.rationale()`, the AI sleeve's `thesis()`, the hedge advisor's `rationale()`), and the fusion
+planner, which places most of the flow, names four triggers the post-mortem must tell apart: an ADR-0086
+trailing-stop cut, an entry, a reduce toward a smaller target, and an exit decayed to flat. ADV child
+slices inherit the parent's trigger. A REJECTED order now keeps both the want and the refusal.
 
-**Order-level post-mortem.** The last fill of any kind was 19:54Z, over three hours ago. Every ALPHA fill
-in the window was AAPL or JPM, each shadowed within 10–40 s by a HEDGE ES clip of 0.003–0.069 contracts.
-No trigger to blame for a loss, because no trigger fired at all after the cash close.
+**This is telemetry only and it moves no money.** Nothing reads the field back, so a null origin cannot
+change what the desk trades; the deterministic floor, all money math and every sizing path are unchanged.
+It should be expected to score ⚠️ INCONCLUSIVE — the correct outcome for buying evidence, not a failure.
+It is worth a cycle because the register's next item (#2: ALPHA negative net of its own fees while a frozen
+hedge masks it) is not diagnosable without knowing which trigger opened the losers, and four consecutive
+cycles have now burned themselves guessing at that and then falsifying the guess.
 
-**Attribution, honestly.** The $11.81 is on a book holding nothing — neither market nor change. ADR-0113
-earns credit and blame for nothing this window.
+## Edge check (the standing priority) — unchanged, still nothing that can size
 
-## Diagnosis
-
-`/api/fusion/targets` publishes `instruments: 0`. `reversion` carries fusion weight 2.90 and is the only
-source with measured edge (t = 3.55); it publishes nothing, so the cross-section is empty. The WARN log
-names the mechanism on every name: *"reversion sensor still cold for ES after seeding 1 of 241 stored
-prices"* — ES, GBPUSD, NQ, and every equity.
-
-Reading `/api/history` per name gives the reason. The median inter-print gap is **19.9 s** on the Treasury
-curve, **90 s** on NQ, **778 s** on GBPUSD and **1,199 s** on ES, against a 10 s reversion cadence. The
-ADR-0071 seed derives two quantities from the *poll* cadence — how far back to read history
-(`interval × samples × 2` = 80 min) and how large a break stops the walk (`interval × 30` = 300 s). Both
-assume the tape prints at least as often as we poll. That is exactly the assumption ADR-0113 removed from
-the live path, and it was left standing in the seed. So for ES every **ordinary** 20-minute print interval
-exceeds the 300 s tolerance and reads as an outage: the walk breaks at the first one, seed = 1 of 241. The
-Treasury curve fails the other way — its gaps clear the tolerance, but 241 prints at ~20 s need 80 minutes
-of history against a lookback asking for exactly 80, hence the observed 147 of 241.
-
-Because the live path now accumulates at that same print rate, none of these names can ever warm — the
-ADR-0071 failure ("a sensor whose warm-up exceeds the process lifetime never speaks at all") re-entered
-through ADR-0113's own door.
-
-## What I changed
-
-ADR-0114 (Proposed, same commit): the seed's lookback and hole tolerance are counted in the step at which
-the **live sensor actually consumes that name** — `max(poll interval, that name's median inter-print
-gap)`, measured from its own stored series. The `×2` and `×30` constants are unchanged; only their unit
-moves, so no dial is added and nothing is configured. This is deliberately **not** the alternative
-ADR-0113 rejected ("widen the tolerance so the seed bridges the halt"): the tolerance is a multiple of the
-name's *own* typical interval, so a 12 s equity tape that stops for three hours at the cash close is still
-a hole and still truncates — pinned as a test, alongside one proving a fast tape is sampled bit-for-bit as
-before.
-
-Honest cost: this **raises** exposure by admitting names the desk currently cannot see, so if the
-reversion edge does not survive contact with them the loss is larger, not smaller. Expect NQ and the rates
-curve to reach a full seed and ES/GBPUSD/AUDUSD to seed from as much series as the 12 h retention holds.
+`/api/signals/telemetry` at `horizonSeconds` **3600**, as `avgReturnBps` / `cohorts` / `stdCohortMeanBps`:
+momentum **5.749961141428572** / **10** / **29.247194899516227**; social **5.743293811097191** / **22** /
+**25.910850044717932**; reversion **4.911734698471268** / **63** / **32.17586652023403**; trend
+**-2.044825086028045** / **71** / **30.426625198598547**; xsreversion **-6.146473850702721** / **25** /
+**33.63312259265042**. Every positive source remains small against its own cohort dispersion and the edge
+gate correctly lets none of them size. Unchanged for seven cycles — which is precisely why I spent this
+cycle on the evidence gap rather than on another combiner parameter.

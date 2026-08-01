@@ -43,7 +43,7 @@ public final class DepthController {
         }
         Map<String, String> names = instrumentNames();
         List<DepthDto> out = new ArrayList<>();
-        for (String id : properties.simInstruments()) {
+        for (String id : universeIds()) { // the DYNAMIC refdata master (invariant 9), not a hardcoded list
             QuoteCache.QuoteHolder q = rt.quoteCache().get(id);
             if (q == null || q.bidSizeScaled() <= 0) {
                 continue; // no quoted depth for this instrument (e.g. curve pseudo-quotes)
@@ -58,5 +58,13 @@ public final class DepthController {
     private Map<String, String> instrumentNames() {
         RefDataRepository rd = refData.getIfAvailable();
         return rd != null ? rd.instrumentAttribute("name") : Map.of();
+    }
+
+    /** The current tradable universe from the refdata master (invariant 9) — dynamic, so a discovery-
+     *  promoted or seeded name shows up here with no edit. Empty when refdata isn't wired. */
+    private List<String> universeIds() {
+        RefDataRepository rd = refData.getIfAvailable();
+        return rd == null ? List.of()
+                : rd.findAllInstruments().stream().map(i -> i.id().value()).toList();
     }
 }

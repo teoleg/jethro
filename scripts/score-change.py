@@ -38,7 +38,9 @@ Env: JETHRO_URL (default http://localhost:8080).
 """
 
 import json
+import math
 import os
+import statistics
 import subprocess
 import sys
 import urllib.request
@@ -62,6 +64,21 @@ ANALYSIS = os.path.join(REPO, "reports", "last-analysis.md")  # Claude's own rea
 #   gross-exposure drift. Override either via env without editing code.
 PNL_DEADBAND = Decimal(os.environ.get("JETHRO_SCORE_PNL_DEADBAND_USD", "50"))
 EXP_DEADBAND_FRAC = Decimal(os.environ.get("JETHRO_SCORE_EXPOSURE_DEADBAND_FRAC", "0.01"))
+
+# --- Evidence-based scoring (ADR-0116). A single 30-minute PnL delta on a small book is almost all
+# market noise, so the old one-cycle deadband verdict was MIXED on essentially everything and the loop
+# never learned. Instead a change is HELD for an evaluation window and judged by the SIGN + STATISTICAL
+# SIGNIFICANCE of its per-cycle risk-adjusted PnL over that window. These gate the verdict (and thus a
+# revert), so per CLAUDE.md they carry provenance — but they are METHODOLOGY knobs, not market/money
+# numbers, and are PLACEHOLDER — Oleg to tune:
+#   MIN_CYCLES  how many heartbeats must accrue with the change live before it is scored at all (a
+#               change is left running, not re-tried, until then). 6 is a round starting point.
+#   T_HURDLE    |t| of the mean per-cycle risk-adjusted return the window must clear to call GOOD/BAD;
+#               below it the verdict is INCONCLUSIVE (kept, not reverted). 1.5 is deliberately lenient.
+#   GROSS_FLOOR normalisation floor so a near-zero book can't turn a $1 mark wiggle into a huge "edge".
+MIN_CYCLES = int(os.environ.get("JETHRO_SCORE_MIN_CYCLES", "6"))
+T_HURDLE = Decimal(os.environ.get("JETHRO_SCORE_T_HURDLE", "1.5"))
+GROSS_FLOOR = Decimal(os.environ.get("JETHRO_SCORE_GROSS_FLOOR_USD", "1000"))
 
 # --- Owner-set PERFORMANCE TARGET (2026-07-26): total PnL must grow at least PNL_TARGET_PCT percent
 # every PNL_TARGET_WINDOW iterations. This is a KPI the loop is measured against and must actively
@@ -167,6 +184,82 @@ def classify(before, after):
     return "⚠️ MIXED", False, ra_note
 
 
+# ----------------------------- evidence-based verdict (ADR-0116) -----------------------------
+
+def evaluate_window(points, t_hurdle, exp_frac, floor):
+    """Score a change over its evaluation WINDOW rather than a single delta (ADR-0116).
+
+    `points` — the change's trajectory as chronological (pnl, gross) pairs (Decimals), oldest first,
+    starting at the baseline and ending at the current vector. The verdict rests on the SIGN and
+    STATISTICAL SIGNIFICANCE of the per-cycle risk-adjusted PnL over the window, so a real effect can be
+    told from mark noise even on a tiny book, and "no evidence yet" is honest rather than a false MIXED.
+
+    Per-cycle return r_i = ΔPnL_i / scale, where scale = max(floor, median |gross|) — flooring stops a
+    near-zero book amplifying a $1 wiggle into a huge apparent edge. t = mean·√n / stdev(r).
+
+      BAD (revert)   t ≤ −hurdle (significantly losing risk-adjusted), OR exposure grew with a
+                     non-positive mean return (bought risk, earned nothing).
+      GOOD           t ≥ +hurdle (significantly positive) AND exposure did not grow.
+      INCONCLUSIVE   otherwise — not enough evidence; the change is KEPT, not reverted.
+
+    Pure function — deterministic, no I/O, no model (invariant 7). Returns (verdict, revert, note, stats).
+    """
+    th = float(t_hurdle)
+    if len(points) < 3:
+        return "⚠️ INCONCLUSIVE", False, f"only {len(points)} observation(s) — not enough to test", {"n": 0}
+    scale = max(float(floor), statistics.median(abs(float(g)) for _, g in points))
+    rets = [float(points[i + 1][0] - points[i][0]) / scale for i in range(len(points) - 1)]
+    n = len(rets)
+    mean = statistics.fmean(rets)
+    sd = statistics.pstdev(rets) if n > 1 else 0.0
+    if sd > 0:
+        t = mean * math.sqrt(n) / sd
+    else:
+        t = 0.0 if mean == 0 else math.copysign(float("inf"), mean)
+    g0 = abs(float(points[0][1]))
+    g1 = abs(float(points[-1][1]))
+    grew = (g1 - g0) > exp_frac_float(exp_frac) * max(g0, float(floor))
+    note = (f"risk-adj return/cycle {mean:+.6f} over {n} cycles, t={t:+.2f} (hurdle {th:.1f}); "
+            f"gross {g0:,.0f}→{g1:,.0f}{' [grew]' if grew else ''}")
+    stats = {"n": n, "mean_ret_per_cycle": round(mean, 8), "t": round(t, 3) if math.isfinite(t) else t,
+             "scale": round(scale, 2), "gross_start": g0, "gross_end": g1, "grew": grew}
+    if t <= -th or (grew and mean <= 0):
+        return "❌ BAD", True, note, stats
+    if t >= th and not grew:
+        return "✅ GOOD", False, note, stats
+    return "⚠️ INCONCLUSIVE", False, note, stats
+
+
+def exp_frac_float(exp_frac):
+    return float(exp_frac)
+
+
+def window_since(base_ts, base_mode):
+    """The change's evaluation window: heartbeats recorded strictly AFTER the baseline, same feed mode
+    (invariant 8), with valid numbers — returned chronological (oldest first) as (pnl, gross) Decimals."""
+    try:
+        with open(STATUS, "r", encoding="utf-8") as f:
+            entries = json.load(f)
+    except Exception:
+        return []
+    out = []
+    for e in entries:  # STATUS is newest-first
+        ts = e.get("ts")
+        if not ts or not base_ts or ts <= base_ts:
+            continue
+        if base_mode and e.get("feedMode") and e.get("feedMode") != base_mode:
+            continue
+        p, g = e.get("total_pnl"), e.get("gross")
+        if p in (None, "") or g in (None, ""):
+            continue
+        try:
+            out.append((Decimal(str(p)), Decimal(str(g))))
+        except (InvalidOperation, ValueError):
+            continue
+    out.reverse()
+    return out
+
+
 # ----------------------------- ledger + snapshot writers -----------------------------
 
 def prepend_ledger_row(row):
@@ -236,18 +329,57 @@ def cmd_score():
         "gross": dec(base["gross_exposure"]),
         "net": dec(base["net_exposure"]),
     }
-    verdict, revert, note = classify(before, after)
     sha = base.get("commit", "unknown")
     short = sha[:9]
+
+    # ADR-0116: hold the change over an evaluation window and judge it by the SIGNIFICANCE of its
+    # per-cycle risk-adjusted PnL, not one noisy 30-min delta. The trajectory is the heartbeats recorded
+    # since the baseline (same feed mode) plus the current vector. Until MIN_CYCLES cycles have accrued
+    # the change is left running and NOT scored — the prompt tells the loop to HOLD rather than pile on a
+    # new change, so the evidence is about THIS change and not the next one.
+    window = window_since(base.get("ts"), base_mode)
+    if len(window) < MIN_CYCLES:
+        print(f"score: {short} still accumulating evidence ({len(window)}/{MIN_CYCLES} cycles) — "
+              f"held, not scored this run")
+        return 0
+    points = [(before["pnl"], before["gross"])] + window + [(after["pnl"], after["gross"])]
+    verdict, revert, note, stats = evaluate_window(points, T_HURDLE, EXP_DEADBAND_FRAC, GROSS_FLOOR)
+
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     summary = base.get("summary", "")
 
-    # Audited snapshot — every number a verdict rests on, recomputable by anyone.
+    # Attempt the revert FIRST, so the snapshot, ledger row and heartbeat record what ACTUALLY happened
+    # rather than what the verdict asked for. A silent revert failure (git conflict) would otherwise leave
+    # a BAD commit LIVE while every downstream reader — the ledger note, the Improve page, next run's
+    # Step 0 — believes it was pulled.
+    reverted_ok = None  # None = no revert intended; True = reverted; False = revert intended but FAILED
+    if revert and sha != "unknown":
+        r = git("revert", "--no-edit", sha, check=False)
+        if r.returncode != 0:
+            git("revert", "--abort", check=False)
+            reverted_ok = False
+            print(f"score: BAD verdict but `git revert {short}` conflicted — NOT reverted; still LIVE, "
+                  f"needs a manual revert")
+        else:
+            reverted_ok = True
+            print(f"score: BAD verdict — reverted {short}")
+
+    # A revert that was intended but FAILED must never read as "reverted": mark the note that lands in both
+    # the ledger and the snapshot, so the record states plainly that the commit is still live.
+    if reverted_ok is False:
+        note = note + (" — ⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a "
+                       "manual revert")
+
+    # Audited snapshot — every number a verdict rests on, recomputable by anyone. `revertApplied` records
+    # the ACTUAL git outcome (True = reverted / False = intended but failed / None = none intended),
+    # distinct from `revert` (what the verdict ASKED for) so a failure can never masquerade as a revert.
     snap_name = f"{ts.replace(':', '').replace('-', '')}-{short}.json"
     snap = {
         "scoredAt": ts, "commit": sha, "summary": summary,
-        "verdict": verdict, "revert": revert, "note": note,
-        "deadbands": {"pnlUsd": str(PNL_DEADBAND), "exposureFrac": str(EXP_DEADBAND_FRAC)},
+        "verdict": verdict, "revert": revert, "revertApplied": reverted_ok, "note": note,
+        "method": {"minCycles": MIN_CYCLES, "tHurdle": str(T_HURDLE),
+                   "grossFloorUsd": str(GROSS_FLOOR), "exposureFrac": str(EXP_DEADBAND_FRAC)},
+        "windowStats": stats,
         "before": {"total_pnl": base.get("total_pnl", base.get("alpha_pnl")),
                    "gross": base["gross_exposure"], "net": base["net_exposure"], "at": base.get("ts")},
         "after": {"total_pnl": str(after["pnl"]), "gross": str(after["gross"]), "net": str(after["net"]),
@@ -265,17 +397,6 @@ def cmd_score():
         net=pair(before["net"], after["net"]),
         verdict=verdict, note=note.replace("|", "/"))
     prepend_ledger_row(row)
-
-    reverted_ok = None
-    if revert and sha != "unknown":
-        r = git("revert", "--no-edit", sha, check=False)
-        if r.returncode != 0:
-            git("revert", "--abort", check=False)
-            reverted_ok = False
-            print(f"score: BAD verdict but `git revert {short}` conflicted — NOT reverted; needs attention")
-        else:
-            reverted_ok = True
-            print(f"score: BAD verdict — reverted {short}")
 
     os.remove(PENDING)
     git("add", "reports/", check=False)
@@ -427,7 +548,13 @@ def cmd_status(argv):
     head = git("rev-parse", "--short", "HEAD", check=False).stdout.strip()
     snap = newest_snapshot() if scored else None
     last_verdict = snap.get("verdict") if snap else None
-    reverted = bool(snap and snap.get("revert"))
+    revert_intended = bool(snap and snap.get("revert"))
+    # `revertApplied` is the ACTUAL git outcome (absent on pre-fix snapshots → assume it applied, the old
+    # behaviour). A revert intended but not applied is a FAILURE the next run's Step 0 must see without
+    # reading git — a BAD commit is still live.
+    revert_applied = snap.get("revertApplied") if snap else None
+    revert_failed = revert_intended and revert_applied is False
+    reverted = revert_intended and not revert_failed
 
     # Claude's own reasoning for this cycle, if it wrote one (reports/last-analysis.md). Only trust it
     # when the brain actually ran this cycle — a stale file from a prior run must not look current.
@@ -444,6 +571,8 @@ def cmd_status(argv):
         action = "market-closed"
     elif not brain_ran:
         action = "no-analysis"
+    elif revert_failed:
+        action = "revert-failed"
     else:
         action = "reverted" if reverted else ("changed" if changed else "no-change")
 
@@ -456,6 +585,10 @@ def cmd_status(argv):
                     "PATH?). No diagnosis was made; the heartbeat/score still ran. Fix the loop's PATH.")
     elif not available:
         decision = f"app unreachable — not measured ({err})"
+    elif revert_failed:
+        short = (snap.get("commit") or "")[:9]
+        decision = (f"⚠️ {short} scored {last_verdict} but the auto-revert FAILED (git conflict) — the "
+                    f"commit is STILL LIVE and needs a manual revert; NOT backed off")
     elif reverted:
         short = (snap.get("commit") or "")[:9]
         decision = f"backed off {short} ({last_verdict}) — next run tries a different lever"
@@ -491,6 +624,7 @@ def cmd_status(argv):
         "underwater": underwater,
         "action": action,
         "last_verdict": last_verdict,
+        "revert_failed": revert_failed,   # a BAD verdict whose git revert conflicted — commit still live
         "decision": decision,
         "reasoning": reasoning,
         "commit": head,

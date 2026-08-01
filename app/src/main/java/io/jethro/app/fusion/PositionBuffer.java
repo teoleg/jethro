@@ -64,12 +64,21 @@ import java.util.Map;
  * aim is clamped into the closed interval between flat and this cycle's target, which can only ever
  * shrink intent or put it back on the side the forecast is on.
  *
+ * <p><b>And so is the position it STOPS AT (ADR-0132).</b> Buffering the aim bounds where the desk means
+ * to be; it does not bound where the desk actually stops, which is a whole band below that. Because the
+ * band is scaled by the average position at the TARGET, it routinely exceeds the aim early on the aim's
+ * slow path, so the no-trade region straddles flat and reaches onto the side the forecast opposes — and a
+ * wrong-side holding inside it is frozen at exactly zero delta indefinitely. See {@link #onTargetSide}:
+ * the destination is held to the side of flat the target is on, which is the same bound ADR-0102 puts on
+ * the intent.
+ *
  * <p><b>What it can never do.</b> It never widens a trade the desk was not already going to make in the
  * same direction on the same aim path, it never moves the aim past the target, and it never buffers an
  * exit: a flat target (the ADR-0086 chandelier cut, the ADR-0065 orphan unwind, the ADR-0027 breaker
- * above it) snaps the aim to zero and trades the whole position, exactly as before. Where the ADR-0064
- * edge gate says a name may not increase, the order is clamped reduce-only and the aim is re-seeded to
- * where the desk will actually be, so intent cannot run away from a book that is not allowed to follow it.
+ * above it) snaps the aim to zero and trades the whole position, exactly as before. Where the desk may
+ * not increase a name — the ADR-0064 edge gate, or ADR-0126's unarmed trailing stop — the order is
+ * clamped reduce-only and the aim is re-seeded to where the desk will actually be, so intent cannot run
+ * away from a book that is not allowed to follow it. See {@link #mayIncrease}.
  *
  * <p>Exact decimal throughout (invariant 1); the only doubles are the dimensionless rate and fraction.
  * It prices nothing and asserts no money number (invariant 7 / ADR-0016).
@@ -111,6 +120,20 @@ public final class PositionBuffer {
      * @param adjustmentRate the ADR-0080 derived partial-adjustment fraction for this cycle
      */
     public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate) {
+        return apply(targets, gate, adjustmentRate, null);
+    }
+
+    /**
+     * ADR-0126 — as above, plus the second reason a name may not have risk ADDED to it: its ADR-0086
+     * trailing-stop σ sensor has not warmed, so the desk has no measured distance at which it would cut
+     * the position and the risk cut cannot protect it. {@code stopArmed} answers "can this name be
+     * stopped out?"; null means unwired, which leaves every path byte-identical.
+     *
+     * @param adjustmentRate the ADR-0080 derived partial-adjustment fraction for this cycle
+     * @param stopArmed      per-name predicate: true when the risk-cut sensor can price this name's stop
+     */
+    public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
+                        java.util.function.Predicate<String> stopArmed) {
         if (targets == null || targets.isEmpty()) {
             aims.clear();
             return new Result(List.of(), Map.of(), 0, 0);
@@ -128,11 +151,16 @@ public final class PositionBuffer {
             double width = widthFor(t.instrument(), gate, edgeBps);
             BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held, width),
                     target, rate);
-            if (gate != null && !gate.mayIncrease(t.instrument())) {
+            if (!mayIncrease(gate, stopArmed, t.instrument())) {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
                 // accumulate into one large order the moment the gate reopens.
-                delta = TargetPlanner.reduceOnly(delta, held);
+                // ADR-0118: an intent of FLAT in a name the gate forbids rebuilding is an EXIT, and an
+                // exit is not buffered (ADR-0090). Otherwise the desk holds a position its own forecast
+                // is on the other side of, at a band scaled by a target it may never reach.
+                delta = isTrappedExit(aim, held)
+                        ? held.negate().setScale(QTY_SCALE, RoundingMode.HALF_EVEN)
+                        : TargetPlanner.reduceOnly(delta, held);
                 aim = held.add(delta).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
             }
             aims.put(t.instrument(), aim);
@@ -144,11 +172,79 @@ public final class PositionBuffer {
             }
             out.add(delta.compareTo(t.deltaQty() == null ? BigDecimal.ZERO : t.deltaQty()) == 0 ? t
                     : new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
-                            t.diversificationMultiplier(), t.price(), t.targetQty(), t.currentQty(),
+                            t.diversificationMultiplier(), t.agreement(), t.price(), t.targetQty(), t.currentQty(),
                             delta, t.contributions()));
         }
         aims.keySet().retainAll(snapshot.keySet()); // a name that left the book leaves no intent behind
         return new Result(out, Collections.unmodifiableMap(snapshot), inside, traded);
+    }
+
+    /**
+     * May this name have risk ADDED to it this cycle? Two independent reasons say no, and either alone
+     * is sufficient:
+     * <ul>
+     *   <li><b>ADR-0064/0072</b> — the edge gate has no measured edge that beats this name's measured
+     *       round trip. {@code gate} null means the measurement is not wired, which is silence, not a
+     *       veto.</li>
+     *   <li><b>ADR-0126</b> — the name's ADR-0086 trailing-stop σ sensor has not warmed, so there is no
+     *       measured distance at which the desk would cut it. A position that cannot be stopped out is
+     *       one the desk's own risk control cannot protect, and opening it is taking risk it has no
+     *       exit for. {@code stopArmed} null means the sensor is not wired, which is again silence.</li>
+     * </ul>
+     *
+     * <p><b>Why this is a conjunction and not a branch inside the gate's.</b> The σ-cold veto is
+     * evaluated whether or not the edge gate is wired or enabled. A rule whose body only runs inside
+     * {@code if (gate != null && !gate.mayIncrease(...))} is dead the moment the gate is switched off —
+     * which is the desk's current configuration under ADR-0122 — and a risk control that disappears with
+     * an unrelated dial is not a control. The two reasons are therefore combined here, at the one place
+     * the delta is finally decided.
+     */
+    private static boolean mayIncrease(EdgeGate.Decision gate,
+                                       java.util.function.Predicate<String> stopArmed, String instrument) {
+        if (gate != null && !gate.mayIncrease(instrument)) {
+            return false;
+        }
+        return stopArmed == null || stopArmed.test(instrument);
+    }
+
+    /**
+     * ADR-0118 — is this name's position an exit the buffer would otherwise trap? True when the desk's
+     * settled intent is FLAT while it still holds something, <em>in a name the edge gate has put
+     * reduce-only</em> (the caller's branch).
+     *
+     * <h3>How the trap forms</h3>
+     * A flat aim arises two ways. Either a control planned the name flat — {@link #nextAim} snaps the aim
+     * to zero and {@link #bufferedDelta} already works that in full — or ADR-0102's {@code withinTarget}
+     * clamped it, which happens for exactly one reason: <b>the held position is on the side the current
+     * forecast opposes</b>, so no position between flat and the target contains it and the intent is held
+     * at flat. The second case reaches the buffer as an ordinary rebalance and is measured against a band
+     * scaled by {@code |target| × TARGET_ABS / |forecast|} — the average position at the TARGET. Under a
+     * shut gate the desk may never take that target, so the band is a no-trade region sized by a position
+     * it is forbidden to hold, and any wrong-side holding smaller than it is frozen: the delta is exactly
+     * zero every cycle, indefinitely, and the position is not being wound down — it is stuck.
+     *
+     * <p>Diagnosed on the live book: short 1 AAPL against a target of +6.031064 at forecast +0.436599,
+     * giving an average position of 138.137520 and a band of 13.813752 against a gap of 1.000000. The
+     * desk carried a short its own model wanted long, hedged it with ES — so it paid gross exposure on
+     * BOTH legs — and had no path to closing either.
+     *
+     * <h3>Why this is not ADR-0080's mistake again</h3>
+     * ADR-0090 narrowed "work every reduction in full" because a mean-reverting forecast crosses the held
+     * position many times inside one horizon, and liquidating on each crossing paid a full round trip per
+     * wobble while never reaching size. That failure needs the desk to be able to REBUILD. This branch
+     * fires only where the gate has taken rebuilding away: the sole trade available in the name is a cut,
+     * so there is no round trip to churn — the position can be closed once and not reopened until measured
+     * evidence reopens the gate, which moves on the gate's timescale (hours of accumulated cohorts), not
+     * the forecast's. A gate that is OPEN leaves every path here byte-identical.
+     *
+     * <h3>What it can never do</h3>
+     * It resolves to flat and nothing else, so {@code |held + delta| = 0 < |held|}: strictly
+     * risk-reducing, never opening, never enlarging, never flipping a position onto a new side. Exact
+     * decimal, no number introduced (invariant 1, invariant 7 / ADR-0016), and it sits above the
+     * deterministic floor — the pre-trade guardrail and the firm breaker still have the last word.
+     */
+    private static boolean isTrappedExit(BigDecimal aim, BigDecimal held) {
+        return aim.signum() == 0 && held.signum() != 0;
     }
 
     /**
@@ -372,11 +468,14 @@ public final class PositionBuffer {
         if (target.signum() == 0) {
             return gap; // a control ordered the exit — worked in full (ADR-0090/0086/0065)
         }
-        if (gap.abs().compareTo(band) <= 0) {
+        BigDecimal edge = gap.abs().compareTo(band) <= 0
+                ? BigDecimal.ZERO.setScale(QTY_SCALE)
+                : gap.abs().subtract(band).multiply(BigDecimal.valueOf(gap.signum()))
+                        .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+        edge = onTargetSide(edge, aim, held, target); // ADR-0132
+        if (edge.signum() == 0) {
             return BigDecimal.ZERO.setScale(QTY_SCALE);
         }
-        BigDecimal edge = gap.abs().subtract(band).multiply(BigDecimal.valueOf(gap.signum()))
-                .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
         if (held.signum() == 0 || aim.signum() == held.signum()) {
             return edge; // the aim moved by a rated step on its own side — ADR-0094, unchanged
         }
@@ -386,5 +485,61 @@ public final class PositionBuffer {
         return edge.subtract(unwind)
                 .add(unwind.multiply(BigDecimal.valueOf(rate)))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+    }
+
+    /**
+     * ADR-0132 — the position the buffer STOPS AT, held to the side of flat the current target is on.
+     *
+     * <h3>The hole this closes</h3>
+     * ADR-0094 buffers around the <em>aim</em> and trades to the near edge, so the position the desk
+     * settles at is {@code aim − band·sgn(gap)}. ADR-0102 confines the aim to the closed interval between
+     * flat and the target, but nothing confined that destination — and the band is scaled by
+     * {@code |target| × TARGET_ABS / |forecast|}, the average position at the TARGET, which is routinely
+     * many times the aim early on the aim's slow ADR-0080 path. Subtracting a whole band from a small aim
+     * lands past flat: the no-trade region straddles zero and extends onto the side the desk's own
+     * forecast opposes. A holding on that side is then either frozen at exactly zero delta (it sits inside
+     * the region) or traded toward a destination that is still on the wrong side. Either way the desk
+     * intends to keep a position its current view contradicts, pays gross exposure on it, and pays again
+     * on the hedge sized against it.
+     *
+     * <p>ADR-0118 diagnosed exactly this position — short 1 AAPL against a target of +6.031064 at forecast
+     * +0.436599, band 13.813752 against a gap of 1.000000 — but scoped its remedy to
+     * {@link #isTrappedExit}, which only runs where {@link #mayIncrease} is false. With the edge gate off
+     * (ADR-0122, the desk's shipped configuration) and the ADR-0126 σ sensors warm, that branch never
+     * runs, so the trap it describes was live on the ordinary path the whole time.
+     *
+     * <h3>The rule</h3>
+     * A destination on the opposite side of flat from the target is replaced by flat. Nothing else moves:
+     * the band, the aim path and the ADR-0107 rating are untouched, and a destination already on the
+     * target's side (or at flat) is returned unchanged, so every same-side rebalance is byte-identical.
+     *
+     * <h3>Why it can only ever reduce risk</h3>
+     * The clamp resolves the destination to flat, so {@code |held + delta'| = 0 ≤ |held|}: it never opens
+     * a position, never enlarges one, and never flips one onto a new side. It also never trades past the
+     * aim, i.e. {@code |delta'| ≤ |gap|}, because it fires only when {@code held} is on the side the target
+     * opposes: with {@code sgn(aim) ∈ {0, sgn(target)}} the aim and the holding are then on opposite sides
+     * of flat (or the aim is flat), so {@code |gap| = |aim| + |held| ≥ |held| = |delta'|}. And it fires
+     * <em>only</em> there — for a holding on the target's own side with the aim in ADR-0102's interval the
+     * destination is {@code held + edge ≥ held > 0} when {@code gap ≥ 0} and {@code aim + band ≥ 0} when
+     * {@code gap < 0}, neither of which can cross flat.
+     *
+     * <p>Where ADR-0102's guarantee does not hold for the aim it is handed — an aim on neither flat nor
+     * the target's side, which {@link #nextAim} cannot produce — there is no interval to hold the
+     * destination to and no claim to make, so the delta is returned untouched. A flat target never reaches
+     * here (that branch returns above), so the ADR-0086 cut, the ADR-0065 unwind and the deterministic
+     * floor above them keep their exact semantics.
+     *
+     * <p>Exact decimal (invariant 1). It introduces no number at all — the bound is flat (invariant 7 /
+     * ADR-0016).
+     */
+    static BigDecimal onTargetSide(BigDecimal delta, BigDecimal aim, BigDecimal held, BigDecimal target) {
+        if (target.signum() == 0 || (aim.signum() != 0 && aim.signum() != target.signum())) {
+            return delta; // no ADR-0102 interval to hold the destination to
+        }
+        BigDecimal dest = held.add(delta);
+        if (dest.signum() == 0 || dest.signum() == target.signum()) {
+            return delta; // already where the current view can justify being
+        }
+        return held.negate().setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
     }
 }

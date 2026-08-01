@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jethro — overview</title>
+<link rel="stylesheet" href="/hub.css"><!-- focus-tile styles (ADR-0133); inline <style> below overrides any shared rule -->
 <style>
   /* v0 placeholder page (ADR-0017/0021); replaced by the React app under ui/ as views grow. */
   :root {
@@ -126,27 +127,17 @@
 <body>
 <script src="/format.js"></script>
 <script src="/poll.js"></script>
+<script src="/hub.js"></script><!-- populates the focus-tile stats (ADR-0133) -->
 <div class="topbar">
   <div class="bar">
     <span class="brand"><span class="dot"></span>JETHRO</span>
     <nav class="tabs">
       <a class="tab active" href="/">Overview</a>
-      <a class="tab" href="/improve.html">Improve</a>
-      <a class="tab" href="/markets.html">Markets</a>
-      <a class="tab" href="/rates.html">Rates</a>
-      <a class="tab" href="/books.html">Books</a>
-      <a class="tab" href="/orders.html">Orders</a>
-      <a class="tab" href="/config.html">Config</a>
-      <a class="tab" href="/sim.html">Sim</a>
-      <a class="tab" href="/backtest.html">Backtest</a>
-      <a class="tab" href="/strategy.html">Strategy</a>
-      <a class="tab" href="/signals.html">Signals</a>
-      <a class="tab" href="/social.html">Social</a>
-      <a class="tab" href="/social-sources.html">Sources</a>
-      <a class="tab" href="/discovery.html">Discover</a>
-      <a class="tab" href="/ollama.html">Ops</a>
+      <a class="tab" href="/hub-status.html">Status</a>
+      <a class="tab" href="/hub-strategy.html">Strategy</a>
+      <a class="tab" href="/hub-discovery.html">Discovery</a>
+      <a class="tab" href="/hub-ops.html">Ops</a>
     </nav>
-    <div class="indices" id="indices"></div>
     <span class="feeds" id="feeds"></span>
     <span class="pill" id="trendPill" title="market trend — price-derived (ADR-0044)"><span class="led"></span><span>trend —</span></span>
     <span class="pill" id="regimePill" title="volatility regime — price-derived (ADR-0051)"><span class="led"></span><span>regime —</span></span>
@@ -157,35 +148,39 @@
   <!-- price ticker across the top -->
   <div class="ticker" id="ticker"><span class="muted" style="padding:4px 8px">loading prices…</span></div>
 
-  <!-- LEFT: book & risk -->
-  <div class="col">
-    <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
-    <div class="stats" id="stats"></div>
-    <div class="section-h">Hedging <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic min-variance proxy hedge (ADR-0038): net equity held target-flat, the sized hedge &amp; its math</span>
-      <span class="badge" id="hedgeMode" style="margin-left:8px" title="OFF / ADVISE / AUTO">—</span>
-      <span class="badge" id="histBadge" style="margin-left:6px" title="daily-return history the covariance is built from">hist —</span></div>
-    <div class="panel pad"><div id="hedging" class="muted" style="padding:14px">loading…</div></div>
-    <div class="section-h">By market</div>
-    <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
-    <div class="section-h">Today's orders <span class="muted" id="obcount"></span></div>
-    <div class="panel pad">
-      <div id="oblotter" class="muted" style="padding:12px">loading…</div>
-      <div style="display:flex;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid var(--line)">
-        <button class="pgbtn" id="obprev">‹ prev</button>
-        <span class="muted" id="obpage" style="font-size:12px"></span>
-        <button class="pgbtn" id="obnext">next ›</button>
-      </div>
-    </div>
+  <!-- consolidated P&L — one tile, all firm numbers on top (ADR-0133) -->
+  <a class="tile pnl" href="/hub-status.html" style="--accent:#5b8cff;grid-column:1/-1;min-height:auto;margin:2px 0 2px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="icon">💰</span><h2>Consolidated P&amp;L</h2>
+      <span class="sl" style="font-weight:400;text-transform:none;letter-spacing:0">firm total — all books incl. hedge <span class="muted" id="asof"></span></span></div>
+    <div class="stats" id="pnlStats"><span class="s"><span class="sv mut">…</span><span class="sl">loading</span></span></div>
+    <span class="go">Status →</span>
+  </a>
+
+  <!-- focus hubs: tiles below the strip; the marquee + status pills above are untouched (ADR-0133) -->
+  <div class="section-h" style="grid-column:1/-1">Focus — jump to a hub</div>
+  <div class="grid" style="grid-column:1/-1;margin-top:0">
+    <a class="tile" href="/hub-status.html" style="--accent:#5b8cff" data-summary="risk">
+      <span class="icon">📊</span><h2>Status</h2>
+      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">firm pnl · risk</span></span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/hub-strategy.html" style="--accent:#35c07a" data-summary="fusion">
+      <span class="icon">🧠</span><h2>Strategy</h2>
+      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">fused targets</span></span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/hub-discovery.html" style="--accent:#e0a83d" data-summary="discovery">
+      <span class="icon">🔭</span><h2>Discovery</h2>
+      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">candidates</span></span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/hub-ops.html" style="--accent:#8b95a8" data-summary="improve">
+      <span class="icon">⚙️</span><h2>Ops</h2>
+      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">loop cycles</span></span></div><span class="go">Open →</span>
+    </a>
   </div>
 
-  <!-- RIGHT: attention · hypotheses · chat (three fixed-height panels) -->
-  <div class="col">
-    <div class="section-h">Needs your attention</div>
-    <div id="feed" class="feed"><div class="empty">all quiet</div></div>
-    <div class="section-h">Signals — combined view <span class="muted" id="fusionMode" style="text-transform:none;letter-spacing:0">— ADR-0055: every source fused into one target per name</span></div>
-    <div class="panel pad hypo-panel"><div id="fusionPanel" class="muted" style="padding:14px">loading…</div></div>
-    <div id="fusionFoot" class="muted" style="font-size:11px;padding:2px 4px"></div>
-  </div>
+  <!-- positions by market — table under the tiles (ADR-0133) -->
+  <div class="section-h" style="grid-column:1/-1;margin-top:10px">Positions by market</div>
+  <div class="panel pad" style="grid-column:1/-1"><div id="byMarket" class="muted" style="padding:14px">loading…</div></div>
+
 </main>
 
 <!-- chat: a floating dock opened from the button (rarely used, keeps the columns for data) -->
@@ -209,27 +204,32 @@
 
   let lastVar = null; // /api/var refreshes slower than /api/risk; cache for the tile
   let lastEod = null; // /api/eod — session day + today's P&L measured from the previous close
+  // Consolidated P&L → the single top tile (#pnlStats, hub stat cells); positions → the table (#byMarket).
   function renderRisk(r) {
-    document.getElementById("asof").textContent = "· " + fmtTimeET(r.asOfMillis);
-    const t = r.total;
-    const varTile = lastVar == null ? "" : (lastVar.note
-      ? `<div class="stat"><div class="k">VaR 95 (1d)</div><div class="v mono muted" style="font-size:12px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</div></div>`
-      : `<div class="stat"><div class="k" title="historical simulation, ${lastVar.observations} days; ES95 ${lastVar.es95}${Number(lastVar.skippedExposure)>0?'; unmeasured exposure '+lastVar.skippedExposure:''}${lastVar.parametric?`; parametric (normal EWMA) VaR95 ${lastVar.parametric.var95} / ES95 ${lastVar.parametric.es95} — thin-tailed by assumption`:''}">VaR 95 (1d)</div><div class="v mono down">${money(lastVar.var95)}</div></div>`);
-    const dayTile = (lastEod == null || lastEod.todayPnl == null) ? "" :
-      `<div class="stat"><div class="k" title="since the previous session close (${esc(lastEod.previousCloseTotal)})${lastEod.overnightPnl!=null?` — overnight ${money(lastEod.overnightPnl)} / intraday ${money(lastEod.intradayPnl)}`:''} — session ${esc(lastEod.sessionDay)}, ${esc(lastEod.calendar)}">Today's P&L</div><div class="v mono ${cls(lastEod.todayPnl)}">${money(lastEod.todayPnl)}</div></div>`;
-    document.getElementById("stats").innerHTML =
-      stat("Total P&L", t.totalPnl, true) + dayTile + stat("Realized", t.realizedPnl) + stat("Unrealized", t.unrealizedPnl) +
-      `<div class="stat"><div class="k">Net exposure</div><div class="v mono">${money(t.netExposure)}</div></div>` +
-      `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>` + varTile;
+    const t = r.total || {};
+    const asof = document.getElementById("asof");
+    if (asof) asof.textContent = "· " + fmtTimeET(r.asOfMillis);
+    const cell = (label, val, big, plain) =>
+      `<span class="s"><span class="sv ${plain ? '' : cls(val)}"${big ? ' style="font-size:22px"' : ''}>${money(val)}</span><span class="sl">${label}</span></span>`;
+    const dayCell = (lastEod == null || lastEod.todayPnl == null) ? "" :
+      `<span class="s"><span class="sv ${cls(lastEod.todayPnl)}" title="since the previous session close (${esc(lastEod.previousCloseTotal)}) — session ${esc(lastEod.sessionDay)}">${money(lastEod.todayPnl)}</span><span class="sl">Today</span></span>`;
+    const varCell = lastVar == null ? "" : (lastVar.note
+      ? `<span class="s"><span class="sv mut" style="font-size:13px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</span><span class="sl">VaR 95 1d</span></span>`
+      : `<span class="s"><span class="sv down" title="historical simulation, ${lastVar.observations}d; ES95 ${lastVar.es95}">${money(lastVar.var95)}</span><span class="sl">VaR 95 1d</span></span>`);
+    const ps = document.getElementById("pnlStats");
+    if (ps) ps.innerHTML =
+      cell("Total P&L", t.totalPnl, true) + dayCell + cell("Realized", t.realizedPnl) + cell("Unrealized", t.unrealizedPnl) +
+      cell("Gross exp", t.grossExposure, false, true) + cell("Net exp", t.netExposure, false, true) + varCell;
     const g = r.byAssetClass || [];
-    document.getElementById("byclass").outerHTML = '<div id="byclass">' + (g.length ?
+    const bm = document.getElementById("byMarket");
+    if (bm) bm.innerHTML = g.length ?
       "<table><tr><th>market</th><th>pos</th><th>realized</th><th>unrealized</th><th>total P&L</th><th>gross exp</th></tr>" +
       g.map(x => `<tr><td class="cls">${esc(x.key)}</td><td class="muted mono">${x.positionCount}</td>
         <td class="mono ${cls(x.realizedPnl)}">${money(x.realizedPnl)}</td>
         <td class="mono ${cls(x.unrealizedPnl)}">${money(x.unrealizedPnl)}</td>
         <td class="mono ${cls(x.totalPnl)}">${money(x.totalPnl)}</td>
         <td class="mono">${money(x.grossExposure)}</td></tr>`).join("") + "</table>"
-      : '<div class="muted" style="padding:14px">no positions yet — the strategy or an order will build a book</div>') + '</div>';
+      : '<div class="muted" style="padding:14px">no positions yet — the strategy or an order will build a book</div>';
   }
 
   function renderFeed(items) {
@@ -287,70 +287,55 @@
     } catch (e) {}
   }
 
-  // ---- price ticker + feed connection indicators ----
+  // ---- price ticker (world indices + securities, one strip under the menu) ----
   let tickPrev = {};
   async function loadTicker() {
     try {
-      const marks = (await (await pollFetch("/api/marks")).json()).filter(m => !m.instrumentId.startsWith("USD.SOFR."));
       const el = document.getElementById("ticker");
-      if (!marks.length) { el.innerHTML = '<span class="muted" style="padding:4px 8px">no live prices</span>'; el.dataset.syms = ""; return; }
-      // Compute each tile's HTML once per refresh (the up/down colour diff mutates tickPrev,
-      // so it must run exactly once per symbol even though the marquee has two copies).
+      // World indices lead the strip (named, with a change chip); securities follow. Indices come
+      // through /api/marks too, so exclude their ids from the securities half to avoid duplication.
+      const [marksRaw, indicesRaw] = await Promise.all([
+        pollFetch("/api/marks").then(r => r.json()).catch(() => []),
+        pollFetch("/api/indices").then(r => r.json()).catch(() => [])
+      ]);
+      const indices = (indicesRaw || []).filter(x => x.hasMark);
+      const indexIds = new Set((indicesRaw || []).map(x => x.instrumentId));
+      const marks = (marksRaw || []).filter(m =>
+        !m.instrumentId.startsWith("USD.SOFR.") && !indexIds.has(m.instrumentId));
+      if (!marks.length && !indices.length) {
+        el.innerHTML = '<span class="muted" style="padding:4px 8px">no live prices</span>'; el.dataset.syms = ""; return;
+      }
+      // Compute each tile's HTML once per refresh (the up/down colour diff mutates tickPrev, so it
+      // must run exactly once per symbol even though the marquee renders two copies).
       const inner = {};
+      indices.forEach(x => {
+        const chg = x.changePct == null ? null : Number(x.changePct);
+        const c = chg == null ? "flat" : (chg > 0 ? "up" : (chg < 0 ? "down" : "flat"));
+        const chip = chg == null ? "" : `<span class="c mono ${c}">${chg > 0 ? "+" : ""}${x.changePct}%</span>`;
+        const px = Number(x.price).toLocaleString(undefined, { maximumFractionDigits: 2 });
+        inner["IX:" + x.instrumentId] = `<span class="s">${esc(x.displayName)}</span><span class="p mono">${esc(px)}</span>` + chip;
+      });
       marks.forEach(m => {
         const prev = tickPrev[m.instrumentId], now = Number(m.price);
         const c = prev == null ? "flat" : (now > prev ? "up" : (now < prev ? "down" : "flat"));
         tickPrev[m.instrumentId] = now;
         inner[m.instrumentId] = `<span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(fmtPrice(m.price, m.instrumentId))}</span>`;
       });
+      // Order: indices first, then securities.
+      const order = indices.map(x => "IX:" + x.instrumentId).concat(marks.map(m => m.instrumentId));
       let track = el.querySelector(".marquee");
-      // Rebuild only when the set of symbols changes — otherwise update in place so the CSS
-      // animation keeps running smoothly (a rebuild restarts the scroll and causes a jump).
-      const symKey = marks.map(m => m.instrumentId).join(",");
+      // Rebuild only when the set of tiles changes — otherwise update in place so the CSS animation
+      // keeps running smoothly (a rebuild restarts the scroll and causes a jump).
+      const symKey = order.join(",");
       if (!track || el.dataset.syms !== symKey) {
         // Two duplicated copies give the seamless -50% loop (keyframes: translateX(-50%)).
-        const tiles = marks.map(m => `<span class="tk" data-sym="${esc(m.instrumentId)}">${inner[m.instrumentId]}</span>`).join("");
+        const tiles = order.map(k => `<span class="tk" data-sym="${esc(k)}">${inner[k]}</span>`).join("");
         el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
         el.dataset.syms = symKey;
       } else {
         track.querySelectorAll(".tk").forEach(node => {
           const h = inner[node.dataset.sym];
           if (h) node.innerHTML = h;
-        });
-      }
-    } catch (e) {}
-  }
-  // Major indices/ETFs (US + international) in the top bar — context only, delayed.
-  async function loadIndicators() {
-    try {
-      const ix = await (await pollFetch("/api/indicators")).json();
-      const el = document.getElementById("indices");
-      if (!ix.length) { el.innerHTML = ""; return; }
-      const inner = i => {
-        if (i.price == null) return `<span class="l">${esc(i.label)}</span><span class="v mono muted">N/A</span>`;
-        // Text tile (e.g. the sim regime): show the string as-is, no change chip.
-        if (isNaN(Number(i.price))) return `<span class="l">${esc(i.label)}</span><span class="v mono">${esc(i.price)}</span>`;
-        const v = Number(i.price).toLocaleString(undefined, {maximumFractionDigits:3});
-        let chip = "";
-        if (i.changePercent != null) {
-          const c = i.changePercent > 0 ? "up" : (i.changePercent < 0 ? "down" : "flat");
-          const sign = i.changePercent > 0 ? "+" : "";
-          chip = `<span class="c mono ${c}">${sign}${i.changePercent.toFixed(2)}%</span>`;
-        }
-        return `<span class="l">${esc(i.label)}</span><span class="v mono">${v}</span>` + chip;
-      };
-      let track = el.querySelector(".marquee");
-      if (!track) {
-        // Build the ticker ONCE (two copies for a seamless -50% loop). Rebuilding on every
-        // refresh would restart the CSS animation and cause the jump — so we update in place below.
-        const tiles = ix.map(i => `<span class="ix" data-sym="${esc(i.symbol)}">${inner(i)}</span>`).join("");
-        el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
-      } else {
-        // Update numbers in place (both copies of each symbol) — animation keeps running smoothly.
-        const bySym = {}; ix.forEach(i => bySym[i.symbol] = i);
-        track.querySelectorAll(".ix").forEach(node => {
-          const i = bySym[node.dataset.sym];
-          if (i) node.innerHTML = inner(i);
         });
       }
     } catch (e) {}
@@ -575,8 +560,11 @@
         : '<div class="muted" style="padding:12px">no orders yet today</div>') + '</div>';
     } catch (e) {}
   }
-  document.getElementById("obprev").onclick = () => { if (obPage > 0) { obPage--; loadOrders(); } };
-  document.getElementById("obnext").onclick = () => { if (obPage < obTotalPages - 1) { obPage++; loadOrders(); } };
+  // Orders pager lives on the Status page now, not the landing — guard so its absence can't throw here.
+  const _obPrev = document.getElementById("obprev");
+  if (_obPrev) _obPrev.onclick = () => { if (obPage > 0) { obPage--; loadOrders(); } };
+  const _obNext = document.getElementById("obnext");
+  if (_obNext) _obNext.onclick = () => { if (obPage < obTotalPages - 1) { obPage++; loadOrders(); } };
   async function bootstrap() {
     try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) {}
     loadRisk();
@@ -592,17 +580,16 @@
   loadHedging();
   loadHistory();
   loadTicker();
+  loadRisk(); // immediate first paint of the consolidated-P&L tile + by-market table (poll() is visibility-gated)
   loadFeeds();
-  loadIndicators();
   // poll() (poll.js): one in-flight run per loop, paused while the tab is hidden, immediate
   // refresh on return — so backgrounded tabs stop hammering the JVM and a backend stall can't
   // pile up pending fetches. The initial call inside each loadX above stays; poll runs its own
   // immediate tick too (idempotent). Replaces raw setInterval, which wedged tabs overnight.
   poll(loadRisk, 5000);       // was 2s — hits the shared risk lock; 5s is plenty for a dashboard
   poll(loadMarketState, 5000);
-  poll(loadTicker, 3000);     // was 2s — cosmetic marquee
+  poll(loadTicker, 3000);     // was 2s — cosmetic marquee (world indices + securities)
   poll(loadFeeds, 5000);
-  poll(loadIndicators, 30000);
   poll(loadFusionPanel, 10000);
   poll(loadHedging, 5000);
   poll(loadHistory, 15000);

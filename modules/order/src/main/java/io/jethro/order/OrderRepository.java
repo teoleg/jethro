@@ -30,24 +30,26 @@ public class OrderRepository implements OrderStore {
      * Returns true if this call created the row, false if the key was already present.
      */
     @Override
-    public boolean insertIfAbsent(Order order, Instant now) {
-        return insertChildIfAbsent(order, null, now);
+    public boolean insertIfAbsent(Order order, String originReason, Instant now) {
+        return insertChildIfAbsent(order, null, originReason, now);
     }
 
     @Override
-    public boolean insertChildIfAbsent(Order order, String parentOrderId, Instant now) {
+    public boolean insertChildIfAbsent(Order order, String parentOrderId, String originReason,
+                                       Instant now) {
         int rows = jdbc.update("""
                 insert into orders (order_id, idempotency_key, book_id, instrument_id, side,
                                     order_type, quantity, limit_price, time_in_force, status,
-                                    created_at, updated_at, parent_order_id, feed_mode)
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    created_at, updated_at, parent_order_id, feed_mode, origin_reason)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict (idempotency_key) do nothing
                 """,
                 order.orderId(), order.idempotencyKey(), order.bookId().value(),
                 order.instrumentId().value(), order.side().name(), order.type().name(),
                 order.quantity(), order.limitPrice().orElse(null), order.timeInForce().name(),
                 order.status().name(), ts(order.createdAt()), ts(now), parentOrderId,
-                io.jethro.messaging.Provenance.mode().name()); // ADR-0029: tag the order's feed mode
+                io.jethro.messaging.Provenance.mode().name(), // ADR-0029: tag the order's feed mode
+                originReason); // ADR-0134: why the desk wanted it — written once, never overwritten
         return rows == 1;
     }
 
@@ -140,7 +142,8 @@ public class OrderRepository implements OrderStore {
         OffsetDateTime end = start.plusDays(1);
         return jdbc.query("""
                 select order_id, book_id, instrument_id, side, order_type, quantity,
-                       limit_price, time_in_force, status, reason, created_at, parent_order_id
+                       limit_price, time_in_force, status, reason, created_at, parent_order_id,
+                       origin_reason
                 from orders where created_at >= ? and created_at < ? and feed_mode = ?
                 order by created_at desc offset ? limit ?
                 """, OrderRepository::mapRow, start, end, mode(), offset, limit);
@@ -158,7 +161,8 @@ public class OrderRepository implements OrderStore {
     public List<OrderRow> recentOrders(int limit) {
         return jdbc.query("""
                 select order_id, book_id, instrument_id, side, order_type, quantity,
-                       limit_price, time_in_force, status, reason, created_at, parent_order_id
+                       limit_price, time_in_force, status, reason, created_at, parent_order_id,
+                       origin_reason
                 from orders where feed_mode = ? order by created_at desc limit ?
                 """, OrderRepository::mapRow, mode(), limit);
     }
@@ -177,7 +181,8 @@ public class OrderRepository implements OrderStore {
     /** Boundary DTOs: decimals as strings (invariant 1 — never a JS float). */
     public record OrderRow(String orderId, String bookId, String instrumentId, String side,
                            String orderType, String quantity, String limitPrice, String timeInForce,
-                           String status, String reason, long createdAtMillis, String parentOrderId) {
+                           String status, String reason, long createdAtMillis, String parentOrderId,
+                           String originReason) {
         /** A child slice produced by the ADV auto-slicer (has a parent). Lets the UI tag it "split". */
         public boolean split() {
             return parentOrderId != null;
@@ -195,7 +200,8 @@ public class OrderRepository implements OrderStore {
                 rs.getBigDecimal("limit_price") == null ? null : rs.getBigDecimal("limit_price").toPlainString(),
                 rs.getString("time_in_force"), rs.getString("status"), rs.getString("reason"),
                 rs.getTimestamp("created_at").toInstant().toEpochMilli(),
-                rs.getString("parent_order_id"));
+                rs.getString("parent_order_id"),
+                rs.getString("origin_reason")); // ADR-0134: why the desk wanted the trade
     }
 
     private static Order mapOrder(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {

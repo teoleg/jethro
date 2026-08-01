@@ -144,8 +144,11 @@ public final class HedgeLifecycle {
                     continue; // cooling down — let the last hedge fill and reprice first
                 }
                 Side side = "SELL".equals(axis.hedgeSide()) ? Side.SELL : Side.BUY;
+                // ADR-0134: the advisor's own rationale says which axis and how much net it is
+                // hedging — the trigger, in the words of the code that computed it.
                 NewOrder cmd = new NewOrder("hedge:" + axis.axis() + ":" + UUID.randomUUID(),
-                        hedgeBook, axis.proxyId(), side, OrderType.MARKET, axis.hedgeQuantity(), null);
+                        hedgeBook, axis.proxyId(), side, OrderType.MARKET, axis.hedgeQuantity(), null,
+                        "auto-hedge " + axis.axis() + " (ADR-0019): " + axis.rationale());
                 var order = os.submit(cmd);
                 lastHedge.put(axis.axis(), now);
                 log.info("AUTO-HEDGE {}: {} {} {} → {} on {} ({}) [ρ²={}]", axis.axis(), side,

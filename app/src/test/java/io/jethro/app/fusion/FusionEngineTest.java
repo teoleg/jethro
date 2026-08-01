@@ -25,12 +25,59 @@ class FusionEngineTest {
         assertEquals(dm, c.diversificationMultiplier(), 1e-9);
         assertEquals(10.0 * dm, c.value(), 1e-9);
         assertEquals(2, c.activeSources());
+        // ADR-0119/0124: sources of one mind earn agreement 1 exactly (zero dispersion about the
+        // average), so this path is untouched by either.
+        assertEquals(1.0, c.agreement(), 1e-12);
     }
 
     @Test
     void disagreementCancels() {
         var c = ForecastCombiner.combine("AAPL", List.of(wf("a", 12, 1), wf("b", -12, 1)), 0.5);
         assertEquals(0.0, c.value(), 1e-12, "equal-and-opposite forecasts net to no view");
+        assertEquals(0.0, c.agreement(), 1e-12, "…which is agreement zero, the ADR-0119 limit");
+    }
+
+    @Test
+    void oneSourceIsNotACorroboratedView() {
+        // The ADR-0124 defect, live on 2026-07-29: META and TSLA were called by `xsreversion` ALONE,
+        // ADR-0119's sign ratio returned 1 because there was nothing to disagree with, and those two
+        // uncorroborated names then carried the LARGEST combined forecasts in the cross-section —
+        // |−15.41| against a best-corroborated |−8.44| over three sources. Breadth was inverted.
+        var alone = ForecastCombiner.combine("META",
+                List.of(wf("xsreversion", -15.411840183349527, 0.6415022359419683)), 0.5);
+        assertEquals(1, alone.activeSources());
+        assertEquals(1.0, alone.diversificationMultiplier(), 1e-12, "one view earns no diversification");
+        assertEquals(0.0, alone.agreement(), 1e-12,
+                "one effective source ⇒ zero residual d.f. ⇒ the dispersion is UNESTIMABLE, not zero");
+        assertEquals(0.0, alone.value(), 1e-12, "…so the desk takes no position on an untested view");
+
+        // All the weight on one forecast is the same case even when several sources are nominally
+        // present: the SECOND source contributing nothing leaves nothing to corroborate with.
+        var effectivelyAlone = ForecastCombiner.combine("META",
+                List.of(wf("xsreversion", -15.411840183349527, 1.0), wf("trend", 0, 0)), 0.5);
+        assertEquals(0.0, effectivelyAlone.agreement(), 1e-12);
+
+        // Self-healing, not a ban: a second sensor waking up on the same view restores it in full.
+        var corroborated = ForecastCombiner.combine("META",
+                List.of(wf("xsreversion", -15.411840183349527, 0.6415022359419683),
+                        wf("trend", -15.411840183349527, 0.6415022359419683)), 0.5);
+        assertEquals(1.0, corroborated.agreement(), 1e-12);
+        assertTrue(Math.abs(corroborated.value()) > Math.abs(alone.value()),
+                "corroboration is what earns size — the inversion is gone");
+    }
+
+    @Test
+    void sourcesThatShareASignButNotAMagnitudeAreNotFullyCorroborated() {
+        // ADR-0124 is strictly smoother than the sign ratio it replaces: +10 and +20 agree on the
+        // direction and disagree on the size, and the desk's confidence in the LEVEL it sizes off is
+        // lower than if both had said +15. ADR-0119 scored this 1.0 — sign-blind.
+        var c = ForecastCombiner.combine("AAPL", List.of(wf("a", 10, 1), wf("b", 20, 1)), 0.5);
+        // μ̂ = 15; Σŵ(f−μ̂)² = 25; Σŵ² = 0.5 ⇒ s² = 25/0.5 = 50; 15/√(225+50) = 0.9045340337332908.
+        assertEquals(0.9045340337332908, c.agreement(), 1e-12);
+        assertTrue(c.agreement() < 1.0 && c.agreement() > 0.9, "shrunk, but only a little");
+        // …and it degrades continuously toward the agreeing case, so no name flips on sensor noise.
+        var closer = ForecastCombiner.combine("AAPL", List.of(wf("a", 14, 1), wf("b", 16, 1)), 0.5);
+        assertTrue(closer.agreement() > c.agreement() && closer.agreement() < 1.0);
     }
 
     @Test
@@ -40,9 +87,78 @@ class FusionEngineTest {
         // variance = 0.625 + (1 − 0.625)·0.5 = 0.8125 ⇒ DM = 1/√0.8125 = 1.1094003924504583.
         var c = ForecastCombiner.combine("AAPL", List.of(wf("a", 20, 3), wf("b", -20, 1)), 0.5);
         assertEquals(1.1094003924504583, c.diversificationMultiplier(), 1e-12);
-        assertEquals(11.094003924504583, c.value(), 1e-12);
+        // ADR-0124: μ̂ = 10 with the sources 30 apart. Σŵ(f−μ̂)² = 0.75·10² + 0.25·(−30)² = 300, and
+        // Σŵ² = 0.625 ⇒ s² = 300/(1 − 0.625) = 800, so agreement = 10/√(100 + 800) = 10/30 = 1/3. Two
+        // thirds of the scale the average claims is disagreement between the sources, not view — the
+        // mean alone hid that. (ADR-0119's sign ratio scored this 0.5, blind to the magnitudes.)
+        assertEquals(1.0 / 3.0, c.agreement(), 1e-12);
+        assertEquals(3.6980013081681946, c.value(), 1e-12);
         // Strictly below the count rule's 1/√0.75 = 1.1547…: two views held 3:1 are not two equal views.
         assertTrue(c.diversificationMultiplier() < 1.0 / Math.sqrt(0.75));
+    }
+
+    @Test
+    void agreementIsOneWayAndNeverTouchesSourcesThatSayTheSameThing() {
+        // The ADR-0119/0124 safety property, over the whole forecast grid: the scalar is in [0,1], it is
+        // EXACTLY 1 whenever the contributing forecasts are identical (so those names are byte-identical
+        // to the pre-ADR-0124 desk), and it never flips a sign.
+        for (double a = -20; a <= 20; a += 2.5) {
+            for (double b = -20; b <= 20; b += 2.5) {
+                var c = ForecastCombiner.combine("AAPL", List.of(wf("x", a, 1.7), wf("y", b, 0.4)), 0.5);
+                assertTrue(c.agreement() >= 0.0 && c.agreement() <= 1.0, "a=" + a + " b=" + b);
+                if (a == b && a != 0) {
+                    assertEquals(1.0, c.agreement(), 1e-12, "identical ⇒ no shrinkage: " + a + "," + b);
+                }
+                double unscaled = (1.7 * a + 0.4 * b) / 2.1 * c.diversificationMultiplier();
+                assertTrue(Math.abs(c.value()) <= Math.abs(unscaled) + 1e-12, "can only shrink");
+                assertTrue(c.value() == 0.0 || Math.signum(c.value()) == Math.signum(unscaled),
+                        "sign is never flipped");
+            }
+        }
+    }
+
+    @Test
+    void agreementIsMonotoneInHowFarApartTheSourcesAre() {
+        // The property ADR-0119's sign ratio did not have: the scalar responds to the SIZE of the
+        // disagreement, not only to whether a sign flipped. Widening the gap around a fixed mean can
+        // only shrink the position, continuously and without a cliff.
+        double previous = Double.MAX_VALUE;
+        for (double gap = 0; gap <= 10; gap += 1.25) {   // ±10 around 10 stays inside the ±20 clamp
+            var c = ForecastCombiner.combine("AAPL",
+                    List.of(wf("x", 10 - gap, 1), wf("y", 10 + gap, 1)), 0.5);
+            assertEquals(1.0 / Math.sqrt(1.0 + 2.0 * gap * gap / 100.0), c.agreement(), 1e-12,
+                    "1/√(1 + (s/μ̂)²) with s² = 2·gap² at equal weights, μ̂ = 10");
+            assertTrue(c.agreement() <= previous, "wider disagreement ⇒ never a larger position");
+            previous = c.agreement();
+        }
+    }
+
+    @Test
+    void aResidualOfTwoFightingSensorsIsNotAFullConvictionPosition() {
+        // The live shape this change targets (2026-07-28): the ONE name the desk held was the one whose
+        // sensors flatly contradicted each other — trend +11.22 against reversion −10.41 — and the desk
+        // sized off the small residual as if it were a settled view, then hedged that position too.
+        var c = ForecastCombiner.combine("AAPL",
+                List.of(wf("trend", 11.222357223010645, 0.7940890068032261),
+                        wf("reversion", -10.408272759827817, 1.0968379620104083)), 0.5);
+        // The pair averages to −1.3245557454277905 while sitting 21.63 apart, so almost all of the
+        // scale is dispersion: ADR-0124's scalar is 0.08627672501946398 (ADR-0119's sign ratio read
+        // 0.12321282549722257 here — the same verdict, reached from the magnitudes rather than the
+        // signs, and a shade more conservative).
+        assertEquals(0.08627672501946398, c.agreement(), 1e-12, "≈ 9% of the conviction survived");
+        // The two sensors still net short, but at a twelfth of the size the mean alone claimed.
+        assertTrue(c.value() < 0, "the sign the average found is kept");
+        assertEquals(-0.1313970740218512, c.value(), 1e-12);
+        assertTrue(Math.abs(c.value()) < 0.09 * 1.5229724354072096,
+                "…at a fraction of the conviction the desk was sizing off");
+        // Contrast: the SAME net view from sources that agree is untouched.
+        var agreeing = ForecastCombiner.combine("AAPL",
+                List.of(wf("trend", -1.3245557454277905, 0.7940890068032261),
+                        wf("reversion", -1.3245557454277905, 1.0968379620104083)), 0.5);
+        assertEquals(1.0, agreeing.agreement(), 1e-12);
+        // Same weighted mean, same DM — the ONLY difference is that these sources agree, and the whole
+        // of that difference is the agreement scalar: the fighting pair gets 12% of the position.
+        assertEquals(c.agreement(), c.value() / agreeing.value(), 1e-9);
     }
 
     @Test

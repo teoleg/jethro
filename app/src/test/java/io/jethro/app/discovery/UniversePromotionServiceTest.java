@@ -158,4 +158,64 @@ class UniversePromotionServiceTest {
         assertTrue(gw.exists("HOOD"), "pinned name survives");
         assertTrue(gw.exists("COIN"), "traded name survives");
     }
+
+    @Test
+    void crossModeCleanupEvictsForeignPromotionsButNeverPinnedOrTraded() {
+        FakeGateway gw = new FakeGateway();
+        RecordingAudit audit = new RecordingAudit();
+        var svc = new UniversePromotionService(gw, companies, audit, props(50));
+
+        // Three names entered the master under SIM; running LIVE, the controller passes exactly the ones
+        // whose promotion mode differs from LIVE (all three here). Cleanup must evict PLTR but keep HOOD
+        // (pinned) and COIN (has a position) — never orphan a held name.
+        svc.promote(cand("PLTR", 40, 3, 5, 9_000L), OK, "e", "SIM", 1L);
+        svc.promote(cand("HOOD", 30, 3, 5, 8_000L), OK, "e", "SIM", 1L);
+        svc.promote(cand("COIN", 20, 3, 5, 2_000L), OK, "e", "SIM", 1L);
+        gw.withFills.add("COIN");
+
+        Set<String> foreignPromoted = Set.of("PLTR", "HOOD", "COIN");
+        List<String> evicted = svc.evictForeignModePromotions(
+                foreignPromoted, Set.of("HOOD"), "e", "LIVE", 5_000L);
+
+        assertEquals(List.of("PLTR"), evicted, "only the un-pinned, un-traded foreign-mode name is cleaned");
+        assertFalse(gw.exists("PLTR"), "SIM-era promotion removed from the LIVE master");
+        assertTrue(gw.exists("HOOD"), "pinned name survives");
+        assertTrue(gw.exists("COIN"), "name with a position survives (never orphaned)");
+        assertTrue(audit.actions.contains("EVICTED:PLTR"));
+    }
+
+    @Test
+    void restoreReAddsEvictedNamesReTaggedAndIsIdempotent() {
+        FakeGateway gw = new FakeGateway();
+        RecordingAudit audit = new RecordingAudit();
+        var svc = new UniversePromotionService(gw, companies, audit, props(50));
+
+        // A name that was evicted (not in the master now) is restored, re-tagged LIVE.
+        List<String> restored = svc.restoreDiscovered(List.of("PLTR", "HOOD"), "e", "LIVE", 10L);
+        assertEquals(List.of("PLTR", "HOOD"), restored);
+        assertTrue(gw.exists("PLTR") && gw.exists("HOOD"), "evicted names are re-added to the master");
+        assertEquals(RefDataRepository.SOURCE_DISCOVERED,
+                gw.attrs.get("PLTR").get(RefDataRepository.ATTR_SOURCE), "re-added as a discovered name");
+
+        // Idempotent: a name already present is skipped, not duplicated.
+        List<String> again = svc.restoreDiscovered(List.of("PLTR", "COIN"), "e", "LIVE", 11L);
+        assertEquals(List.of("COIN"), again, "PLTR already present — only the missing COIN is restored");
+    }
+
+    @Test
+    void crossModeCleanupIsANoopWhenNothingIsForeign() {
+        FakeGateway gw = new FakeGateway();
+        RecordingAudit audit = new RecordingAudit();
+        var svc = new UniversePromotionService(gw, companies, audit, props(50));
+
+        svc.promote(cand("PLTR", 40, 3, 5, 9_000L), OK, "e", "LIVE", 1L);
+        int refreshesBefore = gw.refreshes;
+
+        // Empty foreign set (everything was promoted under the current mode) — no eviction, no refresh.
+        List<String> evicted = svc.evictForeignModePromotions(Set.of(), Set.of(), "e", "LIVE", 2L);
+
+        assertTrue(evicted.isEmpty());
+        assertTrue(gw.exists("PLTR"), "a current-mode promotion is untouched");
+        assertEquals(refreshesBefore, gw.refreshes, "no refresh when nothing was evicted");
+    }
 }

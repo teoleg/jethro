@@ -114,10 +114,17 @@ public final class SignalTelemetryStore {
      * newest-first window across all rungs would fill with the fastest rung and silently starve the
      * slowest of the very history the desk has waited hours to accumulate.
      *
-     * <p>Cohorts are cut by the same rule {@link SignalScoring} applies in memory: observations ordered
-     * by entry instant, and a new cohort wherever the gap to the previous one exceeds
-     * {@code cohortWindowMillis}. Doing it in SQL is what keeps the transfer constant; the definition
-     * is unchanged, and {@code SignalScoringTest} pins the two groupings to the same answer.
+     * <p>Cohorts are cut by the same rule {@link SignalScoring#sweepCohortMeans} applies in memory
+     * (ADR-0120): a name appears at most once per cohort, so the cohort index is the running maximum of
+     * the per-name occurrence count over observations ordered by entry instant. Doing it in SQL is what
+     * keeps the transfer constant; {@code SweepCohortTest} pins the arithmetic on the Java side. The
+     * superseded rule cut a cohort wherever a CLOCK GAP exceeded {@code cohort-window-seconds}, which
+     * measured how fast the scheduler walks the universe rather than how often the market was drawn —
+     * on this book it split each pass into ~2.2 cohorts and inflated the gate's degrees of freedom.
+     *
+     * <p>The occurrence count is taken AFTER the bad-print predicate below, so an excluded observation
+     * does not advance its name's position in the sweep — evidence removed from the estimator must not
+     * silently re-cut the sample it is estimated from.
      *
      * <p>{@code flatThresholdBps} classifies each observation WIN/LOSS/FLAT exactly as
      * {@link SignalScoring#outcome(double, double)} does — a move counts only if it clears the
@@ -131,7 +138,7 @@ public final class SignalTelemetryStore {
      * print arriving by another door. See {@link #discardedCount} for the count that goes with it.
      */
     public List<SignalScoring.Cohort> resolvedCohorts(String source, int horizonSeconds, Instant since,
-                                                      long cohortWindowMillis, double flatThresholdBps,
+                                                      double flatThresholdBps,
                                                       int cohortLimit,
                                                       Map<String, Integer> badPrintBpsByAssetClass) {
         BigDecimal threshold = BigDecimal.valueOf(Math.abs(flatThresholdBps) / 1e4);
@@ -143,9 +150,8 @@ public final class SignalTelemetryStore {
                                                     string_to_array(?, ',')::int[]) as t(cls, bps)
                     ), resolved_obs as (
                         select o.entry_at, o.realized_return,
-                               case when extract(epoch from
-                                        o.entry_at - lag(o.entry_at) over (order by o.entry_at)) * 1000 > ?
-                                    then 1 else 0 end as cohort_break
+                               row_number() over (partition by o.instrument order by o.entry_at)
+                                   as occurrence
                         from signal_observations o
                         left join instrument i on i.instrument_id = o.instrument
                         left join caps c on c.cls = i.asset_class
@@ -156,7 +162,8 @@ public final class SignalTelemetryStore {
                                    and abs(o.realized_return) >= coalesce(c.bps, d.bps) / 10000.0)
                     ), cohorted as (
                         select realized_return, entry_at,
-                               sum(cohort_break) over (order by entry_at) as cohort_id
+                               max(occurrence) over (order by entry_at
+                                   rows between unbounded preceding and current row) as cohort_id
                         from resolved_obs
                     )
                     select count(*) as n,
@@ -174,7 +181,7 @@ public final class SignalTelemetryStore {
                             rs.getBigDecimal("sum_squared_return").doubleValue(),
                             rs.getLong("wins"),
                             rs.getLong("losses")),
-                    caps[0], caps[1], cohortWindowMillis, source, horizonSeconds, mode(),
+                    caps[0], caps[1], source, horizonSeconds, mode(),
                     Timestamp.from(since), threshold, threshold.negate(), cohortLimit);
         } catch (Exception e) {
             log.debug("cohort read failed for {}@{}s: {}", source, horizonSeconds, e.toString());

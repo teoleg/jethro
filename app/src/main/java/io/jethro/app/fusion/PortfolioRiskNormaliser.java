@@ -120,7 +120,7 @@ public final class PortfolioRiskNormaliser {
             BigDecimal delta = TargetPlanner.orderDelta(target, t.currentQty(),
                     params.bufferFraction(), params.adjustmentRate());
             out.add(new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
-                    t.diversificationMultiplier(), t.price(), target, t.currentQty(), delta,
+                    t.diversificationMultiplier(), t.agreement(), t.price(), target, t.currentQty(), delta,
                     t.contributions()));
         }
         return new Scaled(out, pdm, covered.size());

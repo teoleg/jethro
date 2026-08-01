@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-07-30T19:30:05Z",
+    "fees": "88.283732",
+    "gross": "39795.41000000",
+    "net": "-6163.97000000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "39795.41000000",
+      "hedgePnl": "135.03832909",
+      "netExposure": "-6163.97000000",
+      "realizedPnl": "144.51251375",
+      "strategyAlpha": "-8.80768262",
+      "totalFees": "88.283732",
+      "totalPnl": "126.23064647",
+      "unrealizedPnl": "-18.28186728"
+    },
+    "total_pnl": "126.23064647"
+  },
+  "before": {
+    "at": "2026-07-30T16:35:50Z",
+    "gross": "36308.81500000",
+    "net": "-3889.21500000",
+    "total_pnl": "122.78438671"
+  },
+  "commit": "64a7a6336dd7b41569e57416decc5d1467476f90",
+  "delta": {
+    "gross": "3486.59500000",
+    "net": "-2274.75500000",
+    "total_pnl": "3.44625976"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle +0.000013 over 7 cycles, t=+0.09 (hurdle 1.5); gross 36,309\u219239,795 [grew]",
+  "revert": false,
+  "revertApplied": null,
+  "scoredAt": "2026-07-30T19:30:05Z",
+  "summary": "completed the failed auto-revert of the BAD cold-sensor re-seed \u2014 the graded-bad ADR-0131 mechanism is out of the running code, restoring only its code paths so the loop's accumulated findings survive",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "grew": true,
+    "gross_end": 39795.41,
+    "gross_start": 36308.815,
+    "mean_ret_per_cycle": 1.266e-05,
+    "n": 7,
+    "scale": 38903.05,
+    "t": 0.094
+  }
+}

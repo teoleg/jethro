@@ -24,6 +24,8 @@ final class InMemoryOrderStore implements OrderStore {
     final Map<String, Order> byId = new HashMap<>();
     final List<Fill> fills = new ArrayList<>();
     final Map<String, BigDecimal> arrivals = new HashMap<>();
+    /** orderId → origination trigger (ADR-0134), mirroring the JDBC store's write-once column. */
+    final Map<String, String> origins = new HashMap<>();
 
     @Override
     public void recordArrivalPrice(String orderId, BigDecimal price) {
@@ -36,12 +38,13 @@ final class InMemoryOrderStore implements OrderStore {
     }
 
     @Override
-    public boolean insertIfAbsent(Order order, Instant now) {
+    public boolean insertIfAbsent(Order order, String originReason, Instant now) {
         if (byKey.containsKey(order.idempotencyKey())) {
-            return false;
+            return false; // idempotency loser writes nothing at all, origin included
         }
         byKey.put(order.idempotencyKey(), order);
         byId.put(order.orderId(), order);
+        origins.put(order.orderId(), originReason);
         return true;
     }
 

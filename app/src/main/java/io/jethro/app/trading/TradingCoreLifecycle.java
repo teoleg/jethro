@@ -111,7 +111,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
             curveRefresher.scheduleWithFixedDelay(this::refreshCurve, refreshSeconds, refreshSeconds, TimeUnit.SECONDS);
         }
         log.info("trading-core started: provider {}, curve {}, {} instruments, tick/poll config, lmdb at {}, warm-loaded marks {}",
-                adapter.name(), curveSource, properties.simInstruments().size(), properties.lmdbPath(), rt.stats().warmLoadedMarks());
+                adapter.name(), curveSource, effectiveSimInstruments().size(), properties.lmdbPath(), rt.stats().warmLoadedMarks());
     }
 
     /** Selects the market-data adapter by configured provider (ADR-0009/0023). Sim is the default;
@@ -165,10 +165,20 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
      * mode — under a live feed a discovered name is marked by the Yahoo background like any refdata name.
      */
     private List<String> effectiveSimInstruments() {
-        List<String> ids = new ArrayList<>(properties.simInstruments());
+        List<String> ids = new ArrayList<>(properties.simInstruments()); // ordered core → stable seeded tape
         if (refData != null) {
-            for (String id : refData.discoveredInstrumentIds()) {
-                if (!ids.contains(id)) {
+            // The sim consumes the FULL refdata master (invariant 9), not just the seeded core: every
+            // tickable name the master carries — seeded (e.g. the ADR-0125 sector expansion) or
+            // discovery-promoted (ADR-0060) — is appended, so a new name is ticked with no edit here.
+            // Only price-quoted classes the walk engine can tick (equities, FX, futures); swaps/bonds
+            // have no such price and are excluded. Core order is preserved and graceful sim defaults
+            // (start price / 20% vol) price any appended name without its own calibration.
+            for (var inst : refData.findAllInstruments()) {
+                String assetClass = inst.assetClass().name();
+                boolean tickable = "EQUITY".equals(assetClass) || "FX".equals(assetClass)
+                        || "FUTURE".equals(assetClass);
+                String id = inst.id().value();
+                if (tickable && !ids.contains(id)) {
                     ids.add(id);
                 }
             }
@@ -300,7 +310,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
             return new YahooMarketDataAdapter(
                     new YahooQuoteClient(Duration.ofSeconds(10)), yahooRest, curveSim, spacing);
         }
-        List<String> uncovered = properties.simInstruments().stream()
+        List<String> uncovered = effectiveSimInstruments().stream()
                 .filter(id -> !covered.containsKey(id)).toList();
         log.warn("MARKET DATA: {} real-time WS for {} equities + sim for {} others. Dev/demo only (ADR-0056).",
                 label, covered.size(), uncovered.size());
@@ -314,7 +324,7 @@ public final class TradingCoreLifecycle implements SmartLifecycle {
         if (instruments.isEmpty()) {
             // Nothing left for the sim (all covered by the real feed): a 1-instrument idle sim keeps
             // the curve alive if configured; otherwise the market path just carries the real feed.
-            instruments = properties.simInstruments().subList(0, 1);
+            instruments = effectiveSimInstruments().subList(0, 1);
         }
         List<String> ids = instruments;
         long[] startPricesScaled = ids.stream()
