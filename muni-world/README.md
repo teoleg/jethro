@@ -15,11 +15,18 @@ governments (counties, cities, townships, school districts, authorities) — via
 web scraping. Geographic staging: **NY → NJ → PA** first, then outward. Postgres (its own `muni` schema) is
 the system of record.
 
-The data platform is specified across **[ADR-0002 … ADR-0011](docs/adr/README.md)** — mission (0002),
+The data platform is specified across **[ADR-0002 … ADR-0012](docs/adr/README.md)** — mission (0002),
 sources (0003), ingestion (0004), raw+provenance (0005), schema (0006), identity (0007), legal/polite
-crawling (0008), scheduling (0009), document extraction (0010), quality/coverage (0011). Analytics is the
-deferred north star; the schema is built to serve it. Today the module is scaffolding + a live status UI —
-the pipeline is the next build.
+crawling (0008), scheduling (0009), document extraction (0010), quality/coverage (0011), and the
+**Claude-assisted analysis layer + prompt library** (0012). Analytics is the deferred north star; the
+schema is built to serve it. Today the module is scaffolding + a live status UI — the pipeline is the next
+build.
+
+**AI analysis (ADR-0012).** Analysis of the collected data is Claude-assisted, driven by a governed,
+versioned **prompt library** in [`prompts/`](prompts/README.md) — grounded in muni-world's own data,
+cited to source, number-guardrailed and audited (a model output never silently becomes a canonical
+money/valuation figure — jethro's discipline, inherited). Local SLM (Ollama) handles cheap triage; Claude
+does the deep reasoning, cost-gated.
 
 ## Run
 

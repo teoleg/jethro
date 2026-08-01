@@ -30,7 +30,9 @@ the immutable raw PDF in the landing zone (ADR-0005):
    review**, never promoted to canonical silently. Mirrors the jethro discipline: a model/OCR output is
    **never** trusted as a money/terms number without a confidence gate + provenance (jethro invariant 7,
    inherited). A local SLM (Ollama, shared with jethro) may *assist* extraction/classification, but the
-   number that lands is anchored to the document, not asserted by the model.
+   number that lands is anchored to the document, not asserted by the model. Deeper, harder extractions
+   (complex call schedules, multi-table financials) escalate to the **Claude frontier tier under ADR-0012**
+   — same guardrail: grounded in the document, cited, confidence-gated, never a silent canonical number.
 
 ## Consequences
 

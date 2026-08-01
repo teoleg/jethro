@@ -26,7 +26,8 @@ municipal universe** — starting with data and building outward — before any 
   option-adjusted valuation of (mostly callable) municipal bonds. Every data decision is judged by whether
   it will feed that: security terms (coupon, maturity, **call schedule**, tax status, sinking funds),
   issuer/obligor credit and financials, and market prints. We build the data model to serve OAS later —
-  but we do **not** build analytics this phase.
+  but we do **not** build analytics this phase. Analysis, when it comes, is **Claude-assisted** over the
+  collected data, governed by a versioned prompt library under jethro's AI guardrails — see ADR-0012.
 - **Geographic staging: NY → NJ → PA first.** These three give us the richest state-level disclosure
   (NY Office of the State Comptroller, NJ Dept. of Community Affairs, PA DCED) and a large, diverse issuer
   base (state, authorities, counties, cities, townships, school districts) to prove the pipeline before
