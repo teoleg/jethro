@@ -178,6 +178,15 @@
     </a>
   </div>
 
+  <!-- subprojects: independent services reachable from here -->
+  <div class="section-h" style="grid-column:1/-1;margin-top:10px">Subprojects</div>
+  <div class="grid" style="grid-column:1/-1;margin-top:0">
+    <a class="tile" id="muniTile" href="#" style="--accent:#2fbf8f">
+      <span class="icon">🏛️</span><h2>Muni World</h2>
+      <div class="stats"><span class="s"><span class="sv mut">:8090</span><span class="sl">independent service</span></span></div><span class="go">Open →</span>
+    </a>
+  </div>
+
   <!-- positions by market — table under the tiles -->
   <div class="section-h" style="grid-column:1/-1;margin-top:10px">Positions by market</div>
   <div class="panel pad" style="grid-column:1/-1"><div id="byMarket" class="muted" style="padding:14px">loading…</div></div>
@@ -599,6 +608,13 @@
   const loadEod = () => pollFetch("/api/eod").then(r => r.json()).then(v => { lastEod = v; }).catch(() => {});
   poll(loadEod, 5000); // compressed sim days roll in minutes — keep the tile current
   poll(() => { if (obPage === 0) return loadOrders(); }, 5000); // live-refresh first page only
+</script>
+<script>
+  // Muni World is a separate service on :8090 (same host) — resolve the tile link at load.
+  (function () {
+    var t = document.getElementById("muniTile");
+    if (t) t.href = location.protocol + "//" + location.hostname + ":8090/";
+  })();
 </script>
 </body>
 </html>

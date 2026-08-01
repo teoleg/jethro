@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>muni-world</title>
+<style>
+  :root {
+    --bg:#0a0f0d; --surface:#111a16; --surface-2:#16221c; --line:#233029; --line-2:#31423a;
+    --txt:#e8f2ec; --dim:#8ba89a; --brand:#2fbf8f; --up:#35c07a; --down:#f0553f; --warn:#e0a83d;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:radial-gradient(1000px 560px at 82% -10%, rgba(47,191,143,.12), transparent 60%), var(--bg);
+    color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  a { color:inherit; text-decoration:none; }
+
+  /* muni-world's OWN menu — deliberately distinct (teal) from the jethro nav */
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,15,13,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:18px; padding:0 24px; height:56px; max-width:1180px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(47,191,143,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { padding:8px 14px; border-radius:8px; color:var(--dim); font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .spacer { flex:1; }
+  .back { font-size:12px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:5px 12px; }
+  .back:hover { color:var(--txt); border-color:var(--brand); }
+
+  main { max-width:1180px; margin:0 auto; padding:34px 24px 56px; }
+  .kicker { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--brand); font-weight:600; }
+  h1 { font-size:24px; font-weight:680; letter-spacing:-.01em; margin:8px 0 4px; }
+  .sub { color:var(--dim); font-size:13px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px,1fr)); gap:16px; margin-top:24px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--brand); border-radius:16px; padding:18px; }
+  .card h2 { font-size:15px; font-weight:640; margin-bottom:8px; }
+  .card .v { font-size:20px; font-weight:660; font-variant-numeric:tabular-nums; }
+  .card .l { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim); margin-top:3px; }
+  .row { display:flex; gap:8px; align-items:center; margin:6px 0; font-size:13px; }
+  .led { width:8px; height:8px; border-radius:50%; background:var(--dim); }
+  .led.on { background:var(--up); box-shadow:0 0 8px var(--up); } .led.off { background:var(--warn); }
+  .foot { color:var(--dim); font-size:11.5px; margin-top:28px; padding-top:14px; border-top:1px solid var(--line); }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="bar">
+  <span class="brand"><span class="dot"></span>MUNI·WORLD</span>
+  <nav class="tabs">
+    <a class="tab active" href="/">Home</a>
+    <a class="tab" href="/#coming">Instruments</a>
+    <a class="tab" href="/#coming">Curves</a>
+    <a class="tab" href="/#coming">Analytics</a>
+  </nav>
+  <span class="spacer"></span>
+  <a class="back" href="/" id="jethroLink">↩ Jethro</a>
+</div></div>
+
+<main>
+  <div class="kicker">Subproject</div>
+  <h1>Muni World</h1>
+  <div class="sub">An independent service in the jethro repo — its own jar, port, schema and ADR flow. Municipal-bond domain to come.</div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Service</h2>
+      <div class="v" id="svc">…</div><div class="l">status</div>
+    </div>
+    <div class="card">
+      <h2>Backends</h2>
+      <div class="row"><span class="led" id="ledLmdb"></span><span>LMDB — <span class="mono" id="lmdb">…</span></span></div>
+      <div class="row"><span class="led" id="ledPg"></span><span>Postgres — <span class="mono" id="pg">…</span></span></div>
+      <div class="row"><span class="led" id="ledKafka"></span><span>Kafka — <span class="mono" id="kafka">…</span></span></div>
+    </div>
+    <div class="card" id="coming">
+      <h2>Roadmap</h2>
+      <div class="l" style="margin:0 0 6px">next</div>
+      <div style="font-size:13px;color:var(--dim)">Instruments · curves · analytics — reusing jethro's decimal money types &amp; messaging, wired to its own Postgres schema and Redpanda topics.</div>
+    </div>
+  </div>
+
+  <div class="foot">muni-world runs as a separate process. Reached from the jethro landing page via its own tile.</div>
+</main>
+
+<script>
+  // Back-link resolves to the jethro app on the same host (:8080).
+  document.getElementById("jethroLink").href = location.protocol + "//" + location.hostname + ":8080/";
+  async function poll() {
+    try {
+      const s = await (await fetch("/api/muni/status", { cache: "no-store" })).json();
+      document.getElementById("svc").textContent = (s.status || "—").toUpperCase();
+      const b = s.backends || {};
+      const set = (led, txt, val) => {
+        document.getElementById(txt).textContent = val || "—";
+        document.getElementById(led).className = "led " + (/(open|enabled|flyway)/.test(val || "") ? "on" : "off");
+      };
+      set("ledLmdb", "lmdb", b.lmdb); set("ledPg", "pg", b.postgres); set("ledKafka", "kafka", b.kafka);
+    } catch (e) {
+      document.getElementById("svc").textContent = "DOWN";
+    }
+  }
+  poll(); setInterval(poll, 5000);
+</script>
+</body>
+</html>
