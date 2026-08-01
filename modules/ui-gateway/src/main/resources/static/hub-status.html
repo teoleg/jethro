@@ -4,49 +4,596 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jethro — status</title>
-<link rel="stylesheet" href="/hub.css">
-<style>:root { --accent:#5b8cff; }</style>
+<link rel="stylesheet" href="/hub.css"><!-- focus-tile styles (ADR-0133); inline <style> below overrides any shared rule -->
+<style>
+  /* v0 placeholder page (ADR-0017/0021); replaced by the React app under ui/ as views grow. */
+  :root {
+    --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
+    --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
+    --up:#35c07a; --down:#f0553f;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body {
+    background: radial-gradient(1100px 600px at 78% -10%, rgba(91,140,255,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 0%, rgba(53,192,122,.06), transparent 55%), var(--bg);
+    color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased;
+  }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, "JetBrains Mono", Menlo, monospace; }
+
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,13,19,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:20px; padding:0 24px; height:56px; max-width:1780px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(91,140,255,.18); }
+  .tabs { display:flex; flex-wrap:wrap; gap:4px; margin-left:8px; }
+  .tab { position:relative; padding:8px 14px; border-radius:8px; color:var(--dim); text-decoration:none; font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .tab.active::after { content:""; position:absolute; left:14px; right:14px; bottom:-1px; height:2px; border-radius:2px; background:var(--brand); }
+  .spacer { flex:1; }
+  .feeds { display:flex; gap:6px; }
+  /* market indicators — continuously-scrolling ticker, bounded between the tabs and the
+     connection controls (flex:1 + min-width:0 + overflow hidden keeps it from overlapping) */
+  .indices { flex:1; min-width:0; overflow:hidden; padding:0 4px;
+             -webkit-mask-image:linear-gradient(90deg, transparent, #000 22px, #000 calc(100% - 22px), transparent);
+             mask-image:linear-gradient(90deg, transparent, #000 22px, #000 calc(100% - 22px), transparent); }
+  .marquee { display:inline-flex; white-space:nowrap; animation:ticker 60s linear infinite; will-change:transform; }
+  .indices:hover .marquee { animation-play-state:paused; }
+  /* trailing margin per tile (not container gap) so the two copies join seamlessly at -50% */
+  @keyframes ticker { to { transform:translateX(-50%); } }
+  .ix { display:inline-flex; align-items:baseline; gap:6px; margin-right:24px; white-space:nowrap; font-size:12px; }
+  .ix .l { color:var(--dim); } .ix .v { font-weight:600; } .ix .c { font-size:11px; }
+  .pill { display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--dim); padding:5px 11px; border:1px solid var(--line); border-radius:999px; background:var(--surface); }
+  .pill .led { width:7px; height:7px; border-radius:50%; background:var(--dim); } .pill.on .led { background:var(--up); box-shadow:0 0 8px var(--up); } .pill.off .led { background:var(--warn); }
+  .led.ok { background:var(--up); box-shadow:0 0 8px var(--up); } .led.warn { background:var(--warn); } .led.bad { background:var(--down); }
+
+  /* price ticker strip across the top of the landing page */
+  /* continuously-scrolling price marquee under the menu (replaces the static strip) */
+  .ticker { grid-column:1 / -1; overflow:hidden; padding:4px 0 12px; margin-bottom:2px; border-bottom:1px solid var(--line);
+            -webkit-mask-image:linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent);
+            mask-image:linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+  .ticker .marquee { display:inline-flex; white-space:nowrap; animation:ticker 90s linear infinite; will-change:transform; }
+  .ticker:hover .marquee { animation-play-state:paused; }
+  .tk { display:inline-flex; align-items:baseline; gap:7px; background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:5px 11px; margin-right:8px; white-space:nowrap; }
+  .tk .s { color:var(--dim); font-size:10px; letter-spacing:.04em; } .tk .p { font-weight:600; font-size:13px; }
+
+  main { max-width:1780px; margin:0 auto; padding:18px 24px 40px; display:grid; gap:18px; grid-template-columns:1.05fr 0.95fr; align-items:start; }
+  @media (max-width:920px) { main { grid-template-columns:1fr; } }
+  .col { display:flex; flex-direction:column; gap:16px; min-width:0; }
+  .section-h { font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--dim); margin:2px 2px 0; display:flex; align-items:center; gap:8px; }
+
+  .stats { display:grid; grid-template-columns:repeat(3, 1fr); gap:10px; }
+  .stat { background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
+  .stat .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
+  .stat .v { font-size:19px; font-weight:650; margin-top:5px; letter-spacing:-.01em; }
+  .stat .v.big { font-size:22px; }
+  .up { color:var(--up); } .down { color:var(--down); } .flat { color:var(--txt); }
+
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:14px; }
+  .panel.pad { padding:4px 4px; }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; }
+  th, td { text-align:right; padding:3px 12px; border-bottom:1px solid var(--line); line-height:1.7; }
+  th:first-child, td:first-child { text-align:left; }
+  tbody tr:last-child td, tr:last-child td { border-bottom:0; } tbody tr:hover { background:var(--surface-2); }
+  th { color:var(--dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; }
+  .cls { font-weight:600; } .muted { color:var(--dim); }
+  .pgbtn { background:var(--surface-2); color:var(--dim); border:1px solid var(--line-2); border-radius:7px;
+           padding:4px 11px; font:inherit; font-size:12px; cursor:pointer; }
+  .pgbtn:hover { color:var(--txt); border-color:var(--brand); }
+  .BUY { color:var(--up); font-weight:600; } .SELL { color:var(--down); font-weight:600; }
+  .st { font-size:10px; padding:1px 7px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); }
+  .st.FILLED { color:var(--up); border-color:var(--up); } .st.REJECTED { color:var(--down); border-color:var(--down); }
+
+  /* FIXED heights (not max-) so the right column's three panels never jump as content changes */
+  .feed { display:flex; flex-direction:column; gap:8px; height:clamp(180px, 24vh, 320px); overflow-y:auto; padding-right:2px; }
+  .hypo-panel { height:clamp(200px, 28vh, 360px); overflow-y:auto; }
+  tr.hypo-exec td:first-child { border-left:2px solid var(--up); }
+  .whyno { color:var(--dim); font-size:10px; }
+  .empty { color:var(--dim); text-align:center; padding:24px 0; border:1px dashed var(--line); border-radius:12px; background:var(--surface); }
+  .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--info); border-radius:12px; padding:11px 14px; }
+  .card.WARN { border-left-color:var(--warn); } .card.ALERT { border-left-color:var(--alert); box-shadow:0 0 0 1px rgba(240,85,63,.14); }
+  .card .row1 { display:flex; align-items:center; gap:10px; } .card h3 { font-size:13px; font-weight:600; }
+  .badge { font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:2px 8px; border-radius:999px; border:1px solid var(--line-2); color:var(--dim); margin-left:auto; }
+  .card.WARN .badge { color:var(--warn); border-color:var(--warn); } .card.ALERT .badge { color:var(--alert); border-color:var(--alert); }
+  .card p { font-size:12.5px; white-space:pre-wrap; margin-top:6px; } .card .meta { color:var(--dim); font-size:11px; margin-top:8px; }
+
+  /* deterministic (quant) strategy actions — sits under AI hypotheses so both engines are visible */
+  .quant-panel { height:clamp(160px, 22vh, 300px); overflow-y:auto; }
+  .ktag { font-size:9px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); border:1px solid var(--line-2); border-radius:4px; padding:0 4px; margin-left:5px; }
+
+  /* chat is now a floating dock (rarely used) — a button bottom-right opens it */
+  .chat { display:flex; flex-direction:column; height:clamp(220px, 30vh, 340px); }
+  .fab { position:fixed; right:20px; bottom:20px; z-index:60; width:48px; height:48px; border-radius:50%;
+    background:var(--brand); color:#fff; border:0; font-size:20px; cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,.45); }
+  .fab:hover { filter:brightness(1.08); }
+  .chatdock { position:fixed; right:20px; bottom:80px; z-index:60; width:min(380px, 92vw);
+    background:var(--surface); border:1px solid var(--line); border-radius:14px; box-shadow:0 12px 34px rgba(0,0,0,.5); overflow:hidden; }
+  .chatdock[hidden] { display:none; }
+  .chatdock .dh { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--line);
+    font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.1em; }
+  .chatdock .x { background:none; border:0; color:var(--dim); font-size:18px; line-height:1; cursor:pointer; }
+  .chatlog { flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
+  .msg { max-width:88%; padding:7px 11px; border-radius:12px; font-size:13px; white-space:pre-wrap; }
+  .msg.user { align-self:flex-end; background:var(--brand); color:#fff; border-bottom-right-radius:4px; }
+  .msg.bot { align-self:flex-start; background:var(--surface-2); border:1px solid var(--line); border-bottom-left-radius:4px; }
+  .msg.pending { color:var(--dim); }
+  .msg .mmeta { display:block; color:var(--dim); font-size:10px; margin-top:4px; letter-spacing:.04em; }
+  .chatform { display:flex; gap:8px; padding:10px 12px; border-top:1px solid var(--line); }
+  .chatform input { flex:1; background:#0c1019; color:var(--txt); border:1px solid var(--line-2); border-radius:9px; padding:9px 11px; font:inherit; }
+  .chatform input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(91,140,255,.18); }
+  .chatform button { background:var(--brand); color:#fff; border:0; border-radius:9px; padding:9px 15px; font:inherit; font-weight:600; cursor:pointer; }
+</style>
 </head>
 <body>
-<div class="topbar"><div class="bar">
-  <span class="brand"><span class="dot"></span>JETHRO</span>
-  <nav class="tabs">
-    <a class="tab" href="/">Overview</a>
-    <a class="tab active" href="/hub-status.html">Status</a>
-    <a class="tab" href="/hub-strategy.html">Strategy</a>
-    <a class="tab" href="/hub-discovery.html">Discovery</a>
-    <a class="tab" href="/hub-ops.html">Ops</a>
-  </nav>
-  <span class="spacer"></span>
-  <a class="back" href="/">← Overview</a>
-</div></div>
-
+<script src="/format.js"></script>
+<script src="/poll.js"></script>
+<script src="/hub.js"></script><!-- populates the focus-tile stats (ADR-0133) -->
+<div class="topbar">
+  <div class="bar">
+    <span class="brand"><span class="dot"></span>JETHRO</span>
+    <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab active" href="/hub-status.html">Status</a>
+      <a class="tab" href="/hub-strategy.html">Strategy</a>
+      <a class="tab" href="/hub-discovery.html">Discovery</a>
+      <a class="tab" href="/hub-ops.html">Ops</a>
+    </nav>
+    <span class="feeds" id="feeds"></span>
+    <span class="pill" id="trendPill" title="market trend — price-derived (ADR-0044)"><span class="led"></span><span>trend —</span></span>
+    <span class="pill" id="regimePill" title="volatility regime — price-derived (ADR-0051)"><span class="led"></span><span>regime —</span></span>
+    <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
+  </div>
+</div>
 <main>
-  <div class="kicker">Focus</div>
-  <div class="head"><span class="accent"></span><h1>Status</h1>
-    <span class="sub">The live book — money, risk, execution and the market it trades.</span></div>
+  <!-- price ticker across the top -->
+  <div class="ticker" id="ticker"><span class="muted" style="padding:4px 8px">loading prices…</span></div>
 
-  <div class="grid">
-    <a class="tile" href="/books.html" data-summary="risk">
-      <span class="icon">📚</span><h2>Books</h2>
-      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">firm pnl / risk</span></span></div><span class="go">Open →</span>
-    </a>
-    <a class="tile" href="/orders.html" data-summary="orders">
-      <span class="icon">🧾</span><h2>Orders</h2>
-      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">orders today</span></span></div><span class="go">Open →</span>
-    </a>
-    <a class="tile" href="/markets.html" data-summary="regime">
-      <span class="icon">📈</span><h2>Markets</h2>
-      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">trend / vol / feeds</span></span></div><span class="go">Open →</span>
-    </a>
-    <a class="tile" href="/rates.html" data-summary="rates">
-      <span class="icon">〰️</span><h2>Rates</h2>
-      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">dv01 / swaps</span></span></div><span class="go">Open →</span>
-    </a>
+  <!-- quick links to the drill-down pages (was the Status hub) -->
+  <div class="section-h" style="grid-column:1/-1">Status — the live book</div>
+  <div class="grid" style="grid-column:1/-1;margin-top:0;margin-bottom:6px">
+    <a class="tile" href="/books.html" style="--accent:#5b8cff" data-summary="risk"><span class="icon">📚</span><h2>Books</h2><div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">firm pnl · risk</span></span></div><span class="go">Open →</span></a>
+    <a class="tile" href="/orders.html" style="--accent:#5b8cff" data-summary="orders"><span class="icon">🧾</span><h2>Orders</h2><div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">orders today</span></span></div><span class="go">Open →</span></a>
+    <a class="tile" href="/markets.html" style="--accent:#5b8cff" data-summary="regime"><span class="icon">📈</span><h2>Markets</h2><div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">trend · vol · feeds</span></span></div><span class="go">Open →</span></a>
+    <a class="tile" href="/rates.html" style="--accent:#5b8cff" data-summary="rates"><span class="icon">〰️</span><h2>Rates</h2><div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">dv01 · swaps</span></span></div><span class="go">Open →</span></a>
   </div>
 
-  <div class="foot">Navigation only — every tile opens its existing page unchanged. Summaries are read live from the same endpoints those pages poll.</div>
+  <!-- LEFT: book & risk -->
+  <div class="col">
+    <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
+    <div class="stats" id="stats"></div>
+    <div class="section-h">Hedging <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic min-variance proxy hedge (ADR-0038): net equity held target-flat, the sized hedge &amp; its math</span>
+      <span class="badge" id="hedgeMode" style="margin-left:8px" title="OFF / ADVISE / AUTO">—</span>
+      <span class="badge" id="histBadge" style="margin-left:6px" title="daily-return history the covariance is built from">hist —</span></div>
+    <div class="panel pad"><div id="hedging" class="muted" style="padding:14px">loading…</div></div>
+    <div class="section-h">By market</div>
+    <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
+    <div class="section-h">Today's orders <span class="muted" id="obcount"></span></div>
+    <div class="panel pad">
+      <div id="oblotter" class="muted" style="padding:12px">loading…</div>
+      <div style="display:flex;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid var(--line)">
+        <button class="pgbtn" id="obprev">‹ prev</button>
+        <span class="muted" id="obpage" style="font-size:12px"></span>
+        <button class="pgbtn" id="obnext">next ›</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: attention · hypotheses · chat (three fixed-height panels) -->
+  <div class="col">
+    <div class="section-h">Needs your attention</div>
+    <div id="feed" class="feed"><div class="empty">all quiet</div></div>
+    <div class="section-h">Signals — combined view <span class="muted" id="fusionMode" style="text-transform:none;letter-spacing:0">— ADR-0055: every source fused into one target per name</span></div>
+    <div class="panel pad hypo-panel"><div id="fusionPanel" class="muted" style="padding:14px">loading…</div></div>
+    <div id="fusionFoot" class="muted" style="font-size:11px;padding:2px 4px"></div>
+  </div>
 </main>
-<script src="/hub.js"></script>
+
+<!-- chat: a floating dock opened from the button (rarely used, keeps the columns for data) -->
+<button id="chatFab" class="fab" title="Ask a question">💬</button>
+<div id="chatDock" class="chatdock" hidden>
+  <div class="dh"><span>Ask</span><button class="x" id="chatClose" title="close">×</button></div>
+  <div class="chat">
+    <div class="chatlog" id="chatlog"></div>
+    <form class="chatform" id="chatform" autocomplete="off">
+      <input id="chatinput" placeholder="pnl alpha · exposure AAPL · limits?">
+      <button type="submit">Ask</button>
+    </form>
+  </div>
+</div>
+<script>
+  const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+  const money = s => { const n = Number(s); return (n<0?"−":"") + Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2, maximumFractionDigits:2}); };
+  const cls = s => { const n = Number(s); return n>0?"up":(n<0?"down":"flat"); };
+
+  function stat(k, v, big) { return `<div class="stat"><div class="k">${k}</div><div class="v ${big?'big ':''}${cls(v)}">${money(v)}</div></div>`; }
+
+  let lastVar = null; // /api/var refreshes slower than /api/risk; cache for the tile
+  let lastEod = null; // /api/eod — session day + today's P&L measured from the previous close
+  function renderRisk(r) {
+    document.getElementById("asof").textContent = "· " + fmtTimeET(r.asOfMillis);
+    const t = r.total;
+    const varTile = lastVar == null ? "" : (lastVar.note
+      ? `<div class="stat"><div class="k">VaR 95 (1d)</div><div class="v mono muted" style="font-size:12px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</div></div>`
+      : `<div class="stat"><div class="k" title="historical simulation, ${lastVar.observations} days; ES95 ${lastVar.es95}${Number(lastVar.skippedExposure)>0?'; unmeasured exposure '+lastVar.skippedExposure:''}${lastVar.parametric?`; parametric (normal EWMA) VaR95 ${lastVar.parametric.var95} / ES95 ${lastVar.parametric.es95} — thin-tailed by assumption`:''}">VaR 95 (1d)</div><div class="v mono down">${money(lastVar.var95)}</div></div>`);
+    const dayTile = (lastEod == null || lastEod.todayPnl == null) ? "" :
+      `<div class="stat"><div class="k" title="since the previous session close (${esc(lastEod.previousCloseTotal)})${lastEod.overnightPnl!=null?` — overnight ${money(lastEod.overnightPnl)} / intraday ${money(lastEod.intradayPnl)}`:''} — session ${esc(lastEod.sessionDay)}, ${esc(lastEod.calendar)}">Today's P&L</div><div class="v mono ${cls(lastEod.todayPnl)}">${money(lastEod.todayPnl)}</div></div>`;
+    document.getElementById("stats").innerHTML =
+      stat("Total P&L", t.totalPnl, true) + dayTile + stat("Realized", t.realizedPnl) + stat("Unrealized", t.unrealizedPnl) +
+      `<div class="stat"><div class="k">Net exposure</div><div class="v mono">${money(t.netExposure)}</div></div>` +
+      `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>` + varTile;
+    const g = r.byAssetClass || [];
+    document.getElementById("byclass").outerHTML = '<div id="byclass">' + (g.length ?
+      "<table><tr><th>market</th><th>pos</th><th>realized</th><th>unrealized</th><th>total P&L</th><th>gross exp</th></tr>" +
+      g.map(x => `<tr><td class="cls">${esc(x.key)}</td><td class="muted mono">${x.positionCount}</td>
+        <td class="mono ${cls(x.realizedPnl)}">${money(x.realizedPnl)}</td>
+        <td class="mono ${cls(x.unrealizedPnl)}">${money(x.unrealizedPnl)}</td>
+        <td class="mono ${cls(x.totalPnl)}">${money(x.totalPnl)}</td>
+        <td class="mono">${money(x.grossExposure)}</td></tr>`).join("") + "</table>"
+      : '<div class="muted" style="padding:14px">no positions yet — the strategy or an order will build a book</div>') + '</div>';
+  }
+
+  function renderFeed(items) {
+    const feed = document.getElementById("feed");
+    if (!items.length) { feed.innerHTML = '<div class="empty">all quiet</div>'; return; }
+    if (items.length > 50) { items = items.slice(0, 50); } // cap DOM in a long-open tab (memory de-load)
+    feed.innerHTML = items.map(i =>
+      `<div class="card ${esc(i.severity)}"><div class="row1"><h3>${esc(i.title)}</h3><span class="badge">${esc(i.severity)}</span></div>
+         <p>${esc(i.body)}</p><div class="meta">${esc(i.kind)} · ${fmtTimeET(i.timestampMillis)}</div></div>`).join("");
+  }
+
+  // Backend service (SSE stream) indicator: always labelled "system"; the LED colour carries
+  // the state — green when connected, amber when reconnecting.
+  function setStatus(on, text) { document.getElementById("status").className = "pill " + (on?"on":"off"); document.getElementById("statusText").textContent = "system"; }
+
+  // ---- chat ----
+  const chatlog = document.getElementById("chatlog");
+  function addMsg(text, who, meta) {
+    const d = document.createElement("div");
+    d.className = "msg " + who;
+    d.innerHTML = esc(text) + (meta ? `<span class="mmeta">${esc(meta)}</span>` : "");
+    chatlog.appendChild(d); chatlog.scrollTop = chatlog.scrollHeight;
+    return d;
+  }
+  addMsg("Ask me about PnL, exposure, positions, limits, or signals — e.g. \"pnl alpha\".", "bot");
+  document.getElementById("chatform").addEventListener("submit", async e => {
+    e.preventDefault();
+    const input = document.getElementById("chatinput");
+    const q = input.value.trim(); if (!q) return;
+    addMsg(q, "user"); input.value = "";
+    const pending = addMsg("…", "bot pending");
+    try {
+      const r = await (await fetch("/api/chat", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({question:q})})).json();
+      pending.remove();
+      const slots = [r.book, r.instrument].filter(Boolean).join(" · ");
+      addMsg(r.answer, "bot", "intent: " + r.intent + (slots ? " · " + slots : "") + " · " + (r.model||""));
+    } catch (err) { pending.remove(); addMsg("chat unavailable right now", "bot"); }
+  });
+
+  async function loadRisk() { try { renderRisk(await (await pollFetch("/api/risk")).json()); } catch (e) {} }
+
+  // Market state the SYSTEM senses from prices (never a sim label): trend (ADR-0044) + volatility
+  // regime (ADR-0051). Green = benign (trending / calm), amber = attention (chop / elevated vol).
+  async function loadMarketState() {
+    try {
+      const m = await (await pollFetch("/api/market/regime")).json();
+      const tp = document.getElementById("trendPill"), rp = document.getElementById("regimePill");
+      const t = (m.trend || "—");
+      if (tp) { tp.className = "pill " + (t === "TREND" ? "on" : (t === "CHOP" ? "off" : ""));
+        tp.lastElementChild.textContent = "trend " + (t === "—" ? "—" : t.toLowerCase()); }
+      const r = (m.regime || "—");
+      if (rp) { rp.className = "pill " + (r === "CALM" ? "on" : (r === "ELEVATED" ? "off" : ""));
+        rp.lastElementChild.textContent = "regime " + (r === "—" ? "—" : r.toLowerCase());
+        rp.title = "volatility regime — price-derived (ADR-0051)" + (m.volRatio ? " · vol×baseline " + m.volRatio : ""); }
+    } catch (e) {}
+  }
+
+  // ---- price ticker (world indices + securities, one strip under the menu) ----
+  let tickPrev = {};
+  async function loadTicker() {
+    try {
+      const el = document.getElementById("ticker");
+      // World indices lead the strip (named, with a change chip); securities follow. Indices come
+      // through /api/marks too, so exclude their ids from the securities half to avoid duplication.
+      const [marksRaw, indicesRaw] = await Promise.all([
+        pollFetch("/api/marks").then(r => r.json()).catch(() => []),
+        pollFetch("/api/indices").then(r => r.json()).catch(() => [])
+      ]);
+      const indices = (indicesRaw || []).filter(x => x.hasMark);
+      const indexIds = new Set((indicesRaw || []).map(x => x.instrumentId));
+      const marks = (marksRaw || []).filter(m =>
+        !m.instrumentId.startsWith("USD.SOFR.") && !indexIds.has(m.instrumentId));
+      if (!marks.length && !indices.length) {
+        el.innerHTML = '<span class="muted" style="padding:4px 8px">no live prices</span>'; el.dataset.syms = ""; return;
+      }
+      // Compute each tile's HTML once per refresh (the up/down colour diff mutates tickPrev, so it
+      // must run exactly once per symbol even though the marquee renders two copies).
+      const inner = {};
+      indices.forEach(x => {
+        const chg = x.changePct == null ? null : Number(x.changePct);
+        const c = chg == null ? "flat" : (chg > 0 ? "up" : (chg < 0 ? "down" : "flat"));
+        const chip = chg == null ? "" : `<span class="c mono ${c}">${chg > 0 ? "+" : ""}${x.changePct}%</span>`;
+        const px = Number(x.price).toLocaleString(undefined, { maximumFractionDigits: 2 });
+        inner["IX:" + x.instrumentId] = `<span class="s">${esc(x.displayName)}</span><span class="p mono">${esc(px)}</span>` + chip;
+      });
+      marks.forEach(m => {
+        const prev = tickPrev[m.instrumentId], now = Number(m.price);
+        const c = prev == null ? "flat" : (now > prev ? "up" : (now < prev ? "down" : "flat"));
+        tickPrev[m.instrumentId] = now;
+        inner[m.instrumentId] = `<span class="s">${esc(m.instrumentId)}</span><span class="p mono ${c}">${esc(fmtPrice(m.price, m.instrumentId))}</span>`;
+      });
+      // Order: indices first, then securities.
+      const order = indices.map(x => "IX:" + x.instrumentId).concat(marks.map(m => m.instrumentId));
+      let track = el.querySelector(".marquee");
+      // Rebuild only when the set of tiles changes — otherwise update in place so the CSS animation
+      // keeps running smoothly (a rebuild restarts the scroll and causes a jump).
+      const symKey = order.join(",");
+      if (!track || el.dataset.syms !== symKey) {
+        // Two duplicated copies give the seamless -50% loop (keyframes: translateX(-50%)).
+        const tiles = order.map(k => `<span class="tk" data-sym="${esc(k)}">${inner[k]}</span>`).join("");
+        el.innerHTML = `<div class="marquee">${tiles}${tiles}</div>`;
+        el.dataset.syms = symKey;
+      } else {
+        track.querySelectorAll(".tk").forEach(node => {
+          const h = inner[node.dataset.sym];
+          if (h) node.innerHTML = h;
+        });
+      }
+    } catch (e) {}
+  }
+  // Per-feed connection LEDs on the stream line, from real feed status (/api/feeds).
+  async function loadFeeds() {
+    try {
+      const feeds = await (await pollFetch("/api/feeds")).json();
+      // One pill per active feed (a composite shows Finnhub + Yahoo side by side). LED: green =
+      // connected & live, amber = connected but delayed, red = down. Label names the source.
+      const NAMES = { finnhub: "Finnhub", yahoo: "Yahoo", sim: "Sim", none: "—" };
+      document.getElementById("feeds").innerHTML = feeds.map(f => {
+        const led = !f.connected ? "bad" : (f.delayed ? "warn" : "ok");
+        const name = NAMES[f.provider] || esc(f.provider);
+        return `<span class="pill" title="market data${f.delayed ? ' · delayed '+Math.round(f.delaySeconds/60)+'m' : ' · live'}">`
+             + `<span class="led ${led}"></span>${name}</span>`;
+      }).join("");
+    } catch (e) {}
+  }
+
+  // ---- AI hypotheses: PERSISTED executed decisions (don't vanish) + current live proposals,
+  //      merged into one time-ordered table. Executed rows are pinned (green edge, AUTO ✓). ----
+  const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
+  function btCell(s, pnl, trades) {
+    if (s == null) return '<span class="muted" title="not measured — fail-closed under ADR-0049: an unmeasured name is NOT order-eligible">—</span>';
+    if (s) return `<span class="up" title="deterministic OOS backtest net-positive on a MAJORITY of independent sim paths${pnl?` (median ${esc(pnl)}, ${trades} trades)`:''} — HARD GATE (ADR-0049): the name is order-eligible; the model still never trades a name this does not support">supported</span>`;
+    if (trades === 0) return '<span class="muted" title="deterministic strategy fired no signals on the majority of out-of-sample paths — not measured, so NOT order-eligible (ADR-0049 fail-closed)">no trades</span>';
+    return `<span class="down" title="deterministic OOS backtest net-negative on the majority of independent sim paths — GATED (ADR-0049): the AI may not order this name, information only">unsupported</span>`;
+  }
+  function renderHypotheses(rows) {
+    document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
+      "<table><tr><th>time</th><th>thesis</th><th>view</th><th>conv</th><th>verdict</th><th>backtest</th></tr>" +
+      rows.map(r => {
+        const dir = r.dir === "BUY" ? "LONG" : "SHORT";
+        const oc = r.outcome
+          ? ` <span class="${r.outcome==='WIN'?'up':(r.outcome==='LOSS'?'down':'muted')}" title="scored mark-to-mark at horizon expiry: ${esc(r.outcomePnl||'')}">${esc(r.outcome)}</span>`
+          : (r.auto ? ' <span class="whyno">open</span>' : '');
+        const v = r.auto
+          ? '<span class="up" title="auto-executed on the AI sleeve — closed & scored at horizon expiry">AUTO ✓</span>' + oc
+          : `<span class="${VERDICT_CLASS[r.verdict]||'muted'}" title="${esc(r.reason||'')}">${esc(r.verdict)}</span>`
+            + (r.reason ? ` <span class="whyno" title="${esc(r.reason)}">· ${esc(r.reason)}</span>` : '');
+        return `<tr class="${r.executed?'hypo-exec':''}"><td class="muted mono">${fmtTimeET(r.ts)}</td>
+          <td title="${esc(r.note||'')}">${esc(r.instr)} — ${esc(r.thesis)}</td>
+          <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conv||'')}</td>
+          <td>${v}</td><td>${btCell(r.btSupports, r.btPnl, r.btTrades)}</td></tr>`;
+      }).join("") + "</table>" +
+      '<div class="muted" style="font-size:11px;padding:6px 12px">AUTO ✓ = auto-executed on the AI sleeve (persisted — stays across cycles; order on the blotter). Others are live proposals for review. ADR-0049: a thesis is order-eligible ONLY if the deterministic backtest column is <b>supported</b> — the AI never orders an unvalidated name; size is then bounded by the measured track record (probation until enough outcomes score, full size only while positive).</div>'
+      : '<div class="muted" style="padding:14px">no hypotheses yet — the model runs on a cadence; a small model often returns none until a directional headline appears (see the app log "hypotheses: model proposed N")</div>') + '</div>';
+  }
+  async function loadHypotheses() {
+    try {
+      // /api/hypotheses is the event ledger (each distinct thesis retained, newest first);
+      // /api/hypotheses/stats is the measured hit-rate per conviction (ADR-0027).
+      const [led, stats] = await Promise.all([
+        pollFetch("/api/hypotheses").then(r => r.json()),
+        pollFetch("/api/hypotheses/stats").then(r => r.json()).catch(() => [])]);
+      renderHypotheses(led.map(r => ({ ts:r.timestampMillis, instr:r.instrumentId, thesis:r.thesis,
+        dir:r.direction, conv:r.conviction, verdict:r.verdict, auto:r.autonomous, executed:r.autonomous,
+        btSupports:r.backtestSupports, btPnl:r.backtestPnl, btTrades:r.backtestTrades, note:r.note,
+        reason:r.autonomyReason, outcome:r.outcome, outcomePnl:r.outcomePnl })));
+      const scored = stats.filter(s => s.wins + s.losses + s.flat > 0);
+      const statsEl = document.getElementById("hypoStats");
+      if (statsEl) statsEl.textContent = scored.length
+        ? "measured hit-rate — " + scored.map(s =>
+            `${s.conviction}: ${s.wins}/${s.wins+s.losses+s.flat} (${(s.hitRate*100).toFixed(0)}%, ${s.outcomePnl})`).join(" · ")
+        : "";
+    } catch (e) {}
+  }
+
+  // ---- deterministic (quant) strategy actions — entries & exits, each with its reason ----
+  function renderQuant(rows) {
+    document.getElementById("quant").outerHTML = '<div id="quant" class="muted">' + (rows.length ?
+      "<table><tr><th>time</th><th>action</th><th>instr</th><th>qty</th><th>reason</th></tr>" +
+      rows.map(a => {
+        const isExit = a.kind === "EXIT";
+        return `<tr><td class="muted mono">${fmtTimeET(a.timestampMillis)}</td>
+          <td class="${a.side==='BUY'?'up':'down'}">${esc(a.side)}${isExit?'<span class="ktag">exit</span>':''}</td>
+          <td class="cls">${esc(a.instrumentId)} <span class="muted" style="font-size:10px">${esc(a.book)}</span></td>
+          <td class="mono">${esc(a.quantity)}</td>
+          <td class="muted" title="${esc(a.reason||'')}">${esc(a.reason||'')}</td></tr>`;
+      }).join("") + "</table>"
+      : '<div class="muted" style="padding:12px">no strategy actions yet — the momentum engine auto-trades ALPHA/MACRO; every entry and risk-reducing exit (with its reason) appears here</div>') + '</div>';
+  }
+  async function loadQuant() { try { renderQuant(await (await pollFetch("/api/strategy/actions")).json()); } catch (e) {} }
+
+  // ---- ADR-0055: the combined view — every source fused into one target per name (easy comparison) ----
+  async function loadFusionPanel() {
+    try {
+      const book = await (await pollFetch("/api/fusion/targets")).json();
+      const ts = (book.targets || []).slice(0, 12);
+      const modeEl = document.getElementById("fusionMode");
+      if (modeEl) modeEl.innerHTML = book.routing
+        ? '— <span class="up">LIVE (sim)</span>: fusion is the sole order origin'
+        : '— <span class="warn">shadow</span>: computed, not traded';
+      const el = document.getElementById("fusionPanel");
+      if (!ts.length) {
+        el.outerHTML = '<div id="fusionPanel" class="muted" style="padding:14px">no fused targets yet — sources push a forecast as they fire; the loop combines them every 30s.</div>';
+        document.getElementById("fusionFoot").textContent = "";
+        return;
+      }
+      const chip = c => `<span class="ktag" title="${esc(c.source)}">${esc(c.source).slice(0,4)} ${c.forecast>0?'+':''}${c.forecast.toFixed(0)}</span>`;
+      el.outerHTML = '<div id="fusionPanel">' +
+        '<table><tr><th>instr</th><th>fcst</th><th>sources</th><th>Δ order</th></tr>' +
+        ts.map(t => {
+          const fCls = t.combinedForecast>0?'up':(t.combinedForecast<0?'down':'muted');
+          const d = Number(t.deltaQty);
+          const dTxt = d===0 ? '<span class="muted">— band</span>' : (d>0?'up':'down');
+          const dVal = d===0 ? '' : `<span class="${d>0?'up':'down'}">${d.toLocaleString(undefined,{maximumFractionDigits:1})}</span>`;
+          return `<tr><td class="cls">${esc(t.instrument)}</td>
+            <td class="mono ${fCls}">${t.combinedForecast.toFixed(1)}</td>
+            <td>${(t.contributions||[]).map(chip).join(" ")}</td>
+            <td class="mono">${d===0?'<span class="muted">— band</span>':dVal}</td></tr>`;
+        }).join("") + "</table></div>";
+      document.getElementById("fusionFoot").innerHTML =
+        'combined forecast on the [−20,+20] scale; Δ is the partial move toward target ("band" = no-trade zone). '
+        + 'Full drill-down — AI hypotheses, strategy actions, per-source forecasts: <a href="/signals.html">Signals →</a>';
+    } catch (e) {}
+  }
+
+  // ---- hedging: net equity held target-flat, the sized min-variance hedge and its math (ADR-0038) ----
+  function fmtUsd(v) {
+    if (v === null || v === undefined) return "—";
+    const n = +v; return (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString(undefined, {maximumFractionDigits: 0});
+  }
+  function renderHedging(s) {
+    const mb = document.getElementById("hedgeMode");
+    if (mb) { mb.textContent = s.mode; mb.title = "hedging mode: " + s.mode; }
+    const axes = s.axes || [];
+    const body = axes.length ? axes.map(a => {
+      const util = Math.max(0, Math.min(1, a.utilization || 0)); // bar = hedge effectiveness ρ²
+      const pct = Math.round((a.effectiveness != null ? a.effectiveness : 0) * 100);
+      const barColor = a.status === "REDUCE" ? "var(--warn)" : a.hedging ? "var(--brand)" : "var(--up)";
+      const statusColor = (a.status === "HEDGE" || a.status === "UNWIND") ? "var(--brand)"
+        : a.status === "REDUCE" ? "var(--warn)" : a.status === "WARMING" ? "var(--alert)"
+        : a.status === "ON-TARGET" ? "var(--up)" : "var(--dim)";
+      let hedgeRow = "";
+      if (a.hedgeQuantity !== null && a.hedgeQuantity !== undefined) {
+        // STATISTICAL carries a measured ρ² + daily σ; STRUCTURAL asserts the beta (no ρ²/σ).
+        const evidence = a.effectiveness != null
+          ? `effectiveness ρ² <b>${(a.effectiveness * 100).toFixed(0)}%</b> · daily σ ${fmtUsd(a.grossSigmaUsd)} → ${fmtUsd(a.residualSigmaUsd)}`
+          : `<span class="muted">assigned β · effectiveness asserted, not measured</span>`;
+        hedgeRow = `<div style="margin-top:6px;font-size:12px">
+          <b class="${a.hedgeSide === "SELL" ? "down" : "up"}">${esc(a.hedgeSide)} ${esc(a.hedgeQuantity)} ${esc(a.proxyId)}</b>
+          <span class="muted">(${fmtUsd(a.hedgeNotionalUsd)})</span> · ${evidence}</div>`;
+      }
+      // Held vs target: the hedge actually on (HEDGE book) and where the advisor wants it.
+      let heldRow = "";
+      if (a.heldProxyQty !== null && a.heldProxyQty !== undefined) {
+        const tgt = a.targetProxyQty !== null && a.targetProxyQty !== undefined ? a.targetProxyQty : "—";
+        heldRow = `<div class="muted" style="font-size:11px;margin-top:4px">held <b>${esc(a.heldProxyQty)}</b>
+          → target <b>${esc(tgt)}</b> ${esc(a.proxyId)} · the order is the delta</div>`;
+      }
+      const tierBadge = (a.tier && a.tier !== "—")
+        ? `<span class="muted" style="font-size:10px;letter-spacing:.04em">${esc(a.tier)}</span>` : "";
+      return `<div style="padding:8px 4px;border-bottom:1px solid var(--line)">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <b>${esc(a.axis)}</b>
+          <span style="color:${statusColor};font-size:10px;letter-spacing:.06em">${esc(a.status)}</span>
+          ${tierBadge}
+          <span class="muted" style="margin-left:auto;font-size:12px">${fmtUsd(a.netExposureUsd)} net → flat${a.effectiveness != null ? " · ρ² " + pct + "%" : ""}</span>
+        </div>
+        <div style="height:5px;border-radius:3px;background:var(--line);margin-top:5px;overflow:hidden">
+          <div style="height:100%;width:${Math.round(Math.min(1, util) * 100)}%;background:${barColor}"></div></div>
+        ${hedgeRow}
+        ${heldRow}
+        <div class="muted" style="font-size:11px;margin-top:5px">${esc(a.rationale || "")}</div>
+      </div>`;
+    }).join("") : '<div class="muted" style="padding:12px">no hedgeable exposure yet — take an equity position to see the hedge</div>';
+    const note = s.note ? `<div class="muted" style="font-size:10px;padding:6px 4px 0">${esc(s.note)}</div>` : "";
+    document.getElementById("hedging").outerHTML = '<div id="hedging" class="muted">' + body + note + '</div>';
+  }
+  async function loadHedging() { try { renderHedging(await (await pollFetch("/api/hedging")).json()); } catch (e) {} }
+
+  // history-loaded indicator: how many daily-return days back the covariance, and when seeded/loaded
+  async function loadHistory() {
+    try {
+      const h = await (await pollFetch("/api/history/status")).json();
+      const b = document.getElementById("histBadge");
+      if (!b) return;
+      if (h.ready) {
+        b.textContent = `history ✓ ${h.days}d`;
+        b.style.color = "var(--up)";
+      } else if (h.source === "failed") {
+        b.textContent = "history ✕ no data";
+        b.style.color = "var(--alert)";
+      } else if (h.source === "unavailable") {
+        b.textContent = "history ✕ unavailable"; // DB/table error or persistence off — see tooltip
+        b.style.color = "var(--alert)";
+      } else if (h.source === "seeding") {
+        b.textContent = "history loading…";
+        b.style.color = "var(--warn)";
+      } else {
+        // A real source (yahoo-history / existing) but still short of the 20-day minimum.
+        b.textContent = `history warming ${h.days}/20d`;
+        b.style.color = "var(--warn)";
+      }
+      b.title = `covariance history: ${h.days} days · ${h.instruments} instruments · latest ${h.latestDay || "—"}`
+        + (h.note ? ` · ${h.note}` : "");
+    } catch (e) {}
+  }
+
+  // ---- floating chat dock ----
+  const chatDock = document.getElementById("chatDock");
+  document.getElementById("chatFab").onclick = () => { chatDock.hidden = !chatDock.hidden; if (!chatDock.hidden) document.getElementById("chatinput").focus(); };
+  document.getElementById("chatClose").onclick = () => { chatDock.hidden = true; };
+
+  // ---- today's orders (paginated 100/page) ----
+  let obPage = 0, obTotalPages = 1;
+  async function loadOrders() {
+    try {
+      const r = await (await pollFetch(`/api/orders/day?page=${obPage}&size=100`)).json();
+      obTotalPages = r.totalPages;
+      document.getElementById("obcount").textContent = "· " + r.total + " today";
+      document.getElementById("obpage").textContent = `page ${r.page + 1} / ${r.totalPages}`;
+      document.getElementById("oblotter").outerHTML = '<div id="oblotter">' + (r.orders.length ?
+        "<table><tr><th>time</th><th>order id</th><th>instr</th><th>book</th><th>side</th><th>qty</th><th>status</th></tr>" +
+        r.orders.map(o => `<tr><td class="muted mono">${fmtTimeET(o.createdAtMillis)}</td>
+          <td class="mono muted" style="font-size:11px;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(o.orderId)}">${esc(o.orderId)}</td>
+          <td class="cls">${esc(o.instrumentId)}</td><td class="muted">${esc(o.bookId)}</td>
+          <td class="${esc(o.side)}">${esc(o.side)}</td><td class="mono">${esc(o.quantity)}</td>
+          <td><span class="st ${esc(o.status)}" title="${esc(o.reason||'')}">${esc(o.status)}</span>${o.status==='REJECTED'&&o.reason?` <span class="muted" style="font-size:10px">${esc(o.reason)}</span>`:''}</td></tr>`).join("") + "</table>"
+        : '<div class="muted" style="padding:12px">no orders yet today</div>') + '</div>';
+    } catch (e) {}
+  }
+  document.getElementById("obprev").onclick = () => { if (obPage > 0) { obPage--; loadOrders(); } };
+  document.getElementById("obnext").onclick = () => { if (obPage < obTotalPages - 1) { obPage++; loadOrders(); } };
+  async function bootstrap() {
+    try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) {}
+    loadRisk();
+  }
+
+  const es = new EventSource("/api/stream");
+  es.onopen = () => setStatus(true, "live");
+  es.onerror = () => setStatus(false, "reconnecting…");
+  es.addEventListener("attention", e => renderFeed(JSON.parse(e.data)));
+  bootstrap();
+  loadOrders();
+  loadFusionPanel();
+  loadHedging();
+  loadHistory();
+  loadTicker();
+  loadFeeds();
+  // poll() (poll.js): one in-flight run per loop, paused while the tab is hidden, immediate
+  // refresh on return — so backgrounded tabs stop hammering the JVM and a backend stall can't
+  // pile up pending fetches. The initial call inside each loadX above stays; poll runs its own
+  // immediate tick too (idempotent). Replaces raw setInterval, which wedged tabs overnight.
+  poll(loadRisk, 5000);       // was 2s — hits the shared risk lock; 5s is plenty for a dashboard
+  poll(loadMarketState, 5000);
+  poll(loadTicker, 3000);     // was 2s — cosmetic marquee (world indices + securities)
+  poll(loadFeeds, 5000);
+  poll(loadFusionPanel, 10000);
+  poll(loadHedging, 5000);
+  poll(loadHistory, 15000);
+  const loadVar = () => pollFetch("/api/var").then(r => r.json()).then(v => { lastVar = v; }).catch(() => {});
+  poll(loadVar, 15000);
+  const loadEod = () => pollFetch("/api/eod").then(r => r.json()).then(v => { lastEod = v; }).catch(() => {});
+  poll(loadEod, 5000); // compressed sim days roll in minutes — keep the tile current
+  poll(() => { if (obPage === 0) return loadOrders(); }, 5000); // live-refresh first page only
+</script>
 </body>
 </html>

@@ -169,35 +169,6 @@
     </a>
   </div>
 
-  <!-- LEFT: book & risk -->
-  <div class="col">
-    <div class="section-h">Consolidated P&amp;L <span class="muted" id="asof"></span></div>
-    <div class="stats" id="stats"></div>
-    <div class="section-h">Hedging <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic min-variance proxy hedge (ADR-0038): net equity held target-flat, the sized hedge &amp; its math</span>
-      <span class="badge" id="hedgeMode" style="margin-left:8px" title="OFF / ADVISE / AUTO">—</span>
-      <span class="badge" id="histBadge" style="margin-left:6px" title="daily-return history the covariance is built from">hist —</span></div>
-    <div class="panel pad"><div id="hedging" class="muted" style="padding:14px">loading…</div></div>
-    <div class="section-h">By market</div>
-    <div class="panel pad"><div id="byclass" class="muted" style="padding:14px">loading…</div></div>
-    <div class="section-h">Today's orders <span class="muted" id="obcount"></span></div>
-    <div class="panel pad">
-      <div id="oblotter" class="muted" style="padding:12px">loading…</div>
-      <div style="display:flex;gap:8px;align-items:center;padding:8px 12px;border-top:1px solid var(--line)">
-        <button class="pgbtn" id="obprev">‹ prev</button>
-        <span class="muted" id="obpage" style="font-size:12px"></span>
-        <button class="pgbtn" id="obnext">next ›</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- RIGHT: attention · hypotheses · chat (three fixed-height panels) -->
-  <div class="col">
-    <div class="section-h">Needs your attention</div>
-    <div id="feed" class="feed"><div class="empty">all quiet</div></div>
-    <div class="section-h">Signals — combined view <span class="muted" id="fusionMode" style="text-transform:none;letter-spacing:0">— ADR-0055: every source fused into one target per name</span></div>
-    <div class="panel pad hypo-panel"><div id="fusionPanel" class="muted" style="padding:14px">loading…</div></div>
-    <div id="fusionFoot" class="muted" style="font-size:11px;padding:2px 4px"></div>
-  </div>
 </main>
 
 <!-- chat: a floating dock opened from the button (rarely used, keeps the columns for data) -->

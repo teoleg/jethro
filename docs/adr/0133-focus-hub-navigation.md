@@ -48,8 +48,12 @@ Add a thin, **additive** navigation layer — new tile pages, zero edits to exis
   full-width **focus-tile row** (Status/Strategy/Discovery/Ops, each with a live headline stat) directly
   below the strip — the owner's ask: "tiles and strip on top, pills stay." The landing loads `hub.css`
   (before its inline `<style>`, so the page's own rules win any shared selector) + `hub.js`.
-- **Still open (tracked):** (1) the landing's legacy overview panels (consolidated P&L, hedging, attention,
-  signals) still sit BELOW the focus tiles — owner to decide whether to keep, trim, or move them; (2) build
-  the Basket page or drop its planned tile.
+- **Landing is now tiles-only** (owner: "landing must contain now tiles"): strip + status pills + the four
+  focus tiles (concise live status per tile) + the chat dock. The old landing **cockpit** (consolidated
+  P&L, hedging, by-market, today's orders, attention feed, combined-signals) **became the Status page**
+  (`hub-status.html`) — the owner's "old landing content becomes another status page" — with a
+  Books/Orders/Markets/Rates quick-tile row on top. The heavy panel JS/CSS moved with it; the landing keeps
+  only the ticker + pills + tiles machinery (the now-absent panels' pollers are guarded and no-op).
+- **Still open (tracked):** build the Basket page or drop its planned tile.
 - Reversible: the nav swap is a mechanical block replacement; the tile layer is `hub.css` + `hub.js` + the
   four `hub-*.html` files.
