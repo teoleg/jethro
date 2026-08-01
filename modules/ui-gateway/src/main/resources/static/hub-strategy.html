@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — strategy</title>
+<link rel="stylesheet" href="/hub.css">
+<style>:root { --accent:#35c07a; }</style>
+</head>
+<body>
+<div class="topbar"><div class="bar">
+  <span class="brand"><span class="dot"></span>JETHRO</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Overview</a>
+    <a class="tab" href="/hub-status.html">Status</a>
+    <a class="tab active" href="/hub-strategy.html">Strategy</a>
+    <a class="tab" href="/hub-discovery.html">Discovery</a>
+    <a class="tab" href="/hub-ops.html">Ops</a>
+  </nav>
+  <span class="spacer"></span>
+  <a class="back" href="/">← Overview</a>
+</div></div>
+
+<main>
+  <div class="kicker">Focus</div>
+  <div class="head"><span class="accent"></span><h1>Strategy</h1>
+    <span class="sub">How the desk forms, fuses and sizes its views.</span></div>
+
+  <div class="grid">
+    <a class="tile" href="/strategy.html" data-summary="strategy">
+      <span class="icon">🧠</span><h2>Strategy</h2>
+      <div class="desc">The deterministic quant engine — its live actions and reasoning.</div>
+      <div class="metric"></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/signals.html" data-summary="fusion">
+      <span class="icon">📡</span><h2>Signals</h2>
+      <div class="desc">Every source fused into one target per name (ADR-0055).</div>
+      <div class="metric"></div><span class="go">Open →</span>
+    </a>
+    <div class="tile planned">
+      <span class="icon">🧺</span><span class="badge">Planned</span><h2>Basket</h2>
+      <div class="desc">Basket / portfolio-construction view — grouped, correlated sizing in one place.</div>
+      <div class="metric"><span class="v mut">not yet built</span></div>
+    </div>
+    <a class="tile" href="/hub-discovery.html">
+      <span class="icon">🔭</span><h2>Discovery</h2>
+      <div class="desc">New names, data &amp; social sources — jump to the Discovery hub.</div>
+      <div class="metric"><span class="v mut">hub →</span></div><span class="go">Open →</span>
+    </a>
+  </div>
+
+  <div class="foot">Navigation only — every tile opens its existing page unchanged. Summaries are read live from the same endpoints those pages poll.</div>
+</main>
+<script src="/hub.js"></script>
+</body>
+</html>

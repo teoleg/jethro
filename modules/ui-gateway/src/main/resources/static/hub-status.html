@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — status</title>
+<link rel="stylesheet" href="/hub.css">
+<style>:root { --accent:#5b8cff; }</style>
+</head>
+<body>
+<div class="topbar"><div class="bar">
+  <span class="brand"><span class="dot"></span>JETHRO</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Overview</a>
+    <a class="tab active" href="/hub-status.html">Status</a>
+    <a class="tab" href="/hub-strategy.html">Strategy</a>
+    <a class="tab" href="/hub-discovery.html">Discovery</a>
+    <a class="tab" href="/hub-ops.html">Ops</a>
+  </nav>
+  <span class="spacer"></span>
+  <a class="back" href="/">← Overview</a>
+</div></div>
+
+<main>
+  <div class="kicker">Focus</div>
+  <div class="head"><span class="accent"></span><h1>Status</h1>
+    <span class="sub">The live book — money, risk, execution and the market it trades.</span></div>
+
+  <div class="grid">
+    <a class="tile" href="/books.html" data-summary="risk">
+      <span class="icon">📚</span><h2>Books</h2>
+      <div class="desc">Positions, P&amp;L and risk per book, rolled up to FIRM total.</div>
+      <div class="metric"></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/orders.html" data-summary="orders">
+      <span class="icon">🧾</span><h2>Orders</h2>
+      <div class="desc">Every order and fill today — searchable lotter with status.</div>
+      <div class="metric"></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/markets.html" data-summary="regime">
+      <span class="icon">📈</span><h2>Markets</h2>
+      <div class="desc">Live marks, spreads and the sensed trend / volatility regime.</div>
+      <div class="metric"></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/rates.html">
+      <span class="icon">〰️</span><h2>Rates</h2>
+      <div class="desc">Swap curve, bucketed DV01 and the rates book.</div>
+      <div class="metric"><span class="v mut">curve &amp; DV01</span></div><span class="go">Open →</span>
+    </a>
+  </div>
+
+  <div class="foot">Navigation only — every tile opens its existing page unchanged. Summaries are read live from the same endpoints those pages poll.</div>
+</main>
+<script src="/hub.js"></script>
+</body>
+</html>

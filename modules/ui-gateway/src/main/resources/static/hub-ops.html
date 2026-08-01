@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jethro — ops</title>
+<link rel="stylesheet" href="/hub.css">
+<style>:root { --accent:#8b95a8; }</style>
+</head>
+<body>
+<div class="topbar"><div class="bar">
+  <span class="brand"><span class="dot"></span>JETHRO</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Overview</a>
+    <a class="tab" href="/hub-status.html">Status</a>
+    <a class="tab" href="/hub-strategy.html">Strategy</a>
+    <a class="tab" href="/hub-discovery.html">Discovery</a>
+    <a class="tab active" href="/hub-ops.html">Ops</a>
+  </nav>
+  <span class="spacer"></span>
+  <a class="back" href="/">← Overview</a>
+</div></div>
+
+<main>
+  <div class="kicker">Focus</div>
+  <div class="head"><span class="accent"></span><h1>Ops</h1>
+    <span class="sub">Tooling, configuration and the continuous-improvement loop.</span></div>
+
+  <div class="grid">
+    <a class="tile" href="/improve.html" data-summary="improve">
+      <span class="icon">♻️</span><h2>Improve</h2>
+      <div class="desc">The continuous-improvement loop — per-cycle scored PnL &amp; decisions (ADR-0063).</div>
+      <div class="metric"></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/config.html">
+      <span class="icon">⚙️</span><h2>Config</h2>
+      <div class="desc">Runtime configuration and the risk / money dials, with provenance.</div>
+      <div class="metric"><span class="v mut">dials</span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/sim.html">
+      <span class="icon">🎛️</span><h2>Sim</h2>
+      <div class="desc">Simulator control — a TEST tool, gated to SIM mode only (invariant 9).</div>
+      <div class="metric"><span class="v mut">test tool</span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/backtest.html">
+      <span class="icon">⏮️</span><h2>Backtest</h2>
+      <div class="desc">Walk-forward, multi-seed OOS harness and its results (ADR-0027).</div>
+      <div class="metric"><span class="v mut">OOS harness</span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/ollama.html">
+      <span class="icon">🤖</span><h2>Models</h2>
+      <div class="desc">Local model runtime (Ollama) — health and narration status.</div>
+      <div class="metric"><span class="v mut">SLM runtime</span></div><span class="go">Open →</span>
+    </a>
+  </div>
+
+  <div class="foot">Navigation only — every tile opens its existing page unchanged. Summaries are read live from the same endpoints those pages poll.</div>
+</main>
+<script src="/hub.js"></script>
+</body>
+</html>
