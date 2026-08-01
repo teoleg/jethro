@@ -3,8 +3,23 @@
 An **independent subproject** inside the jethro repo — its own deployable jar, port, database schema,
 LMDB env, Kafka topics, **ADR flow** (`docs/adr/`) and README. It *reuses* jethro's shared building
 blocks (`common-domain` decimal money types, `common-messaging` Avro/serde) but is **not** part of the
-jethro `app` assembly and is not depended on by it. Municipal-bond domain is the intended focus; today the
-module is scaffolding + a live status UI.
+jethro `app` assembly and is not depended on by it.
+
+## Mission
+
+Inspired by Andrew Kalotay's *Interest Rate Management of Municipal Bonds* — the eventual goal is deep,
+option-adjusted analytics of the U.S. muni universe (callable-bond OAS, effective duration, refunding
+efficiency). **Phase 1 is data**: collect, normalise and warehouse the muni universe from every available
+source — MSRB/EMMA, Census, state disclosure hubs (NY OSC, NJ DCA, PA DCED), and thousands of local
+governments (counties, cities, townships, school districts, authorities) — via APIs, bulk files and polite
+web scraping. Geographic staging: **NY → NJ → PA** first, then outward. Postgres (its own `muni` schema) is
+the system of record.
+
+The data platform is specified across **[ADR-0002 … ADR-0011](docs/adr/README.md)** — mission (0002),
+sources (0003), ingestion (0004), raw+provenance (0005), schema (0006), identity (0007), legal/polite
+crawling (0008), scheduling (0009), document extraction (0010), quality/coverage (0011). Analytics is the
+deferred north star; the schema is built to serve it. Today the module is scaffolding + a live status UI —
+the pipeline is the next build.
 
 ## Run
 
