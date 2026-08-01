@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jethro — overview</title>
-<link rel="stylesheet" href="/hub.css"><!-- focus-tile styles (ADR-0133); inline <style> below overrides any shared rule -->
+<link rel="stylesheet" href="/hub.css"><!-- focus-tile styles; inline <style> below overrides any shared rule -->
 <style>
-  /* v0 placeholder page (ADR-0017/0021); replaced by the React app under ui/ as views grow. */
+  /* v0 placeholder page; replaced by the React app under ui/ as views grow. */
   :root {
     --bg:#0a0d13; --surface:#141926; --surface-2:#1a2030; --line:#252d3d; --line-2:#323c50;
     --txt:#e6eaf2; --dim:#8b95a8; --brand:#5b8cff; --info:#5b8cff; --warn:#e0a83d; --alert:#f0553f;
@@ -123,11 +123,12 @@
   .chatform input:focus { outline:none; border-color:var(--brand); box-shadow:0 0 0 3px rgba(91,140,255,.18); }
   .chatform button { background:var(--brand); color:#fff; border:0; border-radius:9px; padding:9px 15px; font:inherit; font-weight:600; cursor:pointer; }
 </style>
+<link rel="stylesheet" href="/nav.css">
 </head>
 <body>
 <script src="/format.js"></script>
 <script src="/poll.js"></script>
-<script src="/hub.js"></script><!-- populates the focus-tile stats (ADR-0133) -->
+<script src="/hub.js"></script><!-- populates the focus-tile stats -->
 <div class="topbar">
   <div class="bar">
     <span class="brand"><span class="dot"></span>JETHRO</span>
@@ -139,8 +140,8 @@
       <a class="tab" href="/hub-ops.html">Ops</a>
     </nav>
     <span class="feeds" id="feeds"></span>
-    <span class="pill" id="trendPill" title="market trend — price-derived (ADR-0044)"><span class="led"></span><span>trend —</span></span>
-    <span class="pill" id="regimePill" title="volatility regime — price-derived (ADR-0051)"><span class="led"></span><span>regime —</span></span>
+    <span class="pill" id="trendPill" title="market trend — price-derived"><span class="led"></span><span>trend —</span></span>
+    <span class="pill" id="regimePill" title="volatility regime — price-derived"><span class="led"></span><span>regime —</span></span>
     <span class="pill" id="status"><span class="led"></span><span id="statusText">connecting…</span></span>
   </div>
 </div>
@@ -148,7 +149,7 @@
   <!-- price ticker across the top -->
   <div class="ticker" id="ticker"><span class="muted" style="padding:4px 8px">loading prices…</span></div>
 
-  <!-- consolidated P&L — one tile, all firm numbers on top (ADR-0133) -->
+  <!-- consolidated P&L — one tile, all firm numbers on top -->
   <a class="tile pnl" href="/hub-status.html" style="--accent:#5b8cff;grid-column:1/-1;min-height:auto;margin:2px 0 2px">
     <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="icon">💰</span><h2>Consolidated P&amp;L</h2>
       <span class="sl" style="font-weight:400;text-transform:none;letter-spacing:0">firm total — all books incl. hedge <span class="muted" id="asof"></span></span></div>
@@ -156,7 +157,7 @@
     <span class="go">Status →</span>
   </a>
 
-  <!-- focus hubs: tiles below the strip; the marquee + status pills above are untouched (ADR-0133) -->
+  <!-- focus hubs: tiles below the strip; the marquee + status pills above are untouched -->
   <div class="section-h" style="grid-column:1/-1">Focus — jump to a hub</div>
   <div class="grid" style="grid-column:1/-1;margin-top:0">
     <a class="tile" href="/hub-status.html" style="--accent:#5b8cff" data-summary="risk">
@@ -177,7 +178,7 @@
     </a>
   </div>
 
-  <!-- positions by market — table under the tiles (ADR-0133) -->
+  <!-- positions by market — table under the tiles -->
   <div class="section-h" style="grid-column:1/-1;margin-top:10px">Positions by market</div>
   <div class="panel pad" style="grid-column:1/-1"><div id="byMarket" class="muted" style="padding:14px">loading…</div></div>
 
@@ -271,8 +272,8 @@
 
   async function loadRisk() { try { renderRisk(await (await pollFetch("/api/risk")).json()); } catch (e) {} }
 
-  // Market state the SYSTEM senses from prices (never a sim label): trend (ADR-0044) + volatility
-  // regime (ADR-0051). Green = benign (trending / calm), amber = attention (chop / elevated vol).
+  // Market state the SYSTEM senses from prices (never a sim label): trend + volatility
+  // regime. Green = benign (trending / calm), amber = attention (chop / elevated vol).
   async function loadMarketState() {
     try {
       const m = await (await pollFetch("/api/market/regime")).json();
@@ -283,7 +284,7 @@
       const r = (m.regime || "—");
       if (rp) { rp.className = "pill " + (r === "CALM" ? "on" : (r === "ELEVATED" ? "off" : ""));
         rp.lastElementChild.textContent = "regime " + (r === "—" ? "—" : r.toLowerCase());
-        rp.title = "volatility regime — price-derived (ADR-0051)" + (m.volRatio ? " · vol×baseline " + m.volRatio : ""); }
+        rp.title = "volatility regime — price-derived" + (m.volRatio ? " · vol×baseline " + m.volRatio : ""); }
     } catch (e) {}
   }
 
@@ -360,10 +361,10 @@
   //      merged into one time-ordered table. Executed rows are pinned (green edge, AUTO ✓). ----
   const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
   function btCell(s, pnl, trades) {
-    if (s == null) return '<span class="muted" title="not measured — fail-closed under ADR-0049: an unmeasured name is NOT order-eligible">—</span>';
-    if (s) return `<span class="up" title="deterministic OOS backtest net-positive on a MAJORITY of independent sim paths${pnl?` (median ${esc(pnl)}, ${trades} trades)`:''} — HARD GATE (ADR-0049): the name is order-eligible; the model still never trades a name this does not support">supported</span>`;
-    if (trades === 0) return '<span class="muted" title="deterministic strategy fired no signals on the majority of out-of-sample paths — not measured, so NOT order-eligible (ADR-0049 fail-closed)">no trades</span>';
-    return `<span class="down" title="deterministic OOS backtest net-negative on the majority of independent sim paths — GATED (ADR-0049): the AI may not order this name, information only">unsupported</span>`;
+    if (s == null) return '<span class="muted" title="not measured — fail-closed under an unmeasured name is NOT order-eligible">—</span>';
+    if (s) return `<span class="up" title="deterministic OOS backtest net-positive on a MAJORITY of independent sim paths${pnl?` (median ${esc(pnl)}, ${trades} trades)`:''} — HARD GATE: the name is order-eligible; the model still never trades a name this does not support">supported</span>`;
+    if (trades === 0) return '<span class="muted" title="deterministic strategy fired no signals on the majority of out-of-sample paths — not measured, so NOT order-eligible ( fail-closed)">no trades</span>';
+    return `<span class="down" title="deterministic OOS backtest net-negative on the majority of independent sim paths — GATED: the AI may not order this name, information only">unsupported</span>`;
   }
   function renderHypotheses(rows) {
     document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
@@ -382,13 +383,13 @@
           <td class="${dir==='LONG'?'up':'down'}">${dir}</td><td class="muted">${esc(r.conv||'')}</td>
           <td>${v}</td><td>${btCell(r.btSupports, r.btPnl, r.btTrades)}</td></tr>`;
       }).join("") + "</table>" +
-      '<div class="muted" style="font-size:11px;padding:6px 12px">AUTO ✓ = auto-executed on the AI sleeve (persisted — stays across cycles; order on the blotter). Others are live proposals for review. ADR-0049: a thesis is order-eligible ONLY if the deterministic backtest column is <b>supported</b> — the AI never orders an unvalidated name; size is then bounded by the measured track record (probation until enough outcomes score, full size only while positive).</div>'
+      '<div class="muted" style="font-size:11px;padding:6px 12px">AUTO ✓ = auto-executed on the AI sleeve (persisted — stays across cycles; order on the blotter). Others are live proposals for review. a thesis is order-eligible ONLY if the deterministic backtest column is <b>supported</b> — the AI never orders an unvalidated name; size is then bounded by the measured track record (probation until enough outcomes score, full size only while positive).</div>'
       : '<div class="muted" style="padding:14px">no hypotheses yet — the model runs on a cadence; a small model often returns none until a directional headline appears (see the app log "hypotheses: model proposed N")</div>') + '</div>';
   }
   async function loadHypotheses() {
     try {
       // /api/hypotheses is the event ledger (each distinct thesis retained, newest first);
-      // /api/hypotheses/stats is the measured hit-rate per conviction (ADR-0027).
+      // /api/hypotheses/stats is the measured hit-rate per conviction.
       const [led, stats] = await Promise.all([
         pollFetch("/api/hypotheses").then(r => r.json()),
         pollFetch("/api/hypotheses/stats").then(r => r.json()).catch(() => [])]);
@@ -421,7 +422,7 @@
   }
   async function loadQuant() { try { renderQuant(await (await pollFetch("/api/strategy/actions")).json()); } catch (e) {} }
 
-  // ---- ADR-0055: the combined view — every source fused into one target per name (easy comparison) ----
+  // ---- the combined view — every source fused into one target per name (easy comparison) ----
   async function loadFusionPanel() {
     try {
       const book = await (await pollFetch("/api/fusion/targets")).json();
@@ -455,7 +456,7 @@
     } catch (e) {}
   }
 
-  // ---- hedging: net equity held target-flat, the sized min-variance hedge and its math (ADR-0038) ----
+  // ---- hedging: net equity held target-flat, the sized min-variance hedge and its math ----
   function fmtUsd(v) {
     if (v === null || v === undefined) return "—";
     const n = +v; return (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString(undefined, {maximumFractionDigits: 0});

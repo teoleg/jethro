@@ -41,6 +41,7 @@
   .verdict.no { color:var(--warn); border-color:var(--line-2); }
   .badge { font-size:10px; text-transform:uppercase; letter-spacing:.06em; border:1px solid var(--warn); color:var(--warn); border-radius:4px; padding:1px 6px; }
 </style>
+<link rel="stylesheet" href="/nav.css">
 </head>
 <body>
 <script src="/format.js"></script>
@@ -60,11 +61,11 @@
   <div class="panel" style="padding:10px 12px"><div id="news" class="dim">loading…</div></div>
 
   <div class="section-h">Candidate additions to the tracked list
-    <span class="note" style="text-transform:none;letter-spacing:0">— ADR-0050 §7: untracked names credible news/social are talking about, ranked. Suggestions only — nothing is added or traded. News outlets propose; social adds one when it's really cooking.</span></div>
+    <span class="note" style="text-transform:none;letter-spacing:0">— §7: untracked names credible news/social are talking about, ranked. Suggestions only — nothing is added or traded. News outlets propose; social adds one when it's really cooking.</span></div>
   <div class="panel"><div id="cands"><div class="empty">loading…</div></div></div>
 
   <div class="section-h">Promotion gate <span id="gate-badge"></span>
-    <span class="note" style="text-transform:none;letter-spacing:0">— ADR-0060: the gate that decides whether a candidate enters the tracked universe. When <b>writing</b> it promotes into reference data (a first-class instrument); in <b>dry-run</b> it only proposes. A name must clear every gate — score, corroborated (≥ sources), feed-coverage, sustained (≥ distinct days) — within the daily budget.</span></div>
+    <span class="note" style="text-transform:none;letter-spacing:0">— the gate that decides whether a candidate enters the tracked universe. When <b>writing</b> it promotes into reference data (a first-class instrument); in <b>dry-run</b> it only proposes. A name must clear every gate — score, corroborated (≥ sources), feed-coverage, sustained (≥ distinct days) — within the daily budget.</span></div>
   <div class="panel"><div id="gate"><div class="empty">loading…</div></div></div>
 
   <div class="section-h">Promotion audit trail
@@ -102,7 +103,7 @@
         <td class="mono">${esc(x.instrument)}</td>
         <td class="num mono">${x.score.toFixed(1)}</td>
         <td class="num mono">${x.mentions}</td>
-        <td class="num mono" title="distinct calendar days mentioned — the ADR-0060 'sustained' signal">${x.distinctDays ?? "—"}</td>
+        <td class="num mono" title="distinct calendar days mentioned — the 'sustained' signal">${x.distinctDays ?? "—"}</td>
         <td>${(x.sources||[]).map(s => `<span class="src">${esc(s)}</span>`).join("")}</td>
         <td class="dim mono">${x.firstSeenMillis ? fmtTimeET(x.firstSeenMillis) : "—"}</td>
         <td class="dim" style="max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(x.sample)}">${esc(x.sample)}</td>

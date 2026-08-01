@@ -47,6 +47,7 @@
   .muted { color:var(--dim); } .cls { font-weight:600; }
 </style>
   <script src="format.js"></script>
+<link rel="stylesheet" href="/nav.css">
 </head>
 <body>
 <div class="topbar">
@@ -64,7 +65,7 @@
   </div>
 </div>
 <main>
-  <div class="section-h">Live strategy selection <span class="muted" id="stratselAsOf" style="text-transform:none;letter-spacing:0">— what the OOS harness picked per instrument to drive live trading (ADR-0043)</span></div>
+  <div class="section-h">Live strategy selection <span class="muted" id="stratselAsOf" style="text-transform:none;letter-spacing:0">— what the OOS harness picked per instrument to drive live trading</span></div>
   <div class="panel" style="padding:2px 4px"><div id="stratsel" class="muted" style="padding:12px">loading…</div></div>
 
   <div class="section-h">Run a backtest <span class="muted" style="text-transform:none;letter-spacing:0">— deterministic: same seed reproduces the run; backtests the current strategy config on the price-quoted universe</span></div>
@@ -89,7 +90,7 @@
     <div class="panel" style="padding:2px 4px"><div id="byinstr" class="muted" style="padding:12px">—</div></div>
   </div>
 
-  <div class="section-h">Walk-forward on REAL bars <span class="muted" style="text-transform:none;letter-spacing:0">— params fit per fold (grid on the fit window), then measured OOS on the unseen window; bars from scripts/fetch_bars.py (ADR-0027)</span></div>
+  <div class="section-h">Walk-forward on REAL bars <span class="muted" style="text-transform:none;letter-spacing:0">— params fit per fold (grid on the fit window), then measured OOS on the unseen window; bars from scripts/fetch_bars.py</span></div>
   <div class="panel">
     <button class="btn" id="wfrun" type="button">Run walk-forward</button>
     <span class="muted" id="wfmeta" style="margin-left:10px"></span>
@@ -175,11 +176,11 @@
     } catch (e) { el.textContent = "walk-forward failed: " + e; }
   };
 
-  // ---- live per-instrument strategy selection (ADR-0043) ----
+  // ---- live per-instrument strategy selection ----
   function renderSelection(v) {
     const as = document.getElementById("stratselAsOf");
     const drive = v.regimeAware
-      ? "; a PRICE-DERIVED trend detector picks the live algo (breadth " + esc(v.breadth || "—") + ", ADR-0044), the OOS medians only VETO a measured-losing pick"
+      ? "; a PRICE-DERIVED trend detector picks the live algo (breadth " + esc(v.breadth || "—") + "), the OOS medians only VETO a measured-losing pick"
       : "; the live strategy trades each instrument's OOS winner (nothing where neither has edge)";
     if (as) as.textContent = !v.available ? " — selection off (jethro.strategy.selection.enabled=false)"
       : v.error ? " — last measurement FAILED: " + v.error + " (running the default algo meanwhile)"
@@ -189,7 +190,7 @@
     const badge = a => a === "momentum" ? '<b class="up">momentum</b>'
       : a === "mean-reversion" ? '<b class="down">mean-rev</b>'
       : '<b class="muted">no-trade</b>';
-    // Live price-derived regime driving the pick (ADR-0044): TREND→momentum, CHOP→mean-rev.
+    // Live price-derived regime driving the pick: TREND→momentum, CHOP→mean-rev.
     const regimeCell = r => {
       if (!v.regimeAware || !r.regime || r.regime === "UNKNOWN")
         return '<span class="muted" title="window still warming — the default algo trades">warming</span>';
