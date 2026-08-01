@@ -148,6 +148,14 @@
   <!-- price ticker across the top -->
   <div class="ticker" id="ticker"><span class="muted" style="padding:4px 8px">loading prices…</span></div>
 
+  <!-- consolidated P&L — one tile, all firm numbers on top (ADR-0133) -->
+  <a class="tile pnl" href="/hub-status.html" style="--accent:#5b8cff;grid-column:1/-1;min-height:auto;margin:2px 0 2px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap"><span class="icon">💰</span><h2>Consolidated P&amp;L</h2>
+      <span class="sl" style="font-weight:400;text-transform:none;letter-spacing:0">firm total — all books incl. hedge <span class="muted" id="asof"></span></span></div>
+    <div class="stats" id="pnlStats"><span class="s"><span class="sv mut">…</span><span class="sl">loading</span></span></div>
+    <span class="go">Status →</span>
+  </a>
+
   <!-- focus hubs: tiles below the strip; the marquee + status pills above are untouched (ADR-0133) -->
   <div class="section-h" style="grid-column:1/-1">Focus — jump to a hub</div>
   <div class="grid" style="grid-column:1/-1;margin-top:0">
@@ -168,6 +176,10 @@
       <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">loop cycles</span></span></div><span class="go">Open →</span>
     </a>
   </div>
+
+  <!-- positions by market — table under the tiles (ADR-0133) -->
+  <div class="section-h" style="grid-column:1/-1;margin-top:10px">Positions by market</div>
+  <div class="panel pad" style="grid-column:1/-1"><div id="byMarket" class="muted" style="padding:14px">loading…</div></div>
 
 </main>
 
@@ -192,27 +204,32 @@
 
   let lastVar = null; // /api/var refreshes slower than /api/risk; cache for the tile
   let lastEod = null; // /api/eod — session day + today's P&L measured from the previous close
+  // Consolidated P&L → the single top tile (#pnlStats, hub stat cells); positions → the table (#byMarket).
   function renderRisk(r) {
-    document.getElementById("asof").textContent = "· " + fmtTimeET(r.asOfMillis);
-    const t = r.total;
-    const varTile = lastVar == null ? "" : (lastVar.note
-      ? `<div class="stat"><div class="k">VaR 95 (1d)</div><div class="v mono muted" style="font-size:12px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</div></div>`
-      : `<div class="stat"><div class="k" title="historical simulation, ${lastVar.observations} days; ES95 ${lastVar.es95}${Number(lastVar.skippedExposure)>0?'; unmeasured exposure '+lastVar.skippedExposure:''}${lastVar.parametric?`; parametric (normal EWMA) VaR95 ${lastVar.parametric.var95} / ES95 ${lastVar.parametric.es95} — thin-tailed by assumption`:''}">VaR 95 (1d)</div><div class="v mono down">${money(lastVar.var95)}</div></div>`);
-    const dayTile = (lastEod == null || lastEod.todayPnl == null) ? "" :
-      `<div class="stat"><div class="k" title="since the previous session close (${esc(lastEod.previousCloseTotal)})${lastEod.overnightPnl!=null?` — overnight ${money(lastEod.overnightPnl)} / intraday ${money(lastEod.intradayPnl)}`:''} — session ${esc(lastEod.sessionDay)}, ${esc(lastEod.calendar)}">Today's P&L</div><div class="v mono ${cls(lastEod.todayPnl)}">${money(lastEod.todayPnl)}</div></div>`;
-    document.getElementById("stats").innerHTML =
-      stat("Total P&L", t.totalPnl, true) + dayTile + stat("Realized", t.realizedPnl) + stat("Unrealized", t.unrealizedPnl) +
-      `<div class="stat"><div class="k">Net exposure</div><div class="v mono">${money(t.netExposure)}</div></div>` +
-      `<div class="stat"><div class="k">Gross exposure</div><div class="v mono">${money(t.grossExposure)}</div></div>` + varTile;
+    const t = r.total || {};
+    const asof = document.getElementById("asof");
+    if (asof) asof.textContent = "· " + fmtTimeET(r.asOfMillis);
+    const cell = (label, val, big, plain) =>
+      `<span class="s"><span class="sv ${plain ? '' : cls(val)}"${big ? ' style="font-size:22px"' : ''}>${money(val)}</span><span class="sl">${label}</span></span>`;
+    const dayCell = (lastEod == null || lastEod.todayPnl == null) ? "" :
+      `<span class="s"><span class="sv ${cls(lastEod.todayPnl)}" title="since the previous session close (${esc(lastEod.previousCloseTotal)}) — session ${esc(lastEod.sessionDay)}">${money(lastEod.todayPnl)}</span><span class="sl">Today</span></span>`;
+    const varCell = lastVar == null ? "" : (lastVar.note
+      ? `<span class="s"><span class="sv mut" style="font-size:13px" title="${esc(lastVar.note)}">n/a · ${lastVar.observations}d</span><span class="sl">VaR 95 1d</span></span>`
+      : `<span class="s"><span class="sv down" title="historical simulation, ${lastVar.observations}d; ES95 ${lastVar.es95}">${money(lastVar.var95)}</span><span class="sl">VaR 95 1d</span></span>`);
+    const ps = document.getElementById("pnlStats");
+    if (ps) ps.innerHTML =
+      cell("Total P&L", t.totalPnl, true) + dayCell + cell("Realized", t.realizedPnl) + cell("Unrealized", t.unrealizedPnl) +
+      cell("Gross exp", t.grossExposure, false, true) + cell("Net exp", t.netExposure, false, true) + varCell;
     const g = r.byAssetClass || [];
-    document.getElementById("byclass").outerHTML = '<div id="byclass">' + (g.length ?
+    const bm = document.getElementById("byMarket");
+    if (bm) bm.innerHTML = g.length ?
       "<table><tr><th>market</th><th>pos</th><th>realized</th><th>unrealized</th><th>total P&L</th><th>gross exp</th></tr>" +
       g.map(x => `<tr><td class="cls">${esc(x.key)}</td><td class="muted mono">${x.positionCount}</td>
         <td class="mono ${cls(x.realizedPnl)}">${money(x.realizedPnl)}</td>
         <td class="mono ${cls(x.unrealizedPnl)}">${money(x.unrealizedPnl)}</td>
         <td class="mono ${cls(x.totalPnl)}">${money(x.totalPnl)}</td>
         <td class="mono">${money(x.grossExposure)}</td></tr>`).join("") + "</table>"
-      : '<div class="muted" style="padding:14px">no positions yet — the strategy or an order will build a book</div>') + '</div>';
+      : '<div class="muted" style="padding:14px">no positions yet — the strategy or an order will build a book</div>';
   }
 
   function renderFeed(items) {
@@ -543,8 +560,11 @@
         : '<div class="muted" style="padding:12px">no orders yet today</div>') + '</div>';
     } catch (e) {}
   }
-  document.getElementById("obprev").onclick = () => { if (obPage > 0) { obPage--; loadOrders(); } };
-  document.getElementById("obnext").onclick = () => { if (obPage < obTotalPages - 1) { obPage++; loadOrders(); } };
+  // Orders pager lives on the Status page now, not the landing — guard so its absence can't throw here.
+  const _obPrev = document.getElementById("obprev");
+  if (_obPrev) _obPrev.onclick = () => { if (obPage > 0) { obPage--; loadOrders(); } };
+  const _obNext = document.getElementById("obnext");
+  if (_obNext) _obNext.onclick = () => { if (obPage < obTotalPages - 1) { obPage++; loadOrders(); } };
   async function bootstrap() {
     try { renderFeed(await (await fetch("/api/attention")).json()); } catch (e) {}
     loadRisk();
@@ -560,6 +580,7 @@
   loadHedging();
   loadHistory();
   loadTicker();
+  loadRisk(); // immediate first paint of the consolidated-P&L tile + by-market table (poll() is visibility-gated)
   loadFeeds();
   // poll() (poll.js): one in-flight run per loop, paused while the tab is hidden, immediate
   // refresh on return — so backgrounded tabs stop hammering the JVM and a backend stall can't

@@ -21,9 +21,10 @@
   // key -> async () -> [ {v, l, cls?} , ... ]   (v=value text, l=label)
   var LOADERS = {
     risk: function () { return j("/api/risk").then(function (r) {
-      var t = r.total, tot = (t && typeof t === "object") ? pick(t.pnl, t.total, t.value) : t;
-      var gross = pick(r.gross, r.grossExposure, t && t.gross);
-      var net = pick(r.net, r.netExposure, t && t.net);
+      var t = (r.total && typeof r.total === "object") ? r.total : {};
+      var tot = pick(t.totalPnl, t.pnl, (typeof r.total === "number" ? r.total : null));
+      var gross = pick(t.grossExposure, r.gross, r.grossExposure);
+      var net = pick(t.netExposure, r.net, r.netExposure);
       var out = [{ v: money(tot), l: "Firm PnL", cls: cls(tot) }];
       if (gross != null) out.push({ v: money(gross), l: "Gross" });
       if (net != null) out.push({ v: money(net), l: "Net" });
