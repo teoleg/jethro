@@ -1,6 +1,6 @@
 # ADR-0133: Focus-hub navigation — group the flat 15-tab menu into tiled hubs
 
-- **Status:** Implemented (phase 1 — hubs added; global nav swap deferred)
+- **Status:** Implemented (phase 1 hubs + phase 2 global-nav swap + landing focus-tiles)
 - **Date:** 2026-08-01
 - **Deciders:** Oleg
 - **Tags:** ui, navigation, ia
@@ -41,9 +41,15 @@ Add a thin, **additive** navigation layer — new tile pages, zero edits to exis
 
 ## Consequences
 
-- The owner gets focused, modern navigation now, with **zero risk to existing pages** (purely additive; the
-  old 15-tab nav still works everywhere else).
-- **Deferred — phase 2 (tracked):** swap the *global* nav in the existing pages + the Overview landing to
-  point at these hubs, once the owner signs off on the grouping. Until then the hubs are reachable directly
-  (`/hub-status.html`, …) and cross-linked, but the old nav is untouched (landing constraint honoured).
-- Reversible: deleting four HTML files + `hub.css`/`hub.js` removes the layer entirely.
+- The owner gets focused, modern navigation across the whole app.
+- **Phase 2 (done):** the shared 15-tab nav on every page (all 15 content pages across the ui-gateway,
+  order and reference-data modules) is replaced by the focused 5-item hub nav, with the parent hub marked
+  active per page. The **Overview landing keeps its marquee price strip and all status pills**, and gains a
+  full-width **focus-tile row** (Status/Strategy/Discovery/Ops, each with a live headline stat) directly
+  below the strip — the owner's ask: "tiles and strip on top, pills stay." The landing loads `hub.css`
+  (before its inline `<style>`, so the page's own rules win any shared selector) + `hub.js`.
+- **Still open (tracked):** (1) the landing's legacy overview panels (consolidated P&L, hedging, attention,
+  signals) still sit BELOW the focus tiles — owner to decide whether to keep, trim, or move them; (2) build
+  the Basket page or drop its planned tile.
+- Reversible: the nav swap is a mechanical block replacement; the tile layer is `hub.css` + `hub.js` + the
+  four `hub-*.html` files.

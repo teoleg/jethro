@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>jethro — overview</title>
+<link rel="stylesheet" href="/hub.css"><!-- focus-tile styles (ADR-0133); inline <style> below overrides any shared rule -->
 <style>
   /* v0 placeholder page (ADR-0017/0021); replaced by the React app under ui/ as views grow. */
   :root {
@@ -126,25 +127,16 @@
 <body>
 <script src="/format.js"></script>
 <script src="/poll.js"></script>
+<script src="/hub.js"></script><!-- populates the focus-tile stats (ADR-0133) -->
 <div class="topbar">
   <div class="bar">
     <span class="brand"><span class="dot"></span>JETHRO</span>
     <nav class="tabs">
       <a class="tab active" href="/">Overview</a>
-      <a class="tab" href="/improve.html">Improve</a>
-      <a class="tab" href="/markets.html">Markets</a>
-      <a class="tab" href="/rates.html">Rates</a>
-      <a class="tab" href="/books.html">Books</a>
-      <a class="tab" href="/orders.html">Orders</a>
-      <a class="tab" href="/config.html">Config</a>
-      <a class="tab" href="/sim.html">Sim</a>
-      <a class="tab" href="/backtest.html">Backtest</a>
-      <a class="tab" href="/strategy.html">Strategy</a>
-      <a class="tab" href="/signals.html">Signals</a>
-      <a class="tab" href="/social.html">Social</a>
-      <a class="tab" href="/social-sources.html">Sources</a>
-      <a class="tab" href="/discovery.html">Discover</a>
-      <a class="tab" href="/ollama.html">Ops</a>
+      <a class="tab" href="/hub-status.html">Status</a>
+      <a class="tab" href="/hub-strategy.html">Strategy</a>
+      <a class="tab" href="/hub-discovery.html">Discovery</a>
+      <a class="tab" href="/hub-ops.html">Ops</a>
     </nav>
     <span class="feeds" id="feeds"></span>
     <span class="pill" id="trendPill" title="market trend — price-derived (ADR-0044)"><span class="led"></span><span>trend —</span></span>
@@ -155,6 +147,27 @@
 <main>
   <!-- price ticker across the top -->
   <div class="ticker" id="ticker"><span class="muted" style="padding:4px 8px">loading prices…</span></div>
+
+  <!-- focus hubs: tiles below the strip; the marquee + status pills above are untouched (ADR-0133) -->
+  <div class="section-h" style="grid-column:1/-1">Focus — jump to a hub</div>
+  <div class="grid" style="grid-column:1/-1;margin-top:0">
+    <a class="tile" href="/hub-status.html" style="--accent:#5b8cff" data-summary="risk">
+      <span class="icon">📊</span><h2>Status</h2>
+      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">firm pnl · risk</span></span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/hub-strategy.html" style="--accent:#35c07a" data-summary="fusion">
+      <span class="icon">🧠</span><h2>Strategy</h2>
+      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">fused targets</span></span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/hub-discovery.html" style="--accent:#e0a83d" data-summary="discovery">
+      <span class="icon">🔭</span><h2>Discovery</h2>
+      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">candidates</span></span></div><span class="go">Open →</span>
+    </a>
+    <a class="tile" href="/hub-ops.html" style="--accent:#8b95a8" data-summary="improve">
+      <span class="icon">⚙️</span><h2>Ops</h2>
+      <div class="stats"><span class="s"><span class="sv mut">…</span><span class="sl">loop cycles</span></span></div><span class="go">Open →</span>
+    </a>
+  </div>
 
   <!-- LEFT: book & risk -->
   <div class="col">
