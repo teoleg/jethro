@@ -20,5 +20,3 @@ __pycache__/
 # continuous-improvement loop single-flight lock
 .improve-loop.lock
 
-# host-specific stack config (svc.sh sources it); template is scripts/jethro.env.example
-scripts/jethro.env

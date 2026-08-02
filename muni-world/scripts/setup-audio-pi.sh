@@ -39,6 +39,20 @@ pactl list sources short || true
 MONITOR="$(pactl get-default-sink 2>/dev/null).monitor" || MONITOR=""
 [ -n "$MONITOR" ] && echo "Default sink monitor looks like: $MONITOR"
 
+# Write the resolved paths into the env file (svc.sh passes MUNI_ENV_FILE) so no vars are left empty.
+if [ -n "${MUNI_ENV_FILE:-}" ]; then
+  set_kv() {  # key value → set/replace in the env file
+    if grep -qE "^$1=" "$MUNI_ENV_FILE" 2>/dev/null; then
+      sed -i.bak -E "s|^$1=.*|$1=$2|" "$MUNI_ENV_FILE" && rm -f "$MUNI_ENV_FILE.bak"
+    else
+      echo "$1=$2" >> "$MUNI_ENV_FILE"
+    fi
+  }
+  set_kv MUNI_WHISPER_BIN "$WHISPER_BIN"
+  set_kv MUNI_WHISPER_MODEL "$MODEL_PATH"
+  say "wrote MUNI_WHISPER_BIN + MUNI_WHISPER_MODEL into $MUNI_ENV_FILE"
+fi
+
 cat <<EOF
 
 Setup done. Verify capture works (play Bloomberg/CNBC on YouTube TV first), then run:
@@ -47,15 +61,15 @@ Setup done. Verify capture works (play Bloomberg/CNBC on YouTube TV first), then
   ffmpeg -f pulse -i "${MONITOR:-<sink>.monitor}" -t 10 -ac 1 -ar 16000 /tmp/test.wav
   ffplay /tmp/test.wav    # you should hear the TV audio
 
-Then start muni-world with the capture loop ON:
+The whisper paths are already written to local.env. Two more steps:
 
-  export MUNI_AUDIO_CAPTURE=true
-  export MUNI_WHISPER_BIN="$WHISPER_BIN"
-  export MUNI_WHISPER_MODEL="$MODEL_PATH"
-  export MUNI_AUDIO_DEVICE="pulse:${MONITOR:-<sink>.monitor}"
-  export MUNI_AUDIO_FEED="bloomberg"      # or cnbc — labels the leads
-  export MUNI_AUDIO_SECONDS=300           # chunk length; smaller = fresher, more overhead
-  ./scripts/svc.sh start muni             # or: java -jar muni-world/build/libs/muni-world.jar
+  1) Bind your loopback device + enable a feed in the REGISTRY (pipe-delimited):
+       muni-world/seeds/audio-sources.csv
+     e.g.  tv-bloomberg|Bloomberg TV|Bloomberg|tv|pulse:${MONITOR:-<sink>.monitor}|300|true|
 
-Leads appear on the muni-world page ("Audio leads") and at /api/muni/audio/leads/recent.
+  2) Turn capture on (flips the master switch in local.env + restarts muni-world):
+       ./scripts/svc.sh tv start
+       ./scripts/svc.sh tv status     # shows the feed registry + recent leads
+
+Leads appear on the muni-world page ("TV sources" / "Audio leads") and at /api/muni/audio/leads/recent.
 EOF

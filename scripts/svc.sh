@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start/stop/restart the local stack from ONE place — core jethro (app + infra) AND muni-world, plus the
-# muni-world TV audio capture. Config lives in ONE file: scripts/jethro.env (copy from jethro.env.example),
+# muni-world TV audio capture. Config lives in ONE file: local.env (copy from local.env.example),
 # sourced below. `docker compose stop` keeps the container AND its volume, so restarts are fast.
 #
 #   scripts/svc.sh restart app        # rebuild + restart just the app; LLM + DB keep running
@@ -15,13 +15,20 @@
 #   scripts/svc.sh status             # what's up
 #
 # Targets: app | muni | tv | ollama | postgres | redpanda | infra (the 3 containers) | all  (default: all)
-# muni-world is INDEPENDENT (own jar/port); it joins `all` only when MUNI_AUTOSTART=true in jethro.env.
+# muni-world is INDEPENDENT (own jar/port); it joins `all` only when MUNI_AUTOSTART=true in local.env.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# --- the single config source: export everything in scripts/jethro.env so the launched JVMs inherit it ---
-ENV_FILE="scripts/jethro.env"
-if [ -f "$ENV_FILE" ]; then set -a; . "$ENV_FILE"; set +a; fi
+# --- the single config source: local.env (the SAME file run-local.sh uses) — export it so the launched
+# JVMs inherit it. Same safe line-parse as run-local.sh; command-line env still wins (applied only if unset).
+ENV_FILE="local.env"
+if [ -f "$ENV_FILE" ]; then
+  while IFS='=' read -r k v; do
+    k="${k//[[:space:]]/}"; case "$k" in ''|\#*) continue;; esac
+    v="${v%$'\r'}"
+    [ -z "${!k:-}" ] && export "$k=$v"
+  done < "$ENV_FILE"
+fi
 
 ACTION="${1:-status}"
 TARGET="${2:-all}"
@@ -31,11 +38,11 @@ MUNI_PIDFILE="logs/muni-world.pid"
 MUNI_JAR="muni-world/build/libs/muni-world.jar"
 MUNI_PORT="${MUNI_PORT:-8090}"
 
-# Set/replace KEY=VALUE in jethro.env (creating it from the template if needed) — used by `tv start|stop`
+# Set/replace KEY=VALUE in local.env (creating it from local.env.example if needed) — used by `tv start|stop`
 # so a capture toggle is DURABLE across restarts, not just for one invocation.
 ensure_env_file() {
-  [ -f "$ENV_FILE" ] || { [ -f "$ENV_FILE.example" ] && cp "$ENV_FILE.example" "$ENV_FILE" \
-    && echo "==> created $ENV_FILE from template"; }
+  [ -f "$ENV_FILE" ] || { [ -f "local.env.example" ] && cp "local.env.example" "$ENV_FILE" \
+    && echo "==> created $ENV_FILE from local.env.example"; }
 }
 set_env_kv() {
   ensure_env_file
@@ -89,7 +96,7 @@ muni_start() {
   local cap="${MUNI_AUDIO_CAPTURE:-false}"
   echo "==> starting muni-world on :$MUNI_PORT (independent; boots offline — PG/Kafka opt-in; TV capture=$cap)"
   # lmdbjava (JNR) needs the NIO opens, same as the jethro app. The MUNI_*/audio env is inherited from
-  # jethro.env (exported above), so the capture loop reads its config with no extra plumbing here.
+  # local.env (exported above), so the capture loop reads its config with no extra plumbing here.
   nohup java --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
     -jar "$MUNI_JAR" > logs/muni-world.log 2>&1 &
   echo $! > "$MUNI_PIDFILE"
@@ -97,11 +104,16 @@ muni_start() {
 }
 
 # --- TV audio capture (ADR-0014): the capture loop is a bean INSIDE muni-world, gated by MUNI_AUDIO_CAPTURE.
-# So "TV control" = flip that flag durably in jethro.env, then bounce muni-world to pick it up.
+# So "TV control" = flip that flag durably in local.env, then bounce muni-world to pick it up.
 tv_setup() {
+  ensure_env_file
   echo "==> muni-world audio setup (installs whisper.cpp/ffmpeg, finds the loopback)"
-  bash muni-world/scripts/setup-audio-pi.sh
-  echo "==> when done, put MUNI_WHISPER_MODEL / MUNI_AUDIO_DEVICE into $ENV_FILE, then: scripts/svc.sh tv start"
+  # pass the env file so the setup script WRITES MUNI_WHISPER_BIN/MODEL into it (no more empty vars)
+  MUNI_ENV_FILE="$ENV_FILE" bash muni-world/scripts/setup-audio-pi.sh
+  # make sure the registry pointer is set too
+  grep -qE "^MUNI_AUDIO_SOURCES_FILE=" "$ENV_FILE" 2>/dev/null || set_env_kv MUNI_AUDIO_SOURCES_FILE muni-world/seeds/audio-sources.csv
+  echo "==> whisper paths written to $ENV_FILE. Next: bind a device + enable a feed in"
+  echo "    muni-world/seeds/audio-sources.csv (the registry), then: scripts/svc.sh tv start"
 }
 tv_start() {
   set_env_kv MUNI_AUDIO_CAPTURE true
@@ -148,7 +160,7 @@ case "$ACTION:$TARGET" in
   restart:muni)  muni_stop; muni_start ;;
   deploy:muni)   muni_stop; muni_start ;;
 
-  # TV audio capture (ADR-0014) — drives the capture loop inside muni-world via jethro.env.
+  # TV audio capture (ADR-0014) — drives the capture loop inside muni-world via local.env.
   setup:tv)      tv_setup ;;
   start:tv)      tv_start ;;
   stop:tv)       tv_stop ;;
@@ -168,7 +180,7 @@ case "$ACTION:$TARGET" in
   start:infra)   docker compose up -d $INFRA ;;
   restart:infra) docker compose restart $INFRA ;;
 
-  # `all` includes muni-world only when MUNI_AUTOSTART=true in jethro.env (TV follows its own capture flag).
+  # `all` includes muni-world only when MUNI_AUTOSTART=true in local.env (TV follows its own capture flag).
   stop:all)      ./scripts/backup-db.sh || true; app_stop; muni_stop; docker compose stop $INFRA ;;
   start:all)     app_start; [ "${MUNI_AUTOSTART:-false}" = "true" ] && muni_start || true ;;
   restart:all)   app_stop; docker compose restart $INFRA; app_start

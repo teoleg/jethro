@@ -36,7 +36,7 @@ YouTube TV in a browser (Bloomberg/CNBC)  →  PulseAudio/PipeWire ".monitor"
    sink your browser plays into).
 
 4. **Configure the feed registry + start capture.** Feeds are a registry (like the market-data/social
-   sources), not env vars. Set the config once in `scripts/jethro.env` (copy from `jethro.env.example`):
+   sources), not env vars. Set the config once in `local.env` (copy from `local.env.example`):
    ```bash
    MUNI_WHISPER_BIN=~/whisper.cpp/build/bin/whisper-cli
    MUNI_WHISPER_MODEL=~/whisper.cpp/models/ggml-base.en.bin
