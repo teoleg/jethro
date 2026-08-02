@@ -49,6 +49,11 @@
   .issuer .tag { color:var(--brand); font-size:10px; letter-spacing:.05em; text-transform:uppercase; margin-left:6px; }
   .issuer .sec { font-size:12.5px; color:var(--dim); margin-top:2px; }
   .issuer a { color:var(--brand); font-size:11px; }
+  .tbl { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px; }
+  .tbl th, .tbl td { text-align:right; padding:6px 9px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .tbl th:nth-child(-n+2), .tbl td:nth-child(-n+2) { text-align:left; }
+  .tbl th { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:500; }
+  .tbl tbody tr:hover { background:var(--surface-2); }
 </style>
 </head>
 <body>
@@ -87,16 +92,16 @@
     </div>
   </div>
 
-  <!-- search over the LMDB B-tree index (ADR-0013) -->
+  <!-- bonds by CUSIP with economic indicators, over the LMDB B-tree index (ADR-0013) -->
   <div class="section" style="margin-top:28px">
-    <h2 style="font-size:15px;margin-bottom:10px">Search the index</h2>
+    <h2 style="font-size:15px;margin-bottom:10px">Bonds</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="q" placeholder="CUSIP-6 (e.g. 649122) or FIPS (e.g. 34 / 34003)"
+      <input id="q" placeholder="CUSIP-6 (e.g. SMPL01) or FIPS (e.g. 36 / 3600000000)"
              style="flex:1;min-width:260px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;font:inherit">
       <button class="btn" onclick="search('issuer')">By issuer</button>
       <button class="btn" onclick="search('geo')">By geography</button>
     </div>
-    <div id="results" class="mono" style="margin-top:12px;color:var(--dim);font-size:13px">Index is empty until a connector loads securities (<span class="mono">POST /api/muni/index</span>).</div>
+    <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:10px">loading bonds…</div></div>
   </div>
 
   <!-- seeded NYC issuers -->
@@ -140,21 +145,40 @@
     } catch (e) { document.getElementById("issuers").textContent = "unavailable"; }
   }
 
+  const num = (n, dp) => (n == null || isNaN(n)) ? "—" : Number(n).toFixed(dp);
+
+  function renderBonds(rows) {
+    const el = document.getElementById("bondTable");
+    if (!rows || !rows.length) {
+      el.innerHTML = "no bonds for that key — load via a connector or POST /api/muni/bonds";
+      return;
+    }
+    const cols = ["CUSIP", "Issuer", "Cpn", "Maturity", "Price", "Cur Yld", "YTM", "YTW", "Mod Dur", "Cvx", "Tax", "Rating", "Call"];
+    const banner = rows.some(r => r.sample)
+      ? '<div style="color:var(--warn);font-size:11px;margin:2px 0 8px">illustrative sample data — real bonds load via the EMMA / Open-Data connectors</div>' : "";
+    el.innerHTML = banner + '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
+      + rows.map(r => `<tr>
+          <td class="mono" style="color:var(--txt)">${esc(r.cusip)}</td><td>${esc(r.issuer)}</td>
+          <td class="mono">${num(r.coupon, 3)}</td><td class="mono">${esc(r.maturity)}</td>
+          <td class="mono">${num(r.price, 2)}</td><td class="mono">${num(r.currentYield, 3)}</td>
+          <td class="mono">${num(r.ytm, 3)}</td><td class="mono" style="color:var(--brand)">${num(r.ytw, 3)}</td>
+          <td class="mono">${num(r.modDuration, 2)}</td><td class="mono">${num(r.convexity, 2)}</td>
+          <td>${esc(r.taxStatus)}</td><td>${esc(r.rating)}</td>
+          <td class="mono" style="font-size:11px;color:var(--dim)">${esc(r.call)}</td>
+        </tr>`).join("") + "</tbody></table>";
+  }
+
   async function search(kind) {
-    const q = document.getElementById("q").value.trim();
-    const el = document.getElementById("results");
-    if (!q) { el.textContent = "enter a CUSIP-6 or FIPS prefix"; return; }
-    const path = kind === "geo" ? "/api/muni/search/geo/" : "/api/muni/search/issuer/";
+    const q = document.getElementById("q").value.trim() || "SMPL"; // default: show the sample set
+    const path = kind === "geo" ? "/api/muni/bonds/geo/" : "/api/muni/bonds/issuer/";
     try {
-      const r = await (await fetch(path + encodeURIComponent(q))).json();
-      el.innerHTML = r.length
-        ? `<b style="color:var(--txt)">${r.length}</b> CUSIP(s): ` + r.map(esc).join(", ")
-        : "no matches — the index has no securities for that key yet (load some via a connector or POST /api/muni/index)";
-    } catch (e) { el.textContent = "search error"; }
+      renderBonds(await (await fetch(path + encodeURIComponent(q))).json());
+    } catch (e) { document.getElementById("bondTable").textContent = "search error"; }
   }
 
   document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") search("issuer"); });
   loadIssuers();
+  search("issuer"); // load the sample bonds table on open
 </script>
 </body>
 </html>
