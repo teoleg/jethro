@@ -1,11 +1,13 @@
 package io.muniworld.web;
 
+import io.muniworld.crawl.EmmaDiscovery;
 import io.muniworld.extract.OfficialStatementExtractor;
 import io.muniworld.ingest.FieldMap;
 import io.muniworld.ingest.HttpFetcher;
 import io.muniworld.ingest.IngestService;
 import io.muniworld.ingest.RawArtifact;
 import io.muniworld.ingest.SocrataConnector;
+import java.util.LinkedHashMap;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -32,11 +34,14 @@ public final class MuniIngestController {
     private final IngestService ingest;
     private final HttpFetcher http;
     private final OfficialStatementExtractor osExtractor;
+    private final EmmaDiscovery discovery;
 
-    public MuniIngestController(IngestService ingest, HttpFetcher http, OfficialStatementExtractor osExtractor) {
+    public MuniIngestController(IngestService ingest, HttpFetcher http,
+                               OfficialStatementExtractor osExtractor, EmmaDiscovery discovery) {
         this.ingest = ingest;
         this.http = http;
         this.osExtractor = osExtractor;
+        this.discovery = discovery;
     }
 
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */
@@ -73,5 +78,31 @@ public final class MuniIngestController {
             @RequestParam(name = "base", required = false) String fallbackBase) {
         RawArtifact pdf = http.fetch("emma-os:" + url, url);   // land the PDF (ADR-0005 provenance)
         return osExtractor.extract(pdf, issuer, geoFips, fallbackBase);
+    }
+
+    /**
+     * Discover a CUSIP's Official Statement on EMMA (politely — robots + rate limit, ADR-0008), land the
+     * first candidate PDF, and extract its terms (ADR-0015 Phase 2). No hand-fed URL. Live on the Pi.
+     */
+    @PostMapping("/api/muni/ingest/emma-discover")
+    public Map<String, Object> ingestEmmaDiscover(
+            @RequestParam String cusip,
+            @RequestParam(required = false) String issuer,
+            @RequestParam(required = false) String geoFips) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        EmmaDiscovery.Result disc = discovery.discover(cusip);
+        out.put("securityUrl", disc.securityUrl());
+        out.put("candidates", disc.candidates());
+        if (disc.candidates().isEmpty()) {
+            out.put("ok", false);
+            out.put("error", "no Official Statement link found on the EMMA page — tune muni.emma.os-link-pattern");
+            return out;
+        }
+        String osUrl = disc.candidates().get(0);
+        out.put("chosen", osUrl);
+        RawArtifact pdf = discovery.fetchDocument("emma-os:" + cusip, osUrl);
+        String base = cusip.length() >= 6 ? cusip.substring(0, 6) : cusip;   // CUSIP-6 issuer prefix
+        out.put("extract", osExtractor.extract(pdf, issuer, geoFips, base));
+        return out;
     }
 }
