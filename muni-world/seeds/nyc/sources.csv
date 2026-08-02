@@ -115,3 +115,12 @@ s103,news,Crain's New York Business,Crain's,city finance coverage,https://www.cr
 s104,news,The City (nonprofit newsroom),THE CITY,city accountability,https://www.thecity.nyc/,scrape,html,pending,
 s105,news,Gothamist / WNYC,NYPR,city government coverage,https://gothamist.com/,scrape,html,pending,
 s106,news,City & State NY,City & State,gov & politics,https://www.cityandstateny.com/,scrape,html,pending,
+# --- K. Search-engine / web-scale indexes (discovery frontier — ADR-0009) ---
+s107,discovery,Google web/PDF discovery,Google,find OS/ACFR not linked from official sites,https://www.google.com/search,search,html,pending,queries: site:nyc.gov filetype:pdf "official statement"; site:emma.msrb.org
+s108,discovery,Bing web/PDF discovery,Microsoft,secondary search index,https://www.bing.com/search,search,html,pending,filetype:pdf official statement / ACFR
+s109,discovery,Google Scholar,Google,academic muni datasets/papers,https://scholar.google.com/,search,html,pending,muni credit research + datasets
+s110,discovery,Common Crawl,Common Crawl,web-scale index for bulk discovery,https://commoncrawl.org/,bulk_file,warc,pending,discover gov domains at scale
+s111,discovery,Internet Archive / Wayback,Internet Archive,historical OS/ACFR snapshots,https://web.archive.org/,api,html/pdf,pending,recover moved/removed disclosure
+s112,discovery,MuniOS / primary-market OS index,Ipreo/others,new-issue official statements,https://www.munios.com/,scrape,html/pdf,pending,licensed — access-gated
+s113,discovery,BondView,BondView,retail muni aggregator/screener,https://www.bondview.com/,scrape,html,pending,corroboration
+s114,discovery,DPC Data,DPC Data,continuing-disclosure aggregation,https://www.dpcdata.com/,scrape,html,pending,mirrors/indexes EMMA filings

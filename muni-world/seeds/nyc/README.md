@@ -32,14 +32,25 @@ the entire Bergen/Rockland/Pike corridor combined. Verified investor/disclosure 
 - **One credit family.** GO / TFA-FTS / NYW / TSASC are related but distinct credits — a natural first set to
   exercise the issuer≠obligor and per-credit modelling (ADR-0006) before scaling to thousands of small towns.
 
-## Sources (`sources.csv`) — 106 targets
+## Issuer dossiers (`issuer-profiles.md`)
 
-**106 NYC sources** (target was ≥100), grouped: federal/market-wide (EMMA, Census, IRS, SEC, Treasury,
-FRED) · the NYC **issuers** · NY State & regional **authorities** that finance NYC (MTA, PANYNJ, DASNY,
-ESD, HFA/SONYMA, EFC, Thruway, NYPA, BPCA, OSC, ABO) · **Comptroller** report series + the 5 NYC pension
-funds · **OMB**/Council/MMR budget publications · ~20 **NYC Open Data** finance datasets · other city
-agencies (DOF, IBO, EDC, Water Board) · civic/analytic (CBC, IBO, Volcker, Empire Center, MMA) · rating
-agencies (public actions only) · news.
+Per-issuer **structure, security & conditions** for the NYC complex — the durable, knowable frame
+(security pledge, lien, flow of funds, covenants/ABT, statutory caps, ratings, tax status) that the
+pipeline then fills to full per-CUSIP depth from Official Statements + EMMA. Highlights: **GO** = full
+faith & credit + unlimited ad-valorem tax (General Debt Service Fund, 1978); **TFA-FTS** = PIT + Sales Tax,
+senior ($12B / $330M-quarterly cap) vs subordinate lien; **NYW** = gross water/sewer revenues via the
+Board→Authority→bondholder pledge, 115%/110% ABTs. See the file for all 12 issuers.
+
+## Sources (`sources.csv`) — 114 targets
+
+**114 NYC sources** (target ≥100), grouped: federal/market-wide (EMMA, Census, IRS, SEC, Treasury, FRED) ·
+the NYC **issuers** · NY State & regional **authorities** that finance NYC (MTA, PANYNJ, DASNY, ESD,
+HFA/SONYMA, EFC, Thruway, NYPA, BPCA, OSC, ABO) · **Comptroller** report series + the 5 NYC pension funds ·
+**OMB**/Council/MMR budget publications · ~20 **NYC Open Data** finance datasets · other city agencies
+(DOF, IBO, EDC, Water Board) · civic/analytic (CBC, Volcker, Empire Center, MMA) · rating agencies (public
+actions only) · news · and a **search-engine / web-scale discovery** tier (Google/Bing `site:`+`filetype:pdf`,
+Common Crawl, Wayback, MuniOS, DPC Data) to find OS/ACFR PDFs that official sites don't link — the ADR-0009
+discovery frontier.
 
 **Verify legend:** `verified=yes` — confirmed this session; `pending` — real entity, exact URL to confirm
 on first crawl; `resolve-id` — a real NYC Open Data dataset whose Socrata 4×4 id the connector resolves
