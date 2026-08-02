@@ -36,6 +36,12 @@ municipal universe** — starting with data and building outward — before any 
   data, state/local government financials, and anything institutions publish — is the explicit aim
   (source taxonomy in ADR-0003). Web scraping is a first-class ingestion method, not an afterthought
   (ADR-0004/0008).
+- **Public data only — so OS extraction is a KEY GOAL (ADR-0015).** muni-world uses legally-accessible
+  public disclosure, not paid vendor feeds. Muni terms are disclosed only as **PDF Official Statements on
+  MSRB EMMA** — there is no free structured terms API — so **turning an OS into structured bond terms is the
+  spine of the whole platform**, promoted here from "the deferred hard part" to a **primary near-term goal**.
+  It is deterministic-parser-first, confidence-gated, and terms-only (the OS reoffering price is *not* a
+  current mark — current price is a separate source). See ADR-0015.
 - **Reuse jethro's stack, own namespaces (ADR-0001).** Postgres is the system of record (the shared
   instance, muni-world's own `muni` schema). Exact-decimal money throughout (`NUMERIC`), never binary FP.
 

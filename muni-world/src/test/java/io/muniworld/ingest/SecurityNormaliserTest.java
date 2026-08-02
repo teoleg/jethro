@@ -57,20 +57,21 @@ class SecurityNormaliserTest {
     }
 
     @Test
-    void quarantinesRowsMissingRequiredFields() {
-        // required = cusip, coupon, maturity, price; each of these rows drops one.
+    void quarantinesRowsMissingRequiredTermsButPriceIsOptional() {
+        // required TERMS = cusip, coupon, maturity. Price is optional (ADR-0015: terms-only bonds).
         List<Map<String, Object>> rows = List.of(
                 Map.of("issuer", "no cusip", "coupon_rate", "5", "maturity_date", "2035-06-01", "dollar_price", "100"),
-                Map.of("cusip", "111111AA1", "maturity_date", "2035-06-01", "dollar_price", "100"),   // no coupon
-                Map.of("cusip", "222222AA2", "coupon_rate", "5", "dollar_price", "100"),               // no maturity
-                Map.of("cusip", "333333AA3", "coupon_rate", "5", "maturity_date", "2035-06-01"),       // no price
+                Map.of("cusip", "111111AA1", "maturity_date", "2035-06-01", "dollar_price", "100"),   // no coupon → skip
+                Map.of("cusip", "222222AA2", "coupon_rate", "5", "dollar_price", "100"),               // no maturity → skip
+                Map.of("cusip", "333333AA3", "coupon_rate", "5", "maturity_date", "2035-06-01"),       // no price → SURVIVES
                 Map.of("cusip", "444444AA4", "coupon_rate", "4", "maturity_date", "2030-06-01", "dollar_price", "99"));
 
         SecurityNormaliser.Result res = norm.normalise(rows, MAP);
 
-        assertEquals(1, res.bonds().size(), "only the complete row survives");
-        assertEquals("444444AA4", res.bonds().get(0).cusip());
-        assertEquals(4, res.skipped(), "the four incomplete rows are quarantined, not force-fit");
+        assertEquals(2, res.bonds().size(), "both fully-termed rows survive — one priced, one terms-only");
+        assertEquals(3, res.skipped(), "only rows missing a required TERM are quarantined");
+        Bond termsOnly = res.bonds().stream().filter(b -> b.cusip().equals("333333AA3")).findFirst().orElseThrow();
+        assertNull(termsOnly.price(), "the price-less bond is kept, terms-only");
     }
 
     @Test

@@ -16,6 +16,7 @@ dependencies {
     implementation(libs.spring.boot.starter)
     implementation(libs.spring.boot.starter.web)      // its own REST + static UI
     implementation(libs.lmdbjava)                      // embedded, memory-mapped, derived-only store
+    implementation(libs.pdfbox)                        // ADR-0015: text/layout extraction from OS PDFs
     implementation(libs.kafka.clients)                 // shared Redpanda; muni-world owns its `muni.*` topics
     implementation(libs.spring.boot.starter.jdbc)      // Postgres (its OWN schema, Flyway-managed)
     implementation(libs.flyway.core)

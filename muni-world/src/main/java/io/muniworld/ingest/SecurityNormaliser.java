@@ -13,9 +13,11 @@ import java.util.Map;
 /**
  * The ADR-0004 normalise stage: maps source-shaped rows into canonical {@link Bond}s via a {@link FieldMap},
  * with robust parsing (money strips $/,/% into exact BigDecimal; dates accept ISO / US / Socrata datetime;
- * tax status normalised). A row missing a required field (cusip, coupon, maturity, price) is skipped and
- * counted — the ADR-0011 quarantine discipline: never force-fit, never silently drop. Source-agnostic, so
- * one normaliser serves Socrata, EMMA/OS-extracted fields, or CSV.
+ * tax status normalised). Required fields are the durable <b>terms</b> — cusip, coupon, maturity; a row
+ * missing any is skipped and counted (ADR-0011 quarantine: never force-fit, never silently drop).
+ * <b>Price is optional</b> (ADR-0015): an OS gives terms, not a current mark, so a terms-only bond is
+ * first-class and shows blank economics until a current-price source lands. Source-agnostic — one normaliser
+ * serves Socrata, EMMA/OS-extracted fields, or CSV.
  */
 @Component
 public final class SecurityNormaliser {
@@ -39,9 +41,9 @@ public final class SecurityNormaliser {
                 String cusip = str(r, m.cusip());
                 BigDecimal coupon = dec(r, m.coupon());
                 LocalDate maturity = date(r, m.maturity());
-                BigDecimal price = dec(r, m.price());
-                if (cusip == null || coupon == null || maturity == null || price == null) {
-                    skipped++;   // required field missing → quarantine (ADR-0011), don't guess
+                BigDecimal price = dec(r, m.price());   // optional (ADR-0015) — null = terms-only bond
+                if (cusip == null || coupon == null || maturity == null) {
+                    skipped++;   // a required TERM is missing → quarantine (ADR-0011), don't guess
                     continue;
                 }
                 out.add(new Bond(cusip, str(r, m.issuer()), coupon, maturity, date(r, m.dated()), price,

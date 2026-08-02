@@ -73,11 +73,21 @@ public final class MuniBondService {
     /** Compute the display row (indicators as of today's settlement). */
     public BondRow toRow(Bond b) {
         double coupon = b.coupon().doubleValue();
-        double price = b.price().doubleValue();
         LocalDate settle = LocalDate.now();
-        double callPrice = b.callPrice() == null ? 0.0 : b.callPrice().doubleValue();
         String call = b.callDate() == null ? "—"
                 : b.callDate() + " @" + (b.callPrice() == null ? "100" : b.callPrice().toPlainString());
+        // ADR-0015: no current price (terms-only bond) → market economics are BLANK (NaN → "—" in the UI),
+        // never computed off a stale/absent price. Accrued needs no price, so it's shown regardless.
+        if (b.price() == null) {
+            double nan = Double.NaN;
+            return new BondRow(
+                    b.cusip(), b.issuer(), coupon, b.maturity().toString(), nan,
+                    nan, nan, nan, nan, nan,
+                    r(BondMath.accrued(coupon, settle, b.maturity()), 3),
+                    b.taxStatus(), call, b.rating());
+        }
+        double price = b.price().doubleValue();
+        double callPrice = b.callPrice() == null ? 0.0 : b.callPrice().doubleValue();
         return new BondRow(
                 b.cusip(), b.issuer(), coupon, b.maturity().toString(), price,
                 r(BondMath.currentYield(coupon, price), 3),

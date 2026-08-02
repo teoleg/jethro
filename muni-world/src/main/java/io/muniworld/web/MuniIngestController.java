@@ -1,8 +1,10 @@
 package io.muniworld.web;
 
+import io.muniworld.extract.OfficialStatementExtractor;
 import io.muniworld.ingest.FieldMap;
 import io.muniworld.ingest.HttpFetcher;
 import io.muniworld.ingest.IngestService;
+import io.muniworld.ingest.RawArtifact;
 import io.muniworld.ingest.SocrataConnector;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,10 +31,12 @@ public final class MuniIngestController {
 
     private final IngestService ingest;
     private final HttpFetcher http;
+    private final OfficialStatementExtractor osExtractor;
 
-    public MuniIngestController(IngestService ingest, HttpFetcher http) {
+    public MuniIngestController(IngestService ingest, HttpFetcher http, OfficialStatementExtractor osExtractor) {
         this.ingest = ingest;
         this.http = http;
+        this.osExtractor = osExtractor;
     }
 
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */
@@ -54,5 +58,20 @@ public final class MuniIngestController {
             @RequestBody FieldMap map) {
         SocrataConnector connector = new SocrataConnector("socrata:" + dataset, domain, dataset, limit, http);
         return ingest.ingest(connector, map);
+    }
+
+    /**
+     * Fetch an EMMA Official Statement PDF, land it, and extract its terms into the bonds table (ADR-0015).
+     * The flagship public-data path — live on a networked host (the Pi). Bonds land terms-only. {@code issuer}
+     * /{@code geoFips}/{@code base} tag the OS being ingested.
+     */
+    @PostMapping("/api/muni/ingest/emma-os")
+    public OfficialStatementExtractor.Summary ingestEmmaOs(
+            @RequestParam String url,
+            @RequestParam(required = false) String issuer,
+            @RequestParam(required = false) String geoFips,
+            @RequestParam(name = "base", required = false) String fallbackBase) {
+        RawArtifact pdf = http.fetch("emma-os:" + url, url);   // land the PDF (ADR-0005 provenance)
+        return osExtractor.extract(pdf, issuer, geoFips, fallbackBase);
     }
 }

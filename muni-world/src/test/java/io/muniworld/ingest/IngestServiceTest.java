@@ -61,7 +61,7 @@ class IngestServiceTest {
 
     @Test
     void landsNormalisesIndexesAndSearches() {
-        // two NYC Water bonds (CUSIP-6 649122) + one row missing price → quarantined.
+        // two priced NYC Water bonds (CUSIP-6 649122) + one terms-only row (no price → kept, blank economics).
         String json = """
                 [
                   {"cusip":"649122AC9","issuer":"NYC Water","coupon":"5.000","maturity":"2035-06-01",
@@ -77,17 +77,22 @@ class IngestServiceTest {
 
         assertTrue(sum.ok(), "ingest ran: " + sum.error());
         assertEquals(3, sum.rows());
-        assertEquals(2, sum.indexed(), "two complete rows indexed");
-        assertEquals(1, sum.skipped(), "the price-less row is quarantined");
+        assertEquals(3, sum.indexed(), "all three rows indexed — two priced, one terms-only");
+        assertEquals(0, sum.skipped(), "the price-less row is kept (terms-only), not quarantined");
         assertTrue(sum.bytes() > 0 && sum.sha256() != null, "the landing carries provenance");
 
         // the indexed bonds come back out of the LMDB search index, by issuer prefix, with indicators.
         List<BondRow> rows = bonds.byIssuer("649122");
-        assertEquals(2, rows.size());
+        assertEquals(3, rows.size());
         BondRow ac9 = rows.stream().filter(r -> r.cusip().equals("649122AC9")).findFirst().orElseThrow();
         assertEquals(5.0, ac9.coupon(), 1e-9);
         assertTrue(ac9.ytm() > 0 && ac9.ytm() < 5.0, "premium bond yields below coupon, got " + ac9.ytm());
         assertTrue(ac9.currentYield() > 4.0 && ac9.currentYield() < 5.0, "5/108.25 ~ 4.6%");
+
+        // the terms-only bond shows its terms but BLANK market economics (NaN → "—"), never a stale number.
+        BondRow zz0 = rows.stream().filter(r -> r.cusip().equals("649122ZZ0")).findFirst().orElseThrow();
+        assertEquals(4.0, zz0.coupon(), 1e-9, "terms are present");
+        assertTrue(Double.isNaN(zz0.price()) && Double.isNaN(zz0.ytm()), "no price → no computed economics");
     }
 
     @Test
