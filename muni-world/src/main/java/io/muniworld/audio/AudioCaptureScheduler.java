@@ -9,16 +9,16 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * The ADR-0014 capture loop, wired for a Linux host with audio (the Pi). Each pass: capture a fixed chunk off
- * the configured audio input (ffmpeg → landed {@link RawArtifact}), transcribe it locally (whisper.cpp), mine
- * the transcript for deterministic leads, and stash them in {@link RecentLeadsStore} for the UI/API. It is a
- * lead source, never a source of numbers.
+ * The ADR-0014 capture loop, driven by the {@link AudioSourceCatalog} registry (not a single feed var). Each
+ * pass iterates every <b>capturable</b> feed — enabled and device-bound — and for each: capture a chunk off
+ * its host audio input (ffmpeg → landed {@link RawArtifact}), transcribe locally (whisper.cpp), mine the
+ * transcript for deterministic leads, and stash them tagged with the feed's label. A transcript is a lead
+ * source, never a source of numbers.
  *
- * <p><b>OFF by default</b> ({@code muni.audio.capture.enabled=true} to turn on), so the jar boots the same in
- * the sandbox / CI (no audio device, no whisper binary) and only this bean is absent. Enable it on the Pi
- * once {@code muni.audio.whisper.model} and the capture device are configured. Runs single-threaded: a chunk
- * is captured, then transcribed, then the loop repeats — so on a slow host transcription simply paces it
- * (never overlaps), at the cost of falling behind real time. Use a small model (tiny/base) on a Pi.
+ * <p><b>OFF by default</b> ({@code muni.audio.capture.enabled=true} — the master switch, flipped by
+ * {@code svc.sh tv start/stop}). The jar boots identically in CI/sandbox (no audio device); only this bean
+ * is absent. Single-threaded: feeds are captured then transcribed one after another, so a slow host simply
+ * paces the loop (never overlapping) at the cost of lag. Use a small whisper model on a Pi.
  */
 @Component
 @ConditionalOnProperty(name = "muni.audio.capture.enabled", havingValue = "true")
@@ -26,41 +26,46 @@ public final class AudioCaptureScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(AudioCaptureScheduler.class);
 
+    private final AudioSourceCatalog catalog;
     private final Transcriber transcriber;
     private final TranscriptLeadService leadService;
     private final RecentLeadsStore store;
-    private final AudioCaptureConnector connector;
-    private final String feed;
+    private final String ffmpegBin;
 
     public AudioCaptureScheduler(
+            AudioSourceCatalog catalog,
             Transcriber transcriber,
             TranscriptLeadService leadService,
             RecentLeadsStore store,
-            @Value("${muni.audio.ffmpeg.bin:ffmpeg}") String ffmpegBin,
-            @Value("${muni.audio.capture.device:pulse:default.monitor}") String device,
-            @Value("${muni.audio.capture.seconds:300}") int seconds,
-            @Value("${muni.audio.capture.feed:live}") String feed) {
+            @Value("${muni.audio.ffmpeg.bin:ffmpeg}") String ffmpegBin) {
+        this.catalog = catalog;
         this.transcriber = transcriber;
         this.leadService = leadService;
         this.store = store;
-        this.feed = feed;
-        FfmpegCaptureSource source = new FfmpegCaptureSource(ffmpegBin, device, seconds);
-        this.connector = new AudioCaptureConnector("audio:" + feed, source);
-        log.info("audio capture ENABLED: feed={} device={} chunk={}s", feed, device, seconds);
+        this.ffmpegBin = ffmpegBin;
+        log.info("audio capture ENABLED: {} capturable feed(s) in the registry", catalog.capturable().size());
     }
 
-    /** One capture→transcribe→leads pass. fixedDelay is the gap AFTER a pass; the capture itself blocks. */
+    /** One pass over every capturable feed. fixedDelay is the gap AFTER a pass; each capture itself blocks. */
     @Scheduled(fixedDelayString = "${muni.audio.capture.gap-ms:1000}")
     public void captureOnce() {
-        try {
-            RawArtifact audio = connector.fetch().get(0);
-            Transcript t = transcriber.transcribe(audio);
-            TranscriptLeadService.Leads leads = leadService.detect(t);
-            store.add(feed, leads);
-            log.info("audio pass: {} segments, {} leads", t.segments().size(), leads.leads().size());
-        } catch (RuntimeException e) {
-            // never let one bad pass kill the loop — log and try again next tick (device hiccup, ASR error)
-            log.warn("audio capture pass failed: {}", e.toString());
+        var feeds = catalog.capturable();
+        if (feeds.isEmpty()) {
+            return;   // nothing enabled+device-bound in the registry — nothing to do this pass
+        }
+        for (AudioSource src : feeds) {
+            try {
+                FfmpegCaptureSource source = new FfmpegCaptureSource(ffmpegBin, src.device(), src.chunkSeconds());
+                AudioCaptureConnector connector = new AudioCaptureConnector("audio:" + src.id(), source);
+                RawArtifact audio = connector.fetch().get(0);
+                Transcript t = transcriber.transcribe(audio);
+                TranscriptLeadService.Leads leads = leadService.detect(t);
+                store.add(src.label(), leads);
+                log.info("audio pass [{}]: {} segments, {} leads", src.id(), t.segments().size(), leads.leads().size());
+            } catch (RuntimeException e) {
+                // one bad feed never kills the loop or the other feeds — log and continue
+                log.warn("audio capture pass failed for {}: {}", src.id(), e.toString());
+            }
         }
     }
 }

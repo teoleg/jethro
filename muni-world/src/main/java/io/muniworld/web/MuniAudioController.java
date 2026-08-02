@@ -1,5 +1,7 @@
 package io.muniworld.web;
 
+import io.muniworld.audio.AudioSource;
+import io.muniworld.audio.AudioSourceCatalog;
 import io.muniworld.audio.RecentLeadsStore;
 import io.muniworld.audio.Transcript;
 import io.muniworld.audio.TranscriptLeadService;
@@ -24,10 +26,18 @@ public final class MuniAudioController {
 
     private final TranscriptLeadService leads;
     private final RecentLeadsStore recent;
+    private final AudioSourceCatalog sources;
 
-    public MuniAudioController(TranscriptLeadService leads, RecentLeadsStore recent) {
+    public MuniAudioController(TranscriptLeadService leads, RecentLeadsStore recent, AudioSourceCatalog sources) {
         this.leads = leads;
         this.recent = recent;
+        this.sources = sources;
+    }
+
+    /** The TV/audio source registry (ADR-0014) — every configured feed and whether it's capturable. */
+    @GetMapping("/api/muni/audio/sources")
+    public List<AudioSource> sources() {
+        return sources.all();
     }
 
     /** Detect leads in a supplied transcript — a transcript is a lead source, never a source of numbers. */

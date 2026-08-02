@@ -35,15 +35,22 @@ YouTube TV in a browser (Bloomberg/CNBC)  →  PulseAudio/PipeWire ".monitor"
    Silent? Pick the right monitor from `pactl list sources short` (the one ending in `.monitor` for the
    sink your browser plays into).
 
-4. **Start muni-world with capture ON:**
+4. **Configure the feed registry + start capture.** Feeds are a registry (like the market-data/social
+   sources), not env vars. Set the config once in `scripts/jethro.env` (copy from `jethro.env.example`):
    ```bash
-   export MUNI_AUDIO_CAPTURE=true
-   export MUNI_WHISPER_BIN=~/whisper.cpp/build/bin/whisper-cli
-   export MUNI_WHISPER_MODEL=~/whisper.cpp/models/ggml-base.en.bin
-   export MUNI_AUDIO_DEVICE="pulse:<sink>.monitor"
-   export MUNI_AUDIO_FEED=bloomberg          # labels the leads
-   export MUNI_AUDIO_SECONDS=300             # chunk length
-   ./scripts/svc.sh start muni
+   MUNI_WHISPER_BIN=~/whisper.cpp/build/bin/whisper-cli
+   MUNI_WHISPER_MODEL=~/whisper.cpp/models/ggml-base.en.bin
+   MUNI_AUDIO_SOURCES_FILE=muni-world/seeds/audio-sources.csv
+   ```
+   Then edit the registry `muni-world/seeds/audio-sources.csv` (pipe-delimited) — bind a feed to your
+   loopback device and enable it:
+   ```
+   tv-bloomberg|Bloomberg TV|Bloomberg|tv|pulse:<sink>.monitor|300|true|
+   ```
+   Turn capture on (flips the master switch + restarts muni-world):
+   ```bash
+   ./scripts/svc.sh tv start
+   ./scripts/svc.sh tv status     # shows the registry + recent leads
    ```
 
 5. **Watch the leads** — the muni-world page ("Audio leads") polls every 15s, or:

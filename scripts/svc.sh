@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
-# Start/stop/restart individual parts of the local stack — so you can bounce the app without
-# tearing down Ollama + Postgres (model stays warm, DB stays intact). `docker compose stop` keeps
-# the container AND its volume, so a restart is fast: no re-pull, no data loss.
+# Start/stop/restart the local stack from ONE place — core jethro (app + infra) AND muni-world, plus the
+# muni-world TV audio capture. Config lives in ONE file: scripts/jethro.env (copy from jethro.env.example),
+# sourced below. `docker compose stop` keeps the container AND its volume, so restarts are fast.
 #
 #   scripts/svc.sh restart app        # rebuild + restart just the app; LLM + DB keep running
 #   scripts/svc.sh stop app           # stop the app, leave everything else up
-#   scripts/svc.sh stop ollama        # stop just Ollama (model volume preserved)
 #   scripts/svc.sh start postgres     # start just Postgres
 #   scripts/svc.sh start muni         # build + start the muni-world service (independent, :8090)
-#   scripts/svc.sh stop muni          # stop muni-world, leave everything else up
+#   scripts/svc.sh restart muni       # rebuild + restart muni-world
+#   scripts/svc.sh tv setup           # one-time: install whisper.cpp/ffmpeg, fill audio config (Pi)
+#   scripts/svc.sh tv start           # turn TV audio capture ON and (re)start muni-world
+#   scripts/svc.sh tv stop            # turn capture OFF (muni-world keeps running)
+#   scripts/svc.sh tv status          # capture flags + recent leads
 #   scripts/svc.sh status             # what's up
 #
-# Targets: app | muni | ollama | postgres | redpanda | infra (the 3 containers) | all   (default: all)
-# muni-world is an INDEPENDENT service (its own jar/port) — its own target, not part of `all` start.
+# Targets: app | muni | tv | ollama | postgres | redpanda | infra (the 3 containers) | all  (default: all)
+# muni-world is INDEPENDENT (own jar/port); it joins `all` only when MUNI_AUTOSTART=true in jethro.env.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# --- the single config source: export everything in scripts/jethro.env so the launched JVMs inherit it ---
+ENV_FILE="scripts/jethro.env"
+if [ -f "$ENV_FILE" ]; then set -a; . "$ENV_FILE"; set +a; fi
 
 ACTION="${1:-status}"
 TARGET="${2:-all}"
@@ -23,6 +30,23 @@ PIDFILE="logs/jethro-app.pid"
 MUNI_PIDFILE="logs/muni-world.pid"
 MUNI_JAR="muni-world/build/libs/muni-world.jar"
 MUNI_PORT="${MUNI_PORT:-8090}"
+
+# Set/replace KEY=VALUE in jethro.env (creating it from the template if needed) — used by `tv start|stop`
+# so a capture toggle is DURABLE across restarts, not just for one invocation.
+ensure_env_file() {
+  [ -f "$ENV_FILE" ] || { [ -f "$ENV_FILE.example" ] && cp "$ENV_FILE.example" "$ENV_FILE" \
+    && echo "==> created $ENV_FILE from template"; }
+}
+set_env_kv() {
+  ensure_env_file
+  local k="$1" v="$2"
+  if [ -f "$ENV_FILE" ] && grep -qE "^${k}=" "$ENV_FILE"; then
+    sed -i.bak -E "s|^${k}=.*|${k}=${v}|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
+  else
+    echo "${k}=${v}" >> "$ENV_FILE"
+  fi
+  echo "==> set ${k}=${v} in $ENV_FILE"
+}
 
 app_running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null || echo 0)" 2>/dev/null; }
 app_stop() {
@@ -62,19 +86,57 @@ muni_start() {
   echo "==> building muni-world jar"
   ./gradlew -q :muni-world:bootJar
   mkdir -p logs
-  echo "==> starting muni-world on :$MUNI_PORT (independent service; boots offline — PG/Kafka opt-in)"
-  # lmdbjava (JNR) needs the NIO opens, same as the jethro app.
+  local cap="${MUNI_AUDIO_CAPTURE:-false}"
+  echo "==> starting muni-world on :$MUNI_PORT (independent; boots offline — PG/Kafka opt-in; TV capture=$cap)"
+  # lmdbjava (JNR) needs the NIO opens, same as the jethro app. The MUNI_*/audio env is inherited from
+  # jethro.env (exported above), so the capture loop reads its config with no extra plumbing here.
   nohup java --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED \
     -jar "$MUNI_JAR" > logs/muni-world.log 2>&1 &
   echo $! > "$MUNI_PIDFILE"
   echo "==> muni-world pid $(cat "$MUNI_PIDFILE") — logs/muni-world.log — http://localhost:$MUNI_PORT/"
 }
 
+# --- TV audio capture (ADR-0014): the capture loop is a bean INSIDE muni-world, gated by MUNI_AUDIO_CAPTURE.
+# So "TV control" = flip that flag durably in jethro.env, then bounce muni-world to pick it up.
+tv_setup() {
+  echo "==> muni-world audio setup (installs whisper.cpp/ffmpeg, finds the loopback)"
+  bash muni-world/scripts/setup-audio-pi.sh
+  echo "==> when done, put MUNI_WHISPER_MODEL / MUNI_AUDIO_DEVICE into $ENV_FILE, then: scripts/svc.sh tv start"
+}
+tv_start() {
+  set_env_kv MUNI_AUDIO_CAPTURE true
+  export MUNI_AUDIO_CAPTURE=true
+  if [ -z "${MUNI_WHISPER_MODEL:-}" ]; then
+    echo "!!  MUNI_WHISPER_MODEL is empty in $ENV_FILE — run 'scripts/svc.sh tv setup' and set it,"
+    echo "!!  or capture will error every cycle (it fails loudly, never invents a transcript)."
+  fi
+  echo "==> TV capture ON — bouncing muni-world. Feeds come from the registry"
+  echo "    (${MUNI_AUDIO_SOURCES_FILE:-classpath default}); enable + bind a device there, then 'tv status'."
+  muni_stop; muni_start
+}
+tv_stop() {
+  set_env_kv MUNI_AUDIO_CAPTURE false
+  export MUNI_AUDIO_CAPTURE=false
+  echo "==> TV capture OFF — bouncing muni-world (service stays up, just without the capture loop)"
+  muni_stop; muni_start
+}
+tv_status() {
+  muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
+  echo "master: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} model=${MUNI_WHISPER_MODEL:-unset} registry=${MUNI_AUDIO_SOURCES_FILE:-classpath default}"
+  if muni_running; then
+    grep -q "audio capture ENABLED" logs/muni-world.log 2>/dev/null \
+      && echo "capture loop: ENABLED in the running process" || echo "capture loop: not enabled in the running process"
+    echo "feed registry:"; curl -fsS "http://localhost:${MUNI_PORT}/api/muni/audio/sources" 2>/dev/null || echo "  (unreachable)"; echo
+    echo "recent leads:"; curl -fsS "http://localhost:${MUNI_PORT}/api/muni/audio/leads/recent?limit=5" 2>/dev/null || echo "  (none / unreachable)"; echo
+  fi
+}
+
 case "$ACTION:$TARGET" in
   status:*)
     docker compose ps || true
     app_running && echo "app: RUNNING (pid $(cat "$PIDFILE"))" || echo "app: stopped"
-    muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped" ;;
+    muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
+    echo "TV capture flag: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} (see 'svc.sh tv status')" ;;
 
   stop:app)      ./scripts/backup-db.sh || true; app_stop ;;
   start:app)     app_start ;;
@@ -85,6 +147,13 @@ case "$ACTION:$TARGET" in
   start:muni)    muni_start ;;
   restart:muni)  muni_stop; muni_start ;;
   deploy:muni)   muni_stop; muni_start ;;
+
+  # TV audio capture (ADR-0014) — drives the capture loop inside muni-world via jethro.env.
+  setup:tv)      tv_setup ;;
+  start:tv)      tv_start ;;
+  stop:tv)       tv_stop ;;
+  restart:tv)    tv_start ;;                                    # tv_start already bounces muni-world
+  status:tv)     tv_status ;;
 
   # THE loop's deploy command (JETHRO_DEPLOY_CMD). Rebuild + restart SAFELY, in the only correct order:
   # STOP the running JVM first, THEN rebuild the jar (run-local.sh builds it), THEN start.
@@ -99,15 +168,17 @@ case "$ACTION:$TARGET" in
   start:infra)   docker compose up -d $INFRA ;;
   restart:infra) docker compose restart $INFRA ;;
 
+  # `all` includes muni-world only when MUNI_AUTOSTART=true in jethro.env (TV follows its own capture flag).
   stop:all)      ./scripts/backup-db.sh || true; app_stop; muni_stop; docker compose stop $INFRA ;;
-  start:all)     app_start ;;                                  # run-local brings up infra + app (muni is opt-in: `start muni`)
-  restart:all)   app_stop; docker compose restart $INFRA; app_start ;;
+  start:all)     app_start; [ "${MUNI_AUTOSTART:-false}" = "true" ] && muni_start || true ;;
+  restart:all)   app_stop; docker compose restart $INFRA; app_start
+                 [ "${MUNI_AUTOSTART:-false}" = "true" ] && { muni_stop; muni_start; } || true ;;
 
   stop:postgres) ./scripts/backup-db.sh || true; docker compose stop postgres ;;
   stop:ollama|stop:redpanda)                        docker compose stop "$TARGET" ;;
   start:ollama|start:postgres|start:redpanda)       docker compose up -d "$TARGET" ;;
   restart:ollama|restart:postgres|restart:redpanda) docker compose restart "$TARGET" ;;
 
-  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|status> [app|muni|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
+  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|setup|status> [app|muni|tv|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
 esac
 echo "==> done."
