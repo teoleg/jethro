@@ -9,7 +9,9 @@
 set -euo pipefail
 
 WHISPER_DIR="${WHISPER_DIR:-$HOME/whisper.cpp}"
-MODEL="${MODEL:-base.en}"   # tiny.en = fastest on a Pi; base.en = better, still OK; small.en = slow on a Pi
+# NOTE: NOT named MODEL — that collides with jethro's Ollama MODEL (e.g. qwen2.5:3b) exported from local.env.
+# whisper models are tiny/base/small/etc. tiny.en = fastest on a Pi; base.en = better; small.en = slow.
+WHISPER_MODEL_NAME="${WHISPER_MODEL_NAME:-base.en}"
 
 say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
@@ -29,9 +31,9 @@ cmake --build build --config Release -j"$(nproc)"
 WHISPER_BIN="$WHISPER_DIR/build/bin/whisper-cli"
 [ -x "$WHISPER_BIN" ] || WHISPER_BIN="$WHISPER_DIR/build/bin/main"
 
-say "3/4  Fetching the $MODEL model"
-bash ./models/download-ggml-model.sh "$MODEL"
-MODEL_PATH="$WHISPER_DIR/models/ggml-$MODEL.bin"
+say "3/4  Fetching the $WHISPER_MODEL_NAME whisper model"
+bash ./models/download-ggml-model.sh "$WHISPER_MODEL_NAME"
+MODEL_PATH="$WHISPER_DIR/models/ggml-$WHISPER_MODEL_NAME.bin"
 
 say "4/4  Finding the audio loopback (monitor) source"
 echo "Available PulseAudio/PipeWire sources (look for one ending in '.monitor'):"
