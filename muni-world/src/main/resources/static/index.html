@@ -60,44 +60,22 @@
 <div class="topbar"><div class="bar">
   <span class="brand"><span class="dot"></span>MUNI·WORLD</span>
   <nav class="tabs">
-    <a class="tab active" href="/">Home</a>
-    <a class="tab" href="/#coming">Instruments</a>
-    <a class="tab" href="/#coming">Curves</a>
-    <a class="tab" href="/#coming">Analytics</a>
+    <a class="tab active" href="#bonds">Bonds</a>
+    <a class="tab" href="#sources">Sources</a>
+    <a class="tab" href="#audio">Audio</a>
   </nav>
   <span class="spacer"></span>
+  <span class="mono" id="statusline" style="font-size:11px;color:var(--dim);margin-right:14px">…</span>
   <a class="back" href="/" id="jethroLink">↩ Jethro</a>
 </div></div>
 
 <main>
-  <div class="kicker">Subproject</div>
-  <h1>Muni World</h1>
-  <div class="sub">An independent service in the jethro repo — its own jar, port, schema and ADR flow. Municipal-bond domain to come.</div>
-
-  <div class="grid">
-    <div class="card">
-      <h2>Service</h2>
-      <div class="v" id="svc">…</div><div class="l">status</div>
-    </div>
-    <div class="card">
-      <h2>Backends</h2>
-      <div class="row"><span class="led" id="ledLmdb"></span><span>LMDB — <span class="mono" id="lmdb">…</span></span></div>
-      <div class="row"><span class="led" id="ledPg"></span><span>Postgres — <span class="mono" id="pg">…</span></span></div>
-      <div class="row"><span class="led" id="ledKafka"></span><span>Kafka — <span class="mono" id="kafka">…</span></span></div>
-    </div>
-    <div class="card" id="coming">
-      <h2>Roadmap</h2>
-      <div class="l" style="margin:0 0 6px">next</div>
-      <div style="font-size:13px;color:var(--dim)">Instruments · curves · analytics — reusing jethro's decimal money types &amp; messaging, wired to its own Postgres schema and Redpanda topics.</div>
-      <div class="l" style="margin:12px 0 6px">sources</div>
-      <div style="font-size:13px;color:var(--dim)">EMMA / Open-Data connectors, document extraction, and a broadcast-audio soft-signal (ADR-0014): a transcript is a <b>lead to verify</b>, never a number.</div>
-    </div>
-  </div>
-
-  <!-- bonds by CUSIP with economic indicators, over the LMDB B-tree index (ADR-0013) -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:15px;margin-bottom:10px">Bonds</h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+  <!-- HERO: the bonds table (CUSIPs extracted from OS PDFs) is the primary content -->
+  <div id="bonds" class="section">
+    <div class="kicker">Municipal bonds</div>
+    <h1 style="margin:6px 0 4px">Bonds by CUSIP</h1>
+    <div class="sub">Terms extracted from Official Statements (EMMA) into a searchable table; the economics columns compute once a current price lands. Nothing here is illustrative — the table is empty until real bonds are ingested (<span class="mono">POST /api/muni/ingest/emma-discover</span> or <span class="mono">/emma-os</span> on the Pi).</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:16px">
       <input id="q" placeholder="CUSIP-6 issuer prefix (e.g. 649122) or FIPS (e.g. 36 / 3600000000)"
              style="flex:1;min-width:260px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;font:inherit">
       <button class="btn" onclick="search('issuer')">By issuer</button>
@@ -106,15 +84,20 @@
     <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:10px">loading bonds…</div></div>
   </div>
 
-  <!-- seeded NYC issuers -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:15px;margin-bottom:10px">NYC issuers <span id="issuerCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+  <!-- SOURCES: where the bond data comes from -->
+  <div id="sources" class="section" style="margin-top:40px">
+    <div class="kicker">Provenance</div>
+    <h2 style="font-size:18px;margin:6px 0 4px">Sources</h2>
+    <div class="sub" style="margin-bottom:14px">Bonds are extracted from <b>EMMA Official Statements</b> and Open-Data connectors. The NYC issuer complex below is the seed universe those connectors key off.</div>
+    <h3 style="font-size:13px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-bottom:8px">NYC issuers <span id="issuerCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
     <div id="issuers" style="color:var(--dim)">loading…</div>
   </div>
 
   <!-- ADR-0014: the TV/audio source REGISTRY (feeds configured like the market-data/social sources) -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:15px;margin-bottom:4px">TV sources <span id="srcCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+  <div id="audio" class="section" style="margin-top:40px">
+    <div class="kicker">Broadcast soft-signal</div>
+    <h2 style="font-size:18px;margin:6px 0 12px">Audio</h2>
+    <h3 style="font-size:13px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px">TV sources <span id="srcCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
     <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">Registry of audio feeds — a feed captures only when enabled and bound to a host device.</div>
     <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
   </div>
@@ -140,17 +123,14 @@
   // Back-link resolves to the jethro app on the same host (:8080).
   document.getElementById("jethroLink").href = location.protocol + "//" + location.hostname + ":8080/";
   async function poll() {
+    const el = document.getElementById("statusline");
     try {
       const s = await (await fetch("/api/muni/status", { cache: "no-store" })).json();
-      document.getElementById("svc").textContent = (s.status || "—").toUpperCase();
       const b = s.backends || {};
-      const set = (led, txt, val) => {
-        document.getElementById(txt).textContent = val || "—";
-        document.getElementById(led).className = "led " + (/(open|enabled|flyway)/.test(val || "") ? "on" : "off");
-      };
-      set("ledLmdb", "lmdb", b.lmdb); set("ledPg", "pg", b.postgres); set("ledKafka", "kafka", b.kafka);
+      el.textContent = (s.status || "up").toLowerCase()
+        + " · lmdb " + (b.lmdb || "—") + " · pg " + (b.postgres || "—") + " · kafka " + (b.kafka || "—");
     } catch (e) {
-      document.getElementById("svc").textContent = "DOWN";
+      el.textContent = "service down";
     }
   }
   poll(); setInterval(poll, 5000);
