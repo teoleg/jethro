@@ -32,11 +32,20 @@ the entire Bergen/Rockland/Pike corridor combined. Verified investor/disclosure 
 - **One credit family.** GO / TFA-FTS / NYW / TSASC are related but distinct credits — a natural first set to
   exercise the issuer≠obligor and per-credit modelling (ADR-0006) before scaling to thousands of small towns.
 
-## Sources (`sources.csv`)
+## Sources (`sources.csv`) — 106 targets
 
-10 high-value NYC sources: EMMA (primary), Comptroller (bonds/ACFR/debt report), Investor Relations, OMB,
-**NYC Open Data (API)**, Checkbook NYC, NY State Comptroller (statewide, also covers Rockland), and Census
-(coverage denominator).
+**106 NYC sources** (target was ≥100), grouped: federal/market-wide (EMMA, Census, IRS, SEC, Treasury,
+FRED) · the NYC **issuers** · NY State & regional **authorities** that finance NYC (MTA, PANYNJ, DASNY,
+ESD, HFA/SONYMA, EFC, Thruway, NYPA, BPCA, OSC, ABO) · **Comptroller** report series + the 5 NYC pension
+funds · **OMB**/Council/MMR budget publications · ~20 **NYC Open Data** finance datasets · other city
+agencies (DOF, IBO, EDC, Water Board) · civic/analytic (CBC, IBO, Volcker, Empire Center, MMA) · rating
+agencies (public actions only) · news.
+
+**Verify legend:** `verified=yes` — confirmed this session; `pending` — real entity, exact URL to confirm
+on first crawl; `resolve-id` — a real NYC Open Data dataset whose Socrata 4×4 id the connector resolves
+from the catalog at ingest (the dev environment here blocks the catalog API, so IDs aren't hard-coded —
+`data.cityofnewyork.us`/`api.us.socrata.com` are reachable from the Pi). Nothing is asserted final; the
+connector validates every row under the polite-crawl policy (ADR-0008).
 
 ## Relationship to the tri-county corridor
 
