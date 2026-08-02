@@ -143,6 +143,20 @@ tv_status() {
   fi
 }
 
+# `tv` is a sub-namespace: `svc.sh tv <setup|start|stop|restart|status>` (also accepts `start tv`, etc.).
+# Handled here so `tv status` isn't shadowed by the general `status:*` below.
+if [ "$ACTION" = "tv" ]; then
+  case "$TARGET" in
+    setup)      tv_setup ;;
+    start)      tv_start ;;
+    stop)       tv_stop ;;
+    restart)    tv_start ;;
+    status|all) tv_status ;;   # bare `svc.sh tv` → status
+    *) echo "usage: scripts/svc.sh tv <setup|start|stop|restart|status>"; exit 1 ;;
+  esac
+  echo "==> done."; exit 0
+fi
+
 case "$ACTION:$TARGET" in
   status:*)
     docker compose ps || true
