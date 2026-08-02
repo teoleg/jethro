@@ -46,7 +46,12 @@ Build an **EMMA Official Statement → structured terms** pipeline as a first-cl
 2. **Phase 2 — live EMMA discovery + fetch.** Politely locate an issuer's/CUSIP's OS on EMMA and land the
    PDF (ADR-0008: respect EMMA Terms of Use, robots, rate limits, descriptive UA, conditional GETs; public
    disclosure documents, private analysis, no redistribution). Scanned-PDF OCR fallback (flagged) per
-   ADR-0010.
+   ADR-0010. **Realization:** EMMA is postback/JS ASP.NET and serves no crawlable OS links in its raw HTML,
+   so the fetch renders the page with **headless Chromium** (`HeadlessBrowser` → `EmmaAutoFetcher`),
+   extracts the OS document links from the rendered DOM, downloads the PDFs into the OS inbox, and the
+   folder loader (`DirectoryIngestService`) extracts them — fully hands-off. Off by default (needs a browser
+   binary). A **manual/uploaded or folder-dropped OS PDF** is the always-available path when the browser
+   isn't wired.
 3. **Phase 3 — assisted extraction for hard layouts.** OS table formats vary widely; the deterministic
    parser covers the common columnar schedule, and messy layouts escalate to the local SLM / Claude frontier
    **under ADR-0012's guardrail** — grounded in the document, cited to the `raw_artifact_id`, confidence-

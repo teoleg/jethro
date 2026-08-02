@@ -38,21 +38,34 @@ public final class MuniIngestController {
     private final OfficialStatementExtractor osExtractor;
     private final EmmaDiscovery discovery;
     private final io.muniworld.ingest.DirectoryIngestService dirIngest;
+    private final io.muniworld.crawl.EmmaAutoFetcher emmaAutoFetcher;
 
     public MuniIngestController(IngestService ingest, HttpFetcher http,
                                OfficialStatementExtractor osExtractor, EmmaDiscovery discovery,
-                               io.muniworld.ingest.DirectoryIngestService dirIngest) {
+                               io.muniworld.ingest.DirectoryIngestService dirIngest,
+                               io.muniworld.crawl.EmmaAutoFetcher emmaAutoFetcher) {
         this.ingest = ingest;
         this.http = http;
         this.osExtractor = osExtractor;
         this.discovery = discovery;
         this.dirIngest = dirIngest;
+        this.emmaAutoFetcher = emmaAutoFetcher;
     }
 
     /** Load every PDF sitting in the OS inbox folder now (also runs automatically on a schedule). */
     @PostMapping("/api/muni/ingest/scan")
     public List<OfficialStatementExtractor.Summary> scanInbox() {
         return dirIngest.scanNow();
+    }
+
+    /**
+     * Fully automatic: render a CUSIP's EMMA page with a headless browser, download its OS PDFs into the
+     * inbox (the folder loader then extracts them). No manual download. Needs Chromium on the host + a
+     * running muni. Reports what it found so EMMA's markup can be tuned from a real run.
+     */
+    @PostMapping("/api/muni/ingest/emma-auto")
+    public io.muniworld.crawl.EmmaAutoFetcher.Result emmaAuto(@RequestParam String cusip) {
+        return emmaAutoFetcher.fetchToInbox(cusip);
     }
 
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */
