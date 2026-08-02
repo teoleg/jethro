@@ -7,8 +7,10 @@ import io.muniworld.ingest.HttpFetcher;
 import io.muniworld.ingest.IngestService;
 import io.muniworld.ingest.RawArtifact;
 import io.muniworld.ingest.SocrataConnector;
+import java.io.IOException;
 import java.util.LinkedHashMap;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -86,6 +88,23 @@ public final class MuniIngestController {
                     0, 0, 0, 0, 0.0, false, "fetch failed: " + e.getMessage());
         }
         return osExtractor.extract(pdf, issuer, geoFips, base);
+    }
+
+    /**
+     * Upload an Official Statement PDF directly and extract its terms (ADR-0015). The public-data path that
+     * needs no EMMA scraping: download the OS from EMMA in a browser (it's a public document), upload it
+     * here, and its maturity schedule lands in the bonds table. {@code issuer}/{@code geoFips}/{@code base}
+     * tag the OS; {@code base} defaults to the CUSIP-6 the parser reads from the document.
+     */
+    @PostMapping("/api/muni/ingest/os-pdf")
+    public OfficialStatementExtractor.Summary ingestOsPdf(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(required = false) String issuer,
+            @RequestParam(required = false) String geoFips,
+            @RequestParam(name = "base", required = false) String fallbackBase) throws IOException {
+        RawArtifact pdf = RawArtifact.of("upload:" + file.getOriginalFilename(),
+                file.getOriginalFilename(), file.getContentType(), file.getBytes());  // land the upload (ADR-0005)
+        return osExtractor.extract(pdf, issuer, geoFips, fallbackBase == null ? "" : fallbackBase);
     }
 
     /**
