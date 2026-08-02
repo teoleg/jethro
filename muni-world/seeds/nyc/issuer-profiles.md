@@ -1,12 +1,16 @@
 # NYC issuer dossiers — structure, security & conditions
 
 Per-issuer profiles for the NYC complex (ADR-0006 issuer/obligor/security/call_feature). This captures the
-**stable, structural conditions** (security pledge, lien, flow of funds, covenants, statutory caps, tax
-status) that are knowable up front. The **live, per-series detail** — every CUSIP's coupon/maturity/**call
-schedule**, current par outstanding, current ratings, and audited financials — is populated by the pipeline
-from each issuer's **Official Statements (EMMA)** and financial filings. Figures below are as disclosed in
-the cited documents; the pipeline keeps them current. Ratings are public rating actions only (licensed
-feeds excluded — ADR-0008).
+**stable, structural conditions** — security pledge, lien, flow of funds, covenants, **statutory caps set in
+the enabling acts / bond resolutions**, tax status — which are durable public facts and are what this
+dossier asserts.
+
+> **Provenance discipline (no invented numbers).** Only durable, statute-/resolution-defined conditions are
+> stated as fact below. **Point-in-time figures — current ratings, par outstanding, coverage actuals — are
+> NOT asserted here**; they are marked as pipeline-populated and are filled, each cited to its
+> `raw_artifact_id` (ADR-0005), from each issuer's **Official Statements (EMMA)** and financial filings
+> (ADR-0004/0010). Ratings are public rating actions only (licensed feeds excluded — ADR-0008). Where a
+> number below is statutory it is a real condition; nothing here is a self-chosen placeholder.
 
 ---
 
@@ -17,8 +21,8 @@ feeds excluded — ADR-0008).
 - **Structure:** a **General Debt Service Fund** (Financial Emergency Act, 1978) — City real-estate tax is
   deposited **on receipt** and retained under a statutory formula ahead of debt service; fully funded at the
   start of each payment period since inception.
-- **Ratings (as disclosed 2026):** Moody's **Aa2** on ~$49B of GO; S&P/Fitch/KBRA also rate (public reports
-  on the Comptroller/IR sites).
+- **Ratings:** rated by Moody's / S&P / Fitch / KBRA (public reports on the Comptroller/IR sites). *Current
+  level + par outstanding: pipeline-populated from the latest OS/rating action — not asserted here.*
 - **Tax status:** tax-exempt (some taxable series).
 - **Programs / series:** "The City of New York General Obligation Bonds, Fiscal <year> Series <A…>".
 - **Disclosure:** Comptroller OS archive + `nyc.gov/investorrelations` GO downloads + EMMA (CUSIP-6).
@@ -33,7 +37,8 @@ feeds excluded — ADR-0008).
   other subordinate FTS bonds, junior to senior DS.
 - **Statutory cap:** original $7.5B → raised to **$13.5B** (+$2.5B "Recovery Bonds"); post-2009, issuance
   **above** the cap counts against the **City's debt limit**.
-- **Ratings (as disclosed):** Moody's **Aa1** (subordinate FTS); S&P/Fitch rate senior/sub.
+- **Ratings:** rated by Moody's / S&P / Fitch (senior and subordinate liens). *Current levels:
+  pipeline-populated — not asserted here.*
 - **Also issues:** **Building Aid Revenue Bonds (BARBs)** — secured by State building-aid payments (distinct
   credit; profile as a sub-program).
 - **Disclosure:** `nyc.gov/site/transitionalfinance/investing` + Comptroller + EMMA.
@@ -49,7 +54,8 @@ feeds excluded — ADR-0008).
   of Second Resolution DS + O&M. **Second Resolution** ABT — revenues ≥ **110%** of aggregate (first+second)
   DS. **Rate covenant:** net revenues sum-sufficient for combined DS + O&M + City lease payments.
 - **Liens:** First Resolution (senior, largely legacy) and **Second Resolution** (current issuance).
-- **Ratings:** Aa1/AA+ area (S&P/Fitch reports on the NYW site).
+- **Ratings:** rated by Moody's / S&P / Fitch (reports on the NYW site). *Current levels: pipeline-populated
+  — not asserted here.*
 - **Disclosure:** `nyc.gov/site/nyw` (investing + EMMA notices) + the System ACFR.
 
 ## 4. TSASC, Inc. — Tobacco Settlement Asset-Backed

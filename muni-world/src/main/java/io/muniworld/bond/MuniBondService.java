@@ -86,7 +86,7 @@ public final class MuniBondService {
                 r(BondMath.modDuration(coupon, settle, b.maturity(), price), 2),
                 r(BondMath.convexity(coupon, settle, b.maturity(), price), 2),
                 r(BondMath.accrued(coupon, settle, b.maturity()), 3),
-                b.taxStatus(), call, b.rating(), b.sample());
+                b.taxStatus(), call, b.rating());
     }
 
     private static double r(double v, int dp) {

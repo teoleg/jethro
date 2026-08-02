@@ -98,7 +98,7 @@
   <div class="section" style="margin-top:28px">
     <h2 style="font-size:15px;margin-bottom:10px">Bonds</h2>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-      <input id="q" placeholder="CUSIP-6 (e.g. SMPL01) or FIPS (e.g. 36 / 3600000000)"
+      <input id="q" placeholder="CUSIP-6 issuer prefix (e.g. 649122) or FIPS (e.g. 36 / 3600000000)"
              style="flex:1;min-width:260px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;font:inherit">
       <button class="btn" onclick="search('issuer')">By issuer</button>
       <button class="btn" onclick="search('geo')">By geography</button>
@@ -146,11 +146,16 @@
   async function loadIssuers() {
     try {
       const list = await (await fetch("/api/muni/issuers")).json();
-      document.getElementById("issuerCount").textContent = "· " + list.length;
-      document.getElementById("issuers").innerHTML = list.map(i =>
-        `<div class="issuer"><b>${esc(i.name)}</b><span class="tag">${esc(i.type)}</span>
-         <div class="sec">${esc(i.security)}</div>
-         <a href="${esc(i.disclosureUrl)}" target="_blank" rel="noopener">${esc(i.disclosureUrl)}</a></div>`).join("");
+      const verified = list.filter(i => i.verified === "yes").length;
+      document.getElementById("issuerCount").textContent = "· " + verified + " verified / " + list.length;
+      document.getElementById("issuers").innerHTML = list.map(i => {
+        // Only a confirmed (verified=yes) disclosure page is shown as a real link; otherwise say so plainly.
+        const link = (i.verified === "yes" && i.disclosureUrl)
+          ? `<a href="${esc(i.disclosureUrl)}" target="_blank" rel="noopener">${esc(i.disclosureUrl)}</a>`
+          : `<span style="color:var(--warn);font-size:11px">⚠ disclosure source unverified — pending confirmation</span>`;
+        return `<div class="issuer"><b>${esc(i.name)}</b><span class="tag">${esc(i.type)}</span>
+         <div class="sec">${esc(i.security)}</div>${link}</div>`;
+      }).join("");
     } catch (e) { document.getElementById("issuers").textContent = "unavailable"; }
   }
 
@@ -159,13 +164,11 @@
   function renderBonds(rows) {
     const el = document.getElementById("bondTable");
     if (!rows || !rows.length) {
-      el.innerHTML = "no bonds for that key — load via a connector or POST /api/muni/bonds";
+      el.innerHTML = "no bonds loaded — real bonds arrive only via the EMMA / Open-Data connectors (ingest on the Pi). Nothing here is illustrative.";
       return;
     }
     const cols = ["CUSIP", "Issuer", "Cpn", "Maturity", "Price", "Cur Yld", "YTM", "YTW", "Mod Dur", "Cvx", "Tax", "Rating", "Call"];
-    const banner = rows.some(r => r.sample)
-      ? '<div style="color:var(--warn);font-size:11px;margin:2px 0 8px">illustrative sample data — real bonds load via the EMMA / Open-Data connectors</div>' : "";
-    el.innerHTML = banner + '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
+    el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
       + rows.map(r => `<tr>
           <td class="mono" style="color:var(--txt)">${esc(r.cusip)}</td><td>${esc(r.issuer)}</td>
           <td class="mono">${num(r.coupon, 3)}</td><td class="mono">${esc(r.maturity)}</td>
@@ -178,11 +181,15 @@
   }
 
   async function search(kind) {
-    const q = document.getElementById("q").value.trim() || "SMPL"; // default: show the sample set
+    const q = document.getElementById("q").value.trim();
+    if (!q) {
+      document.getElementById("bondTable").textContent = "enter a CUSIP-6 issuer prefix or a FIPS code to search the loaded bonds.";
+      return;
+    }
     const path = kind === "geo" ? "/api/muni/bonds/geo/" : "/api/muni/bonds/issuer/";
     try {
       renderBonds(await (await fetch(path + encodeURIComponent(q))).json());
-    } catch (e) { document.getElementById("bondTable").textContent = "search error"; }
+    } catch (e) { document.getElementById("bondTable").textContent = "source unreachable — could not query the bond index."; }
   }
 
   const kindColor = k => k === "ISSUER" ? "var(--brand)" : k === "CUSIP" ? "var(--warn)" : "var(--dim)";
@@ -209,7 +216,8 @@
   document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") search("issuer"); });
   loadIssuers();
   loadLeads(); setInterval(loadLeads, 15000);
-  search("issuer"); // load the sample bonds table on open
+  // No default query — the table is empty until real bonds are ingested (no illustrative data on open).
+  document.getElementById("bondTable").textContent = "no bonds loaded yet — ingest real bonds via the EMMA / Open-Data connectors on the Pi.";
 </script>
 </body>
 </html>

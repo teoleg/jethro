@@ -20,8 +20,18 @@ public final class SeedCatalog {
 
     private static final Logger log = LoggerFactory.getLogger(SeedCatalog.class);
 
-    /** A NYC issuer from the seed (ADR-0006 issuer, seed subset). */
-    public record Issuer(String id, String name, String type, String security, String disclosureUrl, String notes) {
+    /**
+     * A NYC issuer from the seed (ADR-0006 issuer, seed subset). {@code verified} is the provenance status of
+     * the {@code disclosureUrl}: {@code "yes"} = the official disclosure page was confirmed; anything else
+     * ({@code "partial"}/{@code "no"}) = NOT corroborated, so the UI must not present its URL as a fact.
+     */
+    public record Issuer(String id, String name, String type, String security, String disclosureUrl,
+                         String verified, String notes) {
+
+        /** True only when the disclosure URL was actually confirmed — the UI links only these. */
+        public boolean isVerified() {
+            return "yes".equalsIgnoreCase(verified);
+        }
     }
 
     private final List<Issuer> issuers;
@@ -51,7 +61,11 @@ public final class SeedCatalog {
                 }
                 String[] f = line.split(",", 7); // only `notes` may contain commas; limit keeps it intact
                 if (f.length >= 7) {
-                    out.add(new Issuer(f[0], f[1], f[2], f[3], f[4], f[6]));
+                    // header: id,issuer,type,security,disclosure_url,verified,notes
+                    String verified = f[5];
+                    // Don't present an unverified URL as fact — null it so the UI shows "source unverified".
+                    String url = "yes".equalsIgnoreCase(verified) ? f[4] : null;
+                    out.add(new Issuer(f[0], f[1], f[2], f[3], url, verified, f[6]));
                 }
             }
         } catch (IOException e) {

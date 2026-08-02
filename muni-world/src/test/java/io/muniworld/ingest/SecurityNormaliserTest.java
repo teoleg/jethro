@@ -9,14 +9,14 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * The normalise stage (ADR-0004) must map source-shaped rows into canonical {@link Bond}s exactly — money
  * strips {@code $ , %} into exact BigDecimal, dates accept ISO / US / Socrata-datetime, tax status folds to
  * the canonical set — and must <b>quarantine</b> (skip + count) any row missing a required field rather than
- * guess (ADR-0011). Normalised bonds are real (sample=false), never illustrative.
+ * guess (ADR-0011). Every normalised bond is real, disclosure-sourced data — the system has no illustrative
+ * or sample bonds at all.
  */
 class SecurityNormaliserTest {
 
@@ -54,7 +54,6 @@ class SecurityNormaliserTest {
         assertEquals(0, new BigDecimal("108.25").compareTo(b.price()), "$ and thousands separators stripped");
         assertEquals("tax-exempt", b.taxStatus());
         assertEquals(LocalDate.of(2032, 6, 1), b.callDate());
-        assertFalse(b.sample(), "a normalised bond is real data, never the illustrative sample");
     }
 
     @Test

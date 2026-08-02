@@ -46,7 +46,7 @@ public final class SecurityNormaliser {
                 }
                 out.add(new Bond(cusip, str(r, m.issuer()), coupon, maturity, date(r, m.dated()), price,
                         tax(str(r, m.taxStatus())), date(r, m.callDate()), dec(r, m.callPrice()),
-                        str(r, m.rating()), str(r, m.geoFips()), false));
+                        str(r, m.rating()), str(r, m.geoFips())));
             } catch (RuntimeException e) {
                 skipped++;
             }

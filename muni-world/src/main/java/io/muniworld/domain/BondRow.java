@@ -19,6 +19,5 @@ public record BondRow(
         double accrued,
         String taxStatus,
         String call,
-        String rating,
-        boolean sample) {
+        String rating) {
 }
