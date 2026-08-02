@@ -21,6 +21,7 @@ gets an ADR here **before** implementation; accepted ADRs are settled and supers
 | [0011](0011-data-quality-coverage-and-quarantine.md) | Data quality, coverage metrics, and quarantine | Accepted |
 | [0012](0012-claude-assisted-analysis-and-prompt-library.md) | Claude-assisted analysis and the muni prompt library | Accepted |
 | [0013](0013-lmdb-btree-search-index.md) | LMDB B-tree search-index layer (derived, ordered-key search) | Accepted |
+| [0014](0014-broadcast-audio-capture-and-transcription.md) | Broadcast-audio capture and transcription as a soft-signal source | Accepted |
 
 ## Reading order
 
@@ -30,4 +31,6 @@ platform then reads as one arc: **what** to collect (0003 sources) → **how** (
 **making it coherent** (0007 identity, 0010 document extraction, 0011 quality/coverage). **0012** adds the
 **Claude-assisted analysis layer + prompt library** (`../../prompts/`) that reasons over the collected data
 under jethro's AI guardrails. Analytics (OAS on callable munis) is the deferred north star — the data model
-in 0006 is built to serve it, and 0012 governs the LLM assistance around it.
+in 0006 is built to serve it, and 0012 governs the LLM assistance around it. **0014** adds a new source
+**modality** — broadcast-audio capture + local transcription — feeding the same pipeline as a *soft signal*:
+a transcript is a **lead to verify**, never a number (invariant 7 / ADR-0011 inherited).
