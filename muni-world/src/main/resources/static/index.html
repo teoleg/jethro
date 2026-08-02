@@ -179,7 +179,7 @@
       + rows.map(r => `<tr>
           <td class="mono" style="color:var(--txt)">${esc(r.cusip)}</td><td>${esc(r.issuer)}</td>
           <td class="mono">${num(r.coupon, 3)}</td><td class="mono">${esc(r.maturity)}</td>
-          <td class="mono">${num(r.price, 2)}</td><td class="mono">${num(r.currentYield, 3)}</td>
+          <td class="mono">${num(r.price, 2)}${r.priceAsOf ? `<div style="font-size:9px;color:var(--dim)" title="${esc(r.priceSource)}">${esc(r.priceAsOf)}</div>` : ""}</td><td class="mono">${num(r.currentYield, 3)}</td>
           <td class="mono">${num(r.ytm, 3)}</td><td class="mono" style="color:var(--brand)">${num(r.ytw, 3)}</td>
           <td class="mono">${num(r.modDuration, 2)}</td><td class="mono">${num(r.convexity, 2)}</td>
           <td>${esc(r.taxStatus)}</td><td>${esc(r.rating)}</td>

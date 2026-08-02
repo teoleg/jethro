@@ -4,10 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.muniworld.domain.Bond;
 import io.muniworld.domain.BondMath;
 import io.muniworld.domain.BondRow;
+import io.muniworld.domain.PriceQuote;
+import io.muniworld.price.MuniPriceStore;
 import io.muniworld.store.MuniKeys;
 import io.muniworld.store.MuniSearchIndex;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,10 +26,12 @@ public final class MuniBondService {
 
     private final MuniSearchIndex index;
     private final ObjectMapper mapper;
+    private final MuniPriceStore prices;
 
-    public MuniBondService(MuniSearchIndex index, ObjectMapper mapper) {
+    public MuniBondService(MuniSearchIndex index, ObjectMapper mapper, MuniPriceStore prices) {
         this.index = index;
         this.mapper = mapper;
+        this.prices = prices;
     }
 
     /** Store a bond: JSON value under its CUSIP, plus the maturity/coupon/geo secondary indexes. */
@@ -76,17 +81,24 @@ public final class MuniBondService {
         LocalDate settle = LocalDate.now();
         String call = b.callDate() == null ? "—"
                 : b.callDate() + " @" + (b.callPrice() == null ? "100" : b.callPrice().toPlainString());
-        // ADR-0015: no current price (terms-only bond) → market economics are BLANK (NaN → "—" in the UI),
-        // never computed off a stale/absent price. Accrued needs no price, so it's shown regardless.
-        if (b.price() == null) {
+
+        // Current price: the price store (ADR-0015 — MSRB trade prints etc.) is the market authority; fall
+        // back to a price carried on the bond itself (e.g. a direct/CSV ingest). OS-terms bonds have neither
+        // until a quote lands → BLANK economics (NaN → "—"), never a stale/invented number.
+        Optional<PriceQuote> q = prices.get(b.cusip());
+        BigDecimal px = q.map(PriceQuote::price).orElse(b.price());
+        String asOf = q.map(x -> x.asOf().toString()).orElse(null);
+        String pxSource = q.map(PriceQuote::source).orElse(b.price() == null ? null : "ingest");
+
+        if (px == null) {
             double nan = Double.NaN;
             return new BondRow(
                     b.cusip(), b.issuer(), coupon, b.maturity().toString(), nan,
                     nan, nan, nan, nan, nan,
                     r(BondMath.accrued(coupon, settle, b.maturity()), 3),
-                    b.taxStatus(), call, b.rating());
+                    b.taxStatus(), call, b.rating(), null, null);
         }
-        double price = b.price().doubleValue();
+        double price = px.doubleValue();
         double callPrice = b.callPrice() == null ? 0.0 : b.callPrice().doubleValue();
         return new BondRow(
                 b.cusip(), b.issuer(), coupon, b.maturity().toString(), price,
@@ -96,7 +108,7 @@ public final class MuniBondService {
                 r(BondMath.modDuration(coupon, settle, b.maturity(), price), 2),
                 r(BondMath.convexity(coupon, settle, b.maturity(), price), 2),
                 r(BondMath.accrued(coupon, settle, b.maturity()), 3),
-                b.taxStatus(), call, b.rating());
+                b.taxStatus(), call, b.rating(), asOf, pxSource);
     }
 
     private static double r(double v, int dp) {

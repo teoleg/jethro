@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.muniworld.bond.MuniBondService;
 import io.muniworld.domain.BondRow;
+import io.muniworld.price.MuniPriceStore;
 import io.muniworld.store.MuniLmdbStore;
 import io.muniworld.store.MuniSearchIndex;
 import org.junit.jupiter.api.AfterEach;
@@ -43,7 +44,7 @@ class IngestServiceTest {
     void setUp() throws IOException {
         dir = Files.createTempDirectory("muni-ingest");
         store = new MuniLmdbStore(dir.toString(), 16);
-        bonds = new MuniBondService(new MuniSearchIndex(store), mapper);
+        bonds = new MuniBondService(new MuniSearchIndex(store), mapper, new MuniPriceStore(store, mapper));
         ingest = new IngestService(mapper, new SecurityNormaliser(), bonds);
     }
 

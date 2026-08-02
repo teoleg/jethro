@@ -19,5 +19,7 @@ public record BondRow(
         double accrued,
         String taxStatus,
         String call,
-        String rating) {
+        String rating,
+        String priceAsOf,     // date the current price is as-of (null = terms-only, blank economics)
+        String priceSource) { // provenance of the price, e.g. msrb-rtrs (null when unpriced)
 }
