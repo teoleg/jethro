@@ -49,8 +49,8 @@ YouTube TV in a browser (Bloomberg/CNBC)  →  PulseAudio/PipeWire ".monitor"
    ```
    Turn capture on (flips the master switch + restarts muni-world):
    ```bash
-   ./scripts/svc.sh tv start
-   ./scripts/svc.sh tv status     # shows the registry + recent leads
+   ./scripts/svc.sh start tv
+   ./scripts/svc.sh status tv     # shows the registry + recent leads
    ```
 
 5. **Watch the leads** — the muni-world page ("Audio leads") polls every 15s, or:

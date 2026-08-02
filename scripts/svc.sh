@@ -8,10 +8,10 @@
 #   scripts/svc.sh start postgres     # start just Postgres
 #   scripts/svc.sh start muni         # build + start the muni-world service (independent, :8090)
 #   scripts/svc.sh restart muni       # rebuild + restart muni-world
-#   scripts/svc.sh tv setup           # one-time: install whisper.cpp/ffmpeg, fill audio config (Pi)
-#   scripts/svc.sh tv start           # turn TV audio capture ON and (re)start muni-world
-#   scripts/svc.sh tv stop            # turn capture OFF (muni-world keeps running)
-#   scripts/svc.sh tv status          # capture flags + recent leads
+#   scripts/svc.sh setup tv           # one-time: install whisper.cpp/ffmpeg, fill audio config (Pi)
+#   scripts/svc.sh start tv           # turn TV audio capture ON and (re)start muni-world
+#   scripts/svc.sh stop tv            # turn capture OFF (muni-world keeps running)
+#   scripts/svc.sh status tv          # capture flags + recent leads
 #   scripts/svc.sh status             # what's up
 #
 # Targets: app | muni | tv | ollama | postgres | redpanda | infra (the 3 containers) | all  (default: all)
@@ -38,7 +38,7 @@ MUNI_PIDFILE="logs/muni-world.pid"
 MUNI_JAR="muni-world/build/libs/muni-world.jar"
 MUNI_PORT="${MUNI_PORT:-8090}"
 
-# Set/replace KEY=VALUE in local.env (creating it from local.env.example if needed) — used by `tv start|stop`
+# Set/replace KEY=VALUE in local.env (creating it from local.env.example if needed) — used by `start/stop tv`
 # so a capture toggle is DURABLE across restarts, not just for one invocation.
 ensure_env_file() {
   [ -f "$ENV_FILE" ] || { [ -f "local.env.example" ] && cp "local.env.example" "$ENV_FILE" \
@@ -113,17 +113,17 @@ tv_setup() {
   # make sure the registry pointer is set too
   grep -qE "^MUNI_AUDIO_SOURCES_FILE=" "$ENV_FILE" 2>/dev/null || set_env_kv MUNI_AUDIO_SOURCES_FILE muni-world/seeds/audio-sources.csv
   echo "==> whisper paths written to $ENV_FILE. Next: bind a device + enable a feed in"
-  echo "    muni-world/seeds/audio-sources.csv (the registry), then: scripts/svc.sh tv start"
+  echo "    muni-world/seeds/audio-sources.csv (the registry), then: scripts/svc.sh start tv"
 }
 tv_start() {
   set_env_kv MUNI_AUDIO_CAPTURE true
   export MUNI_AUDIO_CAPTURE=true
   if [ -z "${MUNI_WHISPER_MODEL:-}" ]; then
-    echo "!!  MUNI_WHISPER_MODEL is empty in $ENV_FILE — run 'scripts/svc.sh tv setup' and set it,"
+    echo "!!  MUNI_WHISPER_MODEL is empty in $ENV_FILE — run 'scripts/svc.sh setup tv' and set it,"
     echo "!!  or capture will error every cycle (it fails loudly, never invents a transcript)."
   fi
   echo "==> TV capture ON — bouncing muni-world. Feeds come from the registry"
-  echo "    (${MUNI_AUDIO_SOURCES_FILE:-classpath default}); enable + bind a device there, then 'tv status'."
+  echo "    (${MUNI_AUDIO_SOURCES_FILE:-classpath default}); enable + bind a device there, then 'status tv'."
   muni_stop; muni_start
 }
 tv_stop() {
@@ -143,26 +143,15 @@ tv_status() {
   fi
 }
 
-# `tv` is a sub-namespace: `svc.sh tv <setup|start|stop|restart|status>` (also accepts `start tv`, etc.).
-# Handled here so `tv status` isn't shadowed by the general `status:*` below.
-if [ "$ACTION" = "tv" ]; then
-  case "$TARGET" in
-    setup)      tv_setup ;;
-    start)      tv_start ;;
-    stop)       tv_stop ;;
-    restart)    tv_start ;;
-    status|all) tv_status ;;   # bare `svc.sh tv` → status
-    *) echo "usage: scripts/svc.sh tv <setup|start|stop|restart|status>"; exit 1 ;;
-  esac
-  echo "==> done."; exit 0
-fi
-
 case "$ACTION:$TARGET" in
+  # TV status must come BEFORE the general status:* below, or it'd be shadowed by it.
+  status:tv)     tv_status ;;
+
   status:*)
     docker compose ps || true
     app_running && echo "app: RUNNING (pid $(cat "$PIDFILE"))" || echo "app: stopped"
     muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
-    echo "TV capture flag: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} (see 'svc.sh tv status')" ;;
+    echo "TV capture flag: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} (see 'svc.sh status tv')" ;;
 
   stop:app)      ./scripts/backup-db.sh || true; app_stop ;;
   start:app)     app_start ;;
@@ -179,7 +168,6 @@ case "$ACTION:$TARGET" in
   start:tv)      tv_start ;;
   stop:tv)       tv_stop ;;
   restart:tv)    tv_start ;;                                    # tv_start already bounces muni-world
-  status:tv)     tv_status ;;
 
   # THE loop's deploy command (JETHRO_DEPLOY_CMD). Rebuild + restart SAFELY, in the only correct order:
   # STOP the running JVM first, THEN rebuild the jar (run-local.sh builds it), THEN start.

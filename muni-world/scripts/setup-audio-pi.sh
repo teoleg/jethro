@@ -68,8 +68,8 @@ The whisper paths are already written to local.env. Two more steps:
      e.g.  tv-bloomberg|Bloomberg TV|Bloomberg|tv|pulse:${MONITOR:-<sink>.monitor}|300|true|
 
   2) Turn capture on (flips the master switch in local.env + restarts muni-world):
-       ./scripts/svc.sh tv start
-       ./scripts/svc.sh tv status     # shows the feed registry + recent leads
+       ./scripts/svc.sh start tv
+       ./scripts/svc.sh status tv     # shows the feed registry + recent leads
 
 Leads appear on the muni-world page ("TV sources" / "Audio leads") and at /api/muni/audio/leads/recent.
 EOF
