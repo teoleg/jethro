@@ -3,6 +3,7 @@ package io.muniworld.web;
 import io.muniworld.audio.AudioSource;
 import io.muniworld.audio.AudioSourceCatalog;
 import io.muniworld.audio.RecentLeadsStore;
+import io.muniworld.audio.RecentTranscriptsStore;
 import io.muniworld.audio.Transcript;
 import io.muniworld.audio.TranscriptLeadService;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,11 +28,20 @@ public final class MuniAudioController {
     private final TranscriptLeadService leads;
     private final RecentLeadsStore recent;
     private final AudioSourceCatalog sources;
+    private final RecentTranscriptsStore transcripts;
 
-    public MuniAudioController(TranscriptLeadService leads, RecentLeadsStore recent, AudioSourceCatalog sources) {
+    public MuniAudioController(TranscriptLeadService leads, RecentLeadsStore recent,
+                              AudioSourceCatalog sources, RecentTranscriptsStore transcripts) {
         this.leads = leads;
         this.recent = recent;
         this.sources = sources;
+        this.transcripts = transcripts;
+    }
+
+    /** The raw recent transcripts — "what did it hear", to eyeball against the TV (ADR-0014 validation). */
+    @GetMapping("/api/muni/audio/transcripts/recent")
+    public List<RecentTranscriptsStore.Entry> transcripts(@RequestParam(defaultValue = "10") int limit) {
+        return transcripts.recent(limit);
     }
 
     /** The TV/audio source registry (ADR-0014) — every configured feed and whether it's capturable. */

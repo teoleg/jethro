@@ -30,6 +30,7 @@ public final class AudioCaptureScheduler {
     private final Transcriber transcriber;
     private final TranscriptLeadService leadService;
     private final RecentLeadsStore store;
+    private final RecentTranscriptsStore transcripts;
     private final String ffmpegBin;
 
     public AudioCaptureScheduler(
@@ -37,11 +38,13 @@ public final class AudioCaptureScheduler {
             Transcriber transcriber,
             TranscriptLeadService leadService,
             RecentLeadsStore store,
+            RecentTranscriptsStore transcripts,
             @Value("${muni.audio.ffmpeg.bin:ffmpeg}") String ffmpegBin) {
         this.catalog = catalog;
         this.transcriber = transcriber;
         this.leadService = leadService;
         this.store = store;
+        this.transcripts = transcripts;
         this.ffmpegBin = ffmpegBin;
         log.info("audio capture ENABLED: {} capturable feed(s) in the registry", catalog.capturable().size());
     }
@@ -59,6 +62,7 @@ public final class AudioCaptureScheduler {
                 AudioCaptureConnector connector = new AudioCaptureConnector("audio:" + src.id(), source);
                 RawArtifact audio = connector.fetch().get(0);
                 Transcript t = transcriber.transcribe(audio);
+                transcripts.add(src.label(), t);   // the raw "what did it hear" surface (validation)
                 TranscriptLeadService.Leads leads = leadService.detect(t);
                 store.add(src.label(), leads);
                 log.info("audio pass [{}]: {} segments, {} leads", src.id(), t.segments().size(), leads.leads().size());

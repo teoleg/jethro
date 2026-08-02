@@ -119,6 +119,13 @@
     <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
   </div>
 
+  <!-- ADR-0014: raw transcript — "what did it hear", to eyeball against the TV -->
+  <div class="section" style="margin-top:28px">
+    <h2 style="font-size:15px;margin-bottom:4px">Live transcript <span id="txCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+    <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">What the capture loop heard — compare it to what's on the TV.</div>
+    <div id="transcripts" style="color:var(--dim);font-size:13px">loading…</div>
+  </div>
+
   <!-- ADR-0014: live audio leads from the capture loop (issuer/keyword/CUSIP pointers to VERIFY, not numbers) -->
   <div class="section" style="margin-top:28px">
     <h2 style="font-size:15px;margin-bottom:4px">Audio leads <span id="leadCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
@@ -220,6 +227,24 @@
     } catch (e) { document.getElementById("sources").textContent = "unavailable"; }
   }
 
+  async function loadTranscripts() {
+    try {
+      const ts = await (await fetch("/api/muni/audio/transcripts/recent?limit=10", { cache: "no-store" })).json();
+      document.getElementById("txCount").textContent = ts.length ? "· " + ts.length : "";
+      const el = document.getElementById("transcripts");
+      if (!ts.length) {
+        el.innerHTML = '<span style="font-size:12.5px">no transcript yet — enable a feed and run <code>svc.sh tv start</code>.</span>';
+        return;
+      }
+      el.innerHTML = ts.map(e => {
+        const t = (e.at || "").replace("T", " ").slice(0, 19);
+        return `<div class="issuer"><span class="tag" style="color:var(--brand)">${esc(e.feed)}</span>
+          <span style="color:var(--dim);font-size:11px">${t} · ${e.segments} seg</span>
+          <div style="margin-top:3px;color:var(--txt);font-size:13px;line-height:1.5">${esc(e.text) || "<span style='color:var(--dim)'>(silence / nothing recognized)</span>"}</div></div>`;
+      }).join("");
+    } catch (e) { document.getElementById("transcripts").textContent = "unavailable"; }
+  }
+
   const kindColor = k => k === "ISSUER" ? "var(--brand)" : k === "CUSIP" ? "var(--warn)" : "var(--dim)";
   async function loadLeads() {
     try {
@@ -244,6 +269,7 @@
   document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") search("issuer"); });
   loadIssuers();
   loadSources(); setInterval(loadSources, 30000);
+  loadTranscripts(); setInterval(loadTranscripts, 8000);
   loadLeads(); setInterval(loadLeads, 15000);
   // No default query — the table is empty until real bonds are ingested (no illustrative data on open).
   document.getElementById("bondTable").textContent = "no bonds loaded yet — ingest real bonds via the EMMA / Open-Data connectors on the Pi.";
