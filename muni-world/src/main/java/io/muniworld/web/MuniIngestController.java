@@ -37,13 +37,22 @@ public final class MuniIngestController {
     private final HttpFetcher http;
     private final OfficialStatementExtractor osExtractor;
     private final EmmaDiscovery discovery;
+    private final io.muniworld.ingest.DirectoryIngestService dirIngest;
 
     public MuniIngestController(IngestService ingest, HttpFetcher http,
-                               OfficialStatementExtractor osExtractor, EmmaDiscovery discovery) {
+                               OfficialStatementExtractor osExtractor, EmmaDiscovery discovery,
+                               io.muniworld.ingest.DirectoryIngestService dirIngest) {
         this.ingest = ingest;
         this.http = http;
         this.osExtractor = osExtractor;
         this.discovery = discovery;
+        this.dirIngest = dirIngest;
+    }
+
+    /** Load every PDF sitting in the OS inbox folder now (also runs automatically on a schedule). */
+    @PostMapping("/api/muni/ingest/scan")
+    public List<OfficialStatementExtractor.Summary> scanInbox() {
+        return dirIngest.scanNow();
     }
 
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */
