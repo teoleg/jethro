@@ -2,6 +2,7 @@ package io.muniworld.store;
 
 import jakarta.annotation.PreDestroy;
 import org.lmdbjava.Env;
+import org.lmdbjava.EnvFlags;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,10 +30,12 @@ public final class MuniLmdbStore implements AutoCloseable {
         if (!dir.exists() && !dir.mkdirs()) {
             throw new IllegalStateException("could not create LMDB dir: " + dir.getAbsolutePath());
         }
+        // MDB_NOSYNC: don't fsync on commit — this store is DERIVED, search-index data only (ADR-0013);
+        // a crash costs a reindex from Postgres, never data. Same posture as the jethro derived stores.
         this.env = Env.create()
                 .setMapSize(mapSizeMb * 1024L * 1024L)
                 .setMaxDbs(8)
-                .open(dir);
+                .open(dir, EnvFlags.MDB_NOSYNC);
         log.info("muni-world LMDB opened at {} (map {} MB)", dir.getAbsolutePath(), mapSizeMb);
     }
 

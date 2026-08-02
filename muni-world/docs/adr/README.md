@@ -20,6 +20,7 @@ gets an ADR here **before** implementation; accepted ADRs are settled and supers
 | [0010](0010-document-extraction-pipeline.md) | Document extraction pipeline (official statements, ACFRs, disclosures) | Accepted |
 | [0011](0011-data-quality-coverage-and-quarantine.md) | Data quality, coverage metrics, and quarantine | Accepted |
 | [0012](0012-claude-assisted-analysis-and-prompt-library.md) | Claude-assisted analysis and the muni prompt library | Accepted |
+| [0013](0013-lmdb-btree-search-index.md) | LMDB B-tree search-index layer (derived, ordered-key search) | Accepted |
 
 ## Reading order
 
