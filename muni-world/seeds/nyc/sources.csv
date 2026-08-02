@@ -1,0 +1,11 @@
+id,tier,name,publisher,covers,base_url,access_method,format,verified,notes
+s01,federal,MSRB EMMA,MSRB,all NYC issuers' CUSIPs — OS/disclosure/trades,https://emma.msrb.org/,scrape/api,html/pdf,yes,primary; key each issuer by CUSIP-6
+s02,state,NYC Comptroller — Invest in NYC Bonds,Office of the NYC Comptroller,City GO + related; OS archive,https://comptroller.nyc.gov/services/financial-matters/nyc-bonds/overview/,scrape,html/pdf,yes,central bond hub
+s03,state,NYC Comptroller — ACFR,Office of the NYC Comptroller,City audited financials,https://comptroller.nyc.gov/reports/annual-comprehensive-financial-reports/,scrape,pdf,yes,ACFR per fiscal year
+s04,state,NYC Comptroller — Capital Debt & Obligations report,Office of the NYC Comptroller,City debt outstanding by credit,https://comptroller.nyc.gov/reports/annual-report-on-capital-debt-and-obligations-fiscal-year-2026/,scrape,pdf,yes,annual debt report
+s05,state,NYC Investor Relations,City of New York,central investor portal for City + authorities,https://www.nyc.gov/site/investorrelations/about/about.page,scrape,html,yes,gateway to TFA/NYW/TSASC/HYIC pages
+s06,state,NYC Office of Management & Budget (OMB),City of New York,adopted/executive budget + financial plan,https://www.nyc.gov/site/omb/index.page,scrape,html/pdf,partial,budget documents
+s07,state,NYC Open Data (Socrata),City of New York,budget/checkbook/many datasets — API-first,https://opendata.cityofnewyork.us/,api,json/csv,yes,best-in-class; prefer over scraping (ADR-0004)
+s08,state,Checkbook NYC,Office of the NYC Comptroller,City spending/contracts/payroll transparency,https://www.checkbooknyc.com/,api,json/csv,partial,transparency feed
+s09,state,NY State Comptroller (OSC) — Open Book / Local Gov,Office of the NYS Comptroller,NY local governments incl. authorities,https://www.osc.ny.gov/local-government,scrape/api,html/csv,yes,statewide NY hub (also covers Rockland)
+s10,federal,U.S. Census — Government Units + FIPS + gov finance,U.S. Census Bureau,denominator + geography spine,https://www.census.gov/programs-surveys/gus.html,api,json/csv,yes,coverage denominator (ADR-0011)
