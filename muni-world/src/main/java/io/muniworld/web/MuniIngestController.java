@@ -76,8 +76,16 @@ public final class MuniIngestController {
             @RequestParam(required = false) String issuer,
             @RequestParam(required = false) String geoFips,
             @RequestParam(name = "base", required = false) String fallbackBase) {
-        RawArtifact pdf = http.fetch("emma-os:" + url, url);   // land the PDF (ADR-0005 provenance)
-        return osExtractor.extract(pdf, issuer, geoFips, fallbackBase);
+        String base = fallbackBase != null ? fallbackBase : "";
+        RawArtifact pdf;
+        try {
+            pdf = http.fetch("emma-os:" + url, url);           // land the PDF (ADR-0005 provenance)
+        } catch (RuntimeException e) {
+            // a bad/unreachable URL must not 500 — report it as a failed ingest, like any other
+            return new OfficialStatementExtractor.Summary("emma-os:" + url, null, 0, "fetch-failed",
+                    0, 0, 0, 0, 0.0, false, "fetch failed: " + e.getMessage());
+        }
+        return osExtractor.extract(pdf, issuer, geoFips, base);
     }
 
     /**
