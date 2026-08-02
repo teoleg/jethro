@@ -1,0 +1,11 @@
+id,issuer,type,security,disclosure_url,verified,notes
+nyc01,City of New York,city (GO),general obligation,https://comptroller.nyc.gov/services/financial-matters/nyc-bonds/invest-in-nyc-bonds/nyc-official-statements-archive/,yes,one city / five county-boroughs; top-tier GO issuer
+nyc02,NYC Transitional Finance Authority (TFA),authority,Future Tax Secured (FTS) + Building Aid (BARBs),https://www.nyc.gov/site/transitionalfinance/investing/investing.page,yes,finances a large share of the City capital program
+nyc03,NYC Municipal Water Finance Authority (NYW),authority,water & sewer system revenue,https://www.nyc.gov/site/nyw/investing-in-nyw-bonds/continuing-disclosure-emma-notices.page,yes,EMMA continuing-disclosure page linked
+nyc04,TSASC Inc.,local dev corp,tobacco settlement asset-backed,https://www.nyc.gov/site/investorrelations/index.page,partial,resolve TSASC investor page/EMMA
+nyc05,Hudson Yards Infrastructure Corporation (HYIC),local dev corp,Hudson Yards revenue,https://www.nyc.gov/site/investorrelations/index.page,partial,resolve HYIC investor page/EMMA
+nyc06,Sales Tax Asset Receivable Corp (STARC),local dev corp,sales-tax secured,https://www.nyc.gov/site/investorrelations/index.page,partial,refinanced MAC; resolve investor page/EMMA
+nyc07,NYC Housing Development Corporation (HDC),authority,multifamily housing revenue,https://www.nychdc.com/,partial,very large national housing issuer; verify investor URL
+nyc08,NYC Health + Hospitals Corporation (HHC),public benefit corp,health system revenue,https://www.nychealthandhospitals.org/,partial,resolve investor/EMMA
+nyc09,NYC Industrial Development Agency / Build NYC (via NYCEDC),conduit issuer,conduit revenue,https://edc.nyc/,partial,obligor != issuer (ADR-0006); conduit deals
+nyc10,NYC Educational Construction Fund (ECF),authority,school-lease revenue,https://www.nyc.gov/site/investorrelations/index.page,partial,resolve investor page/EMMA
