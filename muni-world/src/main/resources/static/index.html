@@ -80,7 +80,9 @@
              style="flex:1;min-width:260px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;font:inherit">
       <button class="btn" onclick="search('issuer')">By issuer</button>
       <button class="btn" onclick="search('geo')">By geography</button>
+      <button class="btn" style="border-color:var(--brand);color:var(--brand)" onclick="loadLatest()">⤓ Load latest from EMMA</button>
     </div>
+    <div id="latestMsg" style="color:var(--dim);font-size:11.5px;margin-top:6px"></div>
     <!-- Upload an Official Statement PDF (downloaded from EMMA) → the extractor pulls its CUSIPs into the table -->
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
       <input type="file" id="osfile" accept="application/pdf"
@@ -253,6 +255,23 @@
           <div class="sec">${esc(e.lead.context)}</div></div>`;
       }).join("");
     } catch (e) { document.getElementById("leads").textContent = "unavailable"; }
+  }
+
+  async function loadLatest() {
+    const msg = document.getElementById("latestMsg");
+    msg.textContent = "fetching the latest official statements from EMMA (headless render, can take ~30s)…";
+    try {
+      const r = await (await fetch("/api/muni/ingest/emma-latest?count=10", { method: "POST" })).json();
+      if (!r.ok) { msg.innerHTML = '<span style="color:var(--down)">EMMA fetch failed: ' + esc(r.error || "") + '</span>'; return; }
+      if (!r.downloaded || !r.downloaded.length) {
+        msg.innerHTML = `<span style="color:var(--warn)">rendered ${r.renderedLinks} links but found 0 OS PDFs — EMMA's recent page may need a click step (tell me this number).</span>`;
+        return;
+      }
+      msg.textContent = `downloaded ${r.downloaded.length} OS PDFs — extracting…`;
+      const s = await (await fetch("/api/muni/ingest/scan", { method: "POST" })).json();
+      const indexed = (s || []).reduce((a, x) => a + (x.indexed || 0), 0);
+      msg.innerHTML = `<span style="color:var(--up)">loaded ${r.downloaded.length} OS PDFs · ${indexed} bonds indexed. Search an issuer prefix above.</span>`;
+    } catch (e) { msg.innerHTML = '<span style="color:var(--down)">request failed (is EMMA auto-fetch enabled + Chromium installed?)</span>'; }
   }
 
   async function uploadOs() {
