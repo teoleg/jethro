@@ -1,0 +1,20 @@
+{
+  "commit": "74a47adee61481eb50fd9ba825456e79ae8a2ae9",
+  "fees": "288.003716",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "86.93246234",
+    "netExposure": "0.00000000",
+    "realizedPnl": "32.51192011",
+    "strategyAlpha": "-54.42054223",
+    "totalFees": "288.003716",
+    "totalPnl": "32.51192011",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "an unestimable combined view (one effective source) now holds the position already held instead of liquidating it \u2014 a breadth collapse at the equity close no longer executes as a decision to be flat (ADR-0135)",
+  "total_pnl": "32.51192011",
+  "ts": "2026-08-03T13:47:18Z"
+}
