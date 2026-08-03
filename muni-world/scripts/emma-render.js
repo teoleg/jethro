@@ -43,8 +43,10 @@ const SETTLE_MS = parseInt(process.env.MUNI_RENDER_SETTLE_MS || '7000', 10);
   }
   const browser = await puppeteer.launch({
     executablePath, headless: true,
-    args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
-      '--disable-blink-features=AutomationControlled', '--window-size=1440,900', '--lang=en-US']
+    timeout: parseInt(process.env.MUNI_LAUNCH_TIMEOUT_MS || '90000', 10), // Chromium is slow to start on a Pi
+    protocolTimeout: 180000,
+    args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-software-rasterizer',
+      '--no-zygote', '--disable-blink-features=AutomationControlled', '--window-size=1440,900', '--lang=en-US']
       .concat(process.env.MUNI_BROWSER_PROXY ? ['--proxy-server=' + process.env.MUNI_BROWSER_PROXY, '--ignore-certificate-errors'] : []),
   });
   try {
