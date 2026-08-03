@@ -76,6 +76,12 @@ public final class MuniIngestController {
         return emmaAutoFetcher.fetchLatest(count);
     }
 
+    /** Debug: dump the links EMMA's recent-OS page renders — so the OS-link pattern can be matched to reality. */
+    @org.springframework.web.bind.annotation.GetMapping("/api/muni/debug/emma-links")
+    public List<String> emmaLinks() {
+        return emmaAutoFetcher.recentLinks();
+    }
+
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */
     public record RowsRequest(List<Map<String, Object>> rows, FieldMap map) {
     }

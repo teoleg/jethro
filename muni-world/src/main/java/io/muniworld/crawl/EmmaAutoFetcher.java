@@ -63,6 +63,16 @@ public final class EmmaAutoFetcher {
         this.latestCount = latestCount;
     }
 
+    /** Debug: the links EMMA's recent-OS page renders to, so the OS-link pattern can be matched to reality. */
+    public List<String> recentLinks() {
+        try {
+            return HtmlLinks.absoluteLinks(browser.render(recentUrl), recentUrl);
+        } catch (Exception e) {
+            log.warn("recentLinks render failed: {}", e.toString());
+            return List.of();
+        }
+    }
+
     /** Load the LATEST official statements from EMMA's "Recent Official Statements" feed — no CUSIP needed. */
     public Result fetchLatest(int count) {
         try {
