@@ -41,7 +41,7 @@ class BookVolatilityBrakeTest {
 
     private static FusionPlanner.Target target(String instrument, String qty) {
         BigDecimal q = new BigDecimal(qty);
-        return new FusionPlanner.Target(instrument, -18.0, 2, 1.0, 1.0, true, PRICE, q, BigDecimal.ZERO, q, List.of());
+        return new FusionPlanner.Target(instrument, -18.0, 2, 1.0, 1.0, PRICE, q, BigDecimal.ZERO, q, List.of());
     }
 
     private static BookVolatilityBrake.Result apply(BookVolatilityBrake brake,

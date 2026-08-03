@@ -1,9 +1,18 @@
 # ADR-0135: An unestimable view holds the position; it does not liquidate it
 
-- **Status:** Implemented
+- **Status:** Reverted
 - **Date:** 2026-08-03
-- **Deciders:** Oleg
+- **Reverted:** 2026-08-03 — see below
+- **Deciders:** continuous-improvement loop (ADR-0063); Oleg to ratify
 - **Tags:** fusion, risk, execution, cost
+
+> **REVERTED.** `scripts/score-change.py` scored the implementing commit `74a47adee` **❌ BAD** at the
+> close of its ADR-0116 evaluation window; the ledger row carries the computed vector, the t-statistic and
+> the verdict. The scorer's own `git revert` hit a conflict on the loop's report files and did not land, so
+> the code was reverted manually in the next cycle (this change), leaving this record in place rather than
+> deleting it. The mechanism is **not** to be re-attempted as specified. What the evaluation window
+> established is recorded under "Why it was reverted" below; a future ADR that wants an unestimable view to
+> stop liquidating must supersede this one and address that defect, not restate the original design.
 
 ## Context
 
@@ -89,3 +98,30 @@ liquidates on an absence of information — slower, and paying more spread on th
 - **Follow-ups:** watch whether breadth recovers at the next cash open; if the routed names stay at
   `sources: 1` during the session, the sensors' warm-up (ADR-0071/0113) is the next target, not the
   combiner.
+
+## Why it was reverted
+
+The evaluation window is the reason this record is worth keeping: **the mechanism did exactly what it
+claimed, and still did not pay for itself.** Those are separate findings and both are recorded.
+
+The defect-level verification passed. The window that finally exercised the guarded branch carried a
+`sources=1` cycle, and the trigger this ADR was shipped to remove — `fusion exit — target decayed to flat`
+— fired **zero** times, against the pre-change behaviour where it liquidated every routed name. The
+`estimable` flag was live on every `/api/fusion/targets` row. So the causal story in "Context" above stands:
+a breadth collapse *was* executing as a decision to be flat, and this change *did* stop it.
+
+What the scorer measured is the other half. Its ledger row for `74a47adee` records a risk-adjusted return
+per cycle of `-0.000387` over 7 cycles at `t=-1.59` against the `1.5` hurdle, with gross exposure moving
+`0.00 → 51,059.11` — significantly negative, with exposure grown. Under the ADR-0116 rule that is **❌ BAD**
+and reverts. (Every figure in this paragraph is the scorer's, read from the ledger — none is authored here;
+invariant 7 / ADR-0016.)
+
+The honest reading of the two together: holding the position through an unestimable view removed a cost,
+but it kept risk deployed against a view the desk had already measured as uninformative, and that carry did
+not earn. Stopping a forced exit is not the same as having a reason to be in the position. **The lesson for
+any superseding ADR: an unestimable view is not a view of flat — but it is also not a view worth holding
+size on.** The unexplored third option, neither liquidate-in-full nor hold-in-full, is to decay the
+inventory at the partial-adjustment rate while breadth is absent, so silence costs neither a round trip nor
+a full position's carry. That is a different decision and needs its own record.
+
+Not re-attempted as specified.

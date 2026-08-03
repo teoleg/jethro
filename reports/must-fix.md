@@ -15,6 +15,59 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 16:30Z (**change shipped: the failed auto-revert of the graded-BAD ADR-0135 is completed by hand.** The scorer closed ADR-0135's ADR-0116 window at **❌ BAD** and its own `git revert` **hit a conflict and did not land** — so the rejected mechanism was **still live in the running code**. That outranks every open item: the loop was about to stack a new change on top of code the scorer had already rejected. Item #1 is that revert.)
+
+### Step 0 — ADR-0135 (`74a47adee`): 🔴 REGRESSED on the money vector, and the revert never landed
+
+Two separate findings, both true, recorded separately because conflating them is how a bad mechanism survives:
+
+- **Defect-level: still ✅ VERIFIED.** The guard does what it claimed. `fusion exit — target decayed to flat`
+  fires **2** times this window, and both carry **`sources=0`** (`PG BUY 106` FILLED, `CVX BUY 2` REJECTED at
+  16:08:19Z) — the ADR-0065 orphan sweep, which ADR-0135 explicitly left out of scope and byte-identical. No
+  `sources=1` liquidation. The one-source branch is still clean.
+- **Money-level: ❌ BAD, and it is the verdict that governs.** The ledger row for `74a47adee` records a
+  risk-adjusted return per cycle of `-0.000387` over 7 cycles at `t=-1.59` against the `1.5` hurdle, gross
+  `0.00 → 51,059.11`. Under ADR-0116 that reverts. **`git merge-base --is-ancestor 74a47adee HEAD` returned
+  true** — the commit was still in the running code four cycles after being graded.
+
+The honest synthesis: stopping a forced exit is not the same as having a reason to hold the position. The
+guard removed a cost and replaced it with carry against a view the desk had already measured as
+uninformative. Recorded in the ADR so a superseding decision starts from it rather than restating it.
+
+### Item #1 — the graded-BAD ADR-0135 mechanism is still in the running code (✅ **FIXED THIS CYCLE**)
+
+The scorer's auto-revert aborted on a merge conflict in the loop's own memory files
+(`docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md`) — later cycles had appended to
+all three. `git revert` is all-or-nothing, so the conflict took the **code** revert down with it. This is the
+**second** time this exact failure has occurred (ADR-0133 / `e61c7f5aa`, completed by hand in `4f67f0515`).
+
+Resolved the same way as the precedent: the rejected mechanism is out of the running code; the loop's
+accumulating memory is **kept** (never rolled back); the ADR is **kept**, marked `Status: Reverted` with a
+"Why it was reverted" section and a not-to-be-re-attempted note. `./gradlew -Pci test` green.
+
+**VERIFY-BY (next run):** `grep -rn "estimable" app/src/main/java/io/jethro/app/fusion/` returns
+**nothing** (it returns **0** lines as of this commit); `/api/fusion/targets` rows no longer carry an
+`estimable` field; and the ADR index shows `0135 … Reverted`.
+
+> **Not** `git merge-base --is-ancestor` — a revert adds an inverse commit and leaves the original in
+> history, so that test returns true forever and would misgrade this as STILL-BROKEN. **Grade a revert on
+> the CODE, not on ancestry.**
+
+### Item #2 — the desk re-plans every 30s against sources with NO measurable return until 900–3600s (⚠️ OPEN, carried, unchanged)
+
+Carried verbatim from the 16:00Z block — untouched this cycle because the revert outranked it, and because
+shipping it on top of un-reverted BAD code would have made it unattributable. `/api/signals/telemetry`
+`avgReturnBps` at 225s sits inside ±0.7 bps for every source while one side of a round trip costs
+`fee_bps 1.00` plus `avgSlippageBps 0.59`–`0.73`; the two heaviest fusion weights (`reversion`, `social`)
+belong to the sources that only pay at 900–3600s. This window: **35** `fusion entry — target increase`,
+**26** `fusion re-plan — passive order superseded by a fresh target`, **22** `fusion reduce toward a smaller
+target`. **This is the #1 candidate for next cycle**, once the revert has scored.
+
+**VERIFY-BY:** per-name `fills` in `turnover_cost_by_name` falls against a flat-or-higher `qty`, and no name
+shows an entry and its reversing unwind inside one source-horizon in `recent_orders`.
+
+---
+
 ## Verification block — 2026-08-03 16:00Z (**no change shipped — ADR-0135 is at 5/6 cycles.** ADR-0135 is at last **✅ VERIFIED**: its guarded branch was exercised and the liquidation trigger it targets fired **zero** times. Last block's item #1 is **🔴 FALSIFIED** — the desk opened 41 positions this window, so there is no opening veto. The new #1 is the defect the ADR-0134 triggers now make plain: **the desk re-plans every 30s against sources with no measurable return until 900–3600s**, so it pays a round trip on every view before the view resolves.)
 
 ### Why no change this cycle

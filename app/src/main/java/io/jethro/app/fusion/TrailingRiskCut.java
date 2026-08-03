@@ -238,7 +238,7 @@ public final class TrailingRiskCut {
         // Belt and braces: a cut may only ever take risk off, whatever the arithmetic above produced.
         BigDecimal reducing = TargetPlanner.reduceOnly(delta, t.currentQty());
         return new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
-                t.diversificationMultiplier(), t.agreement(), t.estimable(), t.price(), BigDecimal.ZERO, t.currentQty(), reducing,
+                t.diversificationMultiplier(), t.agreement(), t.price(), BigDecimal.ZERO, t.currentQty(), reducing,
                 t.contributions());
     }
 

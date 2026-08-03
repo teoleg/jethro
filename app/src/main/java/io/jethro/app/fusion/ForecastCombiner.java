@@ -80,21 +80,12 @@ public final class ForecastCombiner {
     public record Weighted(Forecast forecast, double weight) {
     }
 
-    /** The fused view: the combined forecast plus how many sources contributed, the DM applied, the
-     *  ADR-0119/0124 agreement scalar those sources earned (1 = identical forecasts, 0 = the
+    /** The fused view: the combined forecast plus how many sources contributed, the DM applied, and
+     *  the ADR-0119/0124 agreement scalar those sources earned (1 = identical forecasts, 0 = the
      *  disagreement between them swamps the view, or there is only one effective source and so no
-     *  corroboration was ever tested), and whether that scalar was MEASURED or merely unestimable.
-     *
-     *  <p>{@code estimable} is false in exactly one case (ADR-0135): sources spoke, but all the weight
-     *  sits on ONE of them, so the residual degrees of freedom of the weighted variance are zero and the
-     *  dispersion cannot be estimated at all. {@link #value} is then 0 — not because the desk formed a
-     *  view of flat, but because it could form no view whose uncertainty it can measure. Those are
-     *  different statements and downstream sizing must not conflate them. It is true everywhere else,
-     *  including when NO source spoke (there is no view for the dispersion to be unknown about — ADR-0065
-     *  owns that case and still sweeps the name to flat) and when two or more sources genuinely net to
-     *  zero (a measured view of flat, which still exits). */
+     *  corroboration was ever tested). */
     public record Combined(String instrument, double value, int activeSources,
-                           double diversificationMultiplier, double agreement, boolean estimable) {
+                           double diversificationMultiplier, double agreement) {
     }
 
     /**
@@ -117,9 +108,7 @@ public final class ForecastCombiner {
             active++;
         }
         if (weightSum <= 0 || active == 0) {
-            // No source spoke. There is no view here at all, so there is nothing whose uncertainty is
-            // unknown: ADR-0065's orphan sweep owns this case and still works the name down to flat.
-            return new Combined(instrument, 0.0, 0, 1.0, 0.0, true);
+            return new Combined(instrument, 0.0, 0, 1.0, 0.0);
         }
         double average = weighted / weightSum;
         // Σwᵢ² over NORMALISED weights: Σ(wᵢ/Σw)² = Σwᵢ²/(Σw)². Formed from the running sums so the
@@ -137,12 +126,7 @@ public final class ForecastCombiner {
             weightedSqDeviation += w.weight() * deviation * deviation;
         }
         double agreement = agreement(average, weightedSqDeviation / weightSum, normalisedSumSq);
-        // ADR-0135: the SAME residual-degrees-of-freedom test the agreement scalar makes, surfaced. When
-        // 1 − Σŵᵢ² is not positive the dispersion is unestimable rather than zero, so the 0 this hands
-        // back is an absence of measurable conviction, not a measured conviction of flat.
-        boolean estimable = 1.0 - normalisedSumSq > 0;
-        return new Combined(instrument, Forecast.clamp(average * dm * agreement), active, dm, agreement,
-                estimable);
+        return new Combined(instrument, Forecast.clamp(average * dm * agreement), active, dm, agreement);
     }
 
     /**

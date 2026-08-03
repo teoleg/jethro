@@ -3545,3 +3545,35 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   (`JNJ BUY 9 [forecast=-0.0, sources=1]`) and `fusion exit — target decayed to flat` fired **zero** times —
   the trigger it was shipped to remove. **Patience on a vacuous criterion is correct; grading it early
   would have banked a false verdict in either direction.**
+
+## 2026-08-03 16:30Z — a failed auto-revert leaves rejected code running the money, silently
+
+- **Rule 252 — when the ledger says REVERT FAILED, CHECK, and make that check the cycle's one change.**
+  `74a47adee` (ADR-0135) was graded **❌ BAD** and its row carried `⚠️ REVERT FAILED (git conflict): the BAD
+  commit is STILL LIVE`. `git merge-base --is-ancestor 74a47adee HEAD` returned **true** — the rejected
+  mechanism had been running the desk for four cycles after being graded, while the loop spent those cycles
+  ranking *new* items. The cause: `git revert` conflicted on `docs/loop-findings.md`,
+  `reports/last-analysis.md` and `reports/must-fix.md` (later cycles append to all three), and because
+  `git revert` is all-or-nothing a conflict in three **documentation** files aborted the **code** revert.
+  This is the **second** occurrence (ADR-0133 / `e61c7f5aa`, completed by hand in `4f67f0515`). Resolution
+  both times: revert the code, **keep** the memory files, **keep** the ADR marked `Status: Reverted`.
+- **Rule 255 — grade a revert on the CODE, never on ancestry.** `--is-ancestor` is the right test to DETECT
+  an unreverted commit, but it is the wrong test to VERIFY one: `git revert` adds an inverse commit and
+  leaves the original in history, so the ancestry test returns true forever and a later cycle reading it
+  would mark a completed revert STILL-BROKEN and revert it again. The proving metric is the absence of the
+  mechanism in the source (`grep` over the touched package) and of its field on the endpoint.
+- **Rule 253 — "it did what it claimed" and "it made money" are different verdicts; record both, and let
+  the scorer's govern.** ADR-0135 was ✅ VERIFIED at the defect level and ❌ BAD on the vector, and both
+  stand. The guard genuinely stopped the breadth-collapse liquidation; it also kept risk deployed against a
+  view the desk had already measured as uninformative, and that carry did not earn. **Stopping a forced exit
+  is not the same as having a reason to hold the position.** Collapsing the two verdicts into one is how a
+  rejected mechanism survives its own revert.
+- **Rule 254 — count a trigger's `sources=` before concluding it recurred.** `fusion exit — target decayed
+  to flat` fires **2** times this window with the guard still live, which reads like a regression until the
+  rows are opened: both carry **`sources=0`** (`PG BUY 106` FILLED, `CVX BUY 2` REJECTED at 16:08:19Z) — the
+  ADR-0065 orphan sweep, explicitly out of ADR-0135's scope and byte-identical before and after. The
+  one-source branch stayed clean. Same failure mode as Rules 234/241/248: an aggregate count is not a
+  mechanism.
+- **Trigger/attribution.** No PnL is claimed for this change. The window's `+1.70` is mark-to-market on
+  positions not touched this cycle — market, not change. Reverting to previously-running code restores prior
+  behaviour; what it buys is that the next measurement is attributable at all.
