@@ -14,6 +14,80 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-03 19:30Z (**No change — `e3b33679d` is mid-evaluation.** ADR-0136 is ✅ VERIFIED on its stated mechanism from post-boot orders. A new defect displaces item #1: the loop's own report silently truncates 8 of 24 JSON sections into invalid JSON, so every cross-section diagnosis has been running on a partial view.)
+
+### Step 0 — `e3b33679d` (ADR-0136): ✅ VERIFIED on mechanism — PnL verdict still accumulating
+
+`reports/.pending-baseline.json` **exists** for `e3b33679d`; no new ledger row. The scorer has not judged
+it, so **no code change this cycle** — that is the contract, not a preference.
+
+**Deployed, confirmed:** commit at `2026-08-03T19:15:32Z`; `ops_jvm.uptimeSeconds` **`813`** at
+`timestampMillis 1785785403524` → boot **`19:16:30Z`**, after the commit.
+
+**Its own falsification test, both halves passing.** The window's 60 orders split at boot:
+
+| | pre-boot (44) | post-boot (16) |
+| --- | --- | --- |
+| `fusion reduce toward a smaller target` at \|forecast\| < `5.0` | **13** | **0** |
+| `fusion exit — target decayed to flat` at sub-floor forecast | 2 | **1** (`KO SELL 51`, `forecast=-0.0`) |
+| `fusion entry — target increase` below the floor | 0 | 0 |
+
+Suppressed: `BAC`×9 (`0.347`…`4.493`), `GOOG`×2 (`-1.548`, `-3.930`), `NVDA`×2 (`-3.415`, `-4.886`).
+
+**Suppression, not absence of opportunity** — the distinction that makes this a verification rather than a
+coincidence. `fusion_targets` at `atMillis 1785785388985` (`19:29:48Z`, post-boot) still plans non-zero
+deltas on three sub-floor names: `NEE` (`-3.775`, `currentQty 107`, `deltaQty -0.888`), `JNJ` (`-2.495`,
+`-18`, `-0.175`), `NVDA` (`2.053`, `-8`, `+0.066`). The gate sits at route time, downstream of that field.
+The dribble was planned and did not route.
+
+### Item #1 — NEW: the loop's report truncates 8 of 24 JSON sections into invalid JSON, silently (⚠️ OPEN, #1)
+
+`scripts/system-report.py:405` — `L.append(json.dumps(data, indent=1)[:6000])`. Measured block sizes: the
+cap is hit by **`risk`, `marks`, `fusion_targets`, `discovery`, `social`, `tca`, `strategy_selection`,
+`orders_day`** — each cut mid-object, invalid JSON, **no truncation marker**. `fusion_targets` declares
+`"instruments": 20` and only **9** survive; `tca` and `orders_day` lose their tails the same way.
+
+**Why this outranks everything else even though it moves no money directly.** Every diagnosis this loop
+writes is derived from this file. A cross-section read that silently covers the first nine names looks
+identical to one that covers twenty, so the loop cannot tell a complete finding from a partial one — and
+the register's whole purpose is that "fixed" is never an opinion. A wall of INCONCLUSIVE and BAD verdicts
+built on a half-visible cross-section is not evidence about the market; it is evidence about the report.
+
+**Scoped honestly — two things it does NOT compromise, checked this cycle:**
+- `signals_telemetry` is `4517` chars, **under** the cap → the standing "no source has edge" conclusion
+  rests on the full source set and is unaffected.
+- `scripts/score-change.py` fetches `/api/risk` and `/api/attribution` **directly over HTTP** (`urlopen`,
+  line 94), never through the report → **no ledger number was ever computed from truncated input.**
+  Invariant 7 / ADR-0016 holds. This is a defect in the loop's eyes, not in its money math.
+
+**VERIFY-BY (next run):** every `### <section>` JSON block in `logs/report.md` parses as valid JSON, and
+`fusion_targets` contains as many target entries as its own `instruments` field declares (`20` at the last
+reading). Any block still shortened carries an explicit truncation marker naming what was dropped.
+
+**Why it is not done this cycle:** `e3b33679d` is under measurement. It is a reports-only script with no
+path into the JVM, but the contract's rule is unconditional, and the register exists precisely to carry an
+item forward rather than smuggle it in. This is the change the moment ADR-0136 is scored.
+
+### Item #2 — the desk pays a fee bill larger than its whole deficit, with no measured edge to pay it for (⚠️ OPEN, #2 — was #1)
+
+`totalFees 349.041721` against `firmTotal -271.70317883`; `ALPHA -327.37076589` on `feesPaid 337.902341`,
+`HEDGE +112.46709242` on `10.030226`, `MACRO -56.79950536` on `1.109154`. `turnover_cost_by_name` sums to
+**`$3,935,992.30`** of turnover for **`$349.04`** of fees at `fee_bps 1.00` on a `$72,532.50` book.
+
+Re-checked on the clustered denominator this cycle — still nothing to pay it with. Max \|t\| across all
+five sources and all three horizons is **`1.44`**, and it is *negative* (`xsreversion`, `-7.06` bps at
+`3600s`). Best positive is `social` `+4.96` bps at `t=+1.00`. Against `fee_bps 1.00` plus `tca` slippage
+of roughly half a bp, no source clears its own cost.
+
+**ADR-0136 removed one slice** (the sub-floor dribble, verified above). The majority — the
+breadth-collapse round trip — remains, and both direct remedies for it scored ❌ BAD in opposite
+directions, so it stays closed to direct attack per Rule 270/271.
+
+**VERIFY-BY:** `totalFees` growth per cycle falls relative to `firmTotal`, or a source's clustered t
+clears the edge gate's hurdle. Demoted below #1 because the next attack on it should be chosen from a
+cross-section the loop can actually see in full.
+
+---
 ## Verification block — 2026-08-03 19:00Z (**ADR-0136 shipped.** `c20fb0b70` scored ❌ BAD with a failed revert — and the revert precedent was **refused**, because completing it re-applies the graded-BAD ADR-0135. Item #1 is **re-scoped**: its direct remedies are exhausted in both directions, so the register now tracks the cost problem where a lever still exists.)
 
 ### Step 0 — `c20fb0b70` (the ADR-0135 revert): 🔴 SCORED ❌ BAD — and deliberately NOT reverted

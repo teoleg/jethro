@@ -3741,3 +3741,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `MACRO -56.80`; `totalFees 346.04` against `firmTotal -264.50` — **fees still exceed the whole
   deficit**, and ADR-0136 attacks only the minority of turnover the dribble accounts for. Positions are
   cumulative, so no per-name decomposition of the window delta is claimed.
+
+## 2026-08-03 19:30Z — ADR-0136 verified by splitting the order log at the boot time; the report the loop reads is truncated
+
+- **Rule 275 — verify a change by SPLITTING the order log at the JVM boot time, not by reading the
+  window as a whole.** ADR-0136 committed `19:15:32Z`, `ops_jvm.uptimeSeconds 813` at
+  `timestampMillis 1785785403524` → boot `19:16:30Z`. Split there: sub-floor
+  `fusion reduce toward a smaller target` orders went **13 → 0** (`BAC`×9 at `0.347`…`4.493`, `GOOG`×2,
+  `NVDA`×2 → none), while the sub-floor `fusion exit — target decayed to flat` **still routed**
+  (`KO SELL 51`, `forecast=-0.0`). Both halves of the falsification test the commit wrote for itself.
+  Reading the 60-order window unsplit would have shown 13 sub-floor reduces and looked like a failure.
+- **Rule 276 — "zero bad orders" only proves a fix if you also show the opportunity EXISTED.** Absence of
+  a symptom is not suppression of it. Proof came from `fusion_targets` at `19:29:48Z` (post-boot): `NEE`
+  (`-3.775`, `currentQty 107`, `deltaQty -0.888`), `JNJ` (`-2.495`, `-18`, `-0.175`), `NVDA` (`2.053`,
+  `-8`, `+0.066`) — three sub-floor names with non-zero planned deltas, none of which became an order.
+  The gate sits at route time, downstream of `deltaQty`, so that field is the planner's intent and the
+  order log is the outcome; the pair is the evidence. Always find the telemetry that is upstream of the
+  gate you added.
+- **Rule 277 — the loop has been diagnosing on a silently truncated report.**
+  `scripts/system-report.py:405` does `json.dumps(data, indent=1)[:6000]`. Eight of 24 blocks hit the cap
+  and are cut mid-object into **invalid JSON with no marker**: `risk`, `marks`, `fusion_targets`,
+  `discovery`, `social`, `tca`, `strategy_selection`, `orders_day`. `fusion_targets` declares
+  `"instruments": 20`; **9** survive. Every cross-section claim past cycles made — including this one's —
+  covered the first nine names while looking complete. Now register item #1. Checked and scoped: 
+  `signals_telemetry` is `4517` chars (under the cap) so the no-edge conclusion is sound, and
+  `score-change.py` fetches `/api/risk` and `/api/attribution` over HTTP directly (`urlopen`, line 94),
+  never via the report — **no ledger number was ever built on truncated input.** Invariant 7 holds.
+- **Rule 278 — a pending baseline blocks even a change that provably cannot touch the vector.** The
+  truncation fix is a reports-only script with no path into the JVM, and the temptation to slip it in
+  "because it can't confound anything" is exactly how a measurement window gets eroded by exceptions. It
+  is carried in the register instead, which is what the register is for. No change this cycle.
+- **Trigger/attribution.** No code change. Window `+4.93` on total PnL (`-30.71` over three), gross
+  `+18,438.03` to `$72,532.50` — **4.8%** of the firm cap, headroom `$1,427,467`, no flag but
+  `UNDERWATER`. **None of the move is attributable to ADR-0136**: it was live for ~13 of the window's
+  minutes, and the 15 post-boot entries (`XOM`, `JNJ`, `WMT`, all \|forecast\| ≥ `5.0`) came from the
+  unchanged fusion path. Mark drift plus that rebuild is the whole story; positions are cumulative so no
+  per-name decomposition is claimed. `totalFees 349.04` against `firmTotal -271.70` on `$3,935,992` of
+  turnover — the fee bill still exceeds the entire deficit.

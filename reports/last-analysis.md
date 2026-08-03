@@ -1,94 +1,89 @@
-The pending change scored ❌ BAD with a failed revert — but completing that revert would re-apply ADR-0135, which was ALSO scored ❌ BAD, so I refused the mechanical precedent and instead fixed a live defect the order log caught: below the conviction floor the desk was re-sizing positions it had declared too weak to open.
+ADR-0136 is deployed and its mechanism is ✅ VERIFIED — sub-floor partial reduces went from 13 to 0 while the exit still routes — so it is held under measurement with no new change, and I logged that eight of the report's own JSON sections are silently truncated into invalid JSON, meaning this loop has been diagnosing on half the cross-section.
 
-*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/signals/telemetry`, the `tca`
-section, `recent_orders`, `turnover_cost_by_name`, or the scorer's own output. None is authored here —
-invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/signals/telemetry`, `/api/fusion/targets`, the `tca` section, `recent_orders`, `turnover_cost_by_name`, or the scorer's own output. None is authored here — invariant 7 / ADR-0016.)*
 
 ## Situation — the four questions
 
-1. **Money.** Total PnL **`$-264.50`**, **`+33.98`** since the last run, **`-74.64`** across the last
-   three. `UNDERWATER` and off the +1%/3-iteration target. The one-run move is up; the three-run trend
-   is still down.
-2. **Risk.** Gross **`$54,238.11`** — **3.6%** of the firm cap `$1,500,000`, headroom **`$1,445,762`**;
-   net **`$6,915.96`**, **0.7%** of the `$1,000,000` net cap. Gross **rose `+28,429.35`**. The only flag
-   is `UNDERWATER`: no cap proximity, no breaker. A book at 3.6% of its budget rebuilding is the
-   intended direction (ADR-0132), not a risk event.
-3. **Cause.** `c20fb0b70` **scored ❌ BAD** this cycle (`-0.000563` risk-adj return/cycle over 7 cycles,
-   t=`-1.54` against a `1.5` hurdle; gross `48,013 → 54,236` [grew]). Its auto-revert **failed on a git
-   conflict** and `reports/.pending-baseline.json` is gone, so I am free to change code again.
-4. **Danger.** No. `DANGER` is bleeding *near* the cap or the breaker; this is bleeding at **3.6%** of
-   gross cap. The answer is to fix what loses money, not to cut exposure that is barely deployed.
+1. **Money.** Total PnL **`$-271.70`**, **`+4.93`** since the last run, **`-30.71`** across the last
+   three. `UNDERWATER`, and `pnl_growth_pct` **`-45.7%`** against the **`+1.0%`** target — `on_track=false`,
+   `stale=true`. The one-run move is up; the three-run trend is still down.
+2. **Risk.** Gross **`$72,532.50`** — **4.8%** of the firm cap `$1,500,000`, headroom **`$1,427,467`**;
+   net **`-$8,969.11`**, **0.9%** of the `$1,000,000` net cap. Gross **rose `+18,438.03`**. The only flag
+   is `UNDERWATER`: no cap proximity, no drawdown breaker. A book at 4.8% of its budget rebuilding is the
+   direction ADR-0132 asks for, not a risk event.
+3. **Cause.** `e3b33679d` (ADR-0136) is **still under measurement** — `reports/.pending-baseline.json`
+   exists for it and no new ledger row has appeared, so the scorer has not judged it. Per the contract
+   that forbids a new change this cycle. Its *mechanism* is verified below; its *PnL verdict* is not mine
+   to guess.
+4. **Danger.** No. Bleeding-near-the-cap is the danger state and we are nowhere near it — 4.8% gross,
+   0.9% net, breaker clear. Gross rising with this much room is not a reason to de-risk.
 
-## Step 0 — and the reason I did NOT follow the standing precedent
+## Step 0 — ADR-0136 (`e3b33679d`): ✅ VERIFIED on mechanism
 
-Rule 252 says: when the ledger reports REVERT FAILED, completing that revert by hand is the cycle's one
-change. That is right twice over (ADR-0133, ADR-0135) and it is **wrong here**, for a reason no prior
-cycle has hit:
+**It deployed.** Commit `e3b33679d` at `2026-08-03T19:15:32Z`; the JVM reports `uptimeSeconds` **`813`**
+at `timestampMillis` `1785785403524` → boot **`19:16:30Z`**, after the commit. I am not grading code the
+app never ran.
 
-> **`c20fb0b70` IS the revert of `74a47adee` (ADR-0135) — and `74a47adee` was itself scored ❌ BAD.**
+**The commit named its own falsification test, and both halves pass.** Splitting the window's 60 orders
+at the boot time:
 
-Reverting the revert re-applies a mechanism the scorer already rejected, which the contract forbids
-outright ("never re-attempting the reverted idea"). Both directions of one branch are now graded BAD:
+| | pre-boot (old code, 44 orders) | post-boot (ADR-0136 live, 16 orders) |
+| --- | --- | --- |
+| `fusion reduce toward a smaller target` at \|forecast\| < floor `5.0` | **13** | **0** |
+| `fusion exit — target decayed to flat` at sub-floor forecast | 2 | **1** (`KO SELL 51`, `forecast=-0.0`) |
+| `fusion entry — target increase` below the floor | 0 | 0 |
 
-| commit | what it did to the breadth-collapse exit | risk-adj/cycle | t | gross | verdict |
-| --- | --- | --- | --- | --- | --- |
-| `74a47adee` | unestimable view **holds** instead of liquidating | `-0.000387` | `-1.59` | `0 → 51,059` [grew] | ❌ BAD |
-| `c20fb0b70` | **restores** the liquidation | `-0.000563` | `-1.54` | `48,013 → 54,236` [grew] | ❌ BAD |
+The 13 suppressed were `BAC`×9 (forecasts `0.347`, `0.536`, `0.702`, `1.720`, `1.827`, `2.836`, `4.126`,
+`4.493`, `4.437`), `GOOG`×2 (`-1.548`, `-3.930`), `NVDA`×2 (`-3.415`, `-4.886`). Post-boot every routed
+entry cleared the floor and the sub-floor **exit still routed** — the trapped-position failure this
+change risked did not occur.
 
-**A change and its exact inverse cannot both be the cause of the same deterioration.** When A and ¬A
-both grade BAD, the graded variable is dominated by something neither touched — here the continuous fee
-bleed, which runs at the same rate under both. I am recording that as the finding and leaving the code
-where it stands, rather than laundering a rejected mechanism back in through a procedural rule.
+**And it is suppression, not absence of opportunity.** The `fusion_targets` snapshot at
+`atMillis 1785785388985` (`19:29:48Z`, well after boot) still plans non-zero deltas on three sub-floor
+names — `NEE` (`combinedForecast -3.775`, `currentQty 107`, `deltaQty -0.888`), `JNJ` (`-2.495`, `-18`,
+`-0.175`), `NVDA` (`2.053`, `-8`, `+0.066`). The floor gate sits at route time, downstream of that field,
+so those planned deltas are exactly the dribble the old rule would have routed as one-share fills — and
+none of them became an order. That is the difference between "the fix works" and "nothing came up".
 
-## What the numbers say is actually wrong
+## Change vs market — no attribution claimed
 
-`ALPHA -329.32225499` on `feesPaid 334.905421`; `HEDGE +121.61984242` on `10.030226`;
-`MACRO -56.79950536` on `1.109154`. **`totalFees 346.044801` exceeds the entire deficit
-`firmTotal -264.50191793`** — gross of fees the strategy book is roughly flat. `turnover_cost_by_name`
-sums to ~`$3.3M` of equity turnover at `fee_bps 1.00` on a book of `$54,238.11`. And on the clustered
-denominator (Rule 259) no source is significant at any horizon. **The desk has no measured edge and is
-paying a large fee bill to express it**, so the lever is turnover, not weights.
+ADR-0136 was live for roughly **13 of the window's minutes**. The `+4.93` is mark drift on positions
+opened before it, plus the 15 post-boot entries selected by the *unchanged* fusion path (`XOM`, `JNJ`,
+`WMT`, all at \|forecast\| ≥ `5.0`), which is what took gross to `$72,532.50`. **None of the PnL move is
+attributable to ADR-0136**, favourably or otherwise. Positions are cumulative, so I claim no per-name
+decomposition of the window delta either.
 
-## The defect I fixed — the desk trades a view it has declared too weak to act on
+## The standing edge question, re-checked — still no
 
-`recent_orders`, BAC held short, all tagged `fusion reduce toward a smaller target`:
+On the clustered (cohort) denominator, no source is significant at any horizon. Computed by script from
+`avgReturnBps`, `stdCohortMeanBps` and `cohorts`:
 
-| time | order | forecast | floor |
-| --- | --- | --- | --- |
-| 18:53:15Z | `BUY 1` | `0.3474462086964614` | 5.0 |
-| 18:54:15Z | `BUY 1` | `0.5363969925205933` | 5.0 |
-| 18:55:16Z | `BUY 1` | `0.7016479414426884` | 5.0 |
-| 18:55:47Z | `BUY 1` | `2.835935684486436` | 5.0 |
-| 18:56:17Z | `BUY 1` | `1.72006937226672` | 5.0 |
-| 18:59:49Z | `BUY 1` | `1.82687778188073` | 5.0 |
+| horizon | best positive | t | most negative | t |
+| --- | --- | --- | --- | --- |
+| `3600s` | `social` `+4.96` bps | `+1.00` | `xsreversion` `-7.06` bps | `-1.44` |
+| `900s` | `momentum` `+2.16` bps | `+0.73` | `xsreversion` `-1.02` bps | `-0.93` |
+| `225s` | `social` `+0.19` bps | `+0.26` | `xsreversion` `-0.14` bps | `-0.32` |
 
-Six separate fills, each leaving the short open, none on a view that clears the floor the desk uses to
-*open* a position — and the forecast is **rising** across them. `GOOG` (`-1.548`, `-3.930`) and `NVDA`
-(`-4.886`, `-3.415`) did the same thing in the same window: **10 sub-floor partial reduces**.
+Max \|t\| anywhere is `1.44`, and it is *negative*. Against `fee_bps 1.00` plus measured `tca` slippage of
+roughly half a bp, nothing here is actionable. `totalFees` **`349.04`** against `firmTotal` **`-271.70`**:
+the fee bill is still larger than the entire deficit, on **`$3,935,992`** of turnover.
 
-The mechanism is a waiver that over-reached. ADR-0065 waived the ADR-0059 conviction floor for every
-risk-**reducing** delta, because applying it there "would permanently trap exactly the positions whose
-view has decayed to nothing". That reason is about letting a position **out**; it was keyed on
-`isRiskReducing` alone, which is just as true of a partial rebalance. So a name below the floor kept
-being walked toward a target computed **from** that sub-floor forecast, every cycle, paying fee and
-spread each time.
+## What I found instead — the loop has been reading a truncated report
 
-**ADR-0136 (shipped):** below the floor a name has two states — **held** or **flat** — and is never
-re-sized. The waiver now applies to an order that takes the position **exactly flat**, and nothing else.
-Keyed on the order landing flat rather than on `targetQty == 0`, because ADR-0118's trapped exit plans
-the whole position out with `targetQty` still non-zero. Every control that means *get out* plans the
-name flat (ADR-0086 cut, ADR-0065 unwind, ADR-0027 breaker), so each passes untouched — the
-deterministic floor is not narrowed by one order. Strictly one-way: it can only ever suppress a trade.
+`scripts/system-report.py:405` emits every JSON endpoint as `json.dumps(data, indent=1)[:6000]`. Eight of
+the 24 blocks hit that cap and are cut **mid-object into invalid JSON, with no marker**: `risk`, `marks`,
+`fusion_targets`, `discovery`, `social`, `tca`, `strategy_selection`, `orders_day`. `fusion_targets`
+reports `"instruments": 20` and only **9** survive the cut — so every cross-section diagnosis this loop
+has written, including the sub-floor analysis above, ran on the first nine names and looked complete.
 
-**Scope, stated honestly:** these sub-floor reduces are a **minority** of the window's turnover — the
-majority is the breadth-collapse round trip (`BAC BUY 435`, `KO BUY 175`, `MCD BUY 33`, `JNJ BUY 26`),
-which this deliberately does not touch, because both remedies tried there scored BAD. This is a real
-but partial attack on the cost problem, not a fix for the deficit.
+Two things this does **not** compromise, checked: `signals_telemetry` is `4517` chars, under the cap, so
+the no-edge conclusion stands on the full source set; and `scripts/score-change.py` fetches `/api/risk`
+and `/api/attribution` directly over HTTP (`urlopen`, line 94), never through the report — so no ledger
+number was ever computed from truncated input. Invariant 7 holds. This is a defect in the loop's *own
+eyes*, not in its money math.
 
-## Change vs market
+## Decision
 
-Nothing shipped last cycle (`c20fb0b70` was under measurement all window), so **none** of the
-`+33.98` PnL move is attributable to a code change — it is mark drift on positions the loop did not
-touch. The `+28,429.35` gross rise is the desk rebuilding after the 18:05–18:15Z flattens, i.e. the
-restored branch of the now-BAD `c20fb0b70` still selecting trades; recorded against it, not excused.
-The positions block is cumulative, so no per-name decomposition of the window delta is claimed.
+**No code change.** `e3b33679d` is mid-evaluation and piling a change on top destroys its evidence. The
+truncation fix is now register item #1 and is the change I make the moment ADR-0136 is scored — it is
+cheap, cannot touch the trading vector, and every future diagnosis depends on it.
