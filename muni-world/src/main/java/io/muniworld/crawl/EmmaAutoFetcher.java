@@ -105,6 +105,28 @@ public final class EmmaAutoFetcher {
         return out;
     }
 
+    /** Debug: capture EMMA's network requests and return the ones that look like DATA endpoints (not static
+     *  assets / analytics) — the AJAX call the recent-OS grid makes for its rows. */
+    public List<String> dataRequests() {
+        try {
+            List<String> all = browser.networkRequests(recentUrl);
+            List<String> data = new ArrayList<>();
+            for (String u : all) {
+                String lo = u.toLowerCase();
+                boolean asset = lo.matches(".*\\.(css|js|png|gif|jpg|jpeg|ico|woff2?|svg|map)(\\?.*)?$");
+                boolean thirdParty = lo.contains("google") || lo.contains("fullstory") || lo.contains("gtm")
+                        || lo.contains("fonts.") || lo.contains("analytics") || lo.contains("theice.com");
+                if (u.startsWith("http") && !asset && !thirdParty) {
+                    data.add(u);
+                }
+            }
+            return data;
+        } catch (Exception e) {
+            log.warn("dataRequests failed: {}", e.toString());
+            return List.of("error: " + e);
+        }
+    }
+
     /** Load the LATEST official statements from EMMA's "Recent Official Statements" feed — no CUSIP needed. */
     public Result fetchLatest(int count) {
         try {

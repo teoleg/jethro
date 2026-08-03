@@ -6,8 +6,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Renders a JavaScript page to its final DOM by shelling out to headless Chromium ({@code --dump-dom}). EMMA
@@ -53,6 +60,38 @@ public final class HeadlessBrowser {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("render interrupted", e);
+        }
+    }
+
+    /**
+     * Load {@code url} and capture EVERY network request the page makes (via Chrome's net-log), so an
+     * AJAX/XHR data endpoint built dynamically in JS is revealed even though it never appears in the HTML.
+     * Returns the distinct request URLs. Longer budget so the grid's data request fires.
+     */
+    public List<String> networkRequests(String url) throws IOException {
+        Path netlog = Files.createTempFile("muni-netlog", ".json");
+        List<String> cmd = List.of(bin, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                "--log-net-log=" + netlog, "--net-log-capture-mode=Everything",
+                "--virtual-time-budget=20000", "--dump-dom", "--user-agent=" + userAgent, url);
+        try {
+            Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+            p.getInputStream().readAllBytes();   // drain stdout so the process can exit
+            if (!p.waitFor(90, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                throw new IOException("network capture timed out for " + url);
+            }
+            String log = Files.readString(netlog);
+            Set<String> urls = new LinkedHashSet<>();
+            Matcher m = Pattern.compile("\"url\":\\s*\"([^\"]+)\"").matcher(log);
+            while (m.find()) {
+                urls.add(m.group(1).replace("\\/", "/"));
+            }
+            return new ArrayList<>(urls);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("network capture interrupted", e);
+        } finally {
+            Files.deleteIfExists(netlog);
         }
     }
 }
