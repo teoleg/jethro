@@ -94,6 +94,12 @@ public final class MuniIngestController {
         return emmaAutoFetcher.dataRequests();
     }
 
+    /** Debug: after the puppeteer render, is the grid populated + how does it link docs (href/onclick/postback)? */
+    @org.springframework.web.bind.annotation.GetMapping("/api/muni/debug/emma-grid")
+    public java.util.Map<String, Object> emmaGrid() {
+        return emmaAutoFetcher.debugGrid();
+    }
+
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */
     public record RowsRequest(List<Map<String, Object>> rows, FieldMap map) {
     }

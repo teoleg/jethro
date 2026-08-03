@@ -127,6 +127,42 @@ public final class EmmaAutoFetcher {
         }
     }
 
+    /** Debug: after the (puppeteer) render, is the grid actually populated, and how does it link documents? */
+    public java.util.Map<String, Object> debugGrid() {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        try {
+            String dom = browser.render(recentUrl);
+            out.put("htmlLength", dom.length());
+            out.put("trCount", countOf(dom, "<tr"));
+            out.put("officialStatementMentions", countOf(dom.toLowerCase(), "official statement"));
+            out.put("cusipTokens", regexSample(dom, "\\b[0-9]{3}[0-9A-Z]{5}[0-9]\\b", 15));
+            out.put("doPostBack", regexSample(dom, "__doPostBack\\([^)]*\\)", 15));
+            out.put("onclickDocLike", regexSample(dom,
+                    "onclick=\"[^\"]*(?:Document|\\.pdf|/P[0-9]|/ES[0-9]|Official)[^\"]*\"", 15));
+            out.put("hrefDocLike", regexSample(dom,
+                    "href=\"[^\"]*(?:Document|\\.pdf|/P[0-9]|/ES[0-9]|Official)[^\"]*\"", 15));
+            out.put("dataUrlAttrs", regexSample(dom, "data-[a-z-]+=\"[^\"]*(?:Document|\\.pdf|/[A-Z][0-9])[^\"]*\"", 15));
+        } catch (Exception e) {
+            out.put("error", e.toString());
+        }
+        return out;
+    }
+
+    private static int countOf(String s, String sub) {
+        int n = 0, i = 0;
+        while ((i = s.indexOf(sub, i)) >= 0) { n++; i += sub.length(); }
+        return n;
+    }
+
+    private static List<String> regexSample(String s, String regex, int max) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        var m = Pattern.compile(regex, Pattern.CASE_INSENSITIVE).matcher(s);
+        while (m.find() && out.size() < max) {
+            out.add(m.group());
+        }
+        return new ArrayList<>(out);
+    }
+
     /** Load the LATEST official statements from EMMA's "Recent Official Statements" feed — no CUSIP needed. */
     public Result fetchLatest(int count) {
         try {
