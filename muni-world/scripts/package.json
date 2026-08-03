@@ -1,0 +1,7 @@
+{
+  "name": "muni-world-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless-browser helpers for muni-world EMMA fetch (Puppeteer-core over system Chromium).",
+  "dependencies": { "puppeteer-core": "^23.0.0" }
+}

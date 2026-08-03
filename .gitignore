@@ -24,3 +24,7 @@ __pycache__/
 # muni-world OS PDF drop folder (auto-loaded)
 os-inbox/
 muni-world/os-inbox/
+
+# puppeteer-core install for the EMMA render script
+muni-world/scripts/node_modules/
+muni-world/scripts/package-lock.json

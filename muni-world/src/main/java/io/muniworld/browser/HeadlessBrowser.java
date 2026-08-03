@@ -33,18 +33,61 @@ public final class HeadlessBrowser {
     private final String bin;
     private final String userAgent;
     private final int budgetMs;
+    private final String nodeBin;
+    private final Path renderScript;
 
     public HeadlessBrowser(
             @Value("${muni.browser.bin:chromium-browser}") String bin,
             @Value("${muni.http.user-agent:muni-world/0.1 (+municipal-data-collection)}") String userAgent,
-            @Value("${muni.browser.render-budget-ms:8000}") int budgetMs) {
+            @Value("${muni.browser.render-budget-ms:8000}") int budgetMs,
+            @Value("${muni.browser.node-bin:node}") String nodeBin,
+            @Value("${muni.browser.render-script:muni-world/scripts/emma-render.js}") String renderScript) {
         this.bin = bin;
         this.userAgent = userAgent;
         this.budgetMs = budgetMs;
+        this.nodeBin = nodeBin;
+        this.renderScript = Path.of(renderScript);
     }
 
-    /** Render {@code url} and return the final DOM HTML (after JS runs). */
+    /**
+     * Render {@code url} to its final DOM after JS runs. Prefers the Puppeteer script (waits for
+     * network-idle, so an ajax grid like EMMA's actually loads); falls back to CLI {@code --dump-dom} when
+     * the script isn't present (which does NOT wait for post-load XHR).
+     */
     public String render(String url) throws IOException {
+        return Files.exists(renderScript) ? renderViaNode(url) : renderViaCli(url);
+    }
+
+    /** Puppeteer render (waits for network-idle) — the reliable path for JS/ajax pages. */
+    private String renderViaNode(String url) throws IOException {
+        Path err = Files.createTempFile("muni-render", ".err");
+        try {
+            ProcessBuilder pb = new ProcessBuilder(nodeBin, renderScript.toString(), url);
+            pb.environment().put("MUNI_BROWSER_BIN", bin);            // the Chromium the script drives
+            pb.environment().put("MUNI_HTTP_UA", userAgent);
+            pb.redirectError(err.toFile());                          // keep stderr off stdout (stdout is HTML)
+            Process p = pb.start();
+            byte[] out = p.getInputStream().readAllBytes();
+            if (!p.waitFor(120, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                throw new IOException("puppeteer render timed out for " + url);
+            }
+            if (p.exitValue() != 0) {
+                throw new IOException("puppeteer render failed for " + url + ": " + Files.readString(err).strip());
+            }
+            String html = new String(out);
+            log.info("rendered {} via puppeteer ({} chars, network-idle)", url, html.length());
+            return html;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("render interrupted", e);
+        } finally {
+            Files.deleteIfExists(err);
+        }
+    }
+
+    /** CLI fallback: chrome --dump-dom (fires at load; does NOT wait for post-load XHR). */
+    private String renderViaCli(String url) throws IOException {
         List<String> cmd = List.of(bin, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
                 "--dump-dom", "--virtual-time-budget=" + budgetMs, "--user-agent=" + userAgent, url);
         try {
@@ -55,7 +98,7 @@ public final class HeadlessBrowser {
                 throw new IOException("headless render timed out for " + url);
             }
             String html = new String(out);
-            log.info("rendered {} ({} chars of DOM)", url, html.length());
+            log.info("rendered {} ({} chars of DOM, no idle-wait)", url, html.length());
             return html;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
