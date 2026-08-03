@@ -162,7 +162,7 @@ public final class BookVolatilityBrake {
             BigDecimal delta = TargetPlanner.orderDelta(target, t.currentQty(),
                     params.bufferFraction(), params.adjustmentRate());
             out.add(new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
-                    t.diversificationMultiplier(), t.agreement(), t.price(), target, t.currentQty(), delta,
+                    t.diversificationMultiplier(), t.agreement(), t.estimable(), t.price(), target, t.currentQty(), delta,
                     t.contributions()));
         }
         return new Result(out, brake, planned, reference, covered.size(), samples);

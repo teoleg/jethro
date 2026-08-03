@@ -3366,3 +3366,31 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   regime `CHOP`/`CALM`, `volRatio` **0.99**, and the move sits on ALPHA positions no change of mine
   touched. With no trigger on any fill, market and change still cannot be separated — the last window that
   will have to be recorded this way, which is the point of the change.
+
+## 2026-08-03 13:30Z — the origination trigger named the mechanism that had held the book flat for three days
+
+- **Rule 226 — an UNESTIMABLE view is not a view of FLAT, and conflating them liquidates the book.**
+  ADR-0124 correctly returns agreement 0 at one effective source (`1 − Σŵᵢ²`, the residual degrees of
+  freedom of the weighted variance, is zero there — the dispersion cannot be estimated). But that 0
+  multiplies the combined forecast to exactly 0, `targetQuantity` maps 0 to a target of flat, and ADR-0090
+  works a flat target IN FULL. So a collapse in source BREADTH executed as a full-urgency decision to
+  LIQUIDATE. **When a statistic's "I don't know" is encoded as the same value as "the answer is zero",
+  check what the consumer does with that value — the statistics can be right and the decision still wrong.**
+  Fixed as ADR-0135: hold the inventory already held, zero delta, no exit AND no entry.
+- **Rule 227 — the exit trigger was structural and daily, not a market event.** Since ADR-0113 the
+  price-driven sensors advance only when the tape PRINTS, so at every equity cash close they go silent and
+  only the snapshot-based cross-sectional source is left. Breadth collapses to one at every close, by
+  construction, and the desk round-tripped its entire book on it — ALPHA **-18.59706568** having paid
+  **281.28065700** in fees, a firm total of **32.51192011** positive only because HEDGE carries
+  **86.93246234**. **A cost that recurs on a calendar boundary is a mechanism, never noise; go find the
+  boundary before theorising about the market.**
+- **Rule 228 — Rule 223 paid out in ONE cycle.** The ADR-0134 origination trigger scored ⚠️ INCONCLUSIVE
+  as predicted (it moves no money), and on the very first window it covered it named the trigger — four
+  distinct FILLED origins where there had been none — that four previous cycles of guessing had failed to
+  find. **Evidence-buying changes are scored INCONCLUSIVE and are still sometimes the highest-value spend
+  on the board; judge them by what they unblock, not by their ledger row.**
+- **Rule 229 — the obvious fix was the trap.** Giving the one-source case a non-zero agreement would have
+  un-dormanted the book instantly, and would have handed the whole book to `xsreversion` — the only source
+  still speaking and, at **-5.153198** avgReturnBps, the WORST-measured of the five. **When a change would
+  put risk on, check WHICH source is about to size it before congratulating yourself on removing the
+  blocker.** The fix must never turn a breadth failure into a licence to trade without corroboration.

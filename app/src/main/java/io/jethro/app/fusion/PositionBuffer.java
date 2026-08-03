@@ -172,7 +172,7 @@ public final class PositionBuffer {
             }
             out.add(delta.compareTo(t.deltaQty() == null ? BigDecimal.ZERO : t.deltaQty()) == 0 ? t
                     : new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
-                            t.diversificationMultiplier(), t.agreement(), t.price(), t.targetQty(), t.currentQty(),
+                            t.diversificationMultiplier(), t.agreement(), t.estimable(), t.price(), t.targetQty(), t.currentQty(),
                             delta, t.contributions()));
         }
         aims.keySet().retainAll(snapshot.keySet()); // a name that left the book leaves no intent behind

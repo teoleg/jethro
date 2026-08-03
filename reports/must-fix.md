@@ -15,6 +15,79 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 13:30Z (**item #1 ✅ VERIFIED and struck** — the ADR-0134 origination trigger is live and populated on FILLED orders, and it immediately named the mechanism behind the DORMANT book. New **#1** — the desk liquidates its entire book at every equity close on a breadth collapse — diagnosed and **fixed this cycle** (ADR-0135).)
+
+### Step 0 — last cycle's change (`ad6c42c88`, ADR-0134 origination triggers): ✅ VERIFIED, and SCORED
+
+- **Deployed + landed: ✅.** `recent_orders` now selects `origin_reason` as `origin`, and every FILLED
+  order created after the deploy carries it — the last NULL-origin FILLED row is at 19:44:23Z, every row
+  from 19:45:20Z onward is populated. The pre-deploy rows are the only NULLs left, which is the expected
+  shape for a column stamped at insert.
+- **VERIFY-BY met, both halves.** FILLED orders with a NULL origin among post-deploy rows is **0**, and the
+  distinct FILLED origins name **four** triggers, not one: `fusion entry — target increase`,
+  `fusion reduce toward a smaller target`, `fusion exit — target decayed to flat`, and
+  `auto-hedge EQUITY (ADR-0019)`.
+- **Scored: ⚠️ INCONCLUSIVE.** The ledger row records risk-adjusted return/cycle **-0.001135** over **89**
+  cycles, **t=-0.94** against the **1.5** hurdle; gross **65,195 → 0**. Kept, not reverted — and exactly the
+  verdict predicted for a telemetry-only change that moves no money. Grading is the scorer's; nothing here
+  is authored.
+- **Its actual payoff was immediate and is the entire content of this cycle:** it named the trigger behind
+  the dormancy on the first window it covered. Rule 223 held.
+
+### ~~Item — FILLED orders carry no origination trigger~~ ✅ VERIFIED FIXED (ADR-0134), struck
+
+### Item #1 — the desk liquidates its whole book at every equity close (⚠️ STILL-BROKEN → fixed this cycle, ADR-0135)
+
+Read straight off the new `origin` column. Between 20:10Z and 20:49Z on 2026-07-31 source counts fall
+**4 → 3 → 2** through the equity cash close, and then every routed name exits on
+`fusion exit — target decayed to flat [forecast=-0.0, sources=1]`. Not one of those exits was a change of
+view. `/api/fusion/targets` still shows all five routed names at `sources: 1`, `agreement: 0.0`,
+`combinedForecast: 0.0` with contributing forecasts as large as **±10.97** underneath. Gross has been
+**$0.00** ever since — three days of the **DORMANT** flag against **$1,500,000** of headroom.
+
+**Mechanism, confirmed in code, not inferred.** At one effective source the residual degrees of freedom
+`1 − Σŵᵢ²` are zero, so ADR-0124's dispersion is UNESTIMABLE and the agreement scalar returns 0 — correct
+statistics. But that 0 multiplies the combined forecast to exactly 0, `TargetPlanner.targetQuantity` maps 0
+to a target of flat, and **ADR-0090 works a flat target IN FULL**. So a collapse in source BREADTH executes
+as a full-urgency decision to LIQUIDATE. It is structural, not a market event: since ADR-0113 the
+price-driven sensors advance only when the tape PRINTS, so they fall silent at every cash close and leave
+only the snapshot-based cross-sectional source. The cost is a daily round-trip of the whole book on
+measured-zero information — `/api/attribution` shows ALPHA at **-18.59706568** having paid **281.28065700**
+in fees, against a firm total of **32.51192011** that is positive only because HEDGE carries **86.93246234**.
+
+**What shipped.** `ForecastCombiner.Combined` gains `estimable`, false in exactly one circumstance (sources
+spoke but `1 − Σŵᵢ² ≤ 0`), and `FusionPlanner` then targets the inventory ALREADY HELD with a zero delta —
+no exit, and equally no entry, since an uncorroborated view may not size a position either. Deliberately
+out of scope and byte-identical: a name with NO source is still swept flat by ADR-0065, and two or more
+sources netting to zero is a MEASURED view of flat and still exits in full. The deterministic floor is
+untouched — the ADR-0086 trailing cut, firm breaker, pre-trade guardrail, edge gate and every risk-reducing
+stage still run against the held target and can still flatten it. Eight new tests, `-Pci test` green.
+
+- **VERIFY-BY (next run):** in `/api/fusion/targets`, a routed name with `sources: 1` shows
+  `estimable: false` and `targetQty` equal to its `currentQty` with `deltaQty` **0** — and NO order in
+  `recent_orders` carries `fusion exit — target decayed to flat [... sources=1]`. Second half, the one that
+  matters for money: gross exposure is **no longer $0.00** once the desk next puts a position on.
+- **Honest caveat:** this removes a cost, it does not create edge. It also accepts overnight/weekend gap
+  risk the daily liquidation was removing by accident.
+
+### Open items — re-ranked, most-costly first
+
+- **#2 — no source has demonstrated positive out-of-sample edge.** `/api/signals/telemetry` shows
+  `avgReturnBps` of **+4.954893** (social), **+4.297909** (reversion), **-0.956358** (momentum),
+  **-1.191550** (trend), **-5.153198** (xsreversion); `strategy_diag.edgeGated` reports "no positive OOS
+  edge" on every name it lists. Nothing has cleared the gate. This is the standing priority and remains
+  the real problem — but it could not be worked while a structural gate made holding any position
+  impossible past a close. **VERIFY-BY:** a source with positive measured expectancy that clears the
+  ADR-0049 OOS gate and is permitted to size.
+- **#3 — breadth may be collapsing DURING the session too, not only at the close.** `forecastScalars`
+  lists readings for `xsreversion` only (**784**), and `streamVolMeasuredNames`, `covarianceCoveredNames`
+  and `bookVolSamples` are all **0** — so trend/reversion/momentum/social published nothing at all this
+  process life. ADR-0135 stops the liquidation either way, but if this persists through the next cash open
+  the sensors' warm-up (ADR-0071/0113), not the combiner, is the target. **VERIFY-BY:** at the next open,
+  whether any routed name reaches `sources: 2` or more.
+- **#4 — `hedgeMasking: true` with `covarianceReady: false`.** The firm total is still sourced from a
+  hedge book the desk cannot recompute a covariance for. Carried from the 2026-07-30 block, unchanged.
+
 ## Verification block — 2026-07-31 19:30Z (**hold cleared — CHANGE SHIPPED**. `4f67f0515` scored **⚠️ INCONCLUSIVE** and `reports/.pending-baseline.json` is gone, so the five-cycle hold is over. Item **#1 re-verified ⚠️ STILL-BROKEN** — 36 of 36 FILLED orders NULL this window against 24 of 24 CANCELLED populated — and **fixed this cycle** (ADR-0134): the origination trigger is threaded from the deciding call sites into `submit` and stamped on the row at insert, where no status transition can overwrite it.)
 
 ### Step 0 — last cycle's change (`4f67f0515`, the manual completion of the failed auto-revert): ✅ VERIFIED, and now SCORED

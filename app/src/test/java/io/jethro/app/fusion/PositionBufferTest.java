@@ -30,7 +30,7 @@ class PositionBufferTest {
 
     private static FusionPlanner.Target target(String instrument, double forecast, String targetQty,
                                                String currentQty) {
-        return new FusionPlanner.Target(instrument, forecast, 2, 1.0, 1.0, new BigDecimal("189.714100"),
+        return new FusionPlanner.Target(instrument, forecast, 2, 1.0, 1.0, true, new BigDecimal("189.714100"),
                 new BigDecimal(targetQty), new BigDecimal(currentQty), BigDecimal.ZERO, List.of());
     }
 

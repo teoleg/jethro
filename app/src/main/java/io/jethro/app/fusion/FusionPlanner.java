@@ -29,9 +29,11 @@ public final class FusionPlanner {
     /** The fused plan for one instrument. All quantities signed (+ long / − short). {@code agreement}
      *  is the ADR-0119 scalar already applied to {@code combinedForecast} — 1 when the sources share a
      *  sign, toward 0 as they cancel — surfaced so a name sized off a residual of fighting sensors is
-     *  visible rather than merely derivable from {@code contributions}. */
+     *  visible rather than merely derivable from {@code contributions}. {@code estimable} is false when
+     *  that scalar was not measured but merely unestimable (ADR-0135: one effective source), which is
+     *  why this name is planned HELD rather than flat. */
     public record Target(String instrument, double combinedForecast, int sources, double diversificationMultiplier,
-                        double agreement,
+                        double agreement, boolean estimable,
                         BigDecimal price, BigDecimal targetQty, BigDecimal currentQty, BigDecimal deltaQty,
                         List<Contribution> contributions) {
     }
@@ -110,11 +112,26 @@ public final class FusionPlanner {
                 current = BigDecimal.ZERO;
             }
             BigDecimal multiplier = multiplierFor == null ? null : multiplierFor.apply(instrument);
-            BigDecimal target = TargetPlanner.targetQuantity(combined.value(), params.unitNotional(),
-                    price, multiplier);
-            BigDecimal delta = TargetPlanner.orderDelta(target, current, params.bufferFraction(), params.adjustmentRate());
+            BigDecimal target;
+            BigDecimal delta;
+            if (!combined.estimable()) {
+                // ADR-0135: sources spoke, but only one effectively, so the agreement scalar is
+                // unestimable and zeroed the combined value. Sizing off that zero would read an absence
+                // of corroboration as a decision to be flat, and — because ADR-0090 works a FLAT target
+                // in full rather than at the partial-adjustment rate — would liquidate the whole
+                // position in one cycle. Hold instead: target the inventory already held, trade nothing
+                // in either direction, and let the controls that exit WITHOUT a view do that job (the
+                // ADR-0086 trailing cut, the firm drawdown breaker, the risk-reducing stages
+                // downstream), all of which still run against this target unchanged.
+                target = current;
+                delta = BigDecimal.ZERO;
+            } else {
+                target = TargetPlanner.targetQuantity(combined.value(), params.unitNotional(),
+                        price, multiplier);
+                delta = TargetPlanner.orderDelta(target, current, params.bufferFraction(), params.adjustmentRate());
+            }
             out.add(new Target(instrument, combined.value(), combined.activeSources(),
-                    combined.diversificationMultiplier(), combined.agreement(),
+                    combined.diversificationMultiplier(), combined.agreement(), combined.estimable(),
                     price, target, current, delta, contributions));
         }
         out.sort((a, b) -> Double.compare(Math.abs(b.combinedForecast()), Math.abs(a.combinedForecast())));
