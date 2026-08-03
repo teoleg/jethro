@@ -1,8 +1,12 @@
-// Render a JS page to its FINAL DOM after its ajax content loads (what CLI Chrome can't do), so EMMA's grid
-// actually populates before we read it. Prints the rendered HTML to stdout.
+// Render a JS page to its final DOM (a general capability for legitimately-accessible sources).
 //   node emma-render.js <url>
-// Drives the SYSTEM Chromium (no browser download). Looks like a normal browser so sites that gate content
-// on automation-detection (EMMA runs FullStory) still load their data.
+// Drives the SYSTEM Chromium (no browser download). Identifies itself honestly (descriptive UA) and does
+// NOT attempt to defeat bot-detection or access controls.
+//
+// NOTE: EMMA's Terms of Use PROHIBIT automated scraping/crawling and circumventing access measures, and its
+// grid gates data against automation. Do NOT point the auto-fetcher at EMMA. Legitimate paths are: a human
+// viewing/downloading OS PDFs for their own internal use (then the os-inbox folder-loader extracts them), or
+// the MSRB's paid EMMA data subscription. See ADR-0008 / ADR-0015.
 const fs = require('fs');
 const { execSync } = require('child_process');
 const puppeteer = require('puppeteer-core');
@@ -27,10 +31,7 @@ function resolveChromium(given) {
   return null;
 }
 
-// A real desktop-Chrome UA so the site treats us as a normal browser (override with MUNI_RENDER_UA).
-const REAL_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
-  + 'Chrome/124.0.0.0 Safari/537.36';
-const SETTLE_MS = parseInt(process.env.MUNI_RENDER_SETTLE_MS || '7000', 10);
+const SETTLE_MS = parseInt(process.env.MUNI_RENDER_SETTLE_MS || '3000', 10);
 
 (async () => {
   const url = process.argv[2];
@@ -45,22 +46,15 @@ const SETTLE_MS = parseInt(process.env.MUNI_RENDER_SETTLE_MS || '7000', 10);
     executablePath, headless: true,
     timeout: parseInt(process.env.MUNI_LAUNCH_TIMEOUT_MS || '90000', 10), // Chromium is slow to start on a Pi
     protocolTimeout: 180000,
-    args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-software-rasterizer',
-      '--no-zygote', '--disable-blink-features=AutomationControlled', '--window-size=1440,900', '--lang=en-US']
+    args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-software-rasterizer', '--no-zygote']
       .concat(process.env.MUNI_BROWSER_PROXY ? ['--proxy-server=' + process.env.MUNI_BROWSER_PROXY, '--ignore-certificate-errors'] : []),
   });
   try {
     const page = await browser.newPage();
-    // hide the two clearest automation tells before any page script runs
-    await page.evaluateOnNewDocument(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
-    });
-    await page.setUserAgent(process.env.MUNI_RENDER_UA || REAL_UA);
-    await page.setViewport({ width: 1440, height: 900 });
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-    await new Promise(r => setTimeout(r, SETTLE_MS)); // let a slow ajax grid finish populating
+    // Honest, identifiable UA (ADR-0008) — no automation-detection evasion.
+    await page.setUserAgent(process.env.MUNI_HTTP_UA || 'muni-world/0.1 (+municipal-data-collection)');
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
+    await new Promise(r => setTimeout(r, SETTLE_MS));
     process.stdout.write(await page.content());
   } finally {
     await browser.close();
