@@ -3421,3 +3421,32 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   straight to the permission chain, because no amount of signal work moves a book that is not allowed to
   trade.** And per Rule 229, the fix must ARM the stop with a measured σ, never bypass `stopArmed`:
   deleting the protection would open positions the ADR-0086 cut cannot price an exit for.
+
+## 2026-08-03 14:30Z — the "permanent" σ veto was a closed-session artifact; the live defect is 82% of gross in one name
+
+- **Rule 234 — SUPERSEDES Rule 231. A warm-up requirement longer than the process lifetime is NOT
+  automatically a permanent veto, because the durable seed store GROWS between boots.** I recorded last
+  cycle that σ could never arm (121 prices × 30 s ≈ 60.5 min vs `uptimeSeconds` ~727). Falsified this
+  cycle: the ADR-0071 mark store accumulates while the tape prints, so successive boots seeded AAPL
+  **75 → 107**, NVDA **85 → 117** of 121, `streamVolMeasuredNames` went **1 → 6**, and the book re-entered
+  by itself at the open (`fusion entry — target increase`, NQ 14:14Z, NVDA 14:26Z). **Before calling a
+  warm-up deadlocked, compare the seed depth across TWO consecutive boots — a rising seed is a warming
+  sensor, and a weekend of no prints looks identical to a deadlock in a single snapshot.**
+- **Rule 235 — measure a stuck sensor against its SIBLING on the same data, not against its own spec.**
+  The decisive evidence was not the warm-up arithmetic; it was that `covarianceCoveredNames` = **19** and
+  `streamVolMeasuredNames` = **6** on the same `mark-stream` basis at the same span of 120. One data
+  source, one span, one estimator covering the book and one covering under a third. **When two estimators
+  share an input and disagree on coverage, the defect is in the laggard's seeding path — that comparison
+  localises it in one line, where the spec arithmetic sent me to a wrong conclusion for a whole cycle.**
+- **Rule 236 — an under-deployed book is not merely small, it is CONCENTRATED, and the concentration is
+  the real risk.** Targets summed to **$1,208,080** of |notional| against **$28,761.93** held — 2.4% of
+  intent — but the damaging part is the shape: **NQ was $23,492.67 of the gross, 81.7%**, a naked short
+  index future, because the 14 equity legs that would diversify it had `aims: 0.0`. **When a gate blocks
+  names selectively, check what the SURVIVING names add up to before celebrating exposure coming back —
+  a partial release of a veto is a concentration event, not a deployment.**
+- **Rule 237 — attribute a fresh position's mark-to-market to the OPEN, not to last cycle's change.** PnL
+  fell **$23.64** the same window ADR-0135 sat pending, which invites blaming it. It is causally
+  impossible: every entry fired at `sources=2`/`sources=3` and ADR-0135 only alters the `sources=1`
+  branch. The move was **-0.084%** on a 15-minute-old $23.5k short. **Check the order `reason` strings
+  against the change's actual code path before crediting or blaming it — ADR-0134's origination triggers
+  make this a lookup, so there is no excuse for guessing.**

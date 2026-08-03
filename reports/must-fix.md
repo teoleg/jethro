@@ -15,6 +15,95 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 14:30Z (**no change shipped — ADR-0135 is still under measurement at 2/6 cycles.** The book came off DORMANT at the US open. Last block's item #1 is 🔴 **FALSIFIED as stated** — the σ veto is not permanent, it warms with the live tape. It is **re-scoped**, not closed: σ covers only 6 of 20 names, which under-deploys the book and concentrates 82% of firm gross into one levered index future.)
+
+### Why no change this cycle
+
+`scripts/score-change.py score` printed **`74a47adee still accumulating evidence (2/6 cycles) — held, not
+scored this run`** and `reports/.pending-baseline.json` is present. ADR-0116 forbids stacking a change on a
+pending one. Verified, corrected the record, re-ranked, stopped.
+
+### Step 0 — last block's item #1 ("permanent veto, no boot can satisfy"): 🔴 FALSIFIED
+
+The claim was that the σ warm-up (121 prices × 30 s ≈ 60.5 min) exceeds the app's ~30 min lifetime, so
+`stopArmed` is false on **every** boot, **forever**. This run disproves it. The ADR-0071 durable mark store
+**grows while the tape prints**, so each boot seeds deeper than the last:
+
+| name | seeded at 13:47Z boot | seeded at 14:30Z boot | of |
+| --- | --- | --- | --- |
+| AAPL | 75 | 107 | 121 |
+| NVDA | 85 | 117 | 121 |
+| MSFT | 67 | 101 | 121 |
+| GOOG | 61 | 96 | 121 |
+| AMZN | 44 | 80 | 121 |
+
+`streamVolMeasuredNames` went **1 → 6**, and the book re-entered on its own: `recent_orders` shows
+`fusion entry — target increase` fills on NQ from 14:14Z and NVDA from 14:26Z. **The dormancy was a
+closed-session artifact — a weekend adds no marks to the store — not a structural deadlock.** The rule
+recorded from that wrong trace (Rule 231) is superseded by Rule 234 in `docs/loop-findings.md`.
+
+What *does* survive from that trace, confirmed again here: for a name that is **not** armed,
+`PositionBuffer.java:164` re-seeds the aim to `held + delta`, so intent cannot accumulate — the 14 names
+with `aims: 0.0` are exactly the 20 minus the 6 in `streamVolMeasuredNames`.
+
+### Item #1 — σ arms for only 6 of 20 names, so the desk holds 2.4% of its own intent and 82% of firm gross sits in ONE name (⚠️ OPEN, re-scoped)
+
+**Cost: the deployment AND the concentration.** `/api/fusion/targets` carries **19 of 20** names estimable
+with targets summing to **$1,208,080** of |notional|. The desk holds **$28,761.93**. Worse than the
+shortfall is its shape: **NQ alone is $23,492.67 of that gross — 81.7%** — so the firm's book is a naked
+short index future, while the equity legs that would diversify it are held at zero. PG: `combinedForecast
+-7.398`, `agreement 0.614`, target **-$213,901**, `aim 0.0`. AAPL: target **+$127,333**, `aim 19.91`,
+`currentQty 0`.
+
+**The evidence that localises the defect.** On the *same* mark store, at the *same* span of 120:
+
+- `covarianceCoveredNames` = **19**
+- `streamVolMeasuredNames` = **6**
+- `covarianceBasis` = `mark-stream`
+
+Two estimators, one data source, one span — one covers the whole planned book, the other under a third of
+it. So this is **not** a data-availability problem, and not a "wait for the session" problem: it is
+something in the σ sensor's own seeding/publishing path (`FusionLifecycle.seedVolatility` →
+`SensorWarmup.warm` → `StreamVolatility.warmupPrices`, which demands a **full span** of returns before it
+will speak at all, where the covariance estimator evidently does not).
+
+**Constraint on the fix (Rule 229 / Rule 233).** The fix must **arm the stop with a measured σ** — never
+bypass `stopArmed`, never delete the ADR-0126 conjunction. Opening a position the ADR-0086 trailing cut
+cannot price an exit for is precisely the risk that control exists to prevent, and the deterministic floor
+is off-limits. Any σ derived from a coarser history (the 9 LIVE / 1568 SEED daily closes in
+`daily_close_depth`) must be scaled to the per-sample horizon with the finance-math skill and carry its
+provenance; a daily σ dropped into a 30 s-sampled EWMA is a scale error, not a fix.
+
+**VERIFY-BY (next run, from live telemetry):** `/api/fusion/targets` → `streamVolMeasuredNames` materially
+above **6** of 20 at comparable uptime, the count of `aims` entries reading exactly `0.0` materially below
+**14**, and NQ's share of `/api/risk` `.total.grossExposure` materially below **81.7%**. Architecturally
+significant → ships with its ADR at `**Status:** Implemented` in the same commit.
+
+### Item #2 — even for ARMED names the aim sits inside the no-trade band (⚠️ OPEN, watch only)
+
+`insideBuffer` is **19** of 20: of the six armed names only NQ routed a delta this planning cycle. GOOG
+holds `aim 47.33` against `currentQty 0`; AMZN `aim -12.06` against `currentQty 0`. NVDA did get on
+(`currentQty -26.0`), so the ramp does work — this is a *rate*, not a block, and the band history is
+littered with graded-BAD attempts (ADR-0133 ❌ BAD and reverted). **Do not touch the band until item #1 is
+verified**, because arming more names changes what the band is even measured against.
+
+**VERIFY-BY:** re-read `insideBuffer` and `aims` after item #1 lands; only then decide whether a rate
+problem remains.
+
+### Not a defect this cycle — recorded so it is not re-diagnosed
+
+- **The -$23.64 PnL move is noise, not a regression.** It is a 15-minute mark on a $23.5k NQ short opened
+  at 14:14Z: **-0.084%**. `recent_orders` shows every entry fired at `sources=2`/`sources=3`, so ADR-0135
+  (which only alters the `sources=1` branch) is causally uninvolved.
+- **Turnover cost is not the current problem.** Fees moved **+$0.79** across this window
+  (288.003716 → 288.791846). ALPHA's **$281.55** is cumulative history, not a live bleed.
+- **Signal weights already track measured edge.** `/api/signals/telemetry` @3600s: social **+8.54** bps
+  (weight 1.719), reversion **+3.71** (1.540), momentum **-0.96** (0.867), trend **-1.19** (0.679),
+  xsreversion **-8.22** (0.250, floored). The combiner is ranking sources correctly — consistent with the
+  standing "work on edge, not the combiner" priority, and a reason **not** to spend the next change there.
+
+---
+
 ## Verification block — 2026-08-03 14:00Z (**no change shipped — ADR-0135 is still under measurement at 1/6 cycles.** Last cycle's change ✅ VERIFIED on its own terms. A NEW **#1** is now traced end to end: the ADR-0126 unarmed-stop veto freezes the ENTIRE equity book flat, permanently, because the risk-cut σ sensor cannot warm inside an ephemeral process.)
 
 ### Why no change this cycle
