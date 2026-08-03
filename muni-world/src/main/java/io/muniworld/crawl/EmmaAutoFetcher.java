@@ -73,6 +73,38 @@ public final class EmmaAutoFetcher {
         }
     }
 
+    /** Debug: EMMA loads its grid via AJAX — surface the data endpoints / postback targets referenced in the
+     *  rendered page so the real data URL (not the chrome links) can be found and hit directly. */
+    public java.util.Map<String, Object> debugProbe() {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        try {
+            String dom = browser.render(recentUrl);
+            out.put("htmlLength", dom.length());
+            out.put("hasDataTable", dom.toLowerCase().contains("datatable"));
+            out.put("hasAjaxLoader", dom.contains("ajax-loader"));
+            java.util.Set<String> urls = new java.util.LinkedHashSet<>();
+            var m = Pattern.compile(
+                    "[\"']([^\"'\\s]*(?:Get|Data|Official|Activity|ajax|\\.axd|\\.ashx|/api/)[^\"'\\s]*)[\"']",
+                    Pattern.CASE_INSENSITIVE).matcher(dom);
+            while (m.find() && urls.size() < 80) {
+                String u = m.group(1);
+                if (!u.matches("(?i).*\\.(css|js|png|gif|jpg|ico|woff2?)(\\?.*)?$")) {
+                    urls.add(u);
+                }
+            }
+            out.put("dataUrls", new java.util.ArrayList<>(urls));
+            java.util.Set<String> pb = new java.util.LinkedHashSet<>();
+            var m2 = Pattern.compile("__doPostBack\\(&?#?39?;?['\"]?([^'\"&]+)").matcher(dom);
+            while (m2.find() && pb.size() < 30) {
+                pb.add(m2.group(1));
+            }
+            out.put("postbackTargets", new java.util.ArrayList<>(pb));
+        } catch (Exception e) {
+            out.put("error", e.toString());
+        }
+        return out;
+    }
+
     /** Load the LATEST official statements from EMMA's "Recent Official Statements" feed — no CUSIP needed. */
     public Result fetchLatest(int count) {
         try {

@@ -82,6 +82,12 @@ public final class MuniIngestController {
         return emmaAutoFetcher.recentLinks();
     }
 
+    /** Debug: EMMA loads its grid via AJAX — surface the data-endpoint / postback candidates to hit directly. */
+    @org.springframework.web.bind.annotation.GetMapping("/api/muni/debug/emma-probe")
+    public java.util.Map<String, Object> emmaProbe() {
+        return emmaAutoFetcher.debugProbe();
+    }
+
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */
     public record RowsRequest(List<Map<String, Object>> rows, FieldMap map) {
     }
