@@ -44,7 +44,7 @@ class IngestServiceTest {
     void setUp() throws IOException {
         dir = Files.createTempDirectory("muni-ingest");
         store = new MuniLmdbStore(dir.toString(), 16);
-        bonds = new MuniBondService(new MuniSearchIndex(store), mapper, new MuniPriceStore(store, mapper));
+        bonds = new MuniBondService(new MuniSearchIndex(store), mapper, new MuniPriceStore(store, mapper), new io.muniworld.bond.SecurityRepository(null));
         ingest = new IngestService(mapper, new SecurityNormaliser(), bonds);
     }
 

@@ -27,15 +27,24 @@ public final class MuniBondService {
     private final MuniSearchIndex index;
     private final ObjectMapper mapper;
     private final MuniPriceStore prices;
+    private final SecurityRepository repo;
 
-    public MuniBondService(MuniSearchIndex index, ObjectMapper mapper, MuniPriceStore prices) {
+    public MuniBondService(MuniSearchIndex index, ObjectMapper mapper, MuniPriceStore prices,
+                           SecurityRepository repo) {
         this.index = index;
         this.mapper = mapper;
         this.prices = prices;
+        this.repo = repo;
     }
 
-    /** Store a bond: JSON value under its CUSIP, plus the maturity/coupon/geo secondary indexes. */
+    /**
+     * Store a bond. Postgres ({@code muni.security}) is the system of record and is written first (ADR-0006);
+     * the LMDB B-tree (ADR-0013) is the derived read index and is always written so the UI works even with no
+     * live Postgres. The DB write is best-effort — {@link SecurityRepository} swallows a DB-down error so the
+     * index still lands.
+     */
     public void index(Bond b) {
+        repo.upsert(b, null);   // system of record (best-effort; no-ops when the DB is off) — source_id TODO (deferred-register)
         try {
             long couponScaled = MuniKeys.couponScaled(b.coupon());
             index.indexSecurity(b.cusip(), b.maturity(), couponScaled, b.geoFips(),
@@ -43,6 +52,31 @@ public final class MuniBondService {
         } catch (Exception e) {
             throw new RuntimeException("failed to index bond " + b.cusip(), e);
         }
+    }
+
+    /**
+     * The most-recently-loaded bonds as display rows. Prefers Postgres (the system of record, ordered by load
+     * time); falls back to the LMDB index when the DB isn't reachable, so the UI always shows what's loaded.
+     */
+    public List<BondRow> recent(int limit) {
+        if (repo.available()) {
+            return repo.recent(limit).stream().map(this::toRow).toList();
+        }
+        List<BondRow> out = new ArrayList<>();
+        for (byte[] json : index.allValues(limit)) {
+            out.add(toRow(toBond(json)));
+        }
+        return out;
+    }
+
+    /** Row count in Postgres, or {@code empty} when the DB isn't reachable (Flyway off / DB down). */
+    public java.util.OptionalLong dbCount() {
+        return repo.count();
+    }
+
+    /** Row count in the derived LMDB index. */
+    public long indexCount() {
+        return index.count();
     }
 
     public Optional<BondRow> get(String cusip) {

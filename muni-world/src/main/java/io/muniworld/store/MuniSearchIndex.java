@@ -91,6 +91,28 @@ public final class MuniSearchIndex {
         return prefixCusips(sec, ascii(cusip6), /*cusipIsWholeKey=*/true);
     }
 
+    /** Number of securities in the index (the derived-store row count the UI shows next to the DB count). */
+    public long count() {
+        try (Txn<ByteBuffer> txn = env.txnRead()) {
+            return sec.stat(txn).entries;
+        }
+    }
+
+    /** Up to {@code limit} stored value blobs (JSON bonds) — the offline listing when Postgres isn't up. */
+    public List<byte[]> allValues(int limit) {
+        List<byte[]> out = new ArrayList<>();
+        try (Txn<ByteBuffer> txn = env.txnRead();
+             CursorIterable<ByteBuffer> it = sec.iterate(txn, KeyRange.all())) {
+            for (CursorIterable.KeyVal<ByteBuffer> kv : it) {
+                if (out.size() >= limit) {
+                    break;
+                }
+                out.add(bytes(kv.val()));
+            }
+        }
+        return out;
+    }
+
     /** CUSIPs maturing in [{@code from}, {@code to}] inclusive — a range scan of {@code idx_maturity}. */
     public List<String> byMaturityRange(LocalDate from, LocalDate to) {
         return rangeCusips(byMaturity, dateKey(from), dateKey(to), 4);
