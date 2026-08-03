@@ -68,6 +68,14 @@ public final class MuniIngestController {
         return emmaAutoFetcher.fetchToInbox(cusip);
     }
 
+    /** Load the LATEST official statements from EMMA — no CUSIP needed. Renders the recent-OS feed and pulls
+     *  the newest {@code count} OS PDFs into the inbox (then auto-extracted). Needs Chromium on the host. */
+    @PostMapping("/api/muni/ingest/emma-latest")
+    public io.muniworld.crawl.EmmaAutoFetcher.Result emmaLatest(
+            @RequestParam(defaultValue = "10") int count) {
+        return emmaAutoFetcher.fetchLatest(count);
+    }
+
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */
     public record RowsRequest(List<Map<String, Object>> rows, FieldMap map) {
     }

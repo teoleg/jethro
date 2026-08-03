@@ -36,8 +36,10 @@ public final class EmmaAutoFetcher {
     private final WatchlistCatalog watchlist;
     private final Path inbox;
     private final String urlTemplate;
+    private final String recentUrl;
     private final Pattern osLinkPattern;
     private final boolean enabled;
+    private final int latestCount;
 
     public EmmaAutoFetcher(
             HeadlessBrowser browser,
@@ -45,16 +47,35 @@ public final class EmmaAutoFetcher {
             WatchlistCatalog watchlist,
             @Value("${muni.os.inbox.dir:os-inbox}") String inboxDir,
             @Value("${muni.emma.security-url-template:https://emma.msrb.org/Security/Details/{cusip}}") String urlTemplate,
+            @Value("${muni.emma.recent-url:https://emma.msrb.org/MarketActivity/RecentOfficialstatements}") String recentUrl,
             @Value("${muni.emma.os-link-pattern:(?i)(\\.pdf(\\?|$)|officialstatement|/Document/|securitydocument|/P[0-9]|/ES[0-9])}")
             String osLinkPattern,
-            @Value("${muni.emma.auto.enabled:false}") boolean enabled) {
+            @Value("${muni.emma.auto.enabled:false}") boolean enabled,
+            @Value("${muni.emma.auto.latest-count:10}") int latestCount) {
         this.browser = browser;
         this.fetcher = fetcher;
         this.watchlist = watchlist;
         this.inbox = Path.of(inboxDir);
         this.urlTemplate = urlTemplate;
+        this.recentUrl = recentUrl;
         this.osLinkPattern = Pattern.compile(osLinkPattern);
         this.enabled = enabled;
+        this.latestCount = latestCount;
+    }
+
+    /** Load the LATEST official statements from EMMA's "Recent Official Statements" feed — no CUSIP needed. */
+    public Result fetchLatest(int count) {
+        try {
+            String dom = browser.render(recentUrl);
+            int rendered = HtmlLinks.absoluteLinks(dom, recentUrl).size();
+            List<String> candidates = HtmlLinks.matching(dom, recentUrl, osLinkPattern);
+            List<String> downloaded = downloadToInbox("latest", candidates, count);
+            log.info("emma-latest: {} rendered links, {} OS candidates, {} PDFs downloaded",
+                    rendered, candidates.size(), downloaded.size());
+            return new Result("recent", recentUrl, rendered, candidates, downloaded, true, null);
+        } catch (Exception e) {
+            return new Result("recent", recentUrl, 0, List.of(), List.of(), false, e.getMessage());
+        }
     }
 
     /** What one auto-fetch found: the rendered link count, the OS candidates, and what got downloaded. */
@@ -62,24 +83,14 @@ public final class EmmaAutoFetcher {
                          List<String> candidates, List<String> downloaded, boolean ok, String error) {
     }
 
-    /** Render the CUSIP's EMMA page, download its OS PDFs into the inbox. Manual + scheduled entry point. */
+    /** Render a specific CUSIP's EMMA page, download its OS PDFs into the inbox. */
     public Result fetchToInbox(String cusip) {
         String url = urlTemplate.replace("{cusip}", cusip);
         try {
             String dom = browser.render(url);
             int rendered = HtmlLinks.absoluteLinks(dom, url).size();
             List<String> candidates = HtmlLinks.matching(dom, url, osLinkPattern);
-            List<String> downloaded = new ArrayList<>();
-            Files.createDirectories(inbox);
-            int n = 0;
-            for (String link : candidates) {
-                RawArtifact pdf = fetcher.fetch("emma-auto:" + cusip, link);
-                if (isPdf(pdf)) {
-                    Path dest = inbox.resolve(cusip + "-" + (++n) + ".pdf");
-                    Files.write(dest, pdf.body());
-                    downloaded.add(dest.getFileName().toString());
-                }
-            }
+            List<String> downloaded = downloadToInbox(cusip, candidates, Integer.MAX_VALUE);
             log.info("emma-auto {}: {} rendered links, {} OS candidates, {} PDFs downloaded",
                     cusip, rendered, candidates.size(), downloaded.size());
             return new Result(cusip, url, rendered, candidates, downloaded, true, null);
@@ -88,13 +99,36 @@ public final class EmmaAutoFetcher {
         }
     }
 
-    /** Scheduled: walk the watchlist and auto-fetch each CUSIP (only when enabled + a browser is present). */
+    /** Download up to {@code max} PDF candidates into the inbox; a stable name per link avoids duplicates. */
+    private List<String> downloadToInbox(String prefix, List<String> candidates, int max) throws Exception {
+        Files.createDirectories(inbox);
+        List<String> downloaded = new ArrayList<>();
+        for (String link : candidates) {
+            if (downloaded.size() >= max) {
+                break;
+            }
+            RawArtifact pdf = fetcher.fetch("emma:" + prefix, link);
+            if (isPdf(pdf)) {
+                String tail = link.replaceAll("[^A-Za-z0-9]+", "-").replaceAll("(^-+|-+$)", "");
+                if (tail.length() > 60) {
+                    tail = tail.substring(tail.length() - 60);
+                }
+                Path dest = inbox.resolve(prefix + "-" + tail + ".pdf");
+                Files.write(dest, pdf.body());
+                downloaded.add(dest.getFileName().toString());
+            }
+        }
+        return downloaded;
+    }
+
+    /** Scheduled hands-off pull: the LATEST official statements from EMMA (only when enabled + browser present). */
     @Scheduled(fixedDelayString = "${muni.emma.auto.scan-ms:3600000}")
     public void scheduledFetch() {
         if (!enabled) {
             return;
         }
-        for (WatchlistCatalog.Entry e : watchlist.entries()) {
+        fetchLatest(latestCount);                     // pull the newest filings each cycle — no input needed
+        for (WatchlistCatalog.Entry e : watchlist.entries()) {   // plus any specific CUSIPs you track
             fetchToInbox(e.cusip());
         }
     }
