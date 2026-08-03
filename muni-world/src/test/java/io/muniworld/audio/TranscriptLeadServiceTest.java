@@ -15,7 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class TranscriptLeadServiceTest {
 
-    private final TranscriptLeadService svc = new TranscriptLeadService(new SeedCatalog());
+    // Supply a real issuer inline — no committed seed rows (the seed file ships empty).
+    private final TranscriptLeadService svc = new TranscriptLeadService(new SeedCatalog(List.of(
+            new SeedCatalog.Issuer("nyc", "City of New York", "city", "GO", null, "no", ""))));
 
     private static Transcript transcript(Transcript.Segment... segs) {
         return new Transcript("audio:test", "deadbeef", List.of(segs), 0.5);
