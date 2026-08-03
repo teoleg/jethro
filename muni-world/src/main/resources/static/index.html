@@ -16,7 +16,6 @@
   .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
   a { color:inherit; text-decoration:none; }
 
-  /* muni-world's OWN menu — deliberately distinct (teal) from the jethro nav */
   .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,15,13,.72); border-bottom:1px solid var(--line); }
   .bar { display:flex; align-items:center; gap:18px; padding:0 24px; height:56px; max-width:1180px; margin:0 auto; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
@@ -33,22 +32,13 @@
   .kicker { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--brand); font-weight:600; }
   h1 { font-size:24px; font-weight:680; letter-spacing:-.01em; margin:8px 0 4px; }
   .sub { color:var(--dim); font-size:13px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px,1fr)); gap:16px; margin-top:24px; }
   .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--brand); border-radius:16px; padding:18px; }
   .card h2 { font-size:15px; font-weight:640; margin-bottom:8px; }
-  .card .v { font-size:20px; font-weight:660; font-variant-numeric:tabular-nums; }
-  .card .l { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim); margin-top:3px; }
   .row { display:flex; gap:8px; align-items:center; margin:6px 0; font-size:13px; }
   .led { width:8px; height:8px; border-radius:50%; background:var(--dim); }
-  .led.on { background:var(--up); box-shadow:0 0 8px var(--up); } .led.off { background:var(--warn); }
   .foot { color:var(--dim); font-size:11.5px; margin-top:28px; padding-top:14px; border-top:1px solid var(--line); }
   .btn { background:var(--surface-2); color:var(--txt); border:1px solid var(--line-2); border-radius:9px; padding:9px 14px; font:inherit; cursor:pointer; }
   .btn:hover { border-color:var(--brand); }
-  .section h2 { font-weight:640; }
-  .issuer { padding:9px 0; border-bottom:1px solid var(--line); }
-  .issuer .tag { color:var(--brand); font-size:10px; letter-spacing:.05em; text-transform:uppercase; margin-left:6px; }
-  .issuer .sec { font-size:12.5px; color:var(--dim); margin-top:2px; }
-  .issuer a { color:var(--brand); font-size:11px; }
   .tbl { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px; }
   .tbl th, .tbl td { text-align:right; padding:6px 9px; border-bottom:1px solid var(--line); white-space:nowrap; }
   .tbl th:nth-child(-n+2), .tbl td:nth-child(-n+2) { text-align:left; }
@@ -61,8 +51,7 @@
   <span class="brand"><span class="dot"></span>MUNI·WORLD</span>
   <nav class="tabs">
     <a class="tab active" href="#bonds">Bonds</a>
-    <a class="tab" href="#sources">Sources</a>
-    <a class="tab" href="#audio">Audio</a>
+    <a class="tab" href="/tv.html">TV / Audio</a>
   </nav>
   <span class="spacer"></span>
   <span class="mono" id="statusline" style="font-size:11px;color:var(--dim);margin-right:14px">…</span>
@@ -70,15 +59,14 @@
 </div></div>
 
 <main>
-  <!-- HERO: the bonds table (CUSIPs extracted from OS PDFs) is the primary content -->
-  <div id="bonds" class="section">
+  <!-- The bonds table (CUSIPs from OS PDFs) is the ONLY content on the landing page. -->
+  <div id="bonds">
     <div class="kicker">Municipal bonds</div>
     <h1 style="margin:6px 0 4px">Bonds by CUSIP</h1>
-    <div class="sub">Terms extracted from Official Statement PDFs into a searchable table, persisted to the <b>DB</b> (Postgres <span class="mono">muni.security</span>) and shown here. The economics columns compute once a current price lands. Nothing here is illustrative — the table is empty until real Official Statements are loaded.</div>
+    <div class="sub">Terms extracted from Official Statement PDFs, persisted to the <b>DB</b> (Postgres <span class="mono">muni.security</span>) and shown here. Economics columns compute once a current price lands. The table is empty until real Official Statements are loaded — nothing here is illustrative.</div>
 
-    <!-- LOAD FLOW: drop OS PDFs into the well-defined folder, then one button loads them (folder → extract →
-         DB → index → table). The process is shown per-file below the button. -->
-    <div class="card" style="border-left-color:var(--brand);margin-top:18px">
+    <!-- LOAD FLOW: drop OS PDFs in the folder, one button loads them (folder → extract → DB → index → table). -->
+    <div class="card" style="margin-top:18px">
       <h2 style="display:flex;align-items:center;gap:8px">Load Official Statements
         <span id="storeReadout" class="mono" style="font-size:11px;color:var(--dim);font-weight:400"></span></h2>
       <div style="color:var(--dim);font-size:12px;margin:2px 0 12px">
@@ -109,44 +97,12 @@
     <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:10px">loading bonds…</div></div>
   </div>
 
-  <!-- SOURCES: where the bond data comes from -->
-  <div id="sources" class="section" style="margin-top:40px">
-    <div class="kicker">Provenance</div>
-    <h2 style="font-size:18px;margin:6px 0 4px">Sources</h2>
-    <div class="sub" style="margin-bottom:14px">Bonds are extracted from <b>EMMA Official Statements</b> and Open-Data connectors. The NYC issuer complex below is the seed universe those connectors key off.</div>
-    <h3 style="font-size:13px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-bottom:8px">NYC issuers <span id="issuerCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
-    <div id="issuers" style="color:var(--dim)">loading…</div>
-  </div>
-
-  <!-- ADR-0014: the TV/audio source REGISTRY (feeds configured like the market-data/social sources) -->
-  <div id="audio" class="section" style="margin-top:40px">
-    <div class="kicker">Broadcast soft-signal</div>
-    <h2 style="font-size:18px;margin:6px 0 12px">Audio</h2>
-    <h3 style="font-size:13px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px">TV sources <span id="srcCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
-    <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">Registry of audio feeds — a feed captures only when enabled and bound to a host device.</div>
-    <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
-  </div>
-
-  <!-- ADR-0014: raw transcript — "what did it hear", to eyeball against the TV -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:15px;margin-bottom:4px">Live transcript <span id="txCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">What the capture loop heard — compare it to what's on the TV.</div>
-    <div id="transcripts" style="color:var(--dim);font-size:13px">loading…</div>
-  </div>
-
-  <!-- ADR-0014: live audio leads from the capture loop (issuer/keyword/CUSIP pointers to VERIFY, not numbers) -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:15px;margin-bottom:4px">Audio leads <span id="leadCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">Broadcast-audio soft signal — a lead is a pointer to <b>verify</b>, never a number.</div>
-    <div id="leads" style="color:var(--dim)">loading…</div>
-  </div>
-
-  <div class="foot">muni-world runs as a separate process · <b>UI build B3</b> (load flow: folder → DB + index → table)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B4</b> (landing = bonds only; TV/audio on its own page)</div>
 </main>
 
 <script>
-  // Back-link resolves to the jethro app on the same host (:8080).
   document.getElementById("jethroLink").href = location.protocol + "//" + location.hostname + ":8080/";
+
   async function poll() {
     const el = document.getElementById("statusline");
     try {
@@ -154,31 +110,23 @@
       const b = s.backends || {};
       el.textContent = (s.status || "up").toLowerCase()
         + " · lmdb " + (b.lmdb || "—") + " · pg " + (b.postgres || "—") + " · kafka " + (b.kafka || "—");
-    } catch (e) {
-      el.textContent = "service down";
-    }
+    } catch (e) { el.textContent = "service down"; }
   }
   poll(); setInterval(poll, 5000);
 
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
-
-  async function loadIssuers() {
-    try {
-      const list = await (await fetch("/api/muni/issuers")).json();
-      const verified = list.filter(i => i.verified === "yes").length;
-      document.getElementById("issuerCount").textContent = "· " + verified + " verified / " + list.length;
-      document.getElementById("issuers").innerHTML = list.map(i => {
-        // Only a confirmed (verified=yes) disclosure page is shown as a real link; otherwise say so plainly.
-        const link = (i.verified === "yes" && i.disclosureUrl)
-          ? `<a href="${esc(i.disclosureUrl)}" target="_blank" rel="noopener">${esc(i.disclosureUrl)}</a>`
-          : `<span style="color:var(--warn);font-size:11px">⚠ disclosure source unverified — pending confirmation</span>`;
-        return `<div class="issuer"><b>${esc(i.name)}</b><span class="tag">${esc(i.type)}</span>
-         <div class="sec">${esc(i.security)}</div>${link}</div>`;
-      }).join("");
-    } catch (e) { document.getElementById("issuers").textContent = "unavailable"; }
-  }
-
   const num = (n, dp) => (n == null || isNaN(n)) ? "—" : Number(n).toFixed(dp);
+
+  // Store readout: rows in the DB (Postgres system of record) vs the LMDB search index.
+  async function refreshStore() {
+    const el = document.getElementById("storeReadout");
+    try {
+      const s = await (await fetch("/api/muni/status", { cache: "no-store" })).json();
+      const c = s.counts || {};
+      const db = c.dbSecurities == null ? "DB off (LMDB only)" : c.dbSecurities + " in DB";
+      el.textContent = "· " + db + " · " + (c.lmdbSecurities || 0) + " indexed";
+    } catch (e) { el.textContent = ""; }
+  }
 
   function renderBonds(rows) {
     const el = document.getElementById("bondTable");
@@ -201,93 +149,18 @@
 
   async function search(kind) {
     const q = document.getElementById("q").value.trim();
-    if (!q) {
-      document.getElementById("bondTable").textContent = "enter a CUSIP-6 issuer prefix or a FIPS code to search the loaded bonds.";
-      return;
-    }
+    if (!q) { document.getElementById("bondTable").textContent = "enter a CUSIP-6 issuer prefix or a FIPS code to filter the loaded bonds."; return; }
     const path = kind === "geo" ? "/api/muni/bonds/geo/" : "/api/muni/bonds/issuer/";
     try {
       renderBonds(await (await fetch(path + encodeURIComponent(q))).json());
     } catch (e) { document.getElementById("bondTable").textContent = "source unreachable — could not query the bond index."; }
   }
 
-  async function loadSources() {
-    try {
-      const ss = await (await fetch("/api/muni/audio/sources", { cache: "no-store" })).json();
-      const cap = ss.filter(s => s.enabled && s.device).length;
-      document.getElementById("srcCount").textContent = ss.length ? "· " + cap + " capturable / " + ss.length : "";
-      const el = document.getElementById("sources");
-      if (!ss.length) { el.textContent = "no feeds registered"; return; }
-      const cols = ["Feed", "Publisher", "Category", "Device", "Chunk", "Status"];
-      el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
-        + ss.map(s => {
-          const capturable = s.enabled && s.device;
-          const status = capturable ? '<span style="color:var(--up)">capturing</span>'
-            : s.enabled ? '<span style="color:var(--warn)">no device bound</span>'
-            : '<span style="color:var(--dim)">disabled</span>';
-          return `<tr><td style="color:var(--txt)">${esc(s.label)}</td><td>${esc(s.publisher)}</td>
-            <td>${esc(s.category)}</td><td class="mono" style="font-size:11px">${esc(s.device || "—")}</td>
-            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td></tr>`;
-        }).join("") + "</tbody></table>";
-    } catch (e) { document.getElementById("sources").textContent = "unavailable"; }
-  }
-
-  async function loadTranscripts() {
-    try {
-      const ts = await (await fetch("/api/muni/audio/transcripts/recent?limit=10", { cache: "no-store" })).json();
-      document.getElementById("txCount").textContent = ts.length ? "· " + ts.length : "";
-      const el = document.getElementById("transcripts");
-      if (!ts.length) {
-        el.innerHTML = '<span style="font-size:12.5px">no transcript yet — enable a feed and run <code>svc.sh tv start</code>.</span>';
-        return;
-      }
-      el.innerHTML = ts.map(e => {
-        const t = (e.at || "").replace("T", " ").slice(0, 19);
-        return `<div class="issuer"><span class="tag" style="color:var(--brand)">${esc(e.feed)}</span>
-          <span style="color:var(--dim);font-size:11px">${t} · ${e.segments} seg</span>
-          <div style="margin-top:3px;color:var(--txt);font-size:13px;line-height:1.5">${esc(e.text) || "<span style='color:var(--dim)'>(silence / nothing recognized)</span>"}</div></div>`;
-      }).join("");
-    } catch (e) { document.getElementById("transcripts").textContent = "unavailable"; }
-  }
-
-  const kindColor = k => k === "ISSUER" ? "var(--brand)" : k === "CUSIP" ? "var(--warn)" : "var(--dim)";
-  async function loadLeads() {
-    try {
-      const ls = await (await fetch("/api/muni/audio/leads/recent?limit=50", { cache: "no-store" })).json();
-      document.getElementById("leadCount").textContent = ls.length ? "· " + ls.length : "";
-      const el = document.getElementById("leads");
-      if (!ls.length) {
-        el.innerHTML = '<span style="font-size:12.5px">no leads yet — the capture loop is off. Enable it on the Pi (muni.audio.capture.enabled=true).</span>';
-        return;
-      }
-      el.innerHTML = ls.map(e => {
-        const t = (e.at || "").replace("T", " ").slice(0, 19);
-        const ms = e.lead.atMs || 0, mm = String(Math.floor(ms / 60000)).padStart(2, "0"), ss = String(Math.floor(ms % 60000 / 1000)).padStart(2, "0");
-        return `<div class="issuer"><span class="mono" style="color:${kindColor(e.lead.kind)};font-size:10px">${esc(e.lead.kind)}</span>
-          <b style="margin-left:6px">${esc(e.lead.match)}</b>
-          <span class="tag" style="color:var(--dim)">${esc(e.feed)} · ${mm}:${ss}</span>
-          <div class="sec">${esc(e.lead.context)}</div></div>`;
-      }).join("");
-    } catch (e) { document.getElementById("leads").textContent = "unavailable"; }
-  }
-
-  // Store readout: how many bonds are in the DB (Postgres system of record) and the LMDB search index.
-  async function refreshStore() {
-    const el = document.getElementById("storeReadout");
-    try {
-      const s = await (await fetch("/api/muni/status", { cache: "no-store" })).json();
-      const c = s.counts || {};
-      const db = c.dbSecurities == null ? "DB off (LMDB only)" : c.dbSecurities + " in DB";
-      el.textContent = "· " + db + " · " + (c.lmdbSecurities || 0) + " indexed";
-    } catch (e) { el.textContent = ""; }
-  }
-
   // Render the loading PROCESS — one line per file, so the load is observable, not a black box.
   function renderLoadResults(list) {
     const el = document.getElementById("loadResults");
     if (!list || !list.length) { el.innerHTML = ""; return; }
-    const rows = list.map(s => {
-      const ok = s.ok && s.indexed >= 0;
+    el.innerHTML = list.map(s => {
       const led = s.ok ? (s.indexed > 0 ? "var(--up)" : "var(--warn)") : "var(--down)";
       const detail = s.ok
         ? `${s.pages} pages · ${s.indexed} saved · ${s.quarantined} quarantined · ${esc(s.method)} · conf ${num(s.confidence, 2)}`
@@ -297,10 +170,9 @@
         <span class="mono" style="color:var(--txt);font-size:12px">${esc(name)}</span>
         <span style="color:var(--dim);font-size:11.5px">${detail}</span></div>`;
     }).join("");
-    el.innerHTML = rows;
   }
 
-  // ONE button: load every OS PDF sitting in the well-defined folder → extract → DB + index → table.
+  // ONE button: load every OS PDF in the well-defined folder → extract → DB + index → table.
   async function loadFromFolder() {
     const msg = document.getElementById("loadMsg");
     msg.textContent = "scanning os-inbox/ and extracting each PDF…";
@@ -347,11 +219,6 @@
   }
 
   document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") search("issuer"); });
-  loadIssuers();
-  loadSources(); setInterval(loadSources, 30000);
-  loadTranscripts(); setInterval(loadTranscripts, 8000);
-  loadLeads(); setInterval(loadLeads, 15000);
-  // On open: show the store readout + the bonds already loaded (from the DB when up, else the index).
   refreshStore(); setInterval(refreshStore, 5000);
   loadRecent();
 </script>
