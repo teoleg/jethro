@@ -1,4 +1,4 @@
-No change — `c20fb0b70` is at 5 of 6 measurement cycles; and this window finally shows item #1 executing in full: three names were opened and completely flattened inside the same window, on a breadth collapse rather than a change of view.
+The pending change scored ❌ BAD with a failed revert — but completing that revert would re-apply ADR-0135, which was ALSO scored ❌ BAD, so I refused the mechanical precedent and instead fixed a live defect the order log caught: below the conviction floor the desk was re-sizing positions it had declared too weak to open.
 
 *(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/signals/telemetry`, the `tca`
 section, `recent_orders`, `turnover_cost_by_name`, or the scorer's own output. None is authored here —
@@ -6,87 +6,89 @@ invariant 7 / ADR-0016.)*
 
 ## Situation — the four questions
 
-1. **Money.** Total PnL **`$-285.01`**, **`-44.02`** since the last run, **`-79.52`** across the last three.
-   `UNDERWATER` and off the +1%/3-iteration target. The bleed is a grind, not a step.
-2. **Risk.** Gross **`$25,804.56`** — **1.7%** of the firm cap `$1,500,000`, headroom **`$1,474,195`**; net
-   **`-$5,053.66`**, **0.5%** of the `$1,000,000` net cap. Gross **fell `-39,623.47`** this window. The only
-   flag is `UNDERWATER`: no cap proximity, no breaker. A book this far under its budget shrinking by
-   two-thirds is the *opportunity* signal, not a safety one.
-3. **Cause.** The change under measurement is `c20fb0b70` (the manual completion of the ADR-0135 revert).
-   `scripts/score-change.py score` → `still accumulating evidence (5/6 cycles) — held, not scored this run`,
-   and `reports/.pending-baseline.json` is still present against its `16:37:25Z` baseline. Held, per
-   contract — one more cycle and it scores.
-4. **Danger.** No. `DANGER` is bleeding *near* the cap or the breaker; this is bleeding at **1.7%** of gross
-   cap. The answer is to fix what loses money, not to cut exposure that is already barely deployed.
+1. **Money.** Total PnL **`$-264.50`**, **`+33.98`** since the last run, **`-74.64`** across the last
+   three. `UNDERWATER` and off the +1%/3-iteration target. The one-run move is up; the three-run trend
+   is still down.
+2. **Risk.** Gross **`$54,238.11`** — **3.6%** of the firm cap `$1,500,000`, headroom **`$1,445,762`**;
+   net **`$6,915.96`**, **0.7%** of the `$1,000,000` net cap. Gross **rose `+28,429.35`**. The only flag
+   is `UNDERWATER`: no cap proximity, no breaker. A book at 3.6% of its budget rebuilding is the
+   intended direction (ADR-0132), not a risk event.
+3. **Cause.** `c20fb0b70` **scored ❌ BAD** this cycle (`-0.000563` risk-adj return/cycle over 7 cycles,
+   t=`-1.54` against a `1.5` hurdle; gross `48,013 → 54,236` [grew]). Its auto-revert **failed on a git
+   conflict** and `reports/.pending-baseline.json` is gone, so I am free to change code again.
+4. **Danger.** No. `DANGER` is bleeding *near* the cap or the breaker; this is bleeding at **3.6%** of
+   gross cap. The answer is to fix what loses money, not to cut exposure that is barely deployed.
 
-## Step 0 — `c20fb0b70`: ⚠️ UNDER MEASUREMENT, and its restored branch did something large this window
+## Step 0 — and the reason I did NOT follow the standing precedent
 
-Deployment confirmed on behaviour for a fourth window (Rule 256 — behaviour, not a source grep). The
-restored `fusion exit — target decayed to flat` branch fired three times:
+Rule 252 says: when the ledger reports REVERT FAILED, completing that revert by hand is the cycle's one
+change. That is right twice over (ADR-0133, ADR-0135) and it is **wrong here**, for a reason no prior
+cycle has hit:
 
-| time | name | order | breadth |
+> **`c20fb0b70` IS the revert of `74a47adee` (ADR-0135) — and `74a47adee` was itself scored ❌ BAD.**
+
+Reverting the revert re-applies a mechanism the scorer already rejected, which the contract forbids
+outright ("never re-attempting the reverted idea"). Both directions of one branch are now graded BAD:
+
+| commit | what it did to the breadth-collapse exit | risk-adj/cycle | t | gross | verdict |
+| --- | --- | --- | --- | --- | --- |
+| `74a47adee` | unestimable view **holds** instead of liquidating | `-0.000387` | `-1.59` | `0 → 51,059` [grew] | ❌ BAD |
+| `c20fb0b70` | **restores** the liquidation | `-0.000563` | `-1.54` | `48,013 → 54,236` [grew] | ❌ BAD |
+
+**A change and its exact inverse cannot both be the cause of the same deterioration.** When A and ¬A
+both grade BAD, the graded variable is dominated by something neither touched — here the continuous fee
+bleed, which runs at the same rate under both. I am recording that as the finding and leaving the code
+where it stands, rather than laundering a rejected mechanism back in through a procedural rule.
+
+## What the numbers say is actually wrong
+
+`ALPHA -329.32225499` on `feesPaid 334.905421`; `HEDGE +121.61984242` on `10.030226`;
+`MACRO -56.79950536` on `1.109154`. **`totalFees 346.044801` exceeds the entire deficit
+`firmTotal -264.50191793`** — gross of fees the strategy book is roughly flat. `turnover_cost_by_name`
+sums to ~`$3.3M` of equity turnover at `fee_bps 1.00` on a book of `$54,238.11`. And on the clustered
+denominator (Rule 259) no source is significant at any horizon. **The desk has no measured edge and is
+paying a large fee bill to express it**, so the lever is turnover, not weights.
+
+## The defect I fixed — the desk trades a view it has declared too weak to act on
+
+`recent_orders`, BAC held short, all tagged `fusion reduce toward a smaller target`:
+
+| time | order | forecast | floor |
 | --- | --- | --- | --- |
-| 18:05:27Z | `JNJ` | `BUY 26` | `sources=1` |
-| 18:05:28Z | `BAC` | `BUY 435` | `sources=0` |
-| 18:15:35Z | `KO` | `BUY 175` | `sources=1` |
+| 18:53:15Z | `BUY 1` | `0.3474462086964614` | 5.0 |
+| 18:54:15Z | `BUY 1` | `0.5363969925205933` | 5.0 |
+| 18:55:16Z | `BUY 1` | `0.7016479414426884` | 5.0 |
+| 18:55:47Z | `BUY 1` | `2.835935684486436` | 5.0 |
+| 18:56:17Z | `BUY 1` | `1.72006937226672` | 5.0 |
+| 18:59:49Z | `BUY 1` | `1.82687778188073` | 5.0 |
 
-**Those three flattens are the `-39,623.47` gross drop, and each closes a position this same window opened.**
+Six separate fills, each leaving the short open, none on a view that clears the floor the desk uses to
+*open* a position — and the forecast is **rising** across them. `GOOG` (`-1.548`, `-3.930`) and `NVDA`
+(`-4.886`, `-3.415`) did the same thing in the same window: **10 sub-floor partial reduces**.
 
-## The finding — a complete round trip in 12 to 30 minutes, on a breadth reading, not a view reversal
+The mechanism is a waiver that over-reached. ADR-0065 waived the ADR-0059 conviction floor for every
+risk-**reducing** delta, because applying it there "would permanently trap exactly the positions whose
+view has decayed to nothing". That reason is about letting a position **out**; it was keyed on
+`isRiskReducing` alone, which is just as true of a partial rebalance. So a name below the floor kept
+being walked toward a target computed **from** that sub-floor forecast, every cycle, paying fee and
+spread each time.
 
-Cross the flattens against the entry fills in `recent_orders` and the round trips are exact:
+**ADR-0136 (shipped):** below the floor a name has two states — **held** or **flat** — and is never
+re-sized. The waiver now applies to an order that takes the position **exactly flat**, and nothing else.
+Keyed on the order landing flat rather than on `targetQty == 0`, because ADR-0118's trapped exit plans
+the whole position out with `targetQty` still non-zero. Every control that means *get out* plans the
+name flat (ADR-0086 cut, ADR-0065 unwind, ADR-0027 breaker), so each passes untouched — the
+deterministic floor is not narrowed by one order. Strictly one-way: it can only ever suppress a trade.
 
-| name | opened (fill, forecast) | flattened | held |
-| --- | --- | --- | --- |
-| `BAC` | `SELL 159` 17:43:48Z `-10.14`, `SELL 146` 17:46:20Z `-10.09`, `SELL 130` 17:46:51Z `-11.20` | `BUY 435` 18:05:28Z | **~19 min** |
-| `KO` | `SELL 97` 17:44:18Z `-12.83`, `SELL 76` 17:45:19Z `-15.03` | `BUY 175` 18:15:35Z | **~30 min** |
-| `JNJ` | `SELL 20` 17:53:25Z `-6.18`, `SELL 3` 17:54:26Z `-6.54`, `SELL 3` 17:54:56Z `-5.54` | `BUY 26` 18:05:27Z | **~12 min** |
+**Scope, stated honestly:** these sub-floor reduces are a **minority** of the window's turnover — the
+majority is the breadth-collapse round trip (`BAC BUY 435`, `KO BUY 175`, `MCD BUY 33`, `JNJ BUY 26`),
+which this deliberately does not touch, because both remedies tried there scored BAD. This is a real
+but partial attack on the cost problem, not a fix for the deficit.
 
-The exits carry `forecast=0.0`/`-0.0` — the desk did not change its mind about direction. It stopped being
-able to *count* enough sources, and the breadth collapse alone paid a full round trip. `BAC` was entered on
-three separate strengthening fills at `-10` to `-11.2` and bought back entire, 19 minutes later.
+## Change vs market
 
-**A note on units, because I nearly got this wrong.** `Forecast.java` is a Carver-scaled forecast
-(`TARGET_ABS = 10.0`, `CAP = 20.0`) — a `-15` on `KO` is a 1.5×-average-strength *view*, **not** 15 bps of
-expected return. So no calibration claim can be read off those numbers; only telemetry measures return.
-
-## The cost, at the horizon that matches the holding period
-
-Per side, read: `fee_bps 1.00` on every equity (`turnover_cost_by_name`), plus `tca` `avgSlippageBps`
-`BAC 0.4878`, `KO 0.4638`, `JNJ 0.4307`. A round trip pays both, twice.
-
-`/api/signals/telemetry` at **900s** — the horizon that actually brackets a 12–30 minute hold — with the
-clustered denominator (Rule 258):
-
-| source | resolved | avgReturnBps | cohorts | stdCohortMeanBps |
-| --- | --- | --- | --- | --- |
-| trend | 1995 | `+0.371` | 275 | `13.699` |
-| reversion | 1834 | `+0.698` | 237 | `13.870` |
-| social | 619 | `+0.849` | 61 | `15.773` |
-| momentum | 113 | `+2.140` | 23 | `14.144` |
-| xsreversion | 1902 | `-1.261` | 126 | `12.653` |
-
-Every cell sits far inside its own cohort dispersion — **no source is significant at 900s, and none is at
-225s or 3600s either.** The two sources behind these entries (`sources=2`–`3`, trend/reversion) measure
-`+0.37` and `+0.70` bps — **below the cost of a single side**, let alone the round trip the breadth
-collapse forces. That is item #1, no longer as an argument but as three executed examples.
-
-Book split says the same thing: `ALPHA -350.28` on `feesPaid 330.60`, `HEDGE +122.06` on `9.66`,
-`totalFees 341.37` against `firmTotal -285.01`. Fees remain the whole of the deficit.
-
-## What I got wrong last cycle, and the methodology fix
-
-Last cycle I set item #1's VERIFY-BY at "supersession cancels below `27/59`, zero-fill names below `4`,
-gross not falling". **With no change shipped, all three moved:** cancels `26/60`, zero-fill names **2**
-(`HD`, `PG`), and gross fell `-39,623.47`. A threshold that swings that far on its own cannot grade a
-change — it would have scored a no-op as a partial success. Replaced with a direct count of the defect:
-**same-window round trips** (names both opened and fully flattened inside one window) — **3** this window
-(`BAC`, `KO`, `JNJ`), on `435`/`175`/`26` shares.
-
-## Decision
-
-No code change — `c20fb0b70` must finish measuring, and stacking on it is exactly what muddied the last two
-BAD verdicts. Next cycle, once it scores, the one change targets the **entry** side: require the source
-breadth that justifies an entry to persist before size is committed, so a reading about to collapse never
-opens a round trip. Deliberately **not** the exit branch — that is ADR-0135's mechanism, already graded ❌
-BAD and reverted, and a reverted idea is never re-attempted.
+Nothing shipped last cycle (`c20fb0b70` was under measurement all window), so **none** of the
+`+33.98` PnL move is attributable to a code change — it is mark drift on positions the loop did not
+touch. The `+28,429.35` gross rise is the desk rebuilding after the 18:05–18:15Z flattens, i.e. the
+restored branch of the now-BAD `c20fb0b70` still selecting trades; recorded against it, not excused.
+The positions block is cumulative, so no per-name decomposition of the window delta is claimed.

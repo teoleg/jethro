@@ -3701,3 +3701,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `feesPaid 330.60` vs `HEDGE +122.06` on `9.66`; `totalFees 341.37` against `firmTotal -285.01` — fees are
   still the entire deficit. The positions block is truncated and cumulative, so no per-name decomposition of
   the window delta is claimed.
+
+## 2026-08-03 19:00Z — a change and its exact inverse were BOTH graded BAD, so the precedent that says "complete the revert" had to be refused
+
+- **Rule 270 — never complete a failed revert whose TARGET is itself a revert of a graded-BAD change.**
+  Rule 252 (complete the revert by hand) was right for ADR-0133 and ADR-0135. It is wrong here:
+  `c20fb0b70` scored **❌ BAD** (`-0.000563`/cycle over 7, t=`-1.54` vs hurdle `1.5`; gross
+  `48,013 → 54,236` [grew]) with REVERT FAILED — but `c20fb0b70` **is** the revert of `74a47adee`
+  (ADR-0135), which scored **❌ BAD** too (`-0.000387`, t=`-1.59`, gross `0 → 51,059` [grew]). Reverting
+  it re-applies a mechanism the scorer already rejected, which the contract forbids outright. Before
+  executing the revert precedent, check what the revert RESTORES.
+- **Rule 271 — when A and ¬A both grade BAD, the graded variable is dominated by something neither
+  touched.** Both verdicts fired on "risk-adj negative AND gross grew", and in both windows gross grew
+  because the book was rebuilding off a flatten — the recovery ADR-0132 calls the goal. The constant
+  across both is the fee bleed. Do not read two opposing BAD verdicts as two separate mistakes; read
+  them as evidence that the branch under test is not what sets the sign of the book.
+- **Rule 272 — the conviction floor gated ENTRIES but not partial reduces, so the desk traded a view it
+  had declared too weak to open a position on.** `recent_orders`: `BAC` short took six separate `BUY 1`
+  fills tagged `fusion reduce toward a smaller target` at forecasts `0.347`, `0.536`, `0.702`, `2.836`,
+  `1.720`, `1.827` — every one under the `5.0` floor, every one leaving the short open, the forecast
+  *rising* across them; `GOOG` (`-1.548`, `-3.930`) and `NVDA` (`-4.886`, `-3.415`) the same. Cause:
+  ADR-0065 waived the floor for every risk-REDUCING delta to stop a decayed view TRAPPING a position —
+  a reason about getting OUT, keyed on `isRiskReducing` alone, which is equally true of a rebalance.
+  Fixed by ADR-0136: below the floor a name is **held or flat, never re-sized**, with the waiver keyed
+  on the ORDER LANDING FLAT (not `targetQty == 0`, which would strand ADR-0118's trapped exit).
+- **Rule 273 — when a waiver cites a reason, check the waiver's PREDICATE against the reason's scope.**
+  "It would trap positions" justifies exempting the exit. It does not justify exempting every reduction.
+  A waiver written wider than its own stated justification is a defect, and grepping for the ADR number
+  will not find it — only reading the reason next to the predicate will.
+- **Rule 274 — do not revive the ADR-0101 cost-derived buffer width to fight this.** `max(0.10, min(1,
+  2C/μ))` with measured `C` above measured `μ` pins at the `1.0` cap = one full average position, which
+  an aim clamped inside its own target (ADR-0102) can never cross ⇒ the book freezes. That is the exact
+  failure ADR-0133 was written to patch, and ADR-0133 scored ❌ BAD. Checked and rejected, not attempted.
+- **Trigger/attribution.** Shipped ADR-0136. Window `+33.98` on total PnL (`-74.64` over three), gross
+  `+28,429.35` to **3.6%** of the firm cap with `$1,445,762` headroom — no risk event. **No change was
+  live during this window**, so none of the PnL move is attributable to code; it is mark drift plus the
+  rebuild after the 18:05–18:15Z flattens, which is `c20fb0b70`'s restored branch still selecting trades
+  — recorded against it, not excused. `ALPHA -329.32` on `feesPaid 334.91`, `HEDGE +121.62` on `10.03`,
+  `MACRO -56.80`; `totalFees 346.04` against `firmTotal -264.50` — **fees still exceed the whole
+  deficit**, and ADR-0136 attacks only the minority of turnover the dribble accounts for. Positions are
+  cumulative, so no per-name decomposition of the window delta is claimed.

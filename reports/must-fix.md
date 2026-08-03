@@ -14,6 +14,75 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-03 19:00Z (**ADR-0136 shipped.** `c20fb0b70` scored ❌ BAD with a failed revert — and the revert precedent was **refused**, because completing it re-applies the graded-BAD ADR-0135. Item #1 is **re-scoped**: its direct remedies are exhausted in both directions, so the register now tracks the cost problem where a lever still exists.)
+
+### Step 0 — `c20fb0b70` (the ADR-0135 revert): 🔴 SCORED ❌ BAD — and deliberately NOT reverted
+
+`scripts/score-change.py score` → `no pending change to score`; `reports/.pending-baseline.json` gone.
+The ledger row: `-0.000563` risk-adj return/cycle over 7 cycles, t=`-1.54` (hurdle `1.5`), gross
+`48,013.41 → 54,235.90` [grew], **⚠️ REVERT FAILED (git conflict)**.
+
+**The precedent (Rule 252, "complete the failed revert by hand") does not apply and was not followed.**
+`c20fb0b70` **is** the revert of `74a47adee` (ADR-0135), which scored ❌ BAD itself. Reverting it would
+re-apply a mechanism the scorer already rejected — forbidden by the contract. Both directions of one
+branch are now graded BAD:
+
+| commit | effect on the breadth-collapse exit | risk-adj/cycle | t | gross | verdict |
+| --- | --- | --- | --- | --- | --- |
+| `74a47adee` | unestimable view **holds** instead of liquidating | `-0.000387` | `-1.59` | `0 → 51,059` [grew] | ❌ BAD |
+| `c20fb0b70` | **restores** the liquidation | `-0.000563` | `-1.54` | `48,013 → 54,236` [grew] | ❌ BAD |
+
+A change and its exact inverse cannot both cause the same deterioration (Rule 271). Both verdicts fired
+on "risk-adj negative AND gross grew", and in both windows gross grew because the book was rebuilding
+off a flatten. The constant across both is the fee bleed, which neither commit touched.
+
+### Item #1 — RE-SCOPED: the desk pays a fee bill larger than its whole deficit, with no measured edge to pay it for (⚠️ OPEN, #1)
+
+`totalFees 346.044801` against `firmTotal -264.50191793`; `ALPHA -329.32225499` on `feesPaid 334.905421`
+(roughly flat gross of fees), `HEDGE +121.61984242` on `10.030226`, `MACRO -56.79950536` on `1.109154`.
+`turnover_cost_by_name` sums to ~`$3.3M` of equity turnover at `fee_bps 1.00` on a `$54,238.11` book. On
+the clustered denominator no source is significant at any horizon.
+
+**Why the old framing is retired.** Item #1 was "a breadth collapse pays a full round trip". That is
+still true and still the majority of turnover — but its two direct remedies both scored ❌ BAD, in
+opposite directions, so it is closed to further direct attack. The register now tracks the cost problem
+itself, where levers remain.
+
+**Attacked this cycle (ADR-0136), partially.** The conviction floor gated entries but not partial
+reduces, so a name whose view had decayed below the floor was still walked toward a target computed from
+that sub-floor forecast every cycle. `recent_orders`: `BAC` short took six `BUY 1` fills tagged
+`fusion reduce toward a smaller target` at forecasts `0.3474462086964614`, `0.5363969925205933`,
+`0.7016479414426884`, `2.835935684486436`, `1.72006937226672`, `1.82687778188073`; `GOOG` (`-1.548`,
+`-3.930`) and `NVDA` (`-4.886`, `-3.415`) the same — **10 sub-floor partial reduces**. Below the floor a
+name is now **held or flat, never re-sized**.
+
+**Stated honestly: this is a minority of the turnover.** The flattens (`BAC BUY 435`, `KO BUY 175`,
+`MCD BUY 33`, `JNJ BUY 26`) dominate and are untouched.
+
+**VERIFY-BY next run** — counts the defect directly, not a proxy (Rule 269):
+- `recent_orders` orders tagged `fusion reduce toward a smaller target` with `|forecast| < 5.0`: must be
+  **0** (was **10** this window).
+- `recent_orders` orders tagged `fusion exit — target decayed to flat` at sub-floor forecasts: must
+  **still appear**. Their absence means an exit was trapped and **falsifies** ADR-0136.
+- `ALPHA feesPaid` / `turnover_cost_by_name` fill counts on `BAC`, `GOOG`, `NVDA`: direction only, read
+  as association not proof (Rule 266).
+
+### Item #2 — the ADR-0101 cost-derived buffer width is inert, and must NOT be revived as specified (⚠️ OPEN, ranked #2, blocked)
+
+`widthFor` returns the `0.10` convention unless (a) an `EdgeGate.Decision` is supplied — it is not,
+`jethro.fusion.edge-gate.enabled=false` sets `gateSupplier = null` (ADR-0122, owner-directed) — and (b)
+some source **passes** significance, which none does. Doubly dead.
+
+**Do not simply switch it on.** `max(0.10, min(1, 2C/μ))` with measured `C` above measured `μ` pins at
+the `1.0` cap = one full average position, which an aim clamped inside its own target (ADR-0102) can
+never cross ⇒ the book freezes. That is the failure ADR-0133 was written to patch, and ADR-0133 scored
+❌ BAD. A viable version needs a width that is cost-derived **without** a cap the aim cannot cross.
+
+**VERIFY-BY:** not actionable until that geometry is solved; carried as a known-dead mechanism so no
+future cycle rediscovers it and ships the freezing version.
+
+---
+
 
 ## Verification block — 2026-08-03 18:30Z (**no change shipped — `c20fb0b70` is at 5/6 cycles.** Item #1 stays #1 and is now **demonstrated rather than argued**: three names were opened and completely flattened inside this one window, on a source-breadth collapse with the direction never reversing. Item #1's **VERIFY-BY is replaced** — last block's three criteria all moved materially on a no-op cycle, so they could not grade anything.)
 
