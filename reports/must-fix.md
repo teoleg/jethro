@@ -15,6 +15,106 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 16:00Z (**no change shipped — ADR-0135 is at 5/6 cycles.** ADR-0135 is at last **✅ VERIFIED**: its guarded branch was exercised and the liquidation trigger it targets fired **zero** times. Last block's item #1 is **🔴 FALSIFIED** — the desk opened 41 positions this window, so there is no opening veto. The new #1 is the defect the ADR-0134 triggers now make plain: **the desk re-plans every 30s against sources with no measurable return until 900–3600s**, so it pays a round trip on every view before the view resolves.)
+
+### Why no change this cycle
+
+`scripts/score-change.py score` printed **`74a47adee still accumulating evidence (5/6 cycles) — held, not
+scored this run`** and `reports/.pending-baseline.json` is present. ADR-0116 forbids stacking a change on a
+pending one. Verified, falsified, re-ranked, stopped. ADR-0135 scores next cycle; item #1 ships behind it.
+
+### Step 0 — ADR-0135 (`74a47adee`): ✅ VERIFIED (first genuine exercise, after three vacuous windows)
+
+The branch finally took traffic. `recent_orders` carries a **`sources=1`** cycle —
+`JNJ BUY 9 [forecast=-0.0, sources=1]` at 15:40:00Z — and the string **`fusion exit — target decayed to
+flat` appears ZERO times** in the window. That is the exact trigger ADR-0135 was shipped to eliminate: one
+effective source zeroes the combined forecast, and pre-ADR-0090 read that flat as a decision and liquidated
+the whole position at full urgency. The only order at one source was a **partial** `fusion reduce toward a
+smaller target` from a downstream risk stage acting on the held target — the escape hatch the ADR keeps
+open by design. Deployment re-proved from the field the change ADDED (Rule 240): every `/api/fusion/targets`
+row carries `"estimable": true`. **Struck below the line.** The PnL verdict remains the scorer's at 6/6.
+
+### 🔴 Last block's item #1 ("a name at FLAT cannot open") — FALSIFIED, struck
+
+The claimed split was 4/4 flat names at `deltaQty 0.0` and 5/5 held names non-zero, read as a veto
+conditioned on `currentQty == 0`. **Both halves fail this window:**
+
+- Held names now sit at exactly zero too — `PG` (`currentQty -106`), `JNJ` (`-76`), `NVDA` (`-44`), all
+  `deltaQty 0.0`.
+- Flat names were **opened**: `PG SELL 52 · fusion entry — target increase` from flat at 15:45:34Z, plus
+  CAT, XOM, CVX, JPM. The window carries **41** `fusion entry — target increase` orders.
+
+The zero deltas were a snapshot artefact: `/api/fusion/targets` is stamped **15:59:43Z**, after the last
+order at **15:57:42Z**, with ADR-0084 re-planning every 30s. This is the **third** causal story on this item
+killed by data (Rules 234, 241) and the cause is identical each time — a mechanism inferred from an
+aggregate instead of measured. See Rule 248.
+
+### Item #1 — the desk re-plans every 30s against sources with NO measurable return until 900–3600s, so cost exceeds edge by construction (⚠️ OPEN, NEW — this is old #3 promoted and quantified)
+
+`/api/signals/telemetry`, `avgReturnBps` by source and horizon, against the fusion weights actually in use:
+
+| source | 225s | 900s | 3600s | fusion weight |
+| --- | --- | --- | --- | --- |
+| reversion | `0.047` | `0.752` | `3.1947226656494396` | `1.6383242369546946` |
+| social | `0.490` | `1.225` | `4.6399547951434625` | `1.6087300321666014` |
+| trend | `0.031` | `0.357` | `-0.674` | `0.8246239286767585` |
+| momentum | `-0.666` | `2.129` | `-3.409` | `0.7275477047443887` |
+| xsreversion | `-0.101` | `-1.144` | `-7.717` | `0.25` |
+
+At **225s — the horizon the desk trades** — every source lies inside ±0.7 bps, hit rates `0.424`–`0.504`.
+One side of a round trip costs `fee_bps 1.00` on equities (`turnover_cost_by_name`) plus `avgSlippageBps`
+`0.59`–`0.73` on the liquid names (`tca`). **Cost exceeds the best source's gross expectancy at that
+horizon.** The two heaviest weights, `reversion` and `social`, are exactly the sources that only become
+non-trivial at 900–3600s.
+
+The execution trace, via the ADR-0134 origination triggers:
+
+- **JNJ** — `SELL 11 @ forecast -18.13` (15:47:05Z), `SELL 22 @ -17.12`, `SELL 17 @ -14.93` (15:49:06Z);
+  then **31 seconds later** `BUY 21 @ -0.32`, then BUY 4/7/1/7. Sold 50, bought back 40, inside 8 minutes.
+- **XOM** — sold 92 at forecasts `-5.06` to `-10.33`, bought back 60 at forecasts `+1.28` to `+3.75`: a
+  full sign flip inside the window.
+- Cumulative: MSFT `189` fills / `193554.74` turnover while flat; PFE `95` fills / `193675.36` turnover
+  while flat. Firm-wide `FILLED 4945` / `CANCELLED 1784`.
+
+The cost lands where the books show it: `ALPHA` **`-152.93147385`** against `feesPaid` **`293.768903`** —
+the book's loss is smaller than the fees it paid. `firmTotal` **`-76.36276038`**, `totalFees` **`302.007152`**.
+
+**This is a horizon defect, not an edge drought.** `social` at 3600s (`hitRate 0.5734265734265734`,
+`avgReturnBps 4.6399547951434625`, `resolved 298`) and `reversion` at 3600s (`3.1947226656494396`,
+`resolved 485`) are the only candidates worth capital, and the desk churns straight through both. No
+re-weighting can repair this — the combiner is shaping a view the execution layer destroys before it
+resolves.
+
+**VERIFY-BY (next run):** per-name `fills` in `turnover_cost_by_name` falls against a flat-or-higher `qty`,
+and `recent_orders` shows no name whose entry and reversing unwind both land inside one source horizon.
+
+### Item #2 — a resting passive order is cancelled and re-issued against a near-identical target (⚠️ STILL-BROKEN, carried)
+
+`orders_by_status` is `FILLED 4945` / `CANCELLED 1784` / `REJECTED 84`; the window shows repeated
+`fusion re-plan — passive order superseded by a fresh target (ADR-0084)` on CAT, JNJ, JPM, CVX, GOOG within
+30s of issue. Likely the same root cause as #1 (re-plan cadence), so it is deliberately ranked **below** it —
+fixing the cadence may close this without a separate change. Do not fix independently until #1 is scored.
+
+**VERIFY-BY:** the `CANCELLED`-to-`FILLED` ratio in `orders_by_status` falls.
+
+### Item #3 — a collapse of source breadth to ZERO liquidates the book in full at FULL urgency (⚠️ OPEN, carried, still NOT EXERCISED)
+
+ADR-0135 deliberately left `sources=0` out of scope (the ADR-0065 orphan sweep). It has now gone three
+windows without firing — the window's histogram is `sources=1` ×1, `sources=2` ×35, `sources=3` ×23, and
+zero at `sources=0`. It costs nothing mid-session and fires at the close. Ranked below #1 on measured
+co-occurrence, per Rule 245.
+
+**VERIFY-BY:** at the next equity close, `recent_orders` shows no full-book exit at `sources=0`.
+
+### Struck this cycle
+
+- ~~ADR-0135 — an unestimable one-source view liquidates the whole position~~ ✅ VERIFIED FIXED (branch
+  exercised at `sources=1`; zero `fusion exit — target decayed to flat` orders in the window).
+- ~~Item — a name at FLAT cannot open (`deltaQty` conditioned on `currentQty == 0`)~~ 🔴 FALSIFIED (41
+  `fusion entry — target increase` orders; held names also at `deltaQty 0.0`).
+
+---
+
 ## Verification block — 2026-08-03 15:30Z (**no change shipped — ADR-0135 is at 4/6 cycles.** The book DEPLOYED broadly this window and the zero-source sweep did NOT fire, so old #1 goes unexercised for a second window. Old #2 is now **precisely localised**: the desk can GROW a name it holds but cannot START one — `deltaQty` is exactly `0.0` on 4/4 flat names and non-zero on 5/5 held names. That split is the new item #1.)
 
 ### Why no change this cycle

@@ -3516,3 +3516,32 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   shares/cycle against a 2,807-share gap. The cumulative form is `turnover_cost_by_name`: MSFT `189` fills,
   `193554.74` turnover, `currentQty 0`. **Compare the source's decay horizon against the time the schedule
   needs to reach target before concluding the source has no edge.**
+
+## 2026-08-03 16:00Z — there IS edge here, just not at the horizon being traded
+
+- **Rule 248 — a mechanism inferred from an aggregate is a hypothesis; three of them have now died here.**
+  Last cycle read a clean split (4/4 flat names at `deltaQty 0.0`, 5/5 held non-zero) as a veto conditioned
+  on `currentQty == 0` and ranked it #1. This window held names `PG` (`-106`), `JNJ` (`-76`), `NVDA` (`-44`)
+  are ALSO at `deltaQty 0.0`, and the log carries **41** `fusion entry — target increase` orders including
+  `PG SELL 52` from flat. `/api/fusion/targets` is stamped `15:59:43Z`, after the last order at `15:57:42Z`
+  — the zero deltas were a snapshot instant, not a gate. **Check the endpoint's own timestamp against the
+  order log before reading a cross-sectional split as a mechanism** (cf. Rules 234, 241).
+- **Rule 249 — compare the source's measured horizon against the RE-PLAN cadence, not against the fill
+  time.** `/api/signals/telemetry` `avgReturnBps` at 225s: `reversion 0.047`, `trend 0.031`,
+  `xsreversion -0.101`, `social 0.490`, `momentum -0.666` — all inside ±0.7 bps, hit rates `0.424`–`0.504`.
+  At 3600s the same sources read `reversion 3.1947226656494396`, `social 4.6399547951434625`. One side of a
+  round trip costs `fee_bps 1.00` (`turnover_cost_by_name`) plus `avgSlippageBps 0.59`–`0.73` (`tca`).
+  **The desk trades the one horizon where cost exceeds every source's gross expectancy** — and the two
+  heaviest fusion weights (`reversion 1.6383242369546946`, `social 1.6087300321666014`) belong to the
+  sources that only pay at 900–3600s.
+- **Rule 250 — when fees exceed the loss, the defect is in the execution layer, not the signal.** `ALPHA`
+  `-152.93147385` against `feesPaid 293.768903`; `firmTotal -76.36276038`, `totalFees 302.007152`. JNJ sold
+  50 at forecasts `-18.13`/`-17.12`/`-14.93` then bought back 40 starting **31 seconds** later at `-0.32`;
+  XOM sold 92 at `-5.06`…`-10.33` and bought back 60 at `+1.28`…`+3.75`. MSFT: `189` fills, `193554.74`
+  turnover, flat. **Before concluding a desk has no edge, check whether it is being charged a round trip
+  for every view it forms.**
+- **Rule 251 — grade a guarded branch only on a window where it took traffic, and the wait can be long.**
+  ADR-0135 sat unexercised for three windows; on the fourth a `sources=1` cycle appeared
+  (`JNJ BUY 9 [forecast=-0.0, sources=1]`) and `fusion exit — target decayed to flat` fired **zero** times —
+  the trigger it was shipped to remove. **Patience on a vacuous criterion is correct; grading it early
+  would have banked a false verdict in either direction.**
