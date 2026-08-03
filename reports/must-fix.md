@@ -15,6 +15,76 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 14:00Z (**no change shipped — ADR-0135 is still under measurement at 1/6 cycles.** Last cycle's change ✅ VERIFIED on its own terms. A NEW **#1** is now traced end to end: the ADR-0126 unarmed-stop veto freezes the ENTIRE equity book flat, permanently, because the risk-cut σ sensor cannot warm inside an ephemeral process.)
+
+### Why no change this cycle
+
+`scripts/score-change.py score` printed **`74a47adee still accumulating evidence (1/6 cycles) — held, not
+scored this run`** and `reports/.pending-baseline.json` is present. ADR-0116's rule is explicit: a new code
+change on top of a pending one destroys its evidence. Verified, diagnosed, recorded, stopped.
+
+### Step 0 — last cycle's change (`74a47ade`, ADR-0135 unestimable view holds): ✅ VERIFIED
+
+- **Deployed: ✅.** `/api/fusion/targets` returns the `estimable` field this change introduced.
+- **VERIFY-BY met.** All nine one-source names — CAT, UNH, JPM, TSLA, HD, META, WMT, XOM, CVX — read
+  `sources: 1`, `estimable: false`, `agreement: 0.0`, `deltaQty: 0.000`. The unestimable branch trades
+  nothing in either direction. **Zero** liquidation orders were generated on them.
+- **Honest caveat.** The book was already flat at deploy, so the branch runs at zero inventory. Its real
+  test — a breadth collapse at the cash close no longer round-tripping a *held* book — is unobservable
+  until the desk holds something. That is gated on item #1 below.
+- **Not yet scored** (1/6 cycles). The scorer owns that verdict, not this register.
+
+### Item #1 — the ADR-0126 unarmed-stop veto holds the whole equity book flat, permanently (⚠️ OPEN, NEW)
+
+**Cost: the entire opportunity.** Gross **$0.00** against **$1,500,000** of headroom, DORMANT for a fourth
+day, while the desk carries thirteen estimable views it is not allowed to act on: MCD `combinedForecast
+-8.446` / `agreement 0.596` / `targetQty -670.773`; BAC `+6.507` → `+3090.103`; PFE `-2.315` →
+`-1588.257` — every one with `deltaQty 0.000` at `currentQty 0`.
+
+**Mechanism, read from code and telemetry, not inferred.** `edgeGate` is `null`, so the ADR-0064 gate is
+silent and is NOT the vetoer. That leaves the ADR-0126 clause in `PositionBuffer.mayIncrease`
+(`PositionBuffer.java:202`): `stopArmed == null || stopArmed.test(instrument)`.
+`FusionLifecycle.stopArmed` (`FusionLifecycle.java:550`) answers from
+`streamVol.sigmaPerSample(instrument).isPresent()`. False ⇒ the delta is clamped `reduceOnly` (exactly zero
+at `held = 0`) and then, at `PositionBuffer.java:164`, **the aim is re-seeded to `held + delta` = 0** — so
+the ADR-0080 aim path is reset to flat every cycle and can never accumulate. Telemetry matches exactly:
+every `aims` entry `0.0`, `insideBuffer: 22`, `streamVolMeasuredNames: 1` of 22.
+
+**Why it is structural, not a passing warm-up.** `vol-span=120` (`application.properties:453`) ⇒
+`warmupPrices() = 121` (`StreamVolatility.java:119`), replayed at the 30 s cadence ≈ **60.5 minutes** of
+30 s-spaced history. The durable seed delivers far less — the app's own WARN log, per name: AAPL **75**,
+NVDA **85**, MSFT **67**, GOOG **61**, AMZN **44**, BAC **35**, KO **34**, WMT **33**, NEE **33**, PFE
+**31**, JNJ **30**, XOM **30**, PG **29**, CVX **29**, JPM **28**, CAT **27**, HD **27**, UNH **27** — all
+`of 121`. And the process is ephemeral: `uptimeSeconds` **727**, torn down each cycle. A sensor needing
+~60 min, seeded short, in a process living ~30 min, never warms on any boot. The tape is not at fault:
+`ticksDropped: 0`, mark `ageMillis` 122–232, and the same mark store warms the covariance for **14** names.
+
+ADR-0126's principle is right — do not open a position the risk cut cannot protect. The defect is that its
+warm-up requirement is **unsatisfiable under this deployment's process lifetime**, so a control meant to
+gate *some* names vetoes *all* of them, forever. Note this is above the deterministic floor: the pre-trade
+guardrail, firm breaker and conviction floor are untouched by any fix here.
+
+**VERIFY-BY (next run, from live telemetry):**
+- `/api/fusion/targets` → `streamVolMeasuredNames` **> 1**, and `insideBuffer` **< 22**.
+- At least one name with `estimable: true` shows a **non-zero `deltaQty`**, and its `aims` entry is
+  **non-zero** (proving the aim path is no longer re-seeded to flat every cycle).
+- `/api/risk` `.total.grossExposure` **> 0**.
+- Every name that does put risk on must have a **priced stop distance** — the fix must not simply delete
+  the ADR-0126 protection (see the trap below).
+
+**The trap to avoid (rank this above speed).** The cheap "fix" is to make `stopArmed` return true when the
+sensor is cold. That does not satisfy ADR-0126, it deletes it — the desk would open positions the risk cut
+demonstrably cannot price a cut for. The fix must give the stop a **measured** σ (a shorter measured span,
+a seed that draws on the daily-close depth already in Postgres — `LIVE` **9** days × **51** instruments,
+`SEED` **1568** days × **34** — or persistence of the sensor state across boots), not bypass the check.
+Whatever it is, the σ that arms the stop must be one the ADR-0086 cut will actually use, or the stop is
+armed in name only. Rule 229 applies too: check WHICH source sizes the resulting position before declaring
+victory — `xsreversion` measures **-6.044110** avgReturnBps and must not inherit the book.
+
+### ~~Item — the desk liquidates its whole book at every equity close~~ ✅ VERIFIED FIXED (ADR-0135), struck
+
+---
+
 ## Verification block — 2026-08-03 13:30Z (**item #1 ✅ VERIFIED and struck** — the ADR-0134 origination trigger is live and populated on FILLED orders, and it immediately named the mechanism behind the DORMANT book. New **#1** — the desk liquidates its entire book at every equity close on a breadth collapse — diagnosed and **fixed this cycle** (ADR-0135).)
 
 ### Step 0 — last cycle's change (`ad6c42c88`, ADR-0134 origination triggers): ✅ VERIFIED, and SCORED

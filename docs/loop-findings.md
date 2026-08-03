@@ -3394,3 +3394,30 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   still speaking and, at **-5.153198** avgReturnBps, the WORST-measured of the five. **When a change would
   put risk on, check WHICH source is about to size it before congratulating yourself on removing the
   blocker.** The fix must never turn a breadth failure into a licence to trade without corroboration.
+
+## 2026-08-03 14:00Z — ADR-0135 verified; the re-entry blocker is a warm-up requirement no boot can satisfy
+
+- **Rule 230 — a change was HELD, not stacked.** The scorer printed `74a47adee still accumulating evidence
+  (1/6 cycles)` with `.pending-baseline.json` present, so no code shipped this cycle. ADR-0135 verified on
+  its own terms: all nine one-source names read `estimable: false`, `agreement: 0.0`, `deltaQty: 0.000`, and
+  produced **zero** liquidation orders. **Stopping the exit was never going to cause a re-entry — verify a
+  fix against what it CLAIMED, and do not let a correct fix imply the symptom is gone.**
+- **Rule 231 — a warm-up requirement longer than the PROCESS LIFETIME is a permanent veto wearing a
+  temporary costume.** The risk-cut σ sensor needs `vol-span=120` ⇒ 121 prices at the 30 s cadence ≈ 60.5
+  min; the durable seed supplies 27–85 (`… of 121`, every equity); `uptimeSeconds` is **727** and the loop
+  tears the app down each cycle. So `stopArmed` is false on every boot, forever. **Before reading a "still
+  cold" WARN as warm-up noise, compare the samples REQUIRED against the samples the process will ever LIVE
+  to see — if the second is smaller, it is not warming up, it is deadlocked.**
+- **Rule 232 — find the vetoer by ELIMINATION, not by assumption.** Two controls can freeze a name.
+  `edgeGate: null` proved the ADR-0064 gate was silent, which left ADR-0126 as the only candidate; then
+  `streamVolMeasuredNames: 1` of 22 confirmed it, and `PositionBuffer.java:164` explained why the aim never
+  accumulates — an unpermitted name has its aim **re-seeded to held** every cycle, so the ADR-0080 path is
+  reset to zero forever, not merely slowed. `insideBuffer: 22` and all `aims` at `0.0` are the fingerprint.
+  **When intent is supposed to accumulate and telemetry shows it pinned at the held value, look for a
+  re-seed, not a slow rate.**
+- **Rule 233 — the conviction was there the whole time; only the permission was missing.** Thirteen names
+  carried estimable views (MCD `-8.446` → `targetQty -670.773`, BAC `+6.507` → `+3090.103`) against
+  **$1,500,000** of idle headroom. **A DORMANT book with live forecasts is never a signal problem — go
+  straight to the permission chain, because no amount of signal work moves a book that is not allowed to
+  trade.** And per Rule 229, the fix must ARM the stop with a measured σ, never bypass `stopArmed`:
+  deleting the protection would open positions the ADR-0086 cut cannot price an exit for.
