@@ -15,6 +15,79 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 17:30Z (**no change shipped — `c20fb0b70` is at 2/6 cycles.** Item #1 is unchanged at #1 and gained the piece it was missing: the re-plan cadence does not merely *cost* money, it systematically fills the desk's *weakest* forecasts. Item #2 is **DOWNGRADED and effectively withdrawn** — the telemetry's clustered dispersion field shows the "significant negative" reading that created it was an artifact of a naive standard error.)
+
+### Step 0 — `c20fb0b70` (the ADR-0135 revert): ⚠️ UNDER MEASUREMENT, behavioural criterion holds a second window
+
+`reports/.pending-baseline.json` present, no new ledger row → held, not scored. 2 heartbeats since its
+`16:37:25Z` baseline against `MIN_CYCLES 6`.
+
+The restored branch fired again on a fresh window: `fusion exit — target decayed to flat [… sources=1]` on
+`MCD SELL 35` (17:08:59Z) and `BAC SELL 240` (17:10:00Z). Deployment confirmed on behaviour, per Rule 256.
+
+**Recorded against it, not glossed:** `MCD` shows `realizedPnl -27.35` on a now-flat position, crystallised
+by that restored exit; `BAC` was accumulated 16:43–16:50Z and liquidated by the same branch at 17:10:00Z.
+Not graded a regression — a revert restores prior behaviour by construction and the counterfactual is
+unknowable here — but the register will not claim a change was costless while it can watch it select trades.
+
+### Item #1 — the 30s re-plan cadence fills the desk's WEAKEST forecasts, at a fee that exceeds every measured expectancy (⚠️ OPEN, stays #1, mechanism upgraded)
+
+Two facts from this window, and the second is new.
+
+**(a) The cost dominates the expectancy.** `turnover_cost_by_name` shows `fee_bps 1.00` per side on every
+equity (`0.20` on `ES`/`NQ`) — a round trip is ~2 bps before slippage. `/api/signals/telemetry` at 225s:
+`reversion +0.041` (5198 resolved), `trend +0.056` (5443), `social +0.303` (666). The largest expectancy
+anywhere in the table is `social` at 3600s, `+5.690` on 309 resolved. The two heaviest fusion weights —
+`social 1.663`, `reversion 1.580` — are exactly the sources whose expectancy only appears at 3600s.
+Firm-wide `totalFees 324.11` against `firmTotal -205.30`: **gross of fees the desk is up; fees alone put it
+underwater.**
+
+**(b) NEW — the ladder is adversely selected.** `JPM`, 17:13:02Z → 17:17:35Z: forecast `14.48 → 12.23 →
+9.64 → 9.40 → 9.21 → 5.90 → 5.05` while ordered qty ran `4 → 10 → 13 → 15 → 18 → 21 → 10`. The first five
+are `CANCELLED … superseded by a fresh target (ADR-0084)`; the two that **FILL** are the two weakest views
+on the ladder. Passive orders resting on strong forecasts are superseded by the next 30s re-plan before they
+fill; only decayed ones survive to execution. `JPM` now carries `realizedPnl -54.74`, `totalPnl -79.46` on
+the 46 shares assembled this way. Window-wide: **22 of 60** `recent_orders` rows are supersession cancels.
+
+So this is not "turnover is expensive" — it is a **directional** defect: the cadence biases *which* forecasts
+get executed toward the worst ones. That reframes the fix from "trade less" to "let a passive order live
+long enough to fill on the view that placed it".
+
+**VERIFY-BY (the cycle after `c20fb0b70` scores):** three numbers together, or it is not the fix —
+(i) supersession-cancel rows in `recent_orders` fall materially below **22/60**; (ii) the forecast attached
+to *filled* orders is no longer systematically weaker than the forecast on cancelled ones for the same name
+(the `origin` field carries it — read the ladder directly); (iii) gross exposure does **not** fall.
+Cost down, adverse selection gone, position retained.
+
+### Item #2 — ~~`xsreversion` has the only statistically significant expectancy, and it is NEGATIVE~~ (🔴 **WITHDRAWN — the finding was a statistical artifact**)
+
+The telemetry reports `cohorts` and `stdCohortMeanBps` next to `resolved` and `stdReturnBps`. Last cycle's
+`t = -2.19` was built as `avgReturnBps / (stdReturnBps / √resolved)` — treating **517** overlapping,
+cross-sectionally-linked observations as 517 independent draws. There are **`33` cohorts** behind them.
+Recomputed on the clustered denominator (`stdCohortMeanBps 30.03` over `33` cohorts against
+`avgReturnBps -8.288`), the reading sits well inside the noise band, as does every other cell at every
+horizon — `social` 3600s `+5.690` over `28` cohorts at `stdCohortMeanBps 28.27`; `reversion` 3600s `+3.146`
+over `71` at `30.92`; the whole 225s column inside `±0.31` bps.
+
+**The honest conclusion, stated plainly as the standing priority requires: no source in this universe has
+demonstrated significant edge at any measured horizon.** That is why #1 is a cost/execution fix and not a
+signal fix — and why nothing here justifies zeroing or flipping a weight. Withdrawn rather than re-ranked:
+acting on it would have been the exact overfit this loop's INCONCLUSIVE wall was built from.
+
+### Item #2 (new) — `/api/fusion/targets` reports a target the planner never orders toward (⚠️ OPEN, diagnostic integrity, low money cost)
+
+`JPM`: `targetQty 357.679`, `currentQty 46.0`, **`deltaQty 0.0`**. `CAT`: `targetQty -94.603`,
+`currentQty 0`, `deltaQty 0.0`. `AAPL`: `targetQty -223.167`, `currentQty 1.0`, `deltaQty -0.008299`.
+The published target and what the desk actually works toward differ by an order of magnitude, with no field
+on the endpoint explaining the gap. This costs no money directly, but it is the endpoint every future cycle
+reads to reason about sizing — and a past cycle *has* misread a target as intent.
+
+**VERIFY-BY:** `/api/fusion/targets` either reconciles (`deltaQty` consistent with the `targetQty`/`currentQty`
+gap and the adjustment rate) or carries an explicit field naming what suppressed the delta. Ranked below #1
+because it misleads the reader, not the book.
+
+---
+
 ## Verification block — 2026-08-03 17:00Z (**no change shipped — `c20fb0b70` is at 1/6 cycles.** Last block's item #1 is **✅ VERIFIED and closed**: the ADR-0135 revert landed in the code, on the endpoint, in the ADR index, and — the criterion that actually matters — in the *running desk's behaviour*. No process danger remains. The horizon/cost mismatch is now #1 and is quantified to the point of being ready to ship; a **new #2** is separated out of it.)
 
 ### Step 0 — `c20fb0b70` (manual completion of the ADR-0135 revert): ✅ VERIFIED, four for four

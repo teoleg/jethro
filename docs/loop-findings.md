@@ -3605,3 +3605,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   positions the revert did not select — market, not change. Gross `+1,018.67` at **3.3%** of the firm cap
   with `$1,450,954` of headroom is the desired direction, not a risk event. No change shipped: `c20fb0b70`
   is at **1/6** cycles and stacking on it would destroy the attribution.
+
+## 2026-08-03 17:30Z — the cadence doesn't just cost money, it picks the desk's worst forecasts to fill
+
+- **Rule 259 — use `stdCohortMeanBps`/`cohorts`, never `stdReturnBps`/√`resolved`. It retires Rule 258.**
+  `/api/signals/telemetry` publishes a clustered dispersion alongside the naive one. Rule 258 called
+  `xsreversion` at 3600s "the only significant number" off `t = -2.19`, computed as if **517** overlapping,
+  cross-sectionally-linked observations were 517 independent draws. There are **`33` cohorts** behind them
+  (`stdCohortMeanBps 30.03`, `avgReturnBps -8.288`). On the honest denominator it is inside the noise band —
+  and so is every other cell at every horizon (`social` 3600s `+5.690`/`28` cohorts/`28.27`; `reversion`
+  `+3.146`/`71`/`30.92`; the entire 225s column inside `±0.31` bps). **No source in this universe has
+  significant edge at any measured horizon.** Say it plainly; do not weight-tune against it. A significance
+  claim is only as good as its denominator, and overlapping signal windows are not independent draws.
+- **Rule 260 — a re-plan cadence shorter than the fill time is ADVERSE SELECTION, not just turnover cost.**
+  `JPM` 17:13:02Z→17:17:35Z: forecast `14.48 → 12.23 → 9.64 → 9.40 → 9.21 → 5.90 → 5.05`, ordered qty
+  `4 → 10 → 13 → 15 → 18 → 21 → 10`. The first five are `CANCELLED … superseded by a fresh target
+  (ADR-0084)`; the two that **FILL** are the two weakest views on the ladder. Passive orders on strong
+  forecasts get superseded before they fill, so only decayed ones reach execution — the desk systematically
+  fills its worst signal. `JPM`: `realizedPnl -54.74`, `totalPnl -79.46` on the 46 shares built this way;
+  **22 of 60** window orders are supersession cancels. This reframes the fix: not "trade less" but "let a
+  passive order live long enough to fill on the view that placed it".
+- **Rule 261 — do not read `targetQty` as intent.** `/api/fusion/targets`: `JPM` `targetQty 357.679` vs
+  `currentQty 46.0` with **`deltaQty 0.0`**; `CAT` `-94.603` vs `0` with `deltaQty 0.0`. The published target
+  and what the planner works toward differ by an order of magnitude with no field explaining the gap. Reason
+  about sizing from `deltaQty` and the orders, never from `targetQty`.
+- **Rule 262 — fees, not the market, are what put this book underwater.** `totalFees 324.11` against
+  `firmTotal -205.30`; `ALPHA -280.72` on `feesPaid 314.30`, while `HEDGE +132.22` is the only book earning.
+  Gross of fees the desk is up. When cost exceeds the entire measured expectancy, the edge work IS the cost
+  work — that is not a retreat from the standing "work on EDGE" priority, it is the answer to it.
+- **Trigger/attribution.** No change shipped (`c20fb0b70` at **2/6**). Window `-130.88` to `-205.30`;
+  gross `+6,033.80` at **3.8%** of the firm cap with `$1,442,562` headroom — direction is right, not a risk
+  event. Split: `NVDA` `-123.36` (`unrealized -141.35`, short 44) appears in **no** window order → market on
+  an untouched position. `JPM` `-54.74` realized is the desk's own ladder → change-side. `MCD` `-27.35`
+  realized was crystallised by the `sources=1` exit the revert restored → recorded against the pending
+  change, not excused. The position table is **cumulative**, so no exact per-name decomposition of the
+  window delta is claimed.
