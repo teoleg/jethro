@@ -15,6 +15,73 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 18:00Z (**no change shipped — `c20fb0b70` is at 4/6 cycles.** Item #1 stays #1, but its *stated mechanism* is **partly retracted**: a controlled re-test on this window does **not** reproduce the forecast-strength adverse selection Rule 260 claimed. The cost and the non-execution are confirmed and now carry cleaner evidence; the "we fill our worst view" framing does not survive its own denominator test.)
+
+### Step 0 — `c20fb0b70` (the ADR-0135 revert): ⚠️ UNDER MEASUREMENT, deployment confirmed a third window
+
+`scripts/score-change.py score` → `still accumulating evidence (4/6 cycles) — held, not scored this run`.
+`reports/.pending-baseline.json` present against its `16:37:25Z` baseline. Held, per contract.
+
+The restored branch fired again on a fresh window: `fusion exit — target decayed to flat [forecast=0.0,
+sources=0]` on `XOM BUY 44` and `JPM SELL 46` (both 17:37:13Z), and `[… sources=1]` on `NEE SELL 170`
+(17:39:15Z). Deployment confirmed on behaviour, per Rule 256.
+
+**Recorded against it, not glossed:** `NEE` is now flat at `realizedPnl -25.58`, crystallised by that
+17:39:15Z restored exit; `JPM`'s 46 shares — the ones the previous block flagged — were flattened by the
+`sources=0` branch at 17:37:13Z, and `JPM` has dropped out of the position table entirely. Still not graded
+a regression: a revert restores prior behaviour by construction and the counterfactual is unknowable. But
+the register keeps watching it select trades rather than calling it costless.
+
+### ⛔ RETRACTION — Rule 260's adverse-selection mechanism does not survive a controlled test
+
+Last block claimed the re-plan cadence systematically **fills the desk's weakest forecasts**, from the `JPM`
+ladder (`14.48 → … → 5.05`, only the two weakest filling). Re-tested on this window's ladders, comparing the
+`|forecast|` on FILLED vs CANCELLED orders:
+
+- **Pooled over all ALPHA orders:** filled `n=26` mean `5.685` vs cancelled `n=27` mean `8.579` — looks like
+  a large adverse gap.
+- **Pooled over `fusion entry — target increase` orders only** (apples-to-apples; exits carry `forecast=0.0`
+  and always fill, so including them manufactures the gap): filled `n=13` mean **`8.698`** vs cancelled
+  `n=27` mean **`8.579`**. The gap **inverts and vanishes**.
+- **Within-name, entries only:** the sign is consistent — `5 of 6` names with both fills and cancels show
+  filled weaker (`AMZN -1.43`, `KO -1.28`, `BAC -0.55`, `JNJ -0.55`, `NEE -0.15`; `GOOG +0.29` against) —
+  but with **1–3 fills per name** this is far too small to call, and the cross-name mix explains the pooled
+  result better than selection does.
+
+This is Rule 259 applied to the register's own claim: the dramatic number came from a bad comparison set,
+not from the market. The `JPM` ladder was a real anecdote, not a demonstrated mechanism.
+
+### Item #1 — the 30s re-plan cadence blocks passive entries from executing, at a fee that exceeds every measured expectancy (⚠️ OPEN, stays #1, mechanism narrowed to what the evidence supports)
+
+What survives, and it is enough to keep this at #1:
+
+**(a) The cost still dominates the expectancy — unchanged and confirmed.** `turnover_cost_by_name`:
+`fee_bps 1.00` per side on every equity (`0.20` on `ES`/`NQ`), so ~2 bps a round trip before slippage.
+`/api/attribution`: `totalFees 334.401006` against `firmTotal -234.55764728`, with `ALPHA` carrying
+`feesPaid 324.009878` on `totalPnl -304.50434241` while `HEDGE` is the only book earning (`+126.74620049`,
+`feesPaid 9.281974`). **Gross of fees the desk is up; fees alone put it underwater** (Rule 262).
+
+**(b) The execution failure is real, and this is the clean form of it.** `27 of 59` `recent_orders` rows are
+`fusion re-plan — passive order superseded by a fresh target (ADR-0084)` cancels — up from `22/60`. Sharper:
+**four names placed entry orders this window and filled none of them** — `NVDA`, `HD`, `PG`, `PFE`, at
+`|forecast|` of `5.88`, `6.53`, `6.24`, `5.42`, every one cancelled by supersession before it could execute.
+The defect is not "we fill the worst view"; it is **"a whole name's view can fail to reach the market at
+all"**, while the names that *do* trade pay 2 bps a round trip for the privilege.
+
+**(c) The churn/PnL association, stated with its caveat.** The window's losers are all ladder-churned names —
+`JNJ -169.82373597` (108 fills), `NVDA -92.32373936` (218 fills), `BAC -82.69208761` (76 fills),
+`KO -56.61374169` (89 fills) — while the winners are largely untouched: `AMZN +333.52971740` (one fill this
+window), `AAPL +61.40808388` (no window order), `GOOG +32.73213379`, and the `ES` hedge `+126.74620049`.
+**This is an association, not an attribution:** the position table is cumulative (Rule 263), so no exact
+per-name decomposition of the window delta is claimed, and high-turnover names are also the high-conviction
+names. It is corroborating, not proof.
+
+**VERIFY-BY (the cycle after `c20fb0b70` scores) — three numbers, all three or it is not the fix:**
+(i) supersession-cancel rows in `recent_orders` fall materially below **27/59**;
+(ii) the count of names that place entry orders and fill **none** of them falls below **4** — the honest
+replacement for the retracted mean-gap test, which is too noisy at this sample size to verify anything;
+(iii) gross exposure does **not** fall. Cost down, views reaching the market, position retained.
+
 ## Verification block — 2026-08-03 17:30Z (**no change shipped — `c20fb0b70` is at 2/6 cycles.** Item #1 is unchanged at #1 and gained the piece it was missing: the re-plan cadence does not merely *cost* money, it systematically fills the desk's *weakest* forecasts. Item #2 is **DOWNGRADED and effectively withdrawn** — the telemetry's clustered dispersion field shows the "significant negative" reading that created it was an artifact of a naive standard error.)
 
 ### Step 0 — `c20fb0b70` (the ADR-0135 revert): ⚠️ UNDER MEASUREMENT, behavioural criterion holds a second window

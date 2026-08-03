@@ -3640,3 +3640,31 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   realized was crystallised by the `sources=1` exit the revert restored → recorded against the pending
   change, not excused. The position table is **cumulative**, so no exact per-name decomposition of the
   window delta is claimed.
+
+## 2026-08-03 18:00Z — I retract Rule 260: the "we fill our weakest view" gap was my own bad comparison set
+
+- **Rule 264 — when comparing FILLED vs CANCELLED orders, compare like with like: entries against entries.
+  It retires Rule 260's mechanism (not its priority).** Rule 260 claimed the 30s re-plan systematically
+  fills the desk's weakest forecasts. Pooled over all ALPHA orders this window that looks true — filled
+  `|forecast|` mean `5.685` (n=26) vs cancelled `8.579` (n=27). It is an artifact: `fusion exit` orders
+  carry `forecast=0.0` and always fill, so they drag the filled mean down. Restricted to `fusion entry —
+  target increase`, the gap **inverts**: filled `8.698` (n=13) vs cancelled `8.579` (n=27). Within-name the
+  sign is consistent (5 of 6: `AMZN -1.43`, `KO -1.28`, `BAC -0.55`, `JNJ -0.55`, `NEE -0.15`, `GOOG +0.29`)
+  but on 1–3 fills per name that is noise. The `JPM` ladder was a real anecdote, never a demonstrated
+  mechanism. Rule 259 applies to my own claims, not just the telemetry's.
+- **Rule 265 — the executable form of the cadence defect is "a name's view never reaches the market", not
+  "the wrong view fills".** `27 of 59` window order rows are `fusion re-plan — passive order superseded by a
+  fresh target (ADR-0084)` cancels (up from `22/60`). Sharper and robust to the Rule 264 error: **four names
+  placed entry orders and filled none** — `NVDA` `5.88`, `HD` `6.53`, `PG` `6.24`, `PFE` `5.42` — every one
+  superseded before execution. Count zero-fill names, not mean forecast gaps; it needs no denominator
+  assumption. That is now the VERIFY-BY for item #1.
+- **Rule 266 — churn/PnL association is corroboration, never attribution.** The window's losers are the
+  ladder-churned names (`JNJ -169.82`/108 fills, `NVDA -92.32`/218, `BAC -82.69`/76, `KO -56.61`/89) and the
+  winners are largely untouched (`AMZN +333.53` on one window fill, `AAPL +61.41` on none, `GOOG +32.73`,
+  hedge `ES +126.75`). Tempting, but the position table is cumulative and high-turnover names are also
+  high-conviction names. State it as association; do not let it become the proof.
+- **Trigger/attribution.** No change shipped (`c20fb0b70` at **4/6**). Window `-44.70` on total PnL; gross
+  `-1,244.67`, at **3.7%** of the firm cap with `$1,444,021` headroom — no risk event. The revert's restored
+  `sources=0/1` flatten branch fired on `XOM`/`JPM` (17:37:13Z) and `NEE` (17:39:15Z), crystallising `NEE`
+  `realizedPnl -25.58` and closing `JPM` out of the table — recorded against the pending change, not excused,
+  and not graded a regression since a revert restores prior behaviour by construction.
