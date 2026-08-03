@@ -1,7 +1,8 @@
-// Render a JS page to its FINAL DOM after network-idle (what CLI Chrome can't do), so EMMA's ajax grid
-// actually loads before we read it. Prints the rendered HTML to stdout.
+// Render a JS page to its FINAL DOM after its ajax content loads (what CLI Chrome can't do), so EMMA's grid
+// actually populates before we read it. Prints the rendered HTML to stdout.
 //   node emma-render.js <url>
-// Drives the SYSTEM Chromium (no browser download). Resolves the binary robustly across Pi/Debian naming.
+// Drives the SYSTEM Chromium (no browser download). Looks like a normal browser so sites that gate content
+// on automation-detection (EMMA runs FullStory) still load their data.
 const fs = require('fs');
 const { execSync } = require('child_process');
 const puppeteer = require('puppeteer-core');
@@ -26,6 +27,11 @@ function resolveChromium(given) {
   return null;
 }
 
+// A real desktop-Chrome UA so the site treats us as a normal browser (override with MUNI_RENDER_UA).
+const REAL_UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) '
+  + 'Chrome/124.0.0.0 Safari/537.36';
+const SETTLE_MS = parseInt(process.env.MUNI_RENDER_SETTLE_MS || '7000', 10);
+
 (async () => {
   const url = process.argv[2];
   if (!url) { console.error('usage: node emma-render.js <url>'); process.exit(2); }
@@ -37,14 +43,22 @@ function resolveChromium(given) {
   }
   const browser = await puppeteer.launch({
     executablePath, headless: true,
-    args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
+    args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled', '--window-size=1440,900', '--lang=en-US']
       .concat(process.env.MUNI_BROWSER_PROXY ? ['--proxy-server=' + process.env.MUNI_BROWSER_PROXY, '--ignore-certificate-errors'] : []),
   });
   try {
     const page = await browser.newPage();
-    await page.setUserAgent(process.env.MUNI_HTTP_UA || 'muni-world/0.1 (+municipal-data-collection)');
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 });
-    await new Promise(r => setTimeout(r, 2500)); // let any late grid render settle
+    // hide the two clearest automation tells before any page script runs
+    await page.evaluateOnNewDocument(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+    });
+    await page.setUserAgent(process.env.MUNI_RENDER_UA || REAL_UA);
+    await page.setViewport({ width: 1440, height: 900 });
+    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+    await new Promise(r => setTimeout(r, SETTLE_MS)); // let a slow ajax grid finish populating
     process.stdout.write(await page.content());
   } finally {
     await browser.close();
