@@ -15,6 +15,125 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 15:30Z (**no change shipped — ADR-0135 is at 4/6 cycles.** The book DEPLOYED broadly this window and the zero-source sweep did NOT fire, so old #1 goes unexercised for a second window. Old #2 is now **precisely localised**: the desk can GROW a name it holds but cannot START one — `deltaQty` is exactly `0.0` on 4/4 flat names and non-zero on 5/5 held names. That split is the new item #1.)
+
+### Why no change this cycle
+
+`scripts/score-change.py score` printed **`74a47adee still accumulating evidence (4/6 cycles) — held, not
+scored this run`** and `reports/.pending-baseline.json` is present. ADR-0116 forbids stacking a change on a
+pending one. Verified, re-ranked, stopped.
+
+### Step 0 — ADR-0135 (`74a47adee`): ⚠️ DEPLOYED, STILL NOT EXERCISED (second consecutive window)
+
+Deployment re-proved from the field the change ADDED (Rule 240): every row of `/api/fusion/targets` carries
+`"estimable": true`. Of the fusion orders since 15:00Z — **29 at `sources=2`, 12 at `sources=3`, ZERO at
+`sources=1`, ZERO at `sources=0`**. The guarded branch has now gone two full windows without traffic. Its
+criterion remains vacuously satisfied and it must not be graded on this window (Rule 239).
+
+### Item #1 — a name at FLAT cannot open: `deltaQty` is exactly `0.0` on every zero-position target and non-zero on every held one (⚠️ OPEN — this is old #2, re-scoped from "under-deployed" to a specific OPENING veto)
+
+From `/api/fusion/targets` this run, the split is total and has no exception:
+
+| name | forecast | sources | estimable | currentQty | targetQty | **deltaQty** |
+| --- | --- | --- | --- | --- | --- | --- |
+| PFE | `6.601885581804063` | 3 | true | **0** | `6589.465055` | **`0.0`** |
+| HD | `3.7137715352834646` | 3 | true | **0** | `188.898658` | **`0.0`** |
+| JPM | `3.6401820813173313` | 3 | true | **0** | `257.546115` | **`0.0`** |
+| MSFT | `-3.451626099802119` | 3 | true | **0** | `-103.004746` | **`0.0`** |
+| XOM | `-5.16945990498043` | 3 | true | -92.0 | `-794.11651` | `-0.363738` |
+| JNJ | `-3.1631353632155177` | 3 | true | -75.0 | `-301.165041` | `-35.776603` |
+| CVX | `-2.6889594393466063` | 3 | true | -31.0 | `-307.047327` | `-6.065554` |
+| BAC | `-5.488089050299691` | 3 | true | 46.0 | `-2761.077689` | `-0.381741` |
+| AMZN | `-5.204157224891409` | 3 | true | 6.0 | `-248.539411` | `-0.049792` |
+
+**4 of 4 flat → exactly zero. 5 of 5 held → non-zero.** This is not slow pacing and it is not the
+conviction floor: PFE carries the LARGEST absolute forecast in the whole book at three sources, and JNJ and
+CVX trade on smaller ones. The blocker is conditioned on `currentQty == 0`.
+
+**Two candidate mechanisms, and neither is asserted as fact.** This register has already had one trace on
+this item falsified (Rule 234) and one causal story reversed by a timestamp (Rule 241), so both are logged
+as candidates with a discriminating test, not a diagnosis:
+
+1. **`PositionBuffer.mayIncrease` → the ADR-0126 σ-cold veto** (`PositionBuffer.java:203–211`). When a
+   name's stop sensor is unarmed the delta is passed through `TargetPlanner.reduceOnly`, and
+   `reduceOnly` returns ZERO identically whenever `cur.signum() == 0` (`TargetPlanner.java:202`). A flat
+   name under this veto can therefore **never** open, at any conviction, forever. This mechanism predicts
+   exactly the observed split. It is also the story a previous cycle had falsified, so it needs proof.
+2. **The ADR-0094 band measured from flat.** With ADR-0133 reverted, the band is scaled by the average
+   position at a FULL-strength view, so from flat `|gap| = |aim|` can sit inside it. All four frozen names
+   carry `|forecast|` below the ADR-0101 `TARGET_ABS` scale; two of the trading names do too, which argues
+   against this being the whole story but does not rule it out.
+
+**The two cannot be separated from `/api/fusion/targets` as it stands — it reports the delta but never why
+it is zero.** That is the same information gap ADR-0134 closed for orders, and closing it turned four
+cycles of guessing into a lookup.
+
+**VERIFY-BY (next run):** `/api/fusion/targets` carries a per-name reason for a zero delta (which veto,
+named), AND the four flat names above can be classified from telemetry alone without reading source. Then:
+at least one name with `currentQty == 0` shows a non-zero `deltaQty` and appears in `recent_orders` with a
+`fusion entry` trigger. A gross rise alone does NOT satisfy this — that half already passes (below) while
+the defect stands.
+
+**Ranking note — why this is above the sweep.** Last block ranked the zero-source sweep first on the
+argument that deploying more capital just feeds the sweep. This window falsifies the coupling it assumed:
+the desk deployed `+57555.68` of gross across XOM, CVX, JNJ, CAT, BAC, AAPL, AMZN and NVDA and the sweep
+fired **zero** times. The sweep needs `sources=0`, which the ADR-0113 sensors produce at the equity CLOSE;
+the opening veto costs every mid-session cycle. Fix the recurring one first, the tail-risk one next.
+
+### Item #2 — a 30-second collapse of source breadth to ZERO liquidates the book in full at FULL urgency (⚠️ OPEN, carried from #1, NOT EXERCISED)
+
+Unchanged and untouched — no change was shipped, and no `sources=0` order occurred this window (the single
+one in the digest is still the 14:32:51Z NQ event recorded in the block below). MACRO remains
+`grossExposure 0.00000000` with `realizedPnl -56.79950536`, and that realized loss is still carried in the
+firm total. The mechanism, the scope note (ADR-0065's responsibility is correct; the *urgency* is what is
+wrong) and the VERIFY-BY from the 15:00Z block all stand verbatim.
+
+**VERIFY-BY (unchanged):** in `recent_orders`, no `fusion exit — target decayed to flat` order at
+`sources=0` for a name that carried `sources>=2` within the prior 5 planning cycles; and if a zero-source
+name must still be unwound, the unwind is *paced* — spanning more than one cycle in `recent_orders`.
+
+### Item #3 — the combined forecast reverses SIGN inside the entry window, leaving the desk holding the side its own model now opposes (⚠️ OPEN, NEW)
+
+Two names bought on a three-source positive view are now carried against a three-source negative one, from
+`recent_orders` and `/api/fusion/targets`:
+
+| name | bought at | order forecast | forecast now | currentQty | targetQty |
+| --- | --- | --- | --- | --- | --- |
+| BAC | 15:06:18Z | `+5.310419321398655` (sources=3) | `-5.488089050299691` (sources=3) | `46.0` | `-2761.077689` |
+| AMZN | 15:03:16Z | `+5.553398525956138` (sources=3) | `-5.204157224891409` (sources=3) | `6.0` | `-248.539411` |
+
+Full sign reversal in roughly twenty minutes, and the unwind is running at `-0.381741` and `-0.049792`
+shares per cycle against gaps of thousands. `regime` reads `"trend": "CHOP"` with `volRatio 1.01`, and the
+dominant fusion weight is `reversion` at `1.6917588861521635` — a mean-reverting source whose sign is
+expected to invert as price moves, which is precisely the source whose horizon must be matched by the
+execution schedule rather than outrun by it. The cumulative shape is in `turnover_cost_by_name`: MSFT has
+`189` fills and `193554.74` of turnover and holds `currentQty 0`; XOM has `109` fills and `274426.96`.
+
+**VERIFY-BY:** over one window, no name that filled a `fusion entry` order goes on to carry a combined
+forecast of the OPPOSITE sign at equal or greater source count within the same window; or, if it does, the
+resulting unwind reaches flat inside that window rather than moving sub-share quantities.
+
+### Item #4 — a resting passive order is cancelled and re-issued against a near-identical target (⚠️ STILL-BROKEN, carried, WORSE this window)
+
+`orders_by_status` moved from `FILLED 4901` / `CANCELLED 1750` (15:00Z block) to **`FILLED 4921` /
+`CANCELLED 1772`** — within this window more orders were cancelled than filled. `recent_orders` shows the
+ADR-0084 re-plan cancelling JNJ on a forecast walking `-14.456807214028592` → `-14.829164125098862` →
+`-13.213446920589528` → `-14.026389744529501`, i.e. re-planning against a target that has barely moved.
+Ranked fourth because a cancel pays no fee directly; its cost is the un-earned spread, and it compounds
+items #1 and #3.
+
+**VERIFY-BY:** the cancelled share of a name's orders over a window in which its combined forecast neither
+changes sign nor moves by more than the ADR-0101 band; the re-plan should not fire on an unchanged target.
+
+### Partially satisfied and struck from the deployment item
+
+~~*"firm `grossExposure` rises without the increase being a single name"*~~ — ✅ **met.** Gross moved
+`+57555.68` this window to `86124.23375000`, spread across XOM, CVX, JNJ, CAT, BAC, AAPL, AMZN, NVDA and
+the ES hedge; `ALPHA` now carries `positionCount 21` at `grossExposure 64809.82000000`. The desk is no
+longer DORMANT. The *other* half of that criterion — a flat name opening — is item #1 above and is not met.
+
+---
+
 ## Verification block — 2026-08-03 15:00Z (**no change shipped — ADR-0135 is still under measurement at 3/6 cycles.** ADR-0135 is confirmed *deployed* but its guarded branch never fired, so it is **NOT YET EXERCISED**, not verified. Meanwhile the defect it was shipped to close **recurred through the adjacent `sources=0` branch it deliberately left out of scope** and took the MACRO book to zero. That is the new item #1.)
 
 ### Why no change this cycle

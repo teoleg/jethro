@@ -1,60 +1,60 @@
-The desk lost its largest position to a 30-second collapse in source breadth to ZERO — the same defect ADR-0135 was shipped to close, recurring through the one branch that change deliberately left out of scope.
+The book finally deployed broadly — and in doing so exposed the real blocker with no ambiguity left: the desk can GROW a name it already holds but cannot START one.
 
 *(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`, `recent_orders`,
 `logs/report.md`, the scorer's output, or the repo source. None is authored here — invariant 7 / ADR-0016.)*
 
 ## No code change this cycle — the pending change is still under measurement
 
-`scripts/score-change.py score` prints **`74a47adee still accumulating evidence (3/6 cycles) — held, not
+`scripts/score-change.py score` prints **`74a47adee still accumulating evidence (4/6 cycles) — held, not
 scored this run`**, and `reports/.pending-baseline.json` is present. Under ADR-0116 a new change stacked on
 a pending one destroys its evidence. So this run verifies, diagnoses, ranks and records; it ships no code.
 
 ## Situation — the four questions
 
-1. **Money.** Total PnL **`-13.88198097`**, against **`5.00354203`** at the last deterministic heartbeat
-   (`2026-08-03T14:37:28Z`) — the book crossed back under water inside the window. By book:
-   HEDGE **`+107.90433891`**, ALPHA **`-64.98681452`**, MACRO **`-56.79950536`**. The desk is UNDERWATER
-   and off the growth target (`on_track=false`, `stale=true`).
-2. **Risk.** Gross **`23679.80075000`** — **1.6%** of the $1,500,000 firm cap, **$1,476,320** of headroom.
-   Net **`5528.92075000`**, 0.6% of the net cap. Nowhere near a cap, breaker `halted: false`. Exposure is
-   not the danger here; the near-total *absence* of it is the standing opportunity.
-3. **Cause.** ADR-0135's own branch never fired (zero `sources=1` orders in 44), so it is unscored and
-   unexercised — do not grade it on this window. The window's real event is elsewhere: at 14:32:21Z NQ
-   was still being worked in on `forecast=-6.867533453373563, sources=2`; thirty seconds later, at
-   14:32:51Z, it exited on **`fusion exit — target decayed to flat [forecast=0.0, sources=0]`**. The
-   MACRO book is now `grossExposure 0.00000000` with `realizedPnl -56.79950536` and nothing left on. NQ
-   has dropped out of `/api/fusion/targets` entirely.
-4. **Danger.** No — not bleeding near a cap, not near the breaker. The pathology is the opposite shape: a
-   book that deploys 1.6% of its allowance and then surrenders the largest thing it manages to build the
-   moment a sensor stops reporting.
+1. **Money.** Total PnL **`-85.68734607`**, against `-45.96` since the last run and `-118.20` across the
+   last three. By book: `HEDGE` **`+121.83844392`**, `ALPHA` **`-150.72628463`**, `MACRO`
+   **`-56.79950536`** (all realized, carried from the 14:32Z sweep). `UNDERWATER`, off the growth target.
+   The strategy book is losing while the hedge is winning — `/api/attribution` reads `strategyAlpha
+   -207.52578999` against `hedgePnl 121.83844392`, with `totalFees 296.016031`.
+2. **Risk.** Gross **`86124.23375000`** — the report puts that at **5.7%** of the $1,500,000 firm cap with
+   `1,413,876` of headroom; net `-10728.59625000`, **1.1%** of the net cap. Against the ADR-0132 owner
+   budget of $200,000 the book is now materially deployed rather than dormant. Nowhere near a cap, breaker
+   not halted. Exposure is not the danger.
+3. **Cause.** No change was deployed this cycle, and ADR-0135's guarded branch did not fire for a second
+   window (zero `sources=1` orders in `29 × sources=2` and `12 × sources=3` since 15:00Z), so it can be
+   neither credited nor blamed (Rule 237/239). The `-45.96` is mark-to-market on positions opened in the
+   preceding minutes — `ALPHA` is `unrealizedPnl -122.06541663` on a `64809.82000000` book whose 21
+   positions are all newly on. That is market and the desk's own entry, not a change.
+4. **Danger.** No. Not near a cap, not near the breaker, and no longer dormant. The pathology is narrower
+   and sharper than "under-deployed", and it is item #1 below.
 
-## The mechanism, and what is honestly attributable
+## What the deployment revealed
 
-`ForecastCombiner` maps "no source spoke" to a combined value of `0.0`; `TargetPlanner` maps `0.0` to a
-target of flat; ADR-0090 works a flat target at FULL urgency. So an *absence of information* is executed
-as a *measured decision to be flat*. ADR-0135 named exactly this failure and fixed it at one effective
-source, explicitly leaving zero sources to ADR-0065's orphan sweep. The next live window collapsed through
-the branch left open.
+`/api/fusion/targets` splits with no exception: **`deltaQty` is exactly `0.0` on all four targets whose
+`currentQty` is 0 — PFE, HD, JPM, MSFT — and non-zero on all five that hold something.** PFE carries the
+largest absolute forecast in the book (`6.601885581804063`, three sources, `estimable: true`) against a
+target of `6589.465055` and plans nothing, while CVX trades on `-2.6889594393466063`. So this is not the
+conviction floor and not slow pacing; the veto is conditioned on being flat.
 
-**Attributed honestly (Rule 237):** the **-$56.80 is market** — mark-to-market on a fresh ~$23.6k NQ short
-the tape moved against between 14:21Z and 14:32Z. It is *not* the sweep's loss, and the sweep gets no
-credit for "de-risking" either. What the sweep costs is the decision itself: it crystallised a position its
-own forecast had backed thirty seconds earlier, and paid a full round trip to do it. I checked and
-discarded the obvious explanation — NQ's provider clock is stale *now* (`647s`), but it froze at 14:49Z,
-sixteen minutes **after** the liquidation, so staleness did not cause it. The trigger for the 2→0
-transition is not yet localised and I will not guess it; that is next cycle's first measurement.
+Two mechanisms in code produce exactly that shape, and I am deliberately **not** picking one: the ADR-0126
+σ-cold veto in `PositionBuffer.mayIncrease`, which routes the delta through `TargetPlanner.reduceOnly` —
+and `reduceOnly` returns zero identically when `cur.signum() == 0`, so a flat name under it can never open
+at any conviction; or the ADR-0094 band measured from flat, which ADR-0133's revert restored. This register
+has already had one trace on this item falsified and one causal story reversed by a timestamp, so the next
+change is the one that makes the veto reason **observable** on `/api/fusion/targets` — the same move
+ADR-0134 made for orders, which turned four cycles of guessing into a lookup.
 
-**The asymmetry is the expensive part.** Entry took 17 orders across 18 minutes; the exit took one cycle at
-full urgency. A desk that accumulates slowly and liquidates at once turns every lapse in sensor
-availability into a one-way ratchet down — which is also why `orders_by_status` reads `FILLED 4901` against
-`CANCELLED 1750`, with NQ's forecast frozen bit-identical at `-6.867543315104213` across 13 consecutive
-cycles while ADR-0084 cancelled and re-issued the resting order on every one of them.
+I also logged, but did not act on, a second live pattern: BAC was bought at `+5.310419321398655` (three
+sources) and twenty minutes later carries `-5.488089050299691` (three sources); AMZN the same. The
+dominant fusion weight is `reversion` at `1.6917588861521635` in a regime reading `"trend": "CHOP"` — a
+signal whose sign is expected to invert faster than an 18-minute entry schedule can reach its target.
 
-## What I did, and what next cycle does
+## What I did
 
-Re-ranked `reports/must-fix.md`: **#1** is now the zero-source full-urgency sweep, with a VERIFY-BY that
-demands a *paced* unwind — a derouted name genuinely must still be exited, so the fix is the urgency, not
-the responsibility. The old #1 — 9 of 10 carried targets holding nothing against six-figure targets while
-the firm deploys 1.6% of its cap — is **#2**, with last block's σ-coverage explanation explicitly marked
-unproven so the next cycle does not inherit a trace this register has already had falsified once. Fixing #2
-before #1 would only feed more capital into the same sweep.
+Re-ranked `reports/must-fix.md`. **#1** is now the opening veto, with a VERIFY-BY that demands the veto
+reason be readable from telemetry *and* a flat name actually opening — a gross rise alone no longer counts,
+because that half already passed while the defect stood. The zero-source sweep drops to **#2**: last
+block ranked it first on the argument that deploying capital just feeds it, and this window falsified that
+coupling — `+57555.68` of gross went on across eight names and the sweep fired zero times. New **#3** is
+the mid-entry sign reversal; **#4** is the ADR-0084 cancel churn, which got worse (`FILLED 4921` /
+`CANCELLED 1772`, more cancelled than filled inside this window).

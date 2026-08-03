@@ -3481,3 +3481,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   while ADR-0084 cancelled the resting order on every one. **When accumulation is throttled and liquidation
   is not, the book cannot hold size no matter how good the signal — compare the two urgencies before
   concluding a desk has no edge.**
+
+## 2026-08-03 15:30Z — the desk can grow a position but cannot start one
+
+- **Rule 243 — when a book deploys but some names stay at exactly zero, check `deltaQty` against
+  `currentQty` before blaming conviction or pacing.** `/api/fusion/targets` split with no exception this
+  window: `deltaQty` exactly `0.0` on all four flat names (PFE `6.601885581804063`/3 src, HD, JPM, MSFT)
+  and non-zero on all five held ones (XOM `-0.363738`, JNJ `-35.776603`, CVX `-6.065554`, BAC `-0.381741`,
+  AMZN `-0.049792`). PFE carries the LARGEST forecast in the book and plans nothing while CVX trades on
+  `-2.6889594393466063`. **A veto conditioned on `currentQty == 0` looks identical to "low conviction" and
+  to "slow pacing" in aggregate exposure — only the per-name delta-vs-position split tells them apart.**
+- **Rule 244 — `reduceOnly` on a flat position is an ABSORBING state, not a throttle.**
+  `TargetPlanner.reduceOnly` returns zero identically when `cur.signum() == 0`, so any gate that routes a
+  name through it (ADR-0126's σ-cold veto in `PositionBuffer.mayIncrease`) makes that name unopenable
+  **forever**, at any conviction — the gate cannot clear itself because clearing it would require the
+  position it forbids. **Audit every reduce-only path for whether the thing that lifts the gate depends on
+  the trade the gate blocks.**
+- **Rule 245 — a ranking argument built on an assumed coupling must be re-tested when the book moves.**
+  The 15:00Z block ranked the zero-source sweep above deployment because "deploying more capital just feeds
+  it". This window put `+57555.68` of gross on across XOM/CVX/JNJ/CAT/BAC/AAPL/AMZN/NVDA and the sweep
+  fired **zero** times — it needs `sources=0`, which the ADR-0113 sensors produce at the CLOSE, while the
+  opening veto costs every mid-session cycle. **Re-rank on measured co-occurrence, not on a plausible
+  mechanism linking the two items.**
+- **Rule 246 — make the veto reason observable before designing the fix for it.** Two mechanisms
+  (σ-cold veto, ADR-0094 band from flat) predict the same zero delta and `/api/fusion/targets` reports the
+  delta but never why it is zero. This register has already burned a cycle on a falsified trace here
+  (Rule 234) and one on a reversed causal story (Rule 241). ADR-0134 solved the identical gap for orders
+  and turned four cycles of guessing into a lookup. **When two candidate causes are indistinguishable in
+  telemetry, the correct one change is the instrument, not a guess at the cure.**
+- **Rule 247 — a signal that reverses sign inside the entry schedule is an execution-horizon bug, not a
+  bad signal.** BAC filled at `+5.310419321398655` (3 sources) at 15:06:18Z and carries
+  `-5.488089050299691` (3 sources) twenty minutes later; AMZN the same. `reversion` holds the dominant
+  fusion weight `1.6917588861521635` in a `"trend": "CHOP"` regime, and the unwind runs at `-0.381741`
+  shares/cycle against a 2,807-share gap. The cumulative form is `turnover_cost_by_name`: MSFT `189` fills,
+  `193554.74` turnover, `currentQty 0`. **Compare the source's decay horizon against the time the schedule
+  needs to reach target before concluding the source has no edge.**
