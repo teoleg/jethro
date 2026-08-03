@@ -1,72 +1,69 @@
-The scorer graded ADR-0135 ❌ BAD and its automatic revert silently failed — the rejected mechanism was still live in the running code, so this cycle completes that revert by hand rather than stacking a new idea on top of it.
+No change — last cycle's manual revert is at 1/6 of its measurement window, and it is ✅ VERIFIED on every criterion it was shipped against.
 
-*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/signals/telemetry`,
-`recent_orders`, `turnover_cost_by_name`, `tca`, the scorer's ledger output, or `git`. None is authored
-here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/signals/telemetry`, `/api/fusion/targets`,
+`recent_orders`, `turnover_cost_by_name`, the scorer's output, or `git`/`grep`. None is authored here —
+invariant 7 / ADR-0016.)*
 
 ## Situation — the four questions
 
-1. **Money.** Total PnL **`$-41.66`**, **`+1.70`** since the last run and **`-1.93`** across the last three.
-   `UNDERWATER`, and off the growth target. The move this window is small in both directions — this is not a
-   book that is bleeding hard, it is a book that is not earning.
-2. **Risk.** Gross **`$51,996.31`** — **3.5%** of the firm cap `$1,500,000`, headroom **`$1,448,004`**; net
-   **`$22,854.97`**, **2.3%** of the `$1,000,000` net cap. Gross fell **`-50,570.52`** this run. Nowhere near
-   a cap, breaker not tripped, and not DORMANT.
-3. **Cause.** ADR-0135 (`74a47adee`) finished its ADR-0116 window and scored **❌ BAD**. See below — the
-   material fact is not the verdict but that **the revert did not happen**.
-4. **Danger.** Not a risk-limit danger: no cap proximity, no breaker. The live danger is a **process** one,
-   and it is the reason for this change.
+1. **Money.** Total PnL **`$-68.53`**, **`-9.93`** since the last run and **`-29.61`** across the last three.
+   `UNDERWATER` and off the growth target (`pnl_growth_pct -47.48` vs `pnl_target_pct 1.0`, `on_track=false`,
+   `stale=true`). The book is not collapsing; it is grinding down in small increments.
+2. **Risk.** Gross **`$49,046.31`** — **3.3%** of the firm cap `$1,500,000`, headroom **`$1,450,954`**; net
+   **`$17,174.47`**, **1.7%** of the `$1,000,000` net cap. Gross rose **`+1,018.67`** this run. Nowhere near a
+   cap, breaker not tripped, not DORMANT. **Not a danger state** — exposure rising with this much headroom is
+   the desired direction, not something to de-risk.
+3. **Cause.** The change under measurement is `c20fb0b70`, last cycle's manual completion of the ADR-0135
+   revert. The scorer reports `still accumulating evidence (1/6 cycles)` and
+   `reports/.pending-baseline.json` is present, so it is **held, not scored**.
+4. **Danger.** None on the risk axis. No cap proximity, no breaker, and this time no process danger either —
+   the rejected code is out.
 
-## Step 0 — the finding that outranks everything else this cycle
+## Step 0 — `c20fb0b70` (the ADR-0135 revert): ✅ VERIFIED, all four criteria
 
-The ledger row for `74a47adee` carries `❌ BAD` **and** the note `⚠️ REVERT FAILED (git conflict): the BAD
-commit is STILL LIVE and needs a manual revert`. I checked rather than assumed:
-`git merge-base --is-ancestor 74a47adee HEAD` returns **true**. The mechanism the scorer rejected has been
-running the desk's money for four cycles since it was graded.
+Graded on the **code**, not on ancestry, per the rule the last block wrote down:
 
-The cause is mundane and now twice-proven. The scorer's `git revert` conflicted on the loop's own memory
-files — `docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md` — because later cycles had
-appended to all three. `git revert` is all-or-nothing, so a conflict in three **documentation** files aborted
-the **code** revert with it. This is the *second* occurrence: ADR-0133 / `e61c7f5aa` failed identically and
-was completed by hand in `4f67f0515`. A silent failure that leaves rejected code live is worth more than any
-signal idea I had queued, so it is this cycle's one change.
+- `grep -rn "estimable" app/src/main/java/io/jethro/app/fusion/` returns **0** lines. The only surviving
+  occurrence repo-wide is a prose comment in a test.
+- `/api/fusion/targets` rows carry no `estimable` field — **0** matches for the string in the whole report.
+- The ADR index shows `0135 … Reverted`, with the annotated record kept.
+- **Behavioural, the one that actually matters:** the pre-ADR-0135 branch is live again.
+  `fusion exit — target decayed to flat [… sources=1]` fires on `PFE SELL 26` (16:40:13Z), `CAT SELL 1` and
+  `JNJ SELL 63` (16:38:42Z), `CVX BUY 1` (16:43:46Z). Under ADR-0135 those were suppressed; they are back, so
+  the revert reached the running desk rather than just the source tree.
 
-## Grading ADR-0135 honestly — two findings, not one
+Nothing is claimed for it on PnL. Restoring previously-running code should restore prior behaviour, not
+create edge; the window's `-9.93` is mark-to-market plus cost on positions this change did not select. What
+it buys is that the next measurement is attributable at all.
 
-Both are true and I am recording them separately, because collapsing them is how a rejected mechanism
-survives a revert.
+## What the telemetry says while I wait — the horizon/cost mismatch, now precisely quantified
 
-- **On its own stated criterion it is still ✅ VERIFIED.** The guard works. `fusion exit — target decayed to
-  flat` fires **2** times this window and both carry **`sources=0`** — `PG BUY 106` (FILLED) and `CVX BUY 2`
-  (REJECTED, `no market data`) at 16:08:19Z. That is the ADR-0065 orphan sweep, which ADR-0135 explicitly
-  left out of scope and byte-identical. There is no `sources=1` liquidation. A future cycle reading "the
-  trigger came back" off the raw count would be misreading it.
-- **On the money vector it is ❌ BAD, and that is the verdict that governs.** The scorer computed a
-  risk-adjusted return per cycle of `-0.000387` over 7 cycles at `t=-1.59` against the `1.5` hurdle, with
-  gross `0.00 → 51,059.11` — significantly negative with exposure grown.
+The register's item #1 is confirmed by the cleanest read yet of `/api/signals/telemetry`. Measured expectancy
+by source and horizon, with the t-statistic computed from the reported `stdReturnBps` and resolved count:
 
-The synthesis, which is the part worth keeping: **stopping a forced exit is not the same as having a reason
-to hold the position.** The guard did remove a daily round-trip cost, and it replaced that cost with carry on
-a view the desk had itself measured as uninformative. The unexplored middle — decay the inventory at the
-partial-adjustment rate while breadth is absent, so silence costs neither a full round trip nor a full
-position's carry — is a different decision and needs its own ADR, not a restatement of this one.
+- **225s** — `reversion +0.042`, `trend +0.037`, `social +0.402`, `momentum -0.707`, `xsreversion -0.107`.
+  Every source inside ±0.71 bps, every `|t| < 0.71`. Nothing to trade.
+- **900s** — best is `reversion +0.774` (`t=+0.91`). Still nothing.
+- **3600s** — `social +5.917` (`t=+1.34`) and `reversion +3.079` (`t=+1.07`) are the largest expectancies in
+  the whole table.
 
-## What I did
+And the fusion weights are already aligned with that: `social 1.680` and `reversion 1.572` are the two
+heaviest. **The desk weights the sources that pay at 3600s, then re-plans every 30s and turns the position
+over long before 3600s arrives.** `turnover_cost_by_name` shows `fee_bps 1.00` per side on every equity, so a
+round trip spends ~2 bps of fee to chase a 225s expectancy of ~0.04 bps. `BAC` this window: four re-plans in
+90 seconds, three of them `CANCELLED … superseded by a fresh target (ADR-0084)`. `JNJ`: five cancelled
+entries 16:25–16:27Z, then `BUY 51` filled, then `SELL 6/7/9/2` "reduce toward a smaller target" by 16:31Z,
+then `SELL 63` liquidated at 16:38Z. That is the mechanism, not a metaphor for it.
 
-Completed the revert manually, exactly as the ADR-0133 precedent: the rejected mechanism is out of the
-running code (`ForecastCombiner`, `FusionPlanner`, `PositionBuffer` and the other fusion classes the
-`estimable` flag was threaded through); the loop's accumulating memory files are **kept**, never rolled back;
-and ADR-0135 is **kept** as a record, marked `Status: Reverted` with a "Why it was reverted" section stating
-both findings and a not-to-be-re-attempted note. `./gradlew -Pci test` green.
+One genuinely new datum worth recording: `xsreversion` at 3600s is `-7.765` bps at **`t=-2.19`** on 512
+resolved — the **only** statistically significant number in the table, and it is negative. Its fusion weight
+is already at the floor `0.25`, so the telemetry weighting is doing its job; but a source with significantly
+*negative* measured expectancy still sizing at floor weight in the correct-sign direction is a separate
+defect from the horizon mismatch, and it is ranked as such rather than folded into it.
 
-**Attribution, honestly:** I am claiming no PnL credit for this. Reverting to previously-running code should
-restore prior behaviour, not create edge, and the window's `+1.70` is mark-to-market on positions I did not
-touch — market, not change. What it buys is that the *next* measurement is meaningful.
+## Why no change
 
-## Next
-
-Item #2 in the register is the real edge question and is ready to ship once this scores: the desk re-plans
-every 30s while `/api/signals/telemetry` shows every source inside ±0.7 bps at 225s against a `fee_bps 1.00`
-plus `0.59`–`0.73` bps slippage round trip, with the two heaviest fusion weights on the sources that only pay
-at 900–3600s. I deliberately did not ship it this cycle — on top of un-reverted BAD code it would have been
-unattributable.
+The contract is explicit: a pending change under measurement must not have a new change stacked on it. At
+1/6 cycles, shipping the horizon fix now would make both unattributable — which is exactly how the last two
+BAD verdicts got muddled. The horizon/cost fix is designed and ranked #1; it ships the cycle after
+`c20fb0b70` scores.

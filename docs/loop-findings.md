@@ -3577,3 +3577,31 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Trigger/attribution.** No PnL is claimed for this change. The window's `+1.70` is mark-to-market on
   positions not touched this cycle — market, not change. Reverting to previously-running code restores prior
   behaviour; what it buys is that the next measurement is attributable at all.
+
+## 2026-08-03 17:00Z — a revert is verified by a trigger coming BACK, not by a grep returning empty
+
+- **Rule 256 — verify a revert on the RUNNING BEHAVIOUR, not just the source tree.** `c20fb0b70` cleared
+  every static check (`grep -rn "estimable" app/src/main/java/io/jethro/app/fusion/` → 0 lines; no
+  `estimable` field on `/api/fusion/targets`; ADR index `0135 … Reverted`), but the check that actually
+  closes the loop is that the branch ADR-0135 *suppressed* is firing again:
+  `fusion exit — target decayed to flat [… sources=1]` on `PFE SELL 26`, `CAT SELL 1`, `JNJ SELL 63`,
+  `CVX BUY 1`. A grep proves the code compiled without the mechanism; **only the restored trigger proves the
+  desk is running it.** Extends Rule 255 — that rule said don't grade a revert on ancestry; this one says
+  don't stop at the source either.
+- **Rule 257 — the desk's weights and the desk's clock disagree, and the clock is winning.**
+  `/api/signals/telemetry`: at **225s** every source is inside ±0.71 bps with `|t| < 0.71`; the expectancy
+  only appears at **3600s** (`social +5.917`, `t=+1.34`; `reversion +3.079`, `t=+1.07`). The fusion weights
+  already reflect that — `social 1.680` and `reversion 1.572` are the two heaviest. But the planner re-plans
+  every **30s** at `fee_bps 1.00` per side, so it pays ~2 bps round trip to chase a 225s expectancy of
+  `+0.042`. `JNJ` this window: 5 cancelled entries, `BUY 51`, `SELL 6/7/9/2`, `SELL 63` — a full round trip
+  in 13 minutes on a view that needs 60. **Weighting a source correctly is worthless if the holding period
+  is shorter than the horizon the weight was measured at.**
+- **Rule 258 — the only significant number in the telemetry is negative, and that is a reason for patience,
+  not a trade.** `xsreversion` at 3600s: `-7.765` bps, **`t=-2.19`** on 512 resolved — every other cell is
+  inside `|t| < 1.35`. The weighter is already handling it (floor weight `0.25` vs `social` 1.680). Do NOT
+  sign-flip a source on one significant t: that is the overfit this loop's INCONCLUSIVE wall was built from.
+  Require the sign to persist on an independent window first, then zero the weight rather than invert it.
+- **Trigger/attribution.** No PnL claimed. Window `-9.93` on total PnL is mark-to-market plus cost on
+  positions the revert did not select — market, not change. Gross `+1,018.67` at **3.3%** of the firm cap
+  with `$1,450,954` of headroom is the desired direction, not a risk event. No change shipped: `c20fb0b70`
+  is at **1/6** cycles and stacking on it would destroy the attribution.

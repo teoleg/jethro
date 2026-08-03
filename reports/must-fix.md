@@ -15,6 +15,73 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 17:00Z (**no change shipped — `c20fb0b70` is at 1/6 cycles.** Last block's item #1 is **✅ VERIFIED and closed**: the ADR-0135 revert landed in the code, on the endpoint, in the ADR index, and — the criterion that actually matters — in the *running desk's behaviour*. No process danger remains. The horizon/cost mismatch is now #1 and is quantified to the point of being ready to ship; a **new #2** is separated out of it.)
+
+### Step 0 — `c20fb0b70` (manual completion of the ADR-0135 revert): ✅ VERIFIED, four for four
+
+Graded on the **CODE and the BEHAVIOUR**, never on ancestry (Rule 255):
+
+- `grep -rn "estimable" app/src/main/java/io/jethro/app/fusion/` → **0** lines. Repo-wide the only survivor
+  is a prose comment in `TelemetryWeightsTest`.
+- `/api/fusion/targets` rows carry no `estimable` field — **0** occurrences of the string in the report.
+- ADR index shows `0135 … Reverted`, annotated record kept.
+- **Behavioural — the decisive one.** The suppressed branch is live again:
+  `fusion exit — target decayed to flat [… sources=1]` fires on `PFE SELL 26` (16:40:13Z), `CAT SELL 1` and
+  `JNJ SELL 63` (16:38:42Z), `CVX BUY 1` (16:43:46Z). Under ADR-0135 these were exactly the orders that did
+  not happen. Source-tree greps prove a revert compiled; a restored trigger proves it *deployed*.
+
+No PnL is claimed. The window's `-9.93` is mark-to-market and cost on positions this change did not select.
+
+### Item #1 — the desk re-plans every 30s against sources with NO measurable return until 3600s (⚠️ OPEN, promoted from #2, now fully quantified and ready to ship)
+
+The evidence closed this cycle. Expectancy by source × horizon from `/api/signals/telemetry`, t computed
+from the reported `stdReturnBps` and resolved count:
+
+| horizon | best source | avgReturnBps | t |
+| --- | --- | --- | --- |
+| 225s | social | `+0.402` | `+0.70` |
+| 900s | reversion | `+0.774` | `+0.91` |
+| 3600s | social | `+5.917` | `+1.34` |
+
+At **225s every source is inside ±0.71 bps with every `|t| < 0.71`** — there is nothing there to trade. The
+expectancy lives at **3600s**, and the fusion weights already know it: `social 1.680` and `reversion 1.572`
+are the two heaviest dials, and they are precisely the two sources that only pay at 3600s. Then the planner
+re-plans every **30s** and turns the position over long before 3600s arrives, at `fee_bps 1.00` per side
+(`turnover_cost_by_name`, every equity) — roughly 2 bps of fee round trip chasing a 225s expectancy of
+`+0.042`.
+
+Live instances this window: `BAC` re-planned four times in 90s, three `CANCELLED … superseded by a fresh
+target (ADR-0084)`. `JNJ` — five cancelled entries 16:25–16:27Z, `BUY 51` filled, `SELL 6/7/9/2` "reduce
+toward a smaller target" by 16:31Z, `SELL 63` liquidated 16:38Z. A full round trip inside 13 minutes on a
+view whose expectancy needs 60.
+
+**VERIFY-BY (the cycle after `c20fb0b70` scores):** the count of
+`fusion re-plan — passive order superseded by a fresh target (ADR-0084)` rows in `recent_orders` falls
+materially versus this window's, **and** median holding time per name rises toward the horizon the weights
+imply — with fills per name in `turnover_cost_by_name` falling while gross exposure does **not** fall.
+Cost down, position retained: both, or it is not the fix.
+
+### Item #2 — `xsreversion` has the only statistically significant expectancy in the book, and it is NEGATIVE (⚠️ OPEN, NEW — split out of #1, deliberately not merged with it)
+
+`xsreversion` at 3600s: `avgReturnBps -7.765` on 512 resolved, **`t = -2.19`**. Every other cell in the
+telemetry table is inside `|t| < 1.35`. This is the single significant measurement the desk has, and it says
+the source is anti-predictive at the horizon where the others earn.
+
+The telemetry weighting is **already responding correctly** — `xsreversion` sits at the floor weight `0.25`
+while `social` is at `1.680`. So this is not a broken weighter. The open question is narrower: a source
+measured as significantly *negative* still contributes at floor weight **in the correct-sign direction**,
+which is a small persistent drag rather than a large one.
+
+Ranked #2 and **not** folded into #1 on purpose: sign-flipping a source on a single significant t-statistic
+is textbook backtest overfitting, and the conservative reading (floor the weight to zero, do not invert) is
+a different decision from the horizon fix. It needs its own cycle and its own ADR, not a rider on another
+change.
+
+**VERIFY-BY:** `xsreversion`'s 3600s `t` is re-read next cycle and the sign persists on a grown resolved
+count — persistence across an independent window is the precondition for acting at all.
+
+---
+
 ## Verification block — 2026-08-03 16:30Z (**change shipped: the failed auto-revert of the graded-BAD ADR-0135 is completed by hand.** The scorer closed ADR-0135's ADR-0116 window at **❌ BAD** and its own `git revert` **hit a conflict and did not land** — so the rejected mechanism was **still live in the running code**. That outranks every open item: the loop was about to stack a new change on top of code the scorer had already rejected. Item #1 is that revert.)
 
 ### Step 0 — ADR-0135 (`74a47adee`): 🔴 REGRESSED on the money vector, and the revert never landed
