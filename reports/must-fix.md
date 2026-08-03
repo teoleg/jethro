@@ -15,6 +15,127 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 15:00Z (**no change shipped — ADR-0135 is still under measurement at 3/6 cycles.** ADR-0135 is confirmed *deployed* but its guarded branch never fired, so it is **NOT YET EXERCISED**, not verified. Meanwhile the defect it was shipped to close **recurred through the adjacent `sources=0` branch it deliberately left out of scope** and took the MACRO book to zero. That is the new item #1.)
+
+### Why no change this cycle
+
+`scripts/score-change.py score` printed **`74a47adee still accumulating evidence (3/6 cycles) — held, not
+scored this run`** and `reports/.pending-baseline.json` is present. ADR-0116 forbids stacking a change on a
+pending one. Verified, re-ranked, stopped.
+
+### Step 0 — ADR-0135 (`74a47adee`): ⚠️ DEPLOYED, NOT YET EXERCISED
+
+**Deployment is proven, not assumed.** `/api/fusion/targets` now carries an `"estimable"` field on every
+target row — a field that did not exist before this commit. The running binary is the ADR-0135 binary.
+
+**Its guarded branch never fired, so the window carries no evidence either way.** Of the 44 orders in the
+post-fix window (`recent_orders`, from 14:00Z):
+
+| trigger | source count | orders |
+| --- | --- | --- |
+| `fusion entry — target increase` | `sources=2` | 28 |
+| `fusion entry — target increase` | `sources=3` | 9 |
+| `fusion reduce toward a smaller target` | `sources=3` | 1 |
+| `fusion exit — target decayed to flat` | **`sources=0`** | **1** |
+| `auto-hedge EQUITY (ADR-0019)` | n/a | 5 |
+
+**Zero orders at `sources=1`.** ADR-0135's confirm-next-run criterion ("no order carries the
+decayed-to-flat trigger at one source") is satisfied *vacuously* — no name reached one effective source
+all window. It stays under measurement; do not grade it on this window.
+
+### Item #1 — a 30-second collapse of source breadth to ZERO liquidates the book in full, while entry is paced over 18 minutes (⚠️ OPEN, NEW — this is the ADR-0135 defect recurring one branch over)
+
+**What happened, from `recent_orders` alone.** NQ carried a two-source short view and was being worked in:
+
+| time (UTC) | instrument | trigger | forecast / sources |
+| --- | --- | --- | --- |
+| 14:32:21 | NQ | `fusion entry — target increase` | `-6.867533453373563`, **sources=2** |
+| 14:32:51 | NQ | **`fusion exit — target decayed to flat`** | `0.0`, **sources=0** |
+
+One cycle. Thirty seconds. No change of view was ever measured — the view *stopped being reported*, and
+`ForecastCombiner` maps "no source spoke" to a combined value of `0.0`, which `TargetPlanner` maps to a
+target of flat, which ADR-0090 works at FULL urgency. `FusionPlanner.java:83–84` is the sweep that owns
+this case, and `ForecastCombiner.java:121` is the line that hands it the zero.
+
+**What it cost, from `/api/risk` and `/api/attribution`.** The MACRO book:
+
+```
+"book": "MACRO",  "totalPnl": "-56.79950536",  "realizedPnl": "-56.79950536",
+                  "unrealizedPnl": "0.00000000",  "grossExposure": "0.00000000"
+```
+
+Every dollar of it realized; nothing left on. NQ is now absent from `/api/fusion/targets` altogether.
+The firm total is **`-13.88198097`** — MACRO's realized loss is four times the whole firm's PnL, offset
+only by HEDGE `+107.90433891` against ALPHA `-64.98681452`.
+
+**Attribution, honestly (Rule 237).** The **-$56.80 itself is market** — a fresh ~$23.6k NQ short that the
+tape moved against between 14:21Z and 14:32Z. The **sweep's** attributable damage is not the loss, it is
+the *decision*: it crystallised a position whose own forecast had read `-6.8675` thirty seconds earlier,
+and it paid a full round trip (NQ `turnover_usd 55457.65`, `fee_usd 1.1092`) to do it. Do not credit the
+sweep with de-risking and do not blame it for the mark.
+
+**The asymmetry that makes this expensive.** Entry is paced — 17 NQ orders across 18 minutes to build one
+position. Exit on an *information outage* is instant and full-urgency. The desk is built to accumulate
+slowly and liquidate at once, so any lapse in sensor availability is a one-way ratchet down.
+
+**VERIFY-BY (next run):** in `recent_orders`, no `fusion exit — target decayed to flat` order at
+`sources=0` for a name that carried `sources>=2` within the prior 5 planning cycles; and MACRO
+`grossExposure` in `/api/risk` is non-zero while its combined forecast has not changed sign. If a
+zero-source name must still be unwound (it must — a derouted name cannot be held forever), the unwind is
+*paced*, not FULL: the exit spans more than one cycle in `recent_orders`.
+
+**Explicitly in scope for the fix, and explicitly not.** ADR-0065's responsibility — a held name always
+gets a target so it can never be orphaned — is correct and stays. What is wrong is the *urgency and
+immediacy* of the resulting flat target when the trigger is an absence of information rather than a
+measured view. The deterministic floor (pre-trade guardrail, firm drawdown breaker, ADR-0086 cut,
+ADR-0027 breaker) is untouched and must remain able to flatten instantly.
+
+### Item #2 — 9 of the 10 carried target rows hold nothing against six-figure targets; the firm deploys 1.6% of its cap (⚠️ OPEN, re-ranked down from #1 — cause NOT localised)
+
+From `/api/fusion/targets` (`instruments: 22`, 10 rows carried in the digest), every row `estimable: true`
+and every row `deltaQty: 0.0`:
+
+| name | sources | forecast | targetQty | price | currentQty | deltaQty |
+| --- | --- | --- | --- | --- | --- | --- |
+| KO | 3 | `5.802` | `1104.641247` | 86.76 | 0 | `0.0` |
+| AAPL | 3 | `5.779` | `268.101107` | 305.39 | 0 | `0.0` |
+| BAC | 3 | `2.199` | `702.725` | 62.00 | 0 | `0.0` |
+| NVDA | 3 | `-3.490` | `-151.177` | 206.25 | **-44** | `0.0` |
+
+Against `grossExposure 23679.80075000` — **1.6% of the $1,500,000 firm cap**, `1,476,320` of headroom.
+Of that gross, `HEDGE` is `14604.36075000` (62%) hedging an `ALPHA` book of `9075.44000000` that is, on
+inspection, one real position (NVDA −44 ≈ $9,075) plus dust across `positionCount 21`.
+
+**Cause is NOT established.** Last block's σ-coverage story for this item is unproven — this run's digest
+carries no `streamVolMeasuredNames` figure to re-check it against, and the same register has already
+recorded one falsified trace on this item (Rule 234). **Do not inherit that diagnosis as fact.** NVDA
+demonstrably trades (six fills this window) while KO, holding an equal-conviction three-source view, does
+not; the next diagnosis must start from what differs between those two names, measured, not recalled.
+
+**Ranked below #1 deliberately.** #1 is the mechanism that empties the book ten minutes after it fills.
+Deploying more capital before fixing #1 just feeds more of it into the same sweep.
+
+**VERIFY-BY:** at least one name other than NVDA/ES shows a non-zero `deltaQty` in `/api/fusion/targets`
+while its `currentQty` is 0 and its forecast exceeds the conviction floor; firm `grossExposure` rises
+without the increase being a single name.
+
+### Item #3 — a resting passive order is cancelled and re-issued every 30s against a bit-identical forecast (⚠️ OPEN, NEW)
+
+`recent_orders` shows the NQ forecast frozen at exactly `-6.867543315104213` across **13 consecutive**
+planning cycles (14:23:45Z → 14:29:49Z), and on each one the resting order was killed by
+`fusion re-plan — passive order superseded by a fresh target (ADR-0084)`. The "fresh target" was
+bit-identical to the one it superseded. Of the NQ orders in the window, only 2 reached FILLED.
+Firm-wide `orders_by_status`: `FILLED 4901`, `CANCELLED 1750`, `REJECTED 84`.
+
+A passive order that is never allowed to rest cannot earn the spread it was placed to earn — this is the
+other half of why entry takes 18 minutes (item #1's asymmetry). Ranked third because a cancel costs no
+fee directly; its cost is opportunity and it compounds item #2.
+
+**VERIFY-BY:** the cancelled share of a name's orders over a window in which its combined forecast does
+not change sign; the ADR-0084 re-plan should not fire when the new target is unchanged.
+
+---
+
 ## Verification block — 2026-08-03 14:30Z (**no change shipped — ADR-0135 is still under measurement at 2/6 cycles.** The book came off DORMANT at the US open. Last block's item #1 is 🔴 **FALSIFIED as stated** — the σ veto is not permanent, it warms with the live tape. It is **re-scoped**, not closed: σ covers only 6 of 20 names, which under-deploys the book and concentrates 82% of firm gross into one levered index future.)
 
 ### Why no change this cycle

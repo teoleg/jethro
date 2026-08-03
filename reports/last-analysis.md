@@ -1,62 +1,60 @@
-The book came off dormant at the US open and the "permanent veto" I diagnosed last cycle is FALSIFIED — the σ sensor warms with the live tape; the real defect is that it warms for only 6 of 20 names, so 82% of the firm's risk is one levered index future.
+The desk lost its largest position to a 30-second collapse in source breadth to ZERO — the same defect ADR-0135 was shipped to close, recurring through the one branch that change deliberately left out of scope.
 
-*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`,
-`/api/signals/telemetry`, `logs/report.md`, the scorer's output, or the repo source. None is authored
-here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`, `recent_orders`,
+`logs/report.md`, the scorer's output, or the repo source. None is authored here — invariant 7 / ADR-0016.)*
 
 ## No code change this cycle — the pending change is still under measurement
 
-`scripts/score-change.py score` prints **`74a47adee still accumulating evidence (2/6 cycles) — held, not
-scored this run`**, and `reports/.pending-baseline.json` is present. Under ADR-0116 a new change on top of
-a pending one destroys its evidence. So this run verifies, corrects a wrong diagnosis, and records; it
-ships no code.
+`scripts/score-change.py score` prints **`74a47adee still accumulating evidence (3/6 cycles) — held, not
+scored this run`**, and `reports/.pending-baseline.json` is present. Under ADR-0116 a new change stacked on
+a pending one destroys its evidence. So this run verifies, diagnoses, ranks and records; it ships no code.
 
 ## Situation — the four questions
 
-1. **Money.** Total PnL **$8.87**, down **$23.64** from **$32.51** last run (and the same over the last
-   three runs). By book: MACRO **-$55.97**, ALPHA **-$21.98**, HEDGE **+$86.82**. The move is almost
-   entirely MACRO's fresh NQ short: unrealized **-$19.68** on a position opened **15 minutes ago**.
-2. **Risk.** Gross **$28,761.93** — **1.9%** of the $1,500,000 firm cap, headroom **$1,471,238**; net
-   **-$23,563.29**, **2.4%** of the $1,000,000 net cap. **No flags.** The DORMANT state is over: exposure
-   rising with this much room is the goal, not a concern.
-3. **Cause.** Not ADR-0135. Every entry this window fired on `fusion entry — target increase` with
-   `sources=2` or `sources=3`; ADR-0135 only changes the `sources=1`/unestimable branch, so it is
-   causally uninvolved in this window's PnL. The book re-entered because the US session opened.
-4. **Danger.** None. Breaker clear, regime CALM, `ticksDropped: 0`, nothing near a cap.
+1. **Money.** Total PnL **`-13.88198097`**, against **`5.00354203`** at the last deterministic heartbeat
+   (`2026-08-03T14:37:28Z`) — the book crossed back under water inside the window. By book:
+   HEDGE **`+107.90433891`**, ALPHA **`-64.98681452`**, MACRO **`-56.79950536`**. The desk is UNDERWATER
+   and off the growth target (`on_track=false`, `stale=true`).
+2. **Risk.** Gross **`23679.80075000`** — **1.6%** of the $1,500,000 firm cap, **$1,476,320** of headroom.
+   Net **`5528.92075000`**, 0.6% of the net cap. Nowhere near a cap, breaker `halted: false`. Exposure is
+   not the danger here; the near-total *absence* of it is the standing opportunity.
+3. **Cause.** ADR-0135's own branch never fired (zero `sources=1` orders in 44), so it is unscored and
+   unexercised — do not grade it on this window. The window's real event is elsewhere: at 14:32:21Z NQ
+   was still being worked in on `forecast=-6.867533453373563, sources=2`; thirty seconds later, at
+   14:32:51Z, it exited on **`fusion exit — target decayed to flat [forecast=0.0, sources=0]`**. The
+   MACRO book is now `grossExposure 0.00000000` with `realizedPnl -56.79950536` and nothing left on. NQ
+   has dropped out of `/api/fusion/targets` entirely.
+4. **Danger.** No — not bleeding near a cap, not near the breaker. The pathology is the opposite shape: a
+   book that deploys 1.6% of its allowance and then surrenders the largest thing it manages to build the
+   moment a sensor stops reporting.
 
-## Step 0 — last cycle's #1 was WRONG, and this run's telemetry says so
+## The mechanism, and what is honestly attributable
 
-I recorded that the ADR-0126 unarmed-stop veto was a **permanent** freeze because the σ sensor's warm-up
-(121 prices at the 30 s cadence ≈ 60.5 min) exceeded the app's ~30 min lifetime. **That claim is
-falsified.** The seed comes from the durable mark store (ADR-0071), which **grows as the tape prints**:
-last cycle's boot seeded AAPL **75** / NVDA **85** of 121; this cycle's boot seeded AAPL **107** / NVDA
-**117** of 121. `streamVolMeasuredNames` went **1 → 6**. The dormancy was a *closed-session* artifact — a
-weekend adds no marks to the store — not a structural deadlock. Corrected in `docs/loop-findings.md`
-(Rule 234 supersedes Rule 231) so the memory does not carry a wrong lesson.
+`ForecastCombiner` maps "no source spoke" to a combined value of `0.0`; `TargetPlanner` maps `0.0` to a
+target of flat; ADR-0090 works a flat target at FULL urgency. So an *absence of information* is executed
+as a *measured decision to be flat*. ADR-0135 named exactly this failure and fixed it at one effective
+source, explicitly leaving zero sources to ADR-0065's orphan sweep. The next live window collapsed through
+the branch left open.
 
-## What is actually costing money — the desk expresses 2.4% of its own intent
+**Attributed honestly (Rule 237):** the **-$56.80 is market** — mark-to-market on a fresh ~$23.6k NQ short
+the tape moved against between 14:21Z and 14:32Z. It is *not* the sweep's loss, and the sweep gets no
+credit for "de-risking" either. What the sweep costs is the decision itself: it crystallised a position its
+own forecast had backed thirty seconds earlier, and paid a full round trip to do it. I checked and
+discarded the obvious explanation — NQ's provider clock is stale *now* (`647s`), but it froze at 14:49Z,
+sixteen minutes **after** the liquidation, so staleness did not cause it. The trigger for the 2→0
+transition is not yet localised and I will not guess it; that is next cycle's first measurement.
 
-`/api/fusion/targets` shows **19 of 20** names estimable with real targets summing to **$1,208,080** of
-|notional|. The desk holds **$28,761.93** of it. The `aims` map explains exactly which names are stuck:
-**14 of 20 read `0.0`**, and the six that don't — GOOG **+47.33**, NVDA **-83.27**, AAPL **+19.91**, AMZN
-**-12.06**, NQ **-0.164**, MSFT **-0.018** — are precisely the **6** counted by `streamVolMeasuredNames`.
-An exact match. For the other 14, `PositionBuffer.java:164` re-seeds the aim to `held + delta` = 0 every
-cycle, so intent cannot accumulate at all (that part of last cycle's trace stands).
+**The asymmetry is the expensive part.** Entry took 17 orders across 18 minutes; the exit took one cycle at
+full urgency. A desk that accumulates slowly and liquidates at once turns every lapse in sensor
+availability into a one-way ratchet down — which is also why `orders_by_status` reads `FILLED 4901` against
+`CANCELLED 1750`, with NQ's forecast frozen bit-identical at `-6.867543315104213` across 13 consecutive
+cycles while ADR-0084 cancelled and re-issued the resting order on every one of them.
 
-**The consequence is concentration, and that is the real risk.** NQ alone is **$23,492.67** of the
-**$28,761.93** gross — **81.7%** — so the firm's book is effectively a naked short index future, while the
-equity legs that would diversify it are the ones held at zero. PG carries `combinedForecast -7.398` at
-`agreement 0.614` and a **-$213,901** target with `aim 0.0`; AAPL **+$127,333** with `aim 19.91` and
-nothing held.
+## What I did, and what next cycle does
 
-**The sharpest lead for next cycle:** on the *same* mark store, at the *same* span of 120,
-`covarianceCoveredNames` is **19** while `streamVolMeasuredNames` is **6**. Two estimators, one data
-source, one span — one covers the book and the other covers under a third of it. That says the defect is
-in σ's **seeding path**, not in data availability, and it is where the one change goes once ADR-0135 is
-scored.
-
-**Honest limits.** The -$23.64 is a 15-minute mark on a fresh $23.5k short (**-0.084%**) — noise, not
-evidence about any change. Fees moved only **+$0.79** this window, so turnover cost is not the current
-problem; ALPHA's **$281.55** is cumulative history. And per Rule 229 the fix must **arm** the stop with a
-measured σ, never bypass `stopArmed` — opening positions the ADR-0086 cut cannot price an exit for is
-exactly the risk ADR-0126 exists to prevent.
+Re-ranked `reports/must-fix.md`: **#1** is now the zero-source full-urgency sweep, with a VERIFY-BY that
+demands a *paced* unwind — a derouted name genuinely must still be exited, so the fix is the urgency, not
+the responsibility. The old #1 — 9 of 10 carried targets holding nothing against six-figure targets while
+the firm deploys 1.6% of its cap — is **#2**, with last block's σ-coverage explanation explicitly marked
+unproven so the next cycle does not inherit a trace this register has already had falsified once. Fixing #2
+before #1 would only feed more capital into the same sweep.

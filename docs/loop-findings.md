@@ -3450,3 +3450,34 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   branch. The move was **-0.084%** on a 15-minute-old $23.5k short. **Check the order `reason` strings
   against the change's actual code path before crediting or blaming it — ADR-0134's origination triggers
   make this a lookup, so there is no excuse for guessing.**
+
+## 2026-08-03 15:00Z — a fix that guards one branch of a defect gets tested on the branch next door
+
+- **Rule 238 — when you scope a defect's fix to one branch, the untouched branch is not "out of scope", it
+  is the next incident.** ADR-0135 shipped last cycle to stop a breadth collapse executing as a decision to
+  be flat, and explicitly left `sources=0` to ADR-0065's orphan sweep. The very next live window: NQ read
+  `forecast=-6.867533453373563, sources=2` at 14:32:21Z and `fusion exit — target decayed to flat
+  [forecast=0.0, sources=0]` at 14:32:51Z — thirty seconds — taking the MACRO book to `grossExposure
+  0.00000000` with `realizedPnl -56.79950536`. **The mechanism is `0.0` meaning two different things:
+  "measured flat" and "nobody spoke". Fix that conflation everywhere it is read, or fix it in the type —
+  patching one call site just moves which call site fires.**
+- **Rule 239 — a vacuously-satisfied confirm-next-run criterion is NOT a verification.** ADR-0135's
+  criterion was "no decayed-to-flat order at one source". The window had **zero** `sources=1` orders of any
+  kind (44 orders: 28 at `sources=2`, 9 at `sources=3`, 1 at `sources=0`, 5 hedge). The criterion passed
+  because the branch never ran. **Write VERIFY-BY conditions that require the guarded path to EXECUTE and
+  behave, not conditions an absence of traffic satisfies — otherwise "verified" just means "quiet".**
+- **Rule 240 — prove deployment from a field the change ADDED, not from the commit sha.** `/api/fusion/targets`
+  now carries `"estimable"` on every row, which did not exist before `74a47adee`. That is one grep and it
+  is unforgeable, where a sha match only proves what was built. **Every change should leave one observable
+  fingerprint in telemetry so the next cycle can confirm the binary, not the build.**
+- **Rule 241 — check the timestamp direction before accepting the obvious cause.** NQ's provider clock is
+  frozen (`647s` stale) and "stale feed killed the sources" was the clean story. It froze at **14:49Z**,
+  sixteen minutes **after** the 14:32:51Z liquidation. **A stale-looking sensor at report time says nothing
+  about its state at event time — order the two timestamps before building the causal chain on it.** This
+  is the second consecutive cycle where the tidy first explanation was wrong (see Rule 234).
+- **Rule 242 — entry paced, exit instant, is a structural ratchet down.** NQ took 17 orders across 18
+  minutes to build and one cycle at FULL urgency to destroy; firm-wide `orders_by_status` is `FILLED 4901`
+  / `CANCELLED 1750`, and NQ's forecast sat bit-identical at `-6.867543315104213` for 13 consecutive cycles
+  while ADR-0084 cancelled the resting order on every one. **When accumulation is throttled and liquidation
+  is not, the book cannot hold size no matter how good the signal — compare the two urgencies before
+  concluding a desk has no edge.**
