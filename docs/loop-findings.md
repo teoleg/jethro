@@ -3668,3 +3668,36 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `sources=0/1` flatten branch fired on `XOM`/`JPM` (17:37:13Z) and `NEE` (17:39:15Z), crystallising `NEE`
   `realizedPnl -25.58` and closing `JPM` out of the table — recorded against the pending change, not excused,
   and not graded a regression since a revert restores prior behaviour by construction.
+
+## 2026-08-03 18:30Z — item #1 caught executing: three names opened and fully flattened inside one window
+
+- **Rule 267 — the breadth collapse pays a full round trip on a view that never reversed.** Three
+  `fusion exit — target decayed to flat` orders fired this window, each closing a position the *same* window
+  opened: `BAC` short `159`+`146`+`130` @ 17:43–17:46Z (forecasts `-10.14`/`-10.09`/`-11.20`) bought back
+  `435` @ 18:05:28Z `sources=0` — **~19 min**; `KO` `97`+`76` @ 17:44–17:45Z (`-12.83`/`-15.03`) bought back
+  `175` @ 18:15:35Z `sources=1` — **~30 min**; `JNJ` `20`+`3`+`3` @ 17:53–17:54Z bought back `26` @ 18:05:27Z
+  `sources=1` — **~12 min**. Every exit carries `forecast=0.0`/`-0.0`: direction never reversed, the desk
+  merely stopped being able to *count* sources. That is the `-39,623.47` gross drop, and it is item #1
+  executing rather than being argued.
+- **Rule 268 — match the telemetry horizon to the OBSERVED holding period before comparing edge to cost.**
+  These holds are 12–30 minutes, so **900s** is the row that matters, not 225s or 3600s. There:
+  `trend +0.371` (275 cohorts, `stdCohortMeanBps 13.699`), `reversion +0.698` (237, `13.870`),
+  `social +0.849` (61, `15.773`), `momentum +2.140` (23, `14.144`), `xsreversion -1.261` (126, `12.653`) —
+  all far inside their cohort dispersion. Cost per side is `fee_bps 1.00` plus `tca avgSlippageBps`
+  `BAC 0.4878` / `KO 0.4638` / `JNJ 0.4307`. The trend+reversion pair driving these `sources=2`–`3` entries
+  measures **below one side's cost**. Also: `Forecast.java` is Carver-scaled (`TARGET_ABS 10`, `CAP 20`) — a
+  `-15` is a 1.5×-strength *view*, **not** 15 bps. Never read the order-reason forecast as a return.
+- **Rule 269 — a VERIFY-BY that drifts this much on a no-op cycle cannot grade a change.** Last cycle's
+  three criteria all moved with **no change shipped**: supersession cancels `27/59 → 26/60`, zero-fill entry
+  names `4 → 2` (`HD`, `PG`), and gross *fell* `-39,623.47` against "gross not falling". Two of three would
+  have read as partial success for a no-op. Replaced with a direct count of the defect itself — **same-window
+  round trips**, `3` this window (`BAC`/`KO`/`JNJ`) on `435`/`175`/`26` shares. Prefer a VERIFY-BY that counts
+  the defect over one that proxies it.
+- **Trigger/attribution.** No change shipped (`c20fb0b70` at **5/6**). Window `-44.02` on total PnL; gross
+  `-39,623.47`, leaving **1.7%** of the firm cap used with `$1,474,195` headroom — no risk event, and a book
+  this far under budget shrinking two-thirds is an opportunity signal, not a safety one. The whole gross move
+  is the pending change's own restored branch, recorded against it and not excused; not graded a regression,
+  since a revert restores prior behaviour by construction and it scores next cycle. `ALPHA -350.28` on
+  `feesPaid 330.60` vs `HEDGE +122.06` on `9.66`; `totalFees 341.37` against `firmTotal -285.01` — fees are
+  still the entire deficit. The positions block is truncated and cumulative, so no per-name decomposition of
+  the window delta is claimed.

@@ -15,6 +15,71 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-03 18:30Z (**no change shipped — `c20fb0b70` is at 5/6 cycles.** Item #1 stays #1 and is now **demonstrated rather than argued**: three names were opened and completely flattened inside this one window, on a source-breadth collapse with the direction never reversing. Item #1's **VERIFY-BY is replaced** — last block's three criteria all moved materially on a no-op cycle, so they could not grade anything.)
+
+### Step 0 — `c20fb0b70` (the ADR-0135 revert): ⚠️ UNDER MEASUREMENT, deployment confirmed a fourth window
+
+`scripts/score-change.py score` → `still accumulating evidence (5/6 cycles) — held, not scored this run`.
+`reports/.pending-baseline.json` present against its `16:37:25Z` baseline. Held, per contract; it scores
+next cycle.
+
+Behavioural confirmation (Rule 256): the restored `fusion exit — target decayed to flat` branch fired on
+`JNJ BUY 26` (`sources=1`, 18:05:27Z), `BAC BUY 435` (`sources=0`, 18:05:28Z) and `KO BUY 175` (`sources=1`,
+18:15:35Z).
+
+**Recorded against it, not glossed:** those three orders **are** the window's `-39,623.47` gross drop. Still
+not graded a regression — a revert restores prior behaviour by construction, and the scorer settles it next
+cycle — but the register keeps watching it select trades rather than calling it costless.
+
+### 🔁 VERIFY-BY replaced — last block's criteria drifted on a cycle with NO change shipped
+
+| criterion set 18:00Z | this window, no change shipped | verdict |
+| --- | --- | --- |
+| supersession cancels below `27/59` | `26/60` | moved on its own |
+| zero-fill entry names below `4` | `2` (`HD`, `PG`) | moved on its own |
+| gross exposure not falling | fell `-39,623.47` | moved on its own |
+
+Two of the three would have read as partial success for a no-op. A proxy that swings this far unaided cannot
+grade a change (Rule 269). Replaced below with a direct count of the defect itself.
+
+### Item #1 — a source-breadth collapse pays a full round trip on a view that never reversed, at a cost above every measured expectancy at the matching horizon (⚠️ OPEN, stays #1, now demonstrated)
+
+**The execution, read from `recent_orders`** — every one of these closed a position the *same* window opened:
+
+| name | opened (fill, forecast) | flattened | held |
+| --- | --- | --- | --- |
+| `BAC` | `SELL 159` 17:43:48Z `-10.14`, `SELL 146` 17:46:20Z `-10.09`, `SELL 130` 17:46:51Z `-11.20` | `BUY 435` 18:05:28Z `sources=0` | ~19 min |
+| `KO` | `SELL 97` 17:44:18Z `-12.83`, `SELL 76` 17:45:19Z `-15.03` | `BUY 175` 18:15:35Z `sources=1` | ~30 min |
+| `JNJ` | `SELL 20` 17:53:25Z `-6.18`, `SELL 3` 17:54:26Z `-6.54`, `SELL 3` 17:54:56Z `-5.54` | `BUY 26` 18:05:27Z `sources=1` | ~12 min |
+
+Every exit carries `forecast=0.0`/`-0.0`: the desk never reversed its view, it stopped being able to *count*
+sources. `BAC` was accumulated on three strengthening fills and bought back entire 19 minutes later.
+
+**The cost, at the horizon that matches a 12–30 minute hold (900s), clustered denominator:**
+`trend +0.371` (`cohorts 275`, `stdCohortMeanBps 13.699`), `reversion +0.698` (`237`, `13.870`),
+`social +0.849` (`61`, `15.773`), `momentum +2.140` (`23`, `14.144`), `xsreversion -1.261` (`126`, `12.653`)
+— all far inside their own dispersion; no source is significant at 900s, 225s or 3600s. Against
+`fee_bps 1.00` per side plus `tca avgSlippageBps` `BAC 0.4878` / `KO 0.4638` / `JNJ 0.4307` per side. The
+`sources=2`–`3` trend+reversion pair driving these entries measures **below one side's cost**.
+Firm-wide: `totalFees 341.366091` against `firmTotal -285.01226135`; `ALPHA -350.27709557` on
+`feesPaid 330.599686` while `HEDGE +122.06433958` pays `9.657251`.
+
+**Unit correction, so it is not repeated:** `app/src/main/java/io/jethro/app/fusion/Forecast.java` is
+Carver-scaled (`TARGET_ABS = 10.0`, `CAP = 20.0`). The `-15` on `KO` is a 1.5×-average-strength *view*, not
+15 bps of expected return. No calibration claim may be read off the order-reason forecast.
+
+**The change it calls for (ships next cycle, once `c20fb0b70` scores):** gate the **entry** — require the
+source breadth that justifies an entry to persist before size is committed, so a reading about to collapse
+never opens a round trip. Deliberately **not** the exit branch: that is ADR-0135's mechanism, already graded
+❌ BAD and reverted, and a reverted idea is never re-attempted.
+
+**VERIFY-BY (new, counts the defect instead of proxying it):** **same-window round trips** — names with both
+`fusion entry` fills and a `fusion exit — target decayed to flat` fill inside one report window. This window:
+**3** (`BAC`, `KO`, `JNJ`), on `435`/`175`/`26` shares. The fix must drive that count down while `totalFees`
+growth per window falls relative to `firmTotal`, and without gross exposure collapsing.
+
+---
+
 ## Verification block — 2026-08-03 18:00Z (**no change shipped — `c20fb0b70` is at 4/6 cycles.** Item #1 stays #1, but its *stated mechanism* is **partly retracted**: a controlled re-test on this window does **not** reproduce the forecast-strength adverse selection Rule 260 claimed. The cost and the non-execution are confirmed and now carry cleaner evidence; the "we fill our worst view" framing does not survive its own denominator test.)
 
 ### Step 0 — `c20fb0b70` (the ADR-0135 revert): ⚠️ UNDER MEASUREMENT, deployment confirmed a third window
