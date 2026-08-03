@@ -19,3 +19,8 @@ __pycache__/
 
 # continuous-improvement loop single-flight lock
 .improve-loop.lock
+
+
+# muni-world OS PDF drop folder (auto-loaded)
+os-inbox/
+muni-world/os-inbox/

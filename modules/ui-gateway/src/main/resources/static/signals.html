@@ -39,6 +39,7 @@
   .lead { color:var(--dim); font-size:12px; margin:2px 2px 0; }
 </style>
   <script src="format.js"></script>
+<link rel="stylesheet" href="/nav.css">
 </head>
 <body>
 <div class="topbar">
@@ -52,7 +53,7 @@
       <a class="tab" href="/hub-ops.html">Ops</a>
     </nav>
     <span class="spacer"></span>
-    <span class="hint">The raw source signals behind the landing "combined view" (ADR-0055)</span>
+    <span class="hint">The raw source signals behind the landing "combined view"</span>
   </div>
 </div>
 <main>
@@ -60,7 +61,7 @@
   <div class="lead">Every source's forecast combined into one target per instrument — the decision the landing page shows, with the full drill-down. Orders (when routing is live) come ONLY from this, never from the individual panels below.</div>
   <div class="panel" id="fusionBook" style="margin-top:8px"><div class="muted" style="padding:12px">loading…</div></div>
 
-  <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM thesis → quant sizes/gates it; scored at horizon expiry (ADR-0022/0027). A forecast source into the book above.</span></div>
+  <div class="section-h">AI hypotheses <span class="muted" style="text-transform:none;letter-spacing:0">— LLM thesis → quant sizes/gates it; scored at horizon expiry. A forecast source into the book above.</span></div>
   <div class="panel"><div id="hypotheses" class="muted" style="padding:14px">loading…</div></div>
   <div id="hypoStats" class="muted" style="font-size:11px;padding:6px 4px"></div>
 
@@ -74,10 +75,10 @@
 
   const VERDICT_CLASS = { ADMISSIBLE:"up", BLOCKED:"down", UNSIZEABLE:"", NO_MARK:"", UNKNOWN_INSTRUMENT:"down" };
   function btCell(s, pnl, trades) {
-    if (s == null) return '<span class="muted" title="not measured — ADR-0049 fail-closed: not order-eligible">—</span>';
+    if (s == null) return '<span class="muted" title="not measured — fail-closed: not order-eligible">—</span>';
     if (s) return `<span class="up" title="deterministic OOS backtest net-positive on a majority of sim paths${pnl?` (median ${esc(pnl)}, ${trades} trades)`:''}">supported</span>`;
     if (trades === 0) return '<span class="muted">no trades</span>';
-    return '<span class="down" title="OOS backtest net-negative — gated (ADR-0049)">unsupported</span>';
+    return '<span class="down" title="OOS backtest net-negative — gated">unsupported</span>';
   }
   function renderHypotheses(rows) {
     document.getElementById("hypotheses").outerHTML = '<div id="hypotheses">' + (rows.length ?
@@ -138,11 +139,11 @@
         : '— <span class="warn">shadow</span>: computed, not traded';
       const ts = book.targets || [];
       const q = v => v == null ? "—" : Number(v).toLocaleString(undefined, {maximumFractionDigits: 2});
-      // Per-source combination weights (ADR-0055): evidence-based, re-estimated from telemetry each cycle.
+      // Per-source combination weights: evidence-based, re-estimated from telemetry each cycle.
       const wts = book.weights || {};
       const wKeys = Object.keys(wts).sort();
       const weightsHtml = wKeys.length
-        ? '<div class="muted" style="padding:8px 12px 0;font-size:11px">source weights <span style="opacity:.7">(evidence-based, shrunk toward equal — ADR-0055)</span>: '
+        ? '<div class="muted" style="padding:8px 12px 0;font-size:11px">source weights <span style="opacity:.7">(evidence-based, shrunk toward equal —)</span>: '
           + wKeys.map(k => `${esc(k)} <span class="mono">${Number(wts[k]).toFixed(2)}</span>`).join(" · ") + '</div>'
         : '<div class="muted" style="padding:8px 12px 0;font-size:11px">source weights: <span class="mono">equal</span> (cold start / mode=equal)</div>';
       document.getElementById("fusionBook").innerHTML = weightsHtml + (ts.length

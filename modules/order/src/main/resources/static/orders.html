@@ -72,6 +72,7 @@
   #msg.ok { color:var(--buy); } #msg.err { color:var(--sell); }
   .hint { font-size:11px; color:var(--dim); margin-top:2px; }
 </style>
+<link rel="stylesheet" href="/nav.css">
 </head>
 <body>
 <div class="topbar">
@@ -99,7 +100,7 @@
   <div class="panel"><div id="blotter" class="muted" style="padding:16px">loading…</div></div>
 
   <div class="section-h" style="margin-top:18px">Execution quality (TCA)
-    <span class="muted">slippage vs arrival price — positive bps = cost, negative = improvement; swaps in bp of rate (ADR-0025)</span></div>
+    <span class="muted">slippage vs arrival price — positive bps = cost, negative = improvement; swaps in bp of rate</span></div>
   <div class="panel"><div id="tca" class="muted" style="padding:16px">loading…</div></div>
 </main>
 
@@ -233,7 +234,7 @@
         <td class="mono muted idcell" ${f ? `title="click to copy" onclick="copyId(this)"` : ''}>${f ? esc(f.fillId) : '—'}</td></tr>`; }).join("") + "</table>"
       : '<div class="muted" style="padding:16px">no orders on this date</div>') + '</div>';
   }
-  // Cancel a working order (ADR-0025); the blotter refreshes with the outcome (a fill that
+  // Cancel a working order; the blotter refreshes with the outcome (a fill that
   // won the race shows FILLED — you cannot cancel what already executed).
   // Click an id cell to copy the full identifier (order id / fill id) — the value shown is
   // the full id (ellipsis is display only), so it also stays Ctrl+F searchable.

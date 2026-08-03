@@ -12,12 +12,14 @@ postgresql = "42.7.4"
 flyway = "10.20.1"
 commonsMath = "3.6.1"
 strata = "2.12.20"
+pdfbox = "2.0.32"
 
 [libraries]
 commons-math = { module = "org.apache.commons:commons-math3", version.ref = "commonsMath" }
 strata-measure = { module = "com.opengamma.strata:strata-measure", version.ref = "strata" }
 avro = { module = "org.apache.avro:avro", version.ref = "avro" }
 lmdbjava = { module = "org.lmdbjava:lmdbjava", version.ref = "lmdbjava" }
+pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "pdfbox" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

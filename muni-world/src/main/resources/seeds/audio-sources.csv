@@ -1,0 +1,3 @@
+id|label|publisher|category|device|chunk_seconds|enabled|notes
+tv-bloomberg|Bloomberg TV|Bloomberg|tv||300|false|US market TV via YouTube TV; bind a host audio device (pulse/alsa) then enable
+tv-cnbc|CNBC|CNBC|tv||300|false|US market TV via YouTube TV; bind a host audio device then enable

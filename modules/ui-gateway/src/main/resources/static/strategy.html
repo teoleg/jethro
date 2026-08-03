@@ -95,6 +95,7 @@
   td.num { text-align:right; }
   .empty { color:var(--dim); text-align:center; padding:20px 0; border:1px dashed var(--line); border-radius:12px; }
 </style>
+<link rel="stylesheet" href="/nav.css">
 </head>
 <body>
 <script src="/format.js"></script>
@@ -115,7 +116,7 @@
 </div>
 <main>
   <p class="lead">
-    Live strategy tuning (<b>ADR-0052</b>). Dials take effect immediately — no restart. The effective
+    Live strategy tuning (<b></b>). Dials take effect immediately — no restart. The effective
     value is the override if set, else the <b>application.properties</b> default. The
     <b>OOS backtest always uses the config default</b>, so edge measurement stays reproducible, and
     auto-execute stays SIM-gated. Every change is <b>persisted &amp; audited</b> (old→new, who, when) —

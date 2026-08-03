@@ -1,0 +1,4 @@
+id,county,state,city,official_url,cms_platform,finance_url,doc_example,scrape_pattern,verified
+c001,Bergen,NJ,Hackensack,https://www.hackensack.org/,WordPress,https://www.hackensack.org/finance/,https://www.hackensack.org/wp-content/uploads/2024/05/Hackensack-2025-Budget-Presentation.pdf,/wp-content/uploads/<yyyy>/<mm>/*.pdf,yes
+c002,Bergen,NJ,Englewood,https://cityofenglewood.org/,CivicPlus (CivicEngage),https://cityofenglewood.org/1174/Finance,https://cityofenglewood.org/DocumentCenter/View/5612/2024-Annual-Financial-Statement,/DocumentCenter/View/<id> and /Archive.aspx?ADID=<id>,yes
+c003,Bergen,NJ,Garfield,https://www.garfieldnj.org/,custom,https://www.garfieldnj.org/Departments/finance-department,https://www.garfieldnj.org/_Content/pdf/budgets/2024-AFS.pdf,/_Content/pdf/budgets/<year>-<AFS|Audit|User-Friendly-Budget>.pdf and /Notices/,yes

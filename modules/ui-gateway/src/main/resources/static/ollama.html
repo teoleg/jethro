@@ -42,6 +42,7 @@
   .st.ok { color:var(--up); border-color:var(--up); } .st.err { color:var(--down); border-color:var(--down); }
 </style>
   <script src="format.js"></script>
+<link rel="stylesheet" href="/nav.css">
 </head>
 <body>
 <div class="topbar">
@@ -55,7 +56,7 @@
       <a class="tab active" href="/hub-ops.html">Ops</a>
     </nav>
     <span class="spacer"></span>
-    <span class="hint">Local SLM (Ollama) load · ADR-0016 — operations view</span>
+    <span class="hint">Local SLM (Ollama) load · — operations view</span>
   </div>
 </div>
 <main>
@@ -79,19 +80,19 @@
   <div class="tiles" id="ragTiles"></div>
   <div id="ragHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
 
-  <div class="section-h">Training data <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0053: real Tiingo daily bars for the learned advisory signal (rebuilt on empty; training only)</span></div>
+  <div class="section-h">Training data <span class="muted" style="text-transform:none;letter-spacing:0">— real Tiingo daily bars for the learned advisory signal (rebuilt on empty; training only)</span></div>
   <div class="tiles" id="trainTiles"></div>
   <div id="trainHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
 
-  <div class="section-h">Learned signal — backtest gate <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0053: purged walk-forward, cost-aware; must beat coin-flip AND momentum/mean-rev OOS or it doesn't ship</span></div>
+  <div class="section-h">Learned signal — backtest gate <span class="muted" style="text-transform:none;letter-spacing:0">— purged walk-forward, cost-aware; must beat coin-flip AND momentum/mean-rev OOS or it doesn't ship</span></div>
   <div class="tiles" id="btTiles"></div>
   <div id="btHint" class="muted" style="margin:-4px 2px 16px;font-size:12px"></div>
 
-  <div class="section-h">Signal health <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0055 phase 1: each source's live calls scored by realised forward return; the evidence future fusion weights sources by</span></div>
+  <div class="section-h">Signal health <span class="muted" style="text-transform:none;letter-spacing:0">— phase 1: each source's live calls scored by realised forward return; the evidence future fusion weights sources by</span></div>
   <div id="sigHealth" style="overflow-x:auto;margin-bottom:4px"><div class="muted" style="padding:12px">loading…</div></div>
   <div id="sigHint" class="muted" style="margin:6px 2px 16px;font-size:12px"></div>
 
-  <div class="section-h">Fusion target book <span class="muted" style="text-transform:none;letter-spacing:0">— ADR-0055 phase 4 SHADOW: all sources combined into one target per name; computed, not traded (places no orders)</span></div>
+  <div class="section-h">Fusion target book <span class="muted" style="text-transform:none;letter-spacing:0">— phase 4 SHADOW: all sources combined into one target per name; computed, not traded (places no orders)</span></div>
   <div id="fusionBook" style="overflow-x:auto;margin-bottom:4px"><div class="muted" style="padding:12px">loading…</div></div>
   <div id="fusionHint" class="muted" style="margin:6px 2px 16px;font-size:12px"></div>
 
@@ -166,7 +167,7 @@
       const cls = b.skew === "balanced" ? "up" : "warn";
       document.getElementById("balanceLine").innerHTML = total === 0
         ? 'AI signal balance: <span class="muted">no live calls</span>'
-        : `AI signal balance: <span class="${cls}">${esc(b.skew)}</span> — ${b.longs} long / ${b.shorts} short (ADR-0036: the model is told its skew to self-correct)`;
+        : `AI signal balance: <span class="${cls}">${esc(b.skew)}</span> — ${b.longs} long / ${b.shorts} short (the model is told its skew to self-correct)`;
     } catch (e) {}
   }
 
@@ -178,7 +179,7 @@
         : (r.embedFailures > 0 && r.embeddingDim < 0) ? '<span class="warn">degraded</span>'
         : '<span class="up">on</span>';
       document.getElementById("ragAsOf").textContent =
-        r.enabled ? "— semantic dedup + outcome memory (ADR-0035)" : "— disabled (jethro.rag.enabled=false)";
+        r.enabled ? "— semantic dedup + outcome memory" : "— disabled (jethro.rag.enabled=false)";
       document.getElementById("ragTiles").innerHTML = gridKV([
         kv("Status", status),
         kv("Embed model", esc(r.model || "—")),
@@ -210,7 +211,7 @@
     const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
     return h + "h " + m + "m";
   }
-  // JVM heap + the OOS-selector heap guard behind the ~1h freeze fix (ADR-0052 follow-up).
+  // JVM heap + the OOS-selector heap guard behind the ~1h freeze fix ( follow-up).
   async function loadJvm() {
     try {
       const j = await (await fetch("/api/ops/jvm")).json();
@@ -237,7 +238,7 @@
     } catch (e) {}
   }
 
-  // ADR-0053 training-bars store: real Tiingo daily history for the learned advisory signal, plus the
+  // training-bars store: real Tiingo daily history for the learned advisory signal, plus the
   // derived feature/label matrix — label BALANCE is the first health check before any model exists.
   async function loadTraining() {
     try {
@@ -262,13 +263,13 @@
       document.getElementById("trainHint").innerHTML = !ok
         ? `empty — set <span class="mono">TIINGO_API_TOKEN</span> and restart; the loader rebuilds from Tiingo (skipped without a token).`
         : (f && f.totalRows > 0)
-        ? `${f.instruments} instruments yield ${f.totalRows.toLocaleString()} labelled point-in-time rows at a ${f.labelThresholdBps.toFixed(0)} bps next-day floor (ADR-0053). `
+        ? `${f.instruments} instruments yield ${f.totalRows.toLocaleString()} labelled point-in-time rows at a ${f.labelThresholdBps.toFixed(0)} bps next-day floor. `
           + `Label balance is the first thing that kills a naive classifier — a set dominated by FLAT trains a model that always says FLAT. Feature/label math only, never a number into live sizing/risk.`
-        : `real daily bars loaded from Tiingo — the ADR-0053 training set (never a number into live sizing/risk). Feature matrix builds once enough history is on file.`;
+        : `real daily bars loaded from Tiingo — the training set (never a number into live sizing/risk). Feature matrix builds once enough history is on file.`;
     } catch (e) {}
   }
 
-  // ADR-0053 gate: purged walk-forward, cost-aware; ships only if it beats coin-flip + momentum/mean-rev.
+  // gate: purged walk-forward, cost-aware; ships only if it beats coin-flip + momentum/mean-rev.
   async function loadBacktest() {
     try {
       const b = await (await fetch("/api/training/backtest")).json();
@@ -294,11 +295,11 @@
         kv("Cost charged", r.costBps.toFixed(0) + " bps"),
         kv("Folds", `${r.trainableFolds}/${r.folds} <span class="muted" style="font-size:11px">${r.testRows.toLocaleString()} OOS rows</span>`)]);
       document.getElementById("btHint").innerHTML = esc(r.verdict)
-        + ` <span class="muted">— net/opportunity is the realised edge per test row (flat = 0), net of a ${r.costBps.toFixed(0)} bps round-trip. Advisory only; a model number never sizes a position or reaches PnL/risk (ADR-0016).</span>`;
+        + ` <span class="muted">— net/opportunity is the realised edge per test row (flat = 0), net of a ${r.costBps.toFixed(0)} bps round-trip. Advisory only; a model number never sizes a position or reaches PnL/risk.</span>`;
     } catch (e) {}
   }
 
-  // ADR-0055 phase 1: per-source signal health — hit-rate + avg realised return of following each call.
+  // phase 1: per-source signal health — hit-rate + avg realised return of following each call.
   async function loadSignalHealth() {
     try {
       const rows = await (await fetch("/api/signals/telemetry")).json();
@@ -326,11 +327,11 @@
          <th>W/L/F</th><th>open</th></tr></thead><tbody>${body}</tbody></table>`;
       document.getElementById("sigHint").innerHTML =
         `hit-rate excludes FLATs (no bet); avg ret is per resolved call, net of nothing (gross, forward-return of following the call). `
-        + `Measurement only — no number here sizes or gates an order (ADR-0016). This is the evidence ADR-0055 phase 2+ will weight sources by.`;
+        + `Measurement only — no number here sizes or gates an order. This is the evidence phase 2+ will weight sources by.`;
     } catch (e) {}
   }
 
-  // ADR-0055 phase 4 (shadow): the fused target book — one combined target per instrument, no orders.
+  // phase 4 (shadow): the fused target book — one combined target per instrument, no orders.
   async function loadFusion() {
     try {
       const book = await (await fetch("/api/fusion/targets")).json();
@@ -362,7 +363,7 @@
       document.getElementById("fusionHint").innerHTML =
         `combined forecast on Carver's [-20,+20] scale (× diversification multiplier); target = forecast/10 × unit-notional / price; `
         + `Δ order is the Gârleanu-Pedersen partial move toward target ("— band" = inside the no-trade band). `
-        + `<span class="warn">SHADOW — computed, never sent.</span> Sizing dials are placeholders until set (ADR-0055).`;
+        + `<span class="warn">SHADOW — computed, never sent.</span> Sizing dials are placeholders until set.`;
     } catch (e) {}
   }
 

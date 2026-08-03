@@ -114,11 +114,18 @@
   .muted{color:var(--dim)}
   .notice{padding:48px 20px;text-align:center;color:var(--dim)} .notice h2{color:var(--txt);font-size:16px;margin-bottom:8px}
 </style>
+<link rel="stylesheet" href="/nav.css">
 </head>
 <body>
 <div class="topbar"><div class="bar">
   <span class="brand"><span class="dot"></span>JETHRO</span>
-  <nav class="nav"><a href="/">Overview</a><a href="/hub-status.html">Status</a><a href="/hub-strategy.html">Strategy</a><a href="/hub-discovery.html">Discovery</a><a class="active" href="/hub-ops.html">Ops</a></nav>
+  <nav class="tabs">
+      <a class="tab" href="/">Overview</a>
+      <a class="tab" href="/hub-status.html">Status</a>
+      <a class="tab" href="/hub-strategy.html">Strategy</a>
+      <a class="tab" href="/hub-discovery.html">Discovery</a>
+      <a class="tab active" href="/hub-ops.html">Ops</a>
+    </nav>
   <span class="spacer"></span><span id="statusBadge" class="badge">loading…</span>
 </div></div>
 <main><div id="stage"><div class="notice">connecting to the sim…</div></div></main>

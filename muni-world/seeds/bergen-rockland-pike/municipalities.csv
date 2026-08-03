@@ -1,0 +1,107 @@
+id,state,county,county_fips,name,type,notes
+m001,NJ,Bergen,34003,Allendale,borough,
+m002,NJ,Bergen,34003,Alpine,borough,
+m003,NJ,Bergen,34003,Bergenfield,borough,
+m004,NJ,Bergen,34003,Bogota,borough,
+m005,NJ,Bergen,34003,Carlstadt,borough,
+m006,NJ,Bergen,34003,Cliffside Park,borough,
+m007,NJ,Bergen,34003,Closter,borough,
+m008,NJ,Bergen,34003,Cresskill,borough,
+m009,NJ,Bergen,34003,Demarest,borough,
+m010,NJ,Bergen,34003,Dumont,borough,
+m011,NJ,Bergen,34003,East Rutherford,borough,
+m012,NJ,Bergen,34003,Edgewater,borough,
+m013,NJ,Bergen,34003,Elmwood Park,borough,
+m014,NJ,Bergen,34003,Emerson,borough,
+m015,NJ,Bergen,34003,Englewood,city,
+m016,NJ,Bergen,34003,Englewood Cliffs,borough,
+m017,NJ,Bergen,34003,Fair Lawn,borough,
+m018,NJ,Bergen,34003,Fairview,borough,
+m019,NJ,Bergen,34003,Fort Lee,borough,
+m020,NJ,Bergen,34003,Franklin Lakes,borough,
+m021,NJ,Bergen,34003,Garfield,city,
+m022,NJ,Bergen,34003,Glen Rock,borough,
+m023,NJ,Bergen,34003,Hackensack,city,county seat
+m024,NJ,Bergen,34003,Harrington Park,borough,
+m025,NJ,Bergen,34003,Hasbrouck Heights,borough,
+m026,NJ,Bergen,34003,Haworth,borough,
+m027,NJ,Bergen,34003,Hillsdale,borough,
+m028,NJ,Bergen,34003,Ho-Ho-Kus,borough,
+m029,NJ,Bergen,34003,Leonia,borough,
+m030,NJ,Bergen,34003,Little Ferry,borough,
+m031,NJ,Bergen,34003,Lodi,borough,
+m032,NJ,Bergen,34003,Lyndhurst,township,
+m033,NJ,Bergen,34003,Mahwah,township,
+m034,NJ,Bergen,34003,Maywood,borough,
+m035,NJ,Bergen,34003,Midland Park,borough,
+m036,NJ,Bergen,34003,Montvale,borough,
+m037,NJ,Bergen,34003,Moonachie,borough,
+m038,NJ,Bergen,34003,New Milford,borough,
+m039,NJ,Bergen,34003,North Arlington,borough,
+m040,NJ,Bergen,34003,Northvale,borough,
+m041,NJ,Bergen,34003,Norwood,borough,
+m042,NJ,Bergen,34003,Oakland,borough,
+m043,NJ,Bergen,34003,Old Tappan,borough,
+m044,NJ,Bergen,34003,Oradell,borough,
+m045,NJ,Bergen,34003,Palisades Park,borough,
+m046,NJ,Bergen,34003,Paramus,borough,
+m047,NJ,Bergen,34003,Park Ridge,borough,
+m048,NJ,Bergen,34003,Ramsey,borough,
+m049,NJ,Bergen,34003,Ridgefield,borough,
+m050,NJ,Bergen,34003,Ridgefield Park,village,
+m051,NJ,Bergen,34003,Ridgewood,village,
+m052,NJ,Bergen,34003,River Edge,borough,
+m053,NJ,Bergen,34003,River Vale,township,
+m054,NJ,Bergen,34003,Rochelle Park,township,
+m055,NJ,Bergen,34003,Rockleigh,borough,
+m056,NJ,Bergen,34003,Rutherford,borough,
+m057,NJ,Bergen,34003,Saddle Brook,township,
+m058,NJ,Bergen,34003,Saddle River,borough,
+m059,NJ,Bergen,34003,South Hackensack,township,
+m060,NJ,Bergen,34003,Teaneck,township,
+m061,NJ,Bergen,34003,Tenafly,borough,
+m062,NJ,Bergen,34003,Teterboro,borough,
+m063,NJ,Bergen,34003,Upper Saddle River,borough,
+m064,NJ,Bergen,34003,Waldwick,borough,
+m065,NJ,Bergen,34003,Wallington,borough,
+m066,NJ,Bergen,34003,Washington Township,township,
+m067,NJ,Bergen,34003,Westwood,borough,
+m068,NJ,Bergen,34003,Wood-Ridge,borough,
+m069,NJ,Bergen,34003,Woodcliff Lake,borough,
+m070,NJ,Bergen,34003,Wyckoff,township,
+m071,NY,Rockland,36087,Clarkstown,town,
+m072,NY,Rockland,36087,Haverstraw,town,
+m073,NY,Rockland,36087,Orangetown,town,
+m074,NY,Rockland,36087,Ramapo,town,
+m075,NY,Rockland,36087,Stony Point,town,
+m076,NY,Rockland,36087,Airmont,village,in Ramapo
+m077,NY,Rockland,36087,Chestnut Ridge,village,in Ramapo
+m078,NY,Rockland,36087,Grand View-on-Hudson,village,in Orangetown
+m079,NY,Rockland,36087,Haverstraw,village,in Haverstraw town
+m080,NY,Rockland,36087,Hillburn,village,in Ramapo
+m081,NY,Rockland,36087,Kaser,village,in Ramapo
+m082,NY,Rockland,36087,Montebello,village,in Ramapo
+m083,NY,Rockland,36087,New Hempstead,village,in Ramapo
+m084,NY,Rockland,36087,New Square,village,in Ramapo
+m085,NY,Rockland,36087,Nyack,village,in Orangetown
+m086,NY,Rockland,36087,Piermont,village,in Orangetown
+m087,NY,Rockland,36087,Pomona,village,Ramapo/Haverstraw
+m088,NY,Rockland,36087,Sloatsburg,village,in Ramapo
+m089,NY,Rockland,36087,Spring Valley,village,in Ramapo
+m090,NY,Rockland,36087,Suffern,village,in Ramapo
+m091,NY,Rockland,36087,Upper Nyack,village,in Orangetown
+m092,NY,Rockland,36087,Wesley Hills,village,in Ramapo
+m093,NY,Rockland,36087,West Haverstraw,village,in Haverstraw town
+m094,PA,Pike,42103,Milford,borough,county seat
+m095,PA,Pike,42103,Matamoras,borough,
+m096,PA,Pike,42103,Blooming Grove,township,
+m097,PA,Pike,42103,Delaware,township,
+m098,PA,Pike,42103,Dingman,township,
+m099,PA,Pike,42103,Greene,township,
+m100,PA,Pike,42103,Lackawaxen,township,
+m101,PA,Pike,42103,Lehman,township,
+m102,PA,Pike,42103,Milford,township,Milford Township (distinct from the borough)
+m103,PA,Pike,42103,Palmyra,township,
+m104,PA,Pike,42103,Porter,township,
+m105,PA,Pike,42103,Shohola,township,
+m106,PA,Pike,42103,Westfall,township,

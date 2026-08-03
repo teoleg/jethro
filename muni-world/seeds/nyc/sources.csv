@@ -1,0 +1,126 @@
+id,category,name,publisher,covers,base_url,access_method,format,verify,notes
+# --- A. Federal / market-wide ---
+s001,federal,MSRB EMMA,MSRB,all NYC issuers' CUSIPs — OS/disclosure/trades,https://emma.msrb.org/,scrape,html/pdf,yes,primary; key each issuer by CUSIP-6
+s002,federal,MSRB market data (RTRS),MSRB,muni trade prints,https://www.msrb.org/Market-Data,api,csv,pending,trade tape
+s003,federal,U.S. Census — Government Units (GUS),U.S. Census,government inventory + FIPS,https://www.census.gov/programs-surveys/gus.html,api,json/csv,yes,coverage denominator
+s004,federal,U.S. Census — State & Local Gov Finances,U.S. Census,gov finance survey,https://www.census.gov/programs-surveys/gov-finances.html,api,csv,yes,cross-source reference
+s005,federal,IRS Tax-Exempt Bonds (TEB),IRS,tax-exempt status/enforcement,https://www.irs.gov/tax-exempt-bonds,scrape,html,pending,
+s006,federal,SEC EDGAR full-text,SEC,conduit/obligated-person filings,https://efts.sec.gov/LATEST/search-index?q=,api,json,pending,some muni obligors
+s007,federal,U.S. Treasury SLGS,U.S. Treasury,state & local gov securities (refundings),https://www.treasurydirect.gov/,scrape,html,pending,
+s008,federal,FRED — municipal series,Federal Reserve (St. Louis),muni yield/index series,https://fred.stlouisfed.org/,api,json/csv,pending,macro/context
+s009,federal,DAC / continuing-disclosure agents,Digital Assurance Certification,continuing disclosure filings,https://www.dacbond.com/,scrape,html,pending,mirrors EMMA filings
+s010,federal,GFOA,Gov Finance Officers Assoc,ACFR award / best practice,https://www.gfoa.org/,scrape,html,pending,
+# --- B. NYC issuers ---
+s011,issuer,City of New York (GO),City of New York,general obligation,https://comptroller.nyc.gov/services/financial-matters/nyc-bonds/invest-in-nyc-bonds/nyc-official-statements-archive/,scrape,pdf,yes,
+s012,issuer,NYC Transitional Finance Authority (TFA),NYC TFA,Future Tax Secured + Building Aid,https://www.nyc.gov/site/transitionalfinance/investing/investing.page,scrape,html/pdf,yes,
+s013,issuer,NYC Municipal Water Finance Authority (NYW),NYW,water & sewer revenue,https://www.nyc.gov/site/nyw/investing-in-nyw-bonds/continuing-disclosure-emma-notices.page,scrape,html/pdf,yes,
+s014,issuer,TSASC Inc.,TSASC,tobacco settlement,https://www.nyc.gov/site/investorrelations/index.page,scrape,html,partial,resolve TSASC page/EMMA
+s015,issuer,Hudson Yards Infrastructure Corp (HYIC),HYIC,Hudson Yards revenue,https://www.nyc.gov/site/investorrelations/index.page,scrape,html,partial,
+s016,issuer,Sales Tax Asset Receivable Corp (STARC),STARC,sales-tax secured,https://www.nyc.gov/site/investorrelations/index.page,scrape,html,partial,
+s017,issuer,NYC Housing Development Corp (HDC),NYC HDC,multifamily housing revenue,https://www.nychdc.com/,scrape,html/pdf,partial,large national housing issuer
+s018,issuer,NYC Health + Hospitals (HHC),NYC H+H,health system revenue,https://www.nychealthandhospitals.org/,scrape,html,partial,
+s019,issuer,NYC IDA / Build NYC (via NYCEDC),NYCEDC,conduit revenue (obligor != issuer),https://edc.nyc/,scrape,html,partial,
+s020,issuer,NYC Educational Construction Fund (ECF),NYC ECF,school-lease revenue,https://www.nyc.gov/site/investorrelations/index.page,scrape,html,partial,
+s021,issuer,NYC School Construction Authority (SCA),NYC SCA,capital program,https://www.nycsca.org/,scrape,html,pending,
+s022,issuer,NYC Housing Authority (NYCHA),NYCHA,capital/operating,https://www.nyc.gov/site/nycha/index.page,scrape,html,pending,
+# --- C. NY State & regional authorities financing NYC ---
+s023,authority,Metropolitan Transportation Authority (MTA),MTA,transit revenue (huge),https://new.mta.info/transparency/financial-information,scrape,html/pdf,pending,incl. TBTA bridges & tunnels
+s024,authority,Triborough Bridge & Tunnel Authority (MTA B&T),MTA,toll revenue,https://new.mta.info/transparency,scrape,pdf,pending,
+s025,authority,Port Authority of NY & NJ (PANYNJ),PANYNJ,facility revenue,https://www.panynj.gov/port-authority/en/business-opportunities/investor-relations.html,scrape,html/pdf,pending,bi-state
+s026,authority,Dormitory Authority of the State of NY (DASNY),DASNY,conduit (education/health/state),https://www.dasny.org/,scrape,html/pdf,pending,one of the largest conduit issuers
+s027,authority,Empire State Development / UDC,ESD,state economic-dev revenue,https://esd.ny.gov/,scrape,html,pending,PIT bonds
+s028,authority,NYS Housing Finance Agency (HFA),NYS HCR,housing revenue,https://hcr.ny.gov/,scrape,html,pending,
+s029,authority,State of NY Mortgage Agency (SONYMA),NYS HCR,mortgage revenue,https://hcr.ny.gov/sonyma,scrape,html,pending,
+s030,authority,NYS Environmental Facilities Corp (EFC),EFC,clean-water SRF revenue,https://efc.ny.gov/,scrape,html,pending,
+s031,authority,NYS Thruway Authority,NYS Thruway,toll revenue,https://www.thruway.ny.gov/,scrape,html,pending,
+s032,authority,NY Power Authority (NYPA),NYPA,power revenue,https://www.nypa.gov/,scrape,html,pending,
+s033,authority,Battery Park City Authority (BPCA),BPCA,PILOT/ground-lease revenue,https://bpca.ny.gov/,scrape,html,pending,
+s034,authority,NYS Comptroller (OSC) — Local Gov,Office of the NYS Comptroller,NY local govts incl. authorities,https://www.osc.ny.gov/local-government,scrape/api,html/csv,yes,statewide hub
+s035,authority,NYS Authorities Budget Office (ABO),ABO,public-authority filings,https://www.abo.ny.gov/,scrape,html,pending,PARIS data
+s036,authority,data.ny.gov (state open data),NY State,authority/finance datasets,https://data.ny.gov/,api,json/csv,yes,Socrata; incl. bond/debt datasets
+s037,authority,NYS Div. of the Budget,NY State,state financial plan,https://www.budget.ny.gov/,scrape,html/pdf,pending,
+s038,authority,NYS Dept of Taxation & Finance,NY State,sales/PIT revenue (secures TFA/ESD),https://www.tax.ny.gov/,scrape,html,pending,
+# --- D. NYC Comptroller reports & pension funds ---
+s039,report,NYC Comptroller — Invest in NYC Bonds,NYC Comptroller,bond hub,https://comptroller.nyc.gov/services/financial-matters/nyc-bonds/overview/,scrape,html,yes,
+s040,report,NYC Comptroller — ACFR,NYC Comptroller,City audited financials,https://comptroller.nyc.gov/reports/annual-comprehensive-financial-reports/,scrape,pdf,yes,
+s041,report,NYC Comptroller — PAFR,NYC Comptroller,popular annual report,https://comptroller.nyc.gov/reports/popular-annual-financial-reports/,scrape,pdf,yes,
+s042,report,NYC Comptroller — Capital Debt & Obligations,NYC Comptroller,debt outstanding by credit,https://comptroller.nyc.gov/reports/annual-report-on-capital-debt-and-obligations-fiscal-year-2026/,scrape,pdf,yes,
+s043,report,NYC Comptroller — Monthly Public Finance,NYC Comptroller,monthly issuance wrap,https://comptroller.nyc.gov/services/financial-matters/nyc-bonds/,scrape,pdf,pending,
+s044,report,NYCERS (Employees' Retirement System),NYCERS,pension fund financials,https://www.nycers.org/,scrape,pdf,pending,one of 5 NYC pension funds
+s045,report,Teachers' Retirement System (TRS),TRS NYC,pension fund financials,https://www.trsnyc.org/,scrape,pdf,pending,
+s046,report,Board of Education Retirement System (BERS),BERS,pension fund financials,https://www.bers.nyc.gov/,scrape,pdf,pending,
+s047,report,NYC Police Pension Fund,NYC PPF,pension fund financials,https://www.nyc.gov/site/nycppf/index.page,scrape,pdf,pending,
+s048,report,NYC Fire Pension Fund,NYC FPF,pension fund financials,https://www.nyc.gov/site/fdny/about/units/pension-fund.page,scrape,pdf,pending,
+s049,report,NYC Comptroller — Claims report,NYC Comptroller,claims/liabilities,https://comptroller.nyc.gov/reports/,scrape,pdf,pending,
+s050,report,NYC Comptroller — SpendingNYC/agency reports,NYC Comptroller,agency spending analyses,https://comptroller.nyc.gov/reports/,scrape,html/pdf,pending,
+# --- E. NYC OMB / budget ---
+s051,budget,NYC OMB,City of New York,budget & financial plan hub,https://www.nyc.gov/site/omb/index.page,scrape,html/pdf,pending,
+s052,budget,NYC OMB — Adopted Budget,City of New York,adopted expense/revenue,https://www.nyc.gov/site/omb/publications/publications.page,scrape,pdf,pending,
+s053,budget,NYC OMB — Executive Budget,City of New York,executive budget,https://www.nyc.gov/site/omb/publications/publications.page,scrape,pdf,pending,
+s054,budget,NYC OMB — Financial Plan (Nov/Jan/Apr/Jun),City of New York,quarterly plan updates,https://www.nyc.gov/site/omb/publications/publications.page,scrape,pdf,pending,
+s055,budget,NYC OMB — Capital Commitment Plan,City of New York,capital commitments,https://www.nyc.gov/site/omb/publications/publications.page,scrape,pdf,pending,
+s056,budget,NYC OMB — Ten-Year Capital Strategy,City of New York,10-yr capital plan,https://www.nyc.gov/site/omb/publications/publications.page,scrape,pdf,pending,
+s057,budget,NYC Council Finance Division,NYC Council,budget response/analyses,https://council.nyc.gov/budget/,scrape,html/pdf,pending,
+s058,budget,NYC Mayor's Management Report (MMR),City of New York,agency performance,https://www.nyc.gov/site/operations/performance/mmr.page,scrape,pdf,pending,
+# --- F. NYC Open Data (Socrata; resolve dataset id from catalog at ingest) ---
+s059,opendata,NYC Open Data — Expense Budget,City of New York,adopted/modified expense budget,https://data.cityofnewyork.us/,api,json/csv,resolve-id,catalog q=expense budget
+s060,opendata,NYC Open Data — Revenue Budget,City of New York,revenue budget,https://data.cityofnewyork.us/,api,json/csv,resolve-id,catalog q=revenue budget
+s061,opendata,NYC Open Data — Capital Budget,City of New York,capital budget,https://data.cityofnewyork.us/,api,json/csv,resolve-id,catalog q=capital budget
+s062,opendata,NYC Open Data — Capital Commitments,City of New York,capital commitment plan,https://data.cityofnewyork.us/,api,json/csv,resolve-id,catalog q=capital commitment
+s063,opendata,NYC Open Data — Capital Project Detail,City of New York,project-level capital,https://data.cityofnewyork.us/,api,json/csv,resolve-id,catalog q=capital project detail
+s064,opendata,NYC Open Data — Checkbook Spending,City of New York,agency spending,https://data.cityofnewyork.us/,api,json/csv,resolve-id,also checkbooknyc.com API
+s065,opendata,NYC Open Data — Checkbook Contracts,City of New York,contracts,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+s066,opendata,NYC Open Data — Checkbook Payroll,City of New York,payroll,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+s067,opendata,NYC Open Data — Checkbook Revenue,City of New York,revenue,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+s068,opendata,NYC Open Data — Financial Plan (Expense),City of New York,expense financial plan,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+s069,opendata,NYC Open Data — Financial Plan (Revenue),City of New York,revenue financial plan,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+s070,opendata,NYC Open Data — Debt Service Budget,City of New York,debt service,https://data.cityofnewyork.us/,api,json/csv,resolve-id,catalog q=debt service
+s071,opendata,NYC Open Data — Agency Expense by Unit,City of New York,unit-of-appropriation,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+s072,opendata,NYC Open Data — Budget Function Analysis,City of New York,budget by function,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+s073,opendata,Checkbook NYC — API,NYC Comptroller,spending/contracts/payroll/revenue,https://www.checkbooknyc.com/,api,json/xml,pending,dedicated transparency API
+s074,opendata,NYC Open Data — Recognized Contracts,City of New York,procurement,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+s075,opendata,NYC Open Data — Comptroller datasets,NYC Comptroller,comptroller-published sets,https://data.cityofnewyork.us/,api,json/csv,resolve-id,catalog domain filter agency=Comptroller
+s076,opendata,NYC Open Data — OMB datasets,City of New York (OMB),budget datasets,https://data.cityofnewyork.us/,api,json/csv,resolve-id,catalog agency=OMB
+s077,opendata,NYC Open Data — property assessment (DOF),City of New York (DOF),tax base / assessed value,https://data.cityofnewyork.us/,api,json/csv,resolve-id,secures GO
+s078,opendata,NYC Open Data — property tax delinquency,City of New York (DOF),collections,https://data.cityofnewyork.us/,api,json/csv,resolve-id,
+# --- G. NYC agencies / other city bodies ---
+s079,agency,NYC Dept of Finance (DOF),City of New York,property tax / assessment,https://www.nyc.gov/site/finance/index.page,scrape,html,pending,tax base behind GO
+s080,agency,NYC Independent Budget Office (IBO),IBO,independent budget analysis,https://www.ibo.nyc.ny.us/,scrape,html/pdf,yes,non-partisan analyses
+s081,agency,NYC Economic Development Corp (EDC),NYCEDC,dev projects / conduit,https://edc.nyc/,scrape,html,pending,
+s082,agency,NYC Dept of Education (DOE) budget,City of New York,school budgets,https://www.nyc.gov/site/doe/about/funding.page,scrape,html,pending,
+s083,agency,NYC City Register / ACRIS,City of New York (DOF),property records,https://a836-acris.nyc.gov/,scrape,html,pending,
+s084,agency,NYC Rent Guidelines Board,City of New York,housing econ context,https://rentguidelinesboard.cityofnewyork.us/,scrape,html,pending,
+s085,agency,NYC Water Board,NYC Water Board,water/sewer rates (secures NYW),https://www.nyc.gov/site/nycwaterboard/index.page,scrape,html,pending,
+s086,agency,NYC Franchise & Concession Review,City of New York,revenue agreements,https://www.nyc.gov/site/mocs/,scrape,html,pending,
+# --- H. Civic / analytic / watchdog ---
+s087,civic,Citizens Budget Commission (CBC),CBC,fiscal analysis,https://cbcny.org/,scrape,html/pdf,yes,
+s088,civic,Fiscal Policy Institute,FPI,state/city fiscal analysis,https://fiscalpolicy.org/,scrape,html/pdf,pending,
+s089,civic,Rockefeller Institute of Government,SUNY,state & local finance research,https://rockinst.org/,scrape,html,pending,
+s090,civic,Volcker Alliance,Volcker Alliance,budget transparency ratings,https://www.volckeralliance.org/,scrape,html,pending,
+s091,civic,Empire Center — SeeThroughNY,Empire Center,NY gov transparency data,https://www.seethroughny.net/,scrape,html/csv,pending,payrolls/contracts
+s092,civic,Reinvent Albany,Reinvent Albany,authority transparency,https://reinventalbany.org/,scrape,html,pending,
+s093,civic,Manhattan Institute,Manhattan Institute,fiscal commentary,https://manhattan.institute/,scrape,html,pending,
+s094,civic,Pew — state & local fiscal,Pew Charitable Trusts,comparative fiscal data,https://www.pew.org/,scrape,html,pending,
+s095,civic,Municipal Market Analytics (MMA),MMA,muni credit research,https://www.mma-research.com/,scrape,html,pending,licensed — public notes only
+s096,civic,MuniNet Guide,MuniNet,muni links/directory,https://www.muninetguide.com/,scrape,html,pending,
+# --- I. Rating agencies + market data (public actions only) ---
+s097,rating,Moody's Ratings — public actions,Moody's,NYC credit rating actions,https://www.moodys.com/,scrape,html,pending,licensed feed excluded (ADR-0008)
+s098,rating,S&P Global Ratings — public actions,S&P,NYC credit rating actions,https://www.spglobal.com/ratings/,scrape,html,pending,
+s099,rating,Fitch Ratings — public actions,Fitch,NYC credit rating actions,https://www.fitchratings.com/,scrape,html,pending,
+s100,rating,KBRA — public actions,KBRA,NYC credit rating actions,https://www.kbra.com/,scrape,html,pending,
+s101,rating,The Bond Buyer,Bond Buyer,muni market news/issuance,https://www.bondbuyer.com/,scrape,html,pending,licensed — headlines
+s102,rating,MSRB EMMA — rating history per CUSIP,MSRB,agency ratings on filings,https://emma.msrb.org/,scrape,html,yes,ratings appear on EMMA
+# --- J. News / disclosure media ---
+s103,news,Crain's New York Business,Crain's,city finance coverage,https://www.crainsnewyork.com/,scrape,html,pending,
+s104,news,The City (nonprofit newsroom),THE CITY,city accountability,https://www.thecity.nyc/,scrape,html,pending,
+s105,news,Gothamist / WNYC,NYPR,city government coverage,https://gothamist.com/,scrape,html,pending,
+s106,news,City & State NY,City & State,gov & politics,https://www.cityandstateny.com/,scrape,html,pending,
+# --- K. Search-engine / web-scale indexes (discovery frontier — ADR-0009) ---
+s107,discovery,Google web/PDF discovery,Google,find OS/ACFR not linked from official sites,https://www.google.com/search,search,html,pending,queries: site:nyc.gov filetype:pdf "official statement"; site:emma.msrb.org
+s108,discovery,Bing web/PDF discovery,Microsoft,secondary search index,https://www.bing.com/search,search,html,pending,filetype:pdf official statement / ACFR
+s109,discovery,Google Scholar,Google,academic muni datasets/papers,https://scholar.google.com/,search,html,pending,muni credit research + datasets
+s110,discovery,Common Crawl,Common Crawl,web-scale index for bulk discovery,https://commoncrawl.org/,bulk_file,warc,pending,discover gov domains at scale
+s111,discovery,Internet Archive / Wayback,Internet Archive,historical OS/ACFR snapshots,https://web.archive.org/,api,html/pdf,pending,recover moved/removed disclosure
+s112,discovery,MuniOS / primary-market OS index,Ipreo/others,new-issue official statements,https://www.munios.com/,scrape,html/pdf,pending,licensed — access-gated
+s113,discovery,BondView,BondView,retail muni aggregator/screener,https://www.bondview.com/,scrape,html,pending,corroboration
+s114,discovery,DPC Data,DPC Data,continuing-disclosure aggregation,https://www.dpcdata.com/,scrape,html,pending,mirrors/indexes EMMA filings

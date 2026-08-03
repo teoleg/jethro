@@ -12,4 +12,7 @@ include(
     "modules:ui-gateway",
     "modules:finops",
     "app",
+    // muni-world — independent subproject (own jar, ADR flow, README, UI); reuses the shared
+    // common-* libraries but is not depended on by `app`.
+    "muni-world",
 )
