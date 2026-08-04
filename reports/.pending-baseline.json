@@ -1,0 +1,20 @@
+{
+  "commit": "629dbbdf85fcbffb50e87d844d1133c286f18e7b",
+  "fees": "393.594035",
+  "gross_exposure": "52192.43500000",
+  "net_exposure": "-1456.83500000",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "52192.43500000",
+    "hedgePnl": "30.79368319",
+    "netExposure": "-1456.83500000",
+    "realizedPnl": "-583.32999557",
+    "strategyAlpha": "-697.44435435",
+    "totalFees": "393.594035",
+    "totalPnl": "-666.65067116",
+    "unrealizedPnl": "-83.32067559"
+  },
+  "summary": "the sensor seed's history read extends until the walk is satisfied instead of being estimated once from the median print gap, so a restart no longer leaves sensors cold and the desk no longer liquidates what they held (ADR-0138)",
+  "total_pnl": "-666.65067116",
+  "ts": "2026-08-04T19:42:37Z"
+}
