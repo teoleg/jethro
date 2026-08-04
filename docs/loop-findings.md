@@ -4124,3 +4124,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **$499,999.999386065** against the **$500,000** cap (**0.99999999877×**). Cost picture unchanged: firm
   **-$616.93791140** against `totalFees` **$381.753017** ⇒ pre-fee **-$235.18489440**, **fees 61.88%** of
   the deficit; cumulative LIVE turnover **$4,344,591.80** = **142.87×** gross **$30,409.11287500**.
+
+## 2026-08-04 18:00Z — the seed dies on the read window, not on the restart gap (no change; `120b22b41` at 3/6)
+
+- **Rule 312 — the warm-restart seed is truncated by READ-WINDOW EXHAUSTION, and the `GAP_TOLERANCE` break
+  never fires at all.** Rule 310 refused to assume the restart gap was the terminator; that caution paid.
+  Replaying `SensorWarmup.seedPrices` faithfully (`GAP_TOLERANCE_SAMPLES=30`, `LOOKBACK_MULTIPLE=2`, the
+  `consumptionStepMillis` median, the `age < intervalMillis` thinning) against the live `/api/history`
+  store at the configured cadences (trend 5 s/193, reversion 10 s/241): **16 of 18** name-sensor pairs end
+  on window exhaustion, **2** are satisfied, **0** hit the gap break. No outage, no process boundary, no
+  feed-mode change is involved. Do not go looking for a hole in the series — there isn't one.
+- **Rule 313 — the lookback window is denominated in the MEDIAN print gap, but the walk consumes history at
+  ~2.26× that, so `LOOKBACK_MULTIPLE = 2` leaves the seed short by construction.** The window is
+  `LOOKBACK_MULTIPLE × samples × step` with `step = max(interval, median gap)`, which assumes the walk
+  accepts one point per `step`. The `age < intervalMillis` thinning merges every run of short gaps, so the
+  real consumption rate is the *effective* spacing `seed span ÷ (n − 1)`: measured **2.26×** `step` on
+  average, range **1.92–2.81** (PFE 2.81, CVX 2.60, JPM 2.56 … BAC 2.00, NEE 2.00). **The seed fills iff
+  eff/step ≤ LOOKBACK_MULTIPLE**, and the only two names that seeded full — BAC **193 of 193**, NEE **193
+  of 193** — are exactly the two measuring **2.00**. A window sized in a median cannot bound a walk that
+  advances at a mean-of-merged-gaps. Fix the unit, not the constant: re-read further back when the walk
+  exhausts its window still short, until the seed is full or a genuine gap truncates it.
+- **Rule 314 — a defect that reproduces on THREE independent boots with the same 40-second signature is
+  systemic; stop re-confirming it and specify the fix.** Boots at 16:45:57Z, 17:07:55Z and 17:39:05Z each
+  produced a `target decayed to flat [sources≤1]` liquidation wave within ~40 s: this cycle PFE `SELL 12`
+  `[forecast=0.0, sources=0]` and HD `BUY 1` `[sources=1]` at **17:39:45Z**, JPM `SELL 24` at 17:40:46Z,
+  CAT `SELL 3` at 17:45:50Z — while from 17:46Z, after warm-up, every order carries `sources=2/3` and a
+  forecast of ±5 to ±8. Same desk, same half hour, opposite behaviour; the only variable is whether the
+  sensors had caught up. Two stacked zero-margin conditions (Rule 309's exact `warmupSamples()` ask and
+  Rule 313's exact-2× window) make each boot a coin flip the desk loses on ~13 of 14 names.
+- **Trigger/attribution.** No change shipped: `120b22b41` is at **3/6 cycles** (`.pending-baseline.json`
+  present), so the code was frozen and no baseline recorded. The window's **+$36.36** PnL and rising gross
+  are the running desk rebuilding after its own restart wave — **baseline behaviour**, nothing claimed or
+  blamed on code. ADR-0137's primary VERIFY-BY holds a third cycle: live planned gross
+  **$498,877.903542685** against the **$500,000** cap (**0.99775580708537×**). Cost picture: firm
+  **-$599.45227577** against `totalFees` **$387.112525** ⇒ pre-fee **-$212.33975077**, **fees 64.58%** of
+  the deficit; cumulative LIVE turnover **$4,402,699.14** = **89.20×** gross **$49,356.54110000**.
