@@ -14,6 +14,112 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 17:30Z (**No change — `120b22b41` is at 2/6 cycles under ADR-0116 measurement.** Last block's item #1 was filed as a *hypothesis* with a concrete VERIFY-BY. **That VERIFY-BY has now resolved, against the defect: it is confirmed, not suspected.** The 17:07:55Z boot re-ran the identical cold-sensor pattern, and **39 seconds later** the desk liquidated XOM and CAT on `sources=1` — XOM's `BUY 15` is the *exact* offset of the `SELL 15` its own 3-source view opened 30 minutes earlier. A complete round trip, opened on conviction and closed by a restart. The code-level mechanism is now narrowed to two named terminators in `SensorWarmup`, plus a zero-margin warm-up requirement that makes a seed one sample short as blind as one sixty short.)
+
+### Step 0 — `120b22b41` (ADR-0137): ✅ still VERIFIED on its primary metric, second cycle running
+
+Live `/api/fusion/targets` this cycle: Σ |targetQty × price| over 20 names = **$499,999.999386065** against
+`jethro.risk.max-gross-exposure` **$500,000** — **0.99999999877×**. The cap binds a second consecutive
+cycle and no name flipped side. Nothing else about ADR-0137 is graded here; its PnL verdict is the
+scorer's and stands at **2/6 cycles** (`reports/.pending-baseline.json` present).
+
+`026cda49d`'s flagged auto-revert remains **deliberately not completed** (Rule 303): it is itself the
+revert of the graded-BAD ADR-0136, so completing it would re-apply a rejected mechanism.
+
+### Step 0 — Item #1 of the 17:00Z block (restart liquidates the book): ⚠️ STILL-BROKEN — and now CONFIRMED as mechanism, not hypothesis
+
+The item declared: *"zero `trend sensor still cold` / `reversion sensor still cold` WARNs at boot for any
+name that has stored marks, **and** no `fusion exit — target decayed to flat [… sources=1]` order in the
+five minutes after the JVM starts."* No fix was attempted (the code was frozen under measurement), so this
+is the defect's own reproduction, on a second independent boot:
+
+| check | reading | verdict |
+| --- | --- | --- |
+| JVM boot | `traffic.timestampMillis` **1785864602305** − `ops_jvm.uptimeSeconds` **1327** ⇒ **17:07:55Z** | — |
+| zero cold WARNs at boot | **14** equities cold on trend at 17:08:08–17:08:44Z; **2** cold on reversion | ⚠️ failed |
+| no `sources=1` exit within 5 min of boot | **17:08:34Z** — XOM `BUY 15`, CAT `BUY 3`, both `fusion exit — target decayed to flat [forecast=-0.0/0.0, sources=1]`, **39 s** after boot; MCD `SELL 13` same reason at 17:14:09Z | ⚠️ failed |
+
+**The round trip, in full.** XOM `SELL 15` at **16:38:50.180388Z**, reason
+`fusion entry — target increase [forecast=-5.086943349481853, sources=3]` — a three-source conviction
+short. XOM `BUY 15` at **17:08:34.605741Z**, reason `fusion exit — target decayed to flat [forecast=-0.0,
+sources=1]` — same size, opposite side, 39 s after a restart, at **1.00 bps** each way
+(`turnover_cost_by_name`). The view did not change its mind; the process died. XOM is on the cold list
+("still cold for XOM after seeding **138 of 193** stored prices"). This is the mechanism executing, priced.
+
+**Seed counts this boot** (trend needs **193** = `slow-span 64` + 1 + `normalisation-span 256`/2, matching
+the log's "of 193"; reversion needs **241**): CAT **130**, XOM **138**, HD **147**, MCD **148**, JNJ **148**,
+BAC **153**, PFE **158**, KO **166**, CVX **169**, JPM **170**, PG **173**, GOOG **179**, NEE **192**, UNH,
+plus reversion CAT **235 of 241** and HD **231 of 241**.
+
+**Where the seed dies — narrowed to two terminators, and which one binds is NOT yet determined.** Reading
+`SensorWarmup.seedPrices`, the backward walk can end short in exactly two ways:
+1. `break` at a hole wider than `GAP_TOLERANCE_SAMPLES (30) × step`, where
+   `step = max(poll interval, the name's median stored print gap)` — **150 s at the 5 s trend floor**; or
+2. exhausting the read window, `LOOKBACK_MULTIPLE (2) × samples × step` — **32.2 min at that same floor**.
+The seed must cover `193 × 5 s ≈ 16.1 min` of contiguous history ending at the anchor. The counts above are
+*just under* the requirement, which is consistent with either. **Do not assume the process-restart gap is
+the terminator** — the counts of 130–192 show the walk did *not* stop at the boundary between this process
+and the previous one; it crossed it and stopped further back. Naming the terminator is the fix's first job.
+
+**And the requirement has zero margin, which multiplies the damage.** `warmupSamples()` returns
+`slowSpan + 1 + scaleWarmupSamples`, and tracing `EwmacTrendForecaster.update` that is the *exact* minimum
+number of prices to publish: price 1 only initialises, the gate opens at price `slowSpan + 1`, and
+`scaleSamples > scaleWarmupSamples` first holds at price `slowSpan + 1 + scaleWarmupSamples`. So the seed
+asks for precisely as many samples as it needs and not one more — **NEE at 192 of 193 is exactly as blind
+as CAT at 130 of 193.** Any fix must seed with margin, not just reach further back.
+
+**A distinct, second defect surfaced by the same log — the rates names can NEVER warm.** Twelve
+instruments (`USD.TSY.1Y/2Y/5Y/10Y/30Y`, `USD.SOFR.1Y/2Y/5Y/10Y/30Y`, `USD_IRS_5Y/10Y`) seeded the **full**
+`193 of 193` on trend and `241 of 241` on reversion and are **still cold**. Seed length cannot explain that.
+In `EwmacTrendForecaster.update` the warm-up gate includes `s.vol.signum() <= 0`, and `s.vol` is an EWMA of
+`|price − last|`: a stored series that does not move has zero step vol, returns cold forever, and never
+increments `scaleSamples`. A flat mark series is **permanently** sensorless regardless of history depth.
+Filed as item #4 — it is dead sensor coverage on the MACRO book, not the money leak.
+
+### Open items, re-ranked most-costly-first
+
+**#1 — a restart blinds 14 of 20 equity trend sensors, and the desk liquidates what they held.**
+*(carried at #1; upgraded from hypothesis to CONFIRMED this cycle — see the XOM round trip above)*
+A name whose sensors are cold contributes no forecast, `sources` falls toward 1, and the live rule reads a
+one-source view as unestimable and plans the name **flat** — worked in full, not buffered. Live now:
+**12 of 20** names flat, held-in-targets **$27,962.865** against a planned **$499,999.999386065** — the desk
+holds **5.59%** of its own plan. Cumulative LIVE turnover **$4,344,591.80** = **142.87×** firm gross
+**$30,409.11287500**, across **2,277** fills; **5,264** FILLED / **1,951** CANCELLED / **128** REJECTED.
+**Fix direction:** the warm-restart seed — (a) request meaningfully MORE than the bare `warmupSamples()`
+minimum, since the current ask has zero margin; (b) widen the lookback and/or the hole tolerance so the walk
+reaches the full warm-up span; (c) **log which terminator fired and how much wall-clock span the seed
+covered**, so the next cycle can grade the fix instead of re-deriving it. Architecturally significant —
+it changes ADR-0071/ADR-0114 warm-restart semantics, so it ships with its ADR (`Status: Implemented`).
+**NOT** the routing rule: ADR-0135's "hold instead of liquidate" is graded ❌ BAD and must not be re-tried.
+**VERIFY-BY:** zero `trend sensor still cold` / `reversion sensor still cold` WARNs at boot for any name
+with stored marks, **and** no `fusion exit — target decayed to flat [… sources=1]` order in the five
+minutes after the JVM starts, **and** the new seed log naming the terminator for any name still short.
+
+**#2 — turnover cost is the loss, and its mechanism is CADENCE (a 3600s forecast re-planned every 30s).**
+*(carried, unchanged; likely a downstream symptom of #1 — a restart-driven round trip IS turnover)*
+Firm **-$616.93791140** against `totalFees` **$381.753017** ⇒ pre-fee trading of **-$235.18489440**:
+**fees are 61.88%** of the deficit. Rules 295/296 hold; Rule 304 rules out every *uniform-scalar* remedy
+a priori. Ranked below #1 because #1 is a proven, priced generator of exactly this turnover.
+**VERIFY-BY:** cumulative LIVE `turnover_cost_by_name` Σ`turnover_usd` ÷ `/api/risk` `.total.grossExposure`
+falls materially from **142.87×**, with gross not falling to produce it.
+
+**#3 — social never reaches the combiner, and it is the only source clearing the desk's own hurdle.**
+*(unchanged, re-confirmed on live `/api/fusion/targets`)* Every `contributions` array lists only
+`trend`/`reversion`/`xsreversion`; `forecastScalars` has entries for those three only; yet `weights`
+carries `social 1.9382252560856337`, the largest of the five. Per Rule 292 this is a **superseding ADR**
+(gate and dial together), never a quiet dial turn — and per Rule 298 it stays behind the cost fix, because
+an hour-scale edge cannot be collected by a book that is liquidated every half hour.
+**VERIFY-BY:** a `social` entry appears in `/api/fusion/targets` `forecastScalars` and in at least one
+name's `contributions` array.
+
+**#4 — a flat stored mark series can never warm the trend/reversion sensors, so 12 rates names are
+permanently sensorless.** *(NEW this cycle)* They seed the full `193 of 193` / `241 of 241` and stay cold;
+`EwmacTrendForecaster.update` returns cold while `s.vol.signum() <= 0` and never increments `scaleSamples`.
+Ranked last: it is dead coverage on MACRO (**-$56.79950536**, realised, flat), not the live bleed.
+**VERIFY-BY:** either those names warm, or they are excluded from the sensor universe so the WARN stops
+masking the equity cold-starts that matter.
+
+---
 ## Verification block — 2026-08-04 17:00Z (**No change — `120b22b41` is at 1/6 cycles under ADR-0116 measurement.** ADR-0137 met its primary VERIFY-BY exactly: planned gross **$1,356,452.14 → $499,731.80**, **0.9995×** the $500,000 cap. It missed its secondary one, and the reason refutes its own causal premise: the fusion sizing map is **homogeneous of degree 1** in the target, so a uniform target scalar moves absolute notional and leaves churn-per-unit-of-book untouched. The turnover item stays open, but its mechanism is now **cadence**, not magnitude — and a new, larger candidate has appeared: the loop's own restart may be liquidating the book every cycle.)
 
 ### Step 0 — `120b22b41` (ADR-0137): ✅ VERIFIED on the primary metric, ⚠️ STILL-BROKEN on what it was for

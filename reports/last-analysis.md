@@ -1,111 +1,85 @@
-ADR-0137 hit its target exactly ($499,731.80 planned against the $500,000 cap) — but the fusion sizing map is homogeneous of degree 1, so capping the target shrinks the book and the turnover together and cannot change the churn ratio; held code frozen at 1/6 cycles.
+No change — held at 2/6 cycles; the restart-liquidation defect is now CONFIRMED rather than suspected: XOM was sold short on a 3-source view and bought back 39 seconds after a reboot on a 1-source view, same size, both sides at 1.00 bps.
 
 *(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`, `ops_jvm`,
-`traffic`, `recent_orders`, `turnover_cost_by_name`, the boot log, or computed from those by script. None
-is authored here — invariant 7 / ADR-0016.)*
+`traffic`, `recent_orders`, `orders_by_status`, `turnover_cost_by_name`, the boot log, or computed from
+those by script. None is authored here — invariant 7 / ADR-0016.)*
 
-## Step 0 — `120b22b41` (ADR-0137): ✅ VERIFIED on its primary metric, ⚠️ NOT on its secondary — and its causal premise is refuted
+## Step 0 — verify last run's change first
 
-**Deployed and live.** Boot at `traffic.timestampMillis` **1785862802646** minus `ops_jvm.uptimeSeconds`
-**845** ⇒ the running JVM started ≈**16:45:57Z**, after the ADR-0137 commit. `traffic.up true`,
-`provider alpaca`, `ticksIn 7371`, `ticksDropped 0`. This graded live code.
+**`120b22b41` (ADR-0137): ✅ still VERIFIED on its primary metric.** Live `/api/fusion/targets` sums to
+**$499,999.999386065** of planned gross against the **$500,000** `jethro.risk.max-gross-exposure` the
+guardrail permits — **0.99999999877×**. The cap binds a second consecutive cycle. Its PnL verdict is the
+scorer's, not mine, and stands at **2/6 cycles**.
 
-**Primary VERIFY-BY — met.** Summing `/api/fusion/targets` over its 20 names:
+**`scripts/score-change.py score` prints `120b22b41 still accumulating evidence (2/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` is present.** Under ADR-0116 that forbids a second
+change on top of an open measurement window, so I made **no code edit** and recorded **no baseline**. The
+cycle's work went into Step 0 and into `reports/must-fix.md`.
 
-| quantity | value |
-| --- | --- |
-| planned gross Σ \|targetQty × price\| | **$499,731.80** |
-| `jethro.risk.max-gross-exposure` (the cap it was wired to) | $500,000 |
-| ratio | **0.9995×** |
-
-It was **$1,356,452.14** (2.71×) last cycle. The cap binds, rounds down, and no name flipped side.
-`./gradlew -Pci test` was green at commit; `GrossNotionalCapTest` shows 9 tests, 0 failures.
-
-**Secondary VERIFY-BY — not met.** `insideBuffer` is **18 of 20** (0.90); it was **19 of 22** (0.86). The
-frozen fraction did not fall, it rose slightly.
-
-**Why it did not, and this is the finding of the cycle.** Reading `PositionBuffer`, the map from target to
-order is **homogeneous of degree 1** in the target:
-
-```
-aim   ← aim + a·(target − aim)                     linear in target
-scale = |target| · TARGET_ABS / |forecast|          linear in target
-band  = scale · width                               width is dimensionless (ADR-0101: bps of cost vs edge)
-gap   = aim − held ;  |gap| ≤ band → 0 ; else gap − band·sgn(gap)
-```
-
-ADR-0137 multiplies every target by one scalar `GNM`. That multiplies the aim, the band, the gap and the
-order delta by the *same* `GNM` — so **the set of names that trade, and the turnover-to-book ratio, are
-scale-invariant.** ADR-0137 scales absolute notional down: turnover falls, and the held book falls with
-it, by the same factor. It reduces the dollar fee bill; it cannot reduce churn *per unit of book*, which
-is the quantity the loss is made of. The unchanged `insideBuffer` fraction is exactly what that predicts.
-
-So ADR-0137's stated premise — "the aim never converges because the target is unreachable" — is wrong on
-its own arithmetic: the aim converges to the same *fraction* of any target, large or small. The
-non-convergence is caused by the target **moving** — a 3600s forecast re-planned every 30s (Rules
-295/296) — not by its magnitude. The change is sound and does no harm; it was aimed at the wrong variable.
-Its PnL verdict belongs to the scorer, which has it at **1/6 cycles**.
+**Item #1 of the last block: ⚠️ STILL-BROKEN — and its VERIFY-BY resolved *against* it, which promotes it
+from hypothesis to confirmed mechanism.** It asked for zero cold-sensor WARNs at boot and no `sources=1`
+liquidation in the five minutes after start. Both failed, on an independent second boot.
 
 ## Situation — the live money, in plain numbers
 
-1. **Money.** Total PnL **$-599.89296437** (`/api/risk` `.total`, firm headline incl. hedge) — **down
-   $66.13** since last run, **down $295.66** over the last 3. `UNDERWATER`. By book: ALPHA
-   **-$568.09595742**, HEDGE **+$25.00249841**, MACRO **-$56.79950536**.
-2. **Risk.** Gross **$20,811.28585000** = **1.39%** of the $1,500,000 firm cap, headroom **$1,479,189**;
-   net **$0.13585000**. `riskCuts []`, `bookVolBrake 1.0`, breaker untripped. **Not** a danger state —
-   the opposite: this is a **near-DORMANT** book. Held equity **$20,131.72** is **4.03%** of its own
-   **$499,731.80** plan, and **13 of 20** names are flat (AAPL, CVX, JPM, NEE, BAC, PG, KO, HD, WMT, UNH,
-   GOOG, JNJ, NQ). Under ADR-0132 that undeployed $1.48M is the failure to attack, not safety.
-3. **Cause.** Gross fell **$73,074.32** this window. That drop is **not** ADR-0137's: it came from a wave
-   of `fusion exit — target decayed to flat [forecast=-0.0, sources=1]` orders that fired on **both sides
-   of the deploy** — WMT (16:38:19Z) and PFE SELL 249 (16:40:21Z) *before* the 16:45:57Z boot, JPM SELL 60
-   (16:46:37Z) and PG BUY 103 (16:47:38Z) *after*. Same trigger, same reason string, unchanged behaviour.
-   ADR-0137 only scales a target; it cannot produce `sources=1` or `forecast=-0.0`.
-4. **Danger.** No. Bleeding, but at 1.39% of the gross cap with the breaker untripped. The response is to
+1. **Money.** Total PnL **$-616.93791140** (`/api/risk` `.total`, firm headline incl. hedge) — **down
+   $6.09** since last run, **down $122.80** over the last 3. `UNDERWATER`. By book: ALPHA
+   **-$582.76196433**, HEDGE **+$22.62355829**, MACRO **-$56.79950536**.
+2. **Risk.** Gross **$30,409.11287500** = **2.0%** of the $1,500,000 firm cap, headroom **$1,469,591**;
+   net **$4,677.20712500** = **0.5%** of the $1,000,000 net cap. `riskCuts []`, `bookVolBrake 1.0`,
+   `portfolioRiskMultiplier 1.0`, breaker untripped. **Not** a danger state — the opposite: a near-DORMANT
+   book holding **$27,962.865** against its own **$499,999.999386065** plan, **5.59%**, with **12 of 20**
+   names flat. Under ADR-0132 that unused $1.47M of headroom is the failure to attack, not safety.
+3. **Cause.** No change shipped this window (code frozen at 2/6), so the move is the running desk's own
+   behaviour. Gross rose **+$9,587.54** — the book partially rebuilding after the restart wave, which is
+   the direction ADR-0132 wants, not a concern at 2.0% of cap.
+4. **Danger.** No. Bleeding, but at 2.0% of the gross cap with the breaker untripped. The response is to
    fix the cost mechanism and redeploy, never to de-risk.
-5. **Order-level post-mortem.** Fees are again the majority of the loss: firm **-$599.89296437** against
-   `totalFees` **$379.515318** ⇒ pre-fee trading of **-$220.37764637**, so **fees are 63.26%** of the
-   deficit. Cumulative LIVE turnover is **$4,316,744.05** — **207.42×** the current gross (the ratio
-   exploded because gross collapsed, not because turnover did: turnover rose $196,593.61 while the book
-   fell $73,074.32). That is the churn signature at its clearest.
-6. **Memory.** Rules 294–303 applied. Rule 303 in particular: the ledger's flagged auto-revert of
-   `026cda49d` is still **deliberately not completed**, because `026cda49d` is itself the revert of the
-   graded-BAD ADR-0136. Rule 293's cold-JVM caveat *does* partly apply here (uptime 845s), so the
-   `insideBuffer` reading is reported as an observation; the homogeneity argument above does not depend on
-   it — it is a property of the code, not of a snapshot.
-7. **Change vs. market.** The window's move is **not** attributable to ADR-0137. The exit-to-flat wave
-   that removed most of the gross began before the new binary booted, and the post-boot half used the
-   identical trigger. What ADR-0137 demonstrably did is exactly one thing: pull planned gross from
-   $1,356,452.14 to $499,731.80. Everything else this window is the running desk's baseline behaviour.
+5. **Order-level post-mortem.** Fees remain the majority of the loss: firm **-$616.93791140** against
+   `totalFees` **$381.753017** ⇒ pre-fee trading of **-$235.18489440**, so **fees are 61.88%** of the
+   deficit. Cumulative LIVE turnover **$4,344,591.80** = **142.87×** firm gross, over **2,277** fills;
+   **5,264** FILLED / **1,951** CANCELLED / **128** REJECTED.
+6. **Memory.** Rules 294–307 applied. Rule 303 in particular: the ledger's flagged auto-revert of
+   `026cda49d` stays **deliberately not completed**, because `026cda49d` is itself the revert of the
+   graded-BAD ADR-0136 and completing it would re-apply a rejected mechanism.
+7. **Change vs. market.** Nothing this window is attributable to code — none shipped. The restart round
+   trips described below are **baseline behaviour of the running system**, reproduced on a second
+   independent boot, not the effect of any change I made.
 
-## What I decided, and why — no code change
+## The finding: the restart liquidation is confirmed, and it is priced
 
-`scripts/score-change.py score` prints `120b22b41 still accumulating evidence (1/6 cycles) — held, not
-scored this run`, and `reports/.pending-baseline.json` is present. ADR-0116 forbids a second change on top
-of a window that has barely opened, so I recorded **no baseline** and made **no code edit**. The cycle's
-work went into Step 0 and into re-ranking `reports/must-fix.md`, where the ranking changed on evidence.
+The 17:07:55Z boot (`traffic.timestampMillis` **1785864602305** − `ops_jvm.uptimeSeconds` **1327**) re-ran
+the identical cold-start pattern — **14** equities cold on the trend sensor at 17:08:08–17:08:44Z, **2** on
+reversion. **Thirty-nine seconds after boot**, at 17:08:34Z, the desk liquidated XOM and CAT with reason
+`fusion exit — target decayed to flat [forecast=-0.0/0.0, sources=1]`; MCD followed at 17:14:09Z.
 
-**New item #1 — the restart liquidates the book.** The boot log at 16:46:11–16:46:26Z shows the trend
-sensor cold for 14 equities ("still cold for CVX after seeding 164 of 193 stored prices", and the same for
-GOOG, NEE, XOM, JPM, KO, MCD, PG, HD, JNJ, PFE, BAC, CAT, UNH) and the reversion sensor cold for JPM and
-JNJ. A name whose sensors have not warmed contributes no forecast, `sources` falls toward 1, and the live
-rule — the one restored when ADR-0135 was scored ❌ BAD and reverted — reads a one-source view as
-unestimable and plans the name **flat**, which is worked in full and not buffered. Ten of the twelve flat
-equities are on that cold list. The loop restarts this JVM every cycle, so the desk plausibly pays a full
-liquidate-and-rebuild round trip **every 30 minutes**, then crawls back at the ADR-0080 rate of
-`a = 1 − exp(−30/3600) = 0.0082987…` of the gap per cycle and never arrives. That would explain
-$4,316,744.05 of turnover against a $20,811.29 book far better than target magnitude does.
+XOM is the clean, complete case. `SELL 15` at **16:38:50.180388Z** on
+`fusion entry — target increase [forecast=-5.086943349481853, sources=3]` — a three-source conviction
+short. `BUY 15` at **17:08:34.605741Z** on `fusion exit — target decayed to flat [forecast=-0.0,
+sources=1]` — same size, opposite side, at **1.00 bps** each way. The view did not change its mind; the
+process died, its sensors came back cold ("still cold for XOM after seeding **138 of 193** stored prices"),
+and a one-source view is planned flat. That is a full round trip bought and paid for by the deployment
+cadence, and it recurs every cycle.
 
-I am stating that as the leading hypothesis, not a settled fact: the two *pre*-boot exits at 16:38Z and
-16:40Z happened on a warm JVM and are **not** explained by cold sensors. The fix direction is the warm
-restart, not the routing rule — ADR-0135's "hold instead of liquidate" was already graded BAD and will not
-be re-attempted. **VERIFY-BY next run:** zero `trend sensor still cold` / `reversion sensor still cold`
-WARNs for a name with stored marks at boot, and no `fusion exit — target decayed to flat [… sources=1]`
-order in the five minutes after the JVM starts.
+**Two things I checked that sharpen the fix and rule out a wrong one.** First, the warm-up requirement has
+**zero margin**: tracing `EwmacTrendForecaster.update`, `warmupSamples()` (`slow-span 64` + 1 +
+`normalisation-span 256`/2 = **193**, matching the log) is the *exact* minimum number of prices needed to
+publish, so the seed asks for precisely what it needs and not one more — **NEE at 192 of 193 is as blind as
+CAT at 130**. Second, the walk did **not** stop at the process boundary: seeds of 130–192 mean it crossed
+into the previous process's marks and terminated further back, so "the restart gap breaks the walk" is
+*not* established. `SensorWarmup.seedPrices` has exactly two short-exits — the hole `break` at
+`GAP_TOLERANCE_SAMPLES (30) × step` and the `LOOKBACK_MULTIPLE (2) × samples × step` read window — and
+naming which one binds is the fix's first job, which is why next cycle's change must log the terminator,
+not just widen a constant.
 
-**Item #2 — social still never reaches the combiner.** Unchanged and re-confirmed: every `contributions`
-array in `/api/fusion/targets` lists only `trend`/`reversion`/`xsreversion`, and `forecastScalars` has no
-`social` entry, while `weights` still carries `social 1.7911864985234398` — the largest of the five. Per
-Rule 292 that remains a superseding ADR (gate and dial together), not a quiet dial turn, and per Rule 298
-it stays behind the cost fix: an hour-scale edge cannot be collected by a book that is liquidated every
-half hour.
+A distinct defect fell out of the same log: twelve rates names seed the **full** 193/193 and 241/241 and
+stay cold, because `update` returns cold while step vol is zero and never advances the scale estimator. A
+flat stored series is permanently sensorless. Filed as item #4 — dead coverage on MACRO, not the bleed.
+
+## What happens next cycle
+
+The one change targets must-fix **#1**: repair the warm-restart seed so the sensors publish at boot —
+seed with margin above `warmupSamples()`, reach far enough back to cover the full warm-up span, and log
+which terminator fired. It changes ADR-0071/ADR-0114 semantics, so it ships with its ADR
+(`Status: Implemented`). It is explicitly **not** ADR-0135's "hold instead of liquidate", which is graded
+❌ BAD and will not be re-attempted.

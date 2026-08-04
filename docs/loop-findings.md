@@ -4082,3 +4082,45 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `auto-hedge EQUITY (ADR-0019)` ES trades — **baseline behaviour**. Nothing is claimed or blamed on code.
   JVM was cold-ish (`uptimeSeconds` **845**), so per Rule 293 the `insideBuffer` reading is an observation
   only; Rule 304 is an algebraic property of the code and does not rest on it.
+
+## 2026-08-04 17:30Z — the restart liquidation is CONFIRMED: a 3-source short bought back 39 seconds after reboot on a 1-source view
+
+- **Rule 308 — a hypothesis in the must-fix register is settled by its OWN declared VERIFY-BY on the next
+  independent boot; when the check fails with no fix attempted, the defect is CONFIRMED, not merely still
+  suspected.** Rule 306 filed restart-liquidation as a leading hypothesis. This cycle the 17:07:55Z boot
+  (`traffic.timestampMillis` **1785864602305** − `ops_jvm.uptimeSeconds` **1327**) reproduced it exactly:
+  **14** equities cold on trend at 17:08:08–17:08:44Z, **2** on reversion, and **39 seconds after boot**
+  XOM `BUY 15` + CAT `BUY 3` on `fusion exit — target decayed to flat [forecast=-0.0/0.0, sources=1]`
+  (MCD `SELL 13` at 17:14:09Z). **XOM is the complete round trip:** `SELL 15` at 16:38:50.180388Z on
+  `fusion entry — target increase [forecast=-5.086943349481853, sources=3]`, bought back same size 30
+  minutes later on a one-source view, **1.00 bps each way**. The view did not change its mind — the
+  process died. Two independent boots, identical signature. Stop calling it a hypothesis.
+- **Rule 309 — `warmupSamples()` is the EXACT minimum, so the warm-restart seed has ZERO margin: a seed one
+  sample short is as blind as one sixty short.** Tracing `EwmacTrendForecaster.update`: price 1 only
+  initialises (`steps` stays 0), the warm-up gate first opens at price `slowSpan + 1`, and
+  `scaleSamples > scaleWarmupSamples` first holds at price `slowSpan + 1 + scaleWarmupSamples` — which is
+  precisely what `warmupSamples()` returns (**64 + 1 + 128 = 193**, matching the log's "of 193"; reversion
+  241). `TrendForecastLifecycle` asks `SensorWarmup` for exactly that many. This boot: CAT **130**, XOM
+  **138**, HD **147**, MCD **148**, JNJ **148**, BAC **153**, PFE **158**, KO **166**, CVX **169**, JPM
+  **170**, PG **173**, GOOG **179**, **NEE 192 of 193** — and NEE is exactly as silent as CAT. Any fix
+  must seed with MARGIN, not merely reach further back.
+- **Rule 310 — do NOT assume the process-restart gap is what truncates the seed; the counts refute it.**
+  `SensorWarmup.seedPrices` has exactly two short-exits: the `break` at a hole wider than
+  `GAP_TOLERANCE_SAMPLES (30) × step` (150 s at the 5 s trend floor) and exhausting the
+  `LOOKBACK_MULTIPLE (2) × samples × step` read window (32.2 min at that floor); the seed needs
+  `193 × 5 s ≈ 16.1 min` of contiguous history. Seeds of **130–192** prove the walk *crossed* the boundary
+  between this process and the previous one and stopped further back — so the obvious story is unproven.
+  The fix must **log which terminator fired and the wall-clock span covered**, or the next cycle will
+  re-derive this instead of grading it.
+- **Rule 311 — a flat stored mark series can NEVER warm the sensors, no matter how much history exists.**
+  Twelve rates names (`USD.TSY.*`, `USD.SOFR.*`, `USD_IRS_*`) seeded the **full** `193 of 193` and
+  `241 of 241` and stayed cold. `EwmacTrendForecaster.update` returns cold while `s.vol.signum() <= 0`,
+  and `s.vol` is an EWMA of `|price − last|`, so a non-moving series never advances `scaleSamples`. Seed
+  length can never fix those names. When a full seed still reports cold, look at the SERIES, not the span.
+- **Trigger/attribution.** No change shipped: `120b22b41` is at **2/6 cycles** (`.pending-baseline.json`
+  present), so the code was frozen and no baseline recorded. The window's **-$6.09** PnL and **+$9,587.54**
+  gross are the running desk rebuilding after its own restart wave — **baseline behaviour**, nothing
+  claimed or blamed on code. ADR-0137's primary VERIFY-BY holds a second cycle: live planned gross
+  **$499,999.999386065** against the **$500,000** cap (**0.99999999877×**). Cost picture unchanged: firm
+  **-$616.93791140** against `totalFees` **$381.753017** ⇒ pre-fee **-$235.18489440**, **fees 61.88%** of
+  the deficit; cumulative LIVE turnover **$4,344,591.80** = **142.87×** gross **$30,409.11287500**.
