@@ -3877,3 +3877,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `2026-08-04 13:34:31`. `026cda49d` is deployed (`ops_jvm.uptimeSeconds 1390` at `traffic.timestampMillis
   1785853801356` → boot `2026-08-04T14:06:51Z`) and still unscored. `totalFees 356.521740` against
   `firmTotal -314.90914721` — the fee bill still exceeds the entire deficit.
+
+## 2026-08-04 15:00Z — the band is `|target|/|forecast|`, and from flat it is wider than the aim on every name
+
+- **Rule 287 — a resolved VERIFY-BY proves nothing about the cause when no code changed; check what
+  *state* moved.** Last block's item #1 ("the risk-scaling stage collapses 17 of 22 aims to zero") hit all
+  three legs of its own VERIFY-BY this cycle: non-zero `aims` **5 → 20** of 22, `insideBuffer` **22 → 20**,
+  gross **$0.00 → $11,313.99**. The only commit in between was `4f9ff26`, the offline report generator.
+  What moved was JVM state — `streamVolMeasuredNames` **6 → 20** (of `volBudgetNames 20`), `bookVolBrake`
+  **0.880 → 1.0**, `portfolioRiskMultiplier` **0.977 → 1.0**; the two names still at zero aim, `GOOGL` and
+  `PLTR`, are exactly the two outside the covered 20. So it was a **cold-start coverage artifact** on an
+  ephemeral ~25-minute JVM. **Third time** the loop has read warm-up as a structural defect (ADR-0135, its
+  revert, ADR-0136 — all ❌ BAD). Before diagnosing from `/api/fusion/targets`, check
+  `ops_jvm.uptimeSeconds` and `streamVolMeasuredNames` vs `volBudgetNames` first.
+- **Rule 288 — the ADR-0094 no-trade band is `|target| / |forecast|`, so a weak view gets a band wider
+  than its own target and cannot open from flat.** `PositionBuffer.band` = `scale × fraction`,
+  `scale = |target| × Forecast.TARGET_ABS / |forecast|`, `TARGET_ABS` **10.0**, `position-buffer.fraction`
+  **0.10**; `widthFor` returns that floor unchanged because `edgeGate` is **`null`**, so ADR-0101's
+  measured width never applies. Every zero-`deltaQty` name has `|gap| < band`: NVDA **65.07** vs **92.00**,
+  XOM **90.96** vs **116.53**, CAT **9.05** vs **20.38**, PG **66.61** vs **203.41**, AAPL **38.25** vs
+  **101.60**. AMZN — the only name that traded — went to the band's near edge, `80.236431 − 75.16 = 5.07`
+  against the observed `deltaQty` **5.074178**. **6 of 6 reconcile to the routed share.** The opening
+  condition is `|aim|/|target| > 1/|forecast|`: at forecasts of **4.81–5.98** the aim must reach
+  **17–21%** of target while the ADR-0080/ADR-0117 path has it at **6.5–20.1%**. This is *how far* the desk
+  acts, one layer below the three ❌ BAD changes to *whether* it may act.
+- **Rule 289 — a cumulative cost figure is not a live bleed; check the window's order count before ranking
+  it.** `totalFees` **357.229782** against `firmTotal` **−308.37124107** means the desk is **+48.86** gross
+  of fees and the whole loss is cost — but that is lifetime over `orders_by_status` FILLED **5129**, mostly
+  predating ADR-0064/0084/0094/0101, while this window placed **4** orders. Ranking it #1 would overfit a
+  sunk number to a trading rate that no longer exists. Re-rank it only on fee growth **per unit of new
+  gross**.
+- **Trigger/attribution.** No change shipped: `026cda49d` is at **3/6 cycles** (`.pending-baseline.json`
+  present), so the code was frozen and no baseline recorded. The window's **+$6.54** and
+  **+$11,313.99** gross came from four normal `fusion entry — target increase` fills (`AMZN BUY 10`,
+  `GOOG BUY 5`, the follow-on `HEDGE ES SELL 0.013712`, `AMZN BUY 5`) plus mark movement — **market and
+  ordinary desk behaviour, not code**. Nothing is claimed for any change.

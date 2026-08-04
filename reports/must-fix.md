@@ -14,6 +14,101 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 15:00Z (**No change — `026cda49d` is at 3/6 cycles, so the code is frozen.** The cycle's value is that last block's item #1 is ✅ VERIFIED-RESOLVED *without any code*, which falsifies its stated root cause and replaces it with an arithmetically proven one: the ADR-0094 band is `|target|/|forecast|`, the aim path has only converged to 6–20% of target, and the two are mismatched from flat — so a name with zero holding **cannot open**. Reconciled exactly on 6 of 6 rendered names.)
+
+### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ STILL NOT SCORED — held, undisturbed
+
+`scripts/score-change.py score` prints `026cda49d still accumulating evidence (3/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` still holds its snapshot (`ts 2026-08-04T13:37:23Z`,
+`gross_exposure 0E-8`). Deployment re-confirmed: `ops_jvm.uptimeSeconds` **`1487`** at
+`traffic.timestampMillis` **`1785855602555`** → this is a fresh JVM booted after the commit. Per ADR-0116
+that forbids a code change this cycle. **No baseline was recorded**, so its window is intact.
+
+### Step 0 — Item #1 of the 14:30Z block (risk-scaling collapses 17 of 22 aims to zero): ✅ VERIFIED-RESOLVED — but by STATE, not by code, which falsifies its root cause
+
+Its VERIFY-BY was: non-zero `aims` above **5** of 22, `insideBuffer` below **22**, gross off **$0.00**. All
+three are met — non-zero aims **20** of 22 (only `GOOGL 0.0` and `PLTR 0.0` remain, precisely the two names
+outside `volBudgetNames 20`), `insideBuffer` **20**, gross **$11,313.99**. **No trading code changed**: the
+only commit since was `4f9ff26`, the offline report generator. What moved was JVM state —
+`streamVolMeasuredNames` **6 → 20**, `bookVolBrake` **0.880 → 1.0**, `portfolioRiskMultiplier`
+**0.977 → 1.0**, `volBudgetLeverCap` **0.995 → 1.0**. So the zero aims were a **cold-start coverage
+artifact** on an ephemeral ~25-minute JVM, not the structural sizing defect the block asserted. Struck.
+
+### Item #1 — from a flat holding a name CANNOT open: the no-trade band is `|target|/|forecast|` while the aim path is at 6–20% of target (⚠️ OPEN, #1 — NEW, arithmetically proven)
+
+The desk holds **$11,313.99** gross against the **$1,500,000** firm cap (**0.8%**, headroom
+**$1,488,686**) with `routing` **`true`**, `edgeGate` **`null`**, `riskCuts` **`[]`**, `breaker.halted`
+**`false`** and **20 of 22** names carrying a non-zero aim. Nothing denies it permission. The band and the
+aim are simply mismatched, and the arithmetic is closed-form, not inferred:
+
+`PositionBuffer.band` is `scale × fraction` with `scale = |target| × Forecast.TARGET_ABS / |forecast|`.
+`Forecast.TARGET_ABS` is **10.0** and `jethro.fusion.position-buffer.fraction` is **0.10**, and
+`widthFor` returns that floor unchanged because `gate` is `null` (so the ADR-0101 measured width never
+applies). The band is therefore exactly **`|target| / |forecast|`**. Reading `targets` ⋈ `aims` from this
+cycle's `/api/fusion/targets`, with `gap = aim − currentQty`:
+
+| name | forecast | targetQty | aim | aim/target | held | gap | band = \|target\|/\|forecast\| | deltaQty |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AMZN | 5.978480 | 449.356041 | 90.236431 | 0.201 | 10.0 | 80.236431 | 75.16 | **5.074178** |
+| NVDA | 5.805192 | 534.093773 | 65.071975 | 0.122 | 0 | 65.071975 | 92.00 | 0.0 |
+| XOM | −5.137078 | −598.622367 | −90.960412 | 0.152 | 0 | −90.960412 | 116.53 | 0.0 |
+| CAT | −5.075347 | −103.426349 | −9.047052 | 0.087 | 0 | −9.047052 | 20.38 | 0.0 |
+| PG | −5.039211 | −1025.046014 | −66.612635 | 0.065 | 0 | −66.612635 | 203.41 | 0.0 |
+| AAPL | −4.813032 | −489.014825 | −38.250908 | 0.078 | 0 | −38.250908 | 101.60 | 0.0 |
+
+**6 of 6 reconcile.** Every zero-`deltaQty` name has `|gap| < band`. AMZN is the one that trades, and it
+trades to the band's near edge: `80.236431 − 75.16 = 5.07` against the observed **`5.074178`** — the model
+is confirmed to the routed share count, so this is measurement, not hypothesis.
+
+The opening condition reduces to `|aim| / |target| > 1 / |forecast|`. At the forecasts this desk actually
+carries (**4.81–5.98**) that demands the aim reach **17–21%** of target, while the ADR-0080/ADR-0117
+partial-adjustment path has it at **6.5–20.1%** after ~25 minutes of uptime. The desk is stalled a few
+percent short of its own trigger, on **every** name, from flat. AMZN cleared it only because it already
+held 10 shares.
+
+**Why this is the top item.** It is the whole gap between a $11.3k book and the aims it has already
+decided on, on a $1.5M cap — the "undeployed capital is a failure to attack" case in ADR-0132, quantified.
+It is also **not** another routing-permission rule: ADR-0135, its revert and ADR-0136 all graded ❌ BAD
+changing *whether* the desk may act. This is *how far* it acts, one layer down.
+
+**Do NOT reach for the obvious dial.** Lowering `position-buffer.fraction` re-litigates Carver's published
+convention and ADR-0101's floor, and widening the adjustment rate re-litigates ADR-0117's identity
+`a = 1 − exp(−cycle/horizon)`. The defect is neither number alone — it is that `scale` is the average
+position at a **typical-strength** forecast (`TARGET_ABS = 10`) while the aim is throttled toward a
+**below-typical** one, so a weak view gets a band *wider than its own target*. Any change needs a
+superseding ADR that states which of the two quantities is being re-based, and must leave exits unbuffered.
+
+**VERIFY-BY (next run):** in `/api/fusion/targets`, `insideBuffer` falls below **20** of 22 and the count of
+names with non-zero `deltaQty` rises above **1**, with firm gross exposure (`/api/risk` `.total`) above
+**$11,313.99** — and the same `gap` vs `band` table recomputed from live fields shows at least three names
+with `|gap| ≥ band`. Fee cost must not be traded for it: `/api/attribution` `totalFees` growth per unit of
+new gross stays at or below its current ratio.
+
+### Item #2 — the ephemeral JVM never outlives the sensor warm-up (⚠️ OPEN, #2 — NEW, carried from the struck item's real cause)
+
+The struck item's true cause deserves its own row: `streamVolMeasuredNames` was **6** of
+`volBudgetNames 20` at ~23 minutes of uptime last cycle and **20** of 20 at ~25 minutes this cycle, and
+the WARN log still shows `trend sensor still cold for XOM after seeding 175 of 193 stored prices` (also
+CVX, JPM). The loop boots a fresh ~25-30 minute JVM every cycle, so a material fraction of the desk's life
+is spent under-covered and mis-sized — and, worse, **the loop has repeatedly read that warm-up state as a
+structural defect and shipped routing changes at it** (three ❌ BAD in a row). Below item #1 because it now
+self-heals within the cycle; above nothing else because it corrupts every diagnosis taken too early.
+- **VERIFY-BY:** `streamVolMeasuredNames` equals `volBudgetNames` and zero `trend sensor still cold`
+  WARNs, at an `ops_jvm.uptimeSeconds` **below 900**.
+
+### Item #3 — the cumulative fee bill exceeds the cumulative deficit, but is NOT a live bleed (⚠️ OPEN, #3 — DEMOTED, framing corrected)
+
+`/api/attribution` `totalFees` **357.229782** against `firmTotal` **−308.37124107** — the desk is
+**+48.86** gross of fees and the entire loss is cost. But that is a **lifetime** figure over
+`orders_by_status` FILLED **5129**, accumulated across many boots and several code generations, most of it
+before the cost-aware work (ADR-0064, ADR-0084, ADR-0094, ADR-0101) landed. This window placed **4** orders
+in ~25 minutes. Ranking it #1 would be overfitting to a sunk cumulative number — the live trading rate is
+not the one that produced it. **Re-open as #1 only if fee growth per unit of new gross rises** once item #1
+deploys and turnover resumes.
+- **VERIFY-BY:** `totalFees` growth per cycle divided by the cycle's gross-exposure growth, tracked against
+  the ratio implied by the current **357.229782 / 11,313.99**.
+
+---
 ## Verification block — 2026-08-04 14:30Z (**Fixed the report truncation (item #1).** The previously-hidden fields answered the question on the first read: the edge gate is open and the ADR-0094 buffer is holding all 22 names — but the `aims` map shows the real defect is upstream of both, in **sizing**: the risk-scaling stage collapses 17 of 22 aims to zero and leaves the rest at single-digit share counts the buffer then absorbs. That becomes item **#1**. `026cda49d` remains under measurement and was NOT disturbed — this change is to the offline report generator, not the JVM, and no new baseline was recorded.)
 
 ### Step 0 — Item #1 of the 14:00Z block (report truncation): ✅ VERIFIED — fixed and struck
