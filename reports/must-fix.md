@@ -14,6 +14,87 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 13:30Z (**Revert shipped.** `e3b33679d`/ADR-0136 was scored ❌ BAD and the scorer's own `git revert` conflicted, leaving the graded-bad mechanism LIVE for a full cycle. Completing that revert is this cycle's one change. The finding it leaves behind is the important part: the mechanism **passed its own falsification test and still lost the vector** — so item #1 is re-ranked onto the breadth collapse.)
+
+### Step 0 — `e3b33679d` (ADR-0136): 🔴 REGRESSED on the objective, ✅ VERIFIED on its own mechanism
+
+Deployment confirmed, so this grades live code and not a stranded commit: `ops_jvm.uptimeSeconds` **`64358`**
+at `traffic.timestampMillis 1785850202149` → boot **`2026-08-03T19:37:24Z`**, after the commit's
+`19:15:32Z`. It ran continuously through the whole evaluation window.
+
+**Its own falsification test passed on both halves** (verified last cycle by splitting the order log at
+boot; nothing since contradicts it). Sub-floor `fusion reduce toward a smaller target` went 13 → 0, the
+sub-floor `fusion exit — target decayed to flat` still routed, and `fusion_targets` showed three sub-floor
+names (`NEE`, `JNJ`, `NVDA`) with non-zero planned deltas that never became orders — suppression, not an
+absence of opportunity.
+
+**And the scorer graded it ❌ BAD anyway**, on the risk-adjusted return over its ADR-0116 window with the
+t-statistic clearing the hurdle on the losing side. The ledger row owns those numbers. `revertApplied` was
+`false` — a git conflict on the loop's report files — so the mechanism stayed in the running code.
+
+**This is the whole lesson of the cycle.** A change that does exactly what it specified, and whose
+specification was honestly scoped, can still lose: ADR-0136 itself recorded that the sub-floor dribble was
+a *minority* of turnover. The window has now priced that admission. **Verifying a mechanism is not
+verifying a fix** — the register's VERIFY-BY discipline grades whether the defect went away, and it must
+not be mistaken for evidence that removing the defect helped.
+
+**Action taken:** the two running-code paths (`FusionLifecycle`, the `application.properties` provenance
+comment) restored to `e3b33679d^`; `ConvictionFloorRoutingTest` deleted; ADR-0136 and `docs/adr/README.md`
+annotated **Reverted** with the rationale; the loop's findings kept. Verified no `clearsConvictionFloor`
+or `ADR-0136` reference survives under `app/src/`. `./gradlew -Pci test` green.
+
+### Item #1 — the breadth collapse liquidates the whole book at the equity close (⚠️ OPEN, #1 — promoted)
+
+Three mechanisms have now been scored ❌ BAD against this bleed: **ADR-0135** (hold an unestimable view),
+**its own revert**, and now **ADR-0136** (bind the floor on partial reduces). A change, its exact inverse,
+and an adjacent remedy all losing says the graded variable is dominated by something none of them touched.
+
+The order log names it directly. Post-boot on 2026-08-03, `recent_orders` shows `NEE`, `GOOG`, `JNJ`,
+`CAT`, `CVX`, `PG`, `XOM`, `NVDA`, `AAPL`, `AMZN`, `BAC` — the entire routed book — exiting in one sweep,
+every row tagged `fusion exit — target decayed to flat` and **every one carrying `sources=1`**. The
+entries that preceded them carried `sources=2` and `sources=3`. Breadth collapsed to a single effective
+source at the cash close, every combined forecast decayed to flat, and the book was liquidated.
+
+This is a **sensor-availability defect upstream of every routing rule**, which is why three routing-rule
+remedies could not reach it: since ADR-0113 the price-driven sensors advance only on PRINTS, so they fall
+silent at every close, leaving the snapshot-based cross-sectional source alone. The desk is not deciding
+to be flat — it is losing the ability to hold an opinion, and paying a full round trip for it.
+
+**Rank rationale.** `/api/attribution` reads `totalFees 356.521740` against `firmTotal -314.90914721` —
+**the fee bill still exceeds the entire deficit**, and `ALPHA` is `-371.22428289` on `feesPaid 345.102835`.
+Gross of fees the desk is roughly flat: the cost IS the loss, and this round trip is the bulk of it.
+
+**VERIFY-BY next run:** in `recent_orders`, the count of `fusion exit — target decayed to flat` orders
+carrying `sources=1` must be **0** across a session close, while orders at `sources≥2` are unaffected.
+Cross-check `fusion_targets.sources` spanning the close: a name held before the close must not show
+`sources` dropping to 1 with `combinedForecast` at `±0.0`.
+
+**Constraint on the next attempt — do not repeat what the ledger already rejected.** Not another
+conviction-floor variant, and not ADR-0135's "hold the position through the collapse" (graded BAD: it kept
+risk deployed against a view already measured uninformative). The untried direction the ADR-0135 index
+already records: **decay the inventory at the ADR-0080 partial-adjustment rate while breadth is absent**,
+so sensor silence costs neither a full round trip nor a full position's carry.
+
+### Item #2 — the loop's report truncates 8 of 24 JSON sections into invalid JSON, silently (⚠️ OPEN, was #1)
+
+`scripts/system-report.py:405` — `L.append(json.dumps(data, indent=1)[:6000])`. Unchanged this cycle and
+still live: `fusion_targets` again declares fewer instruments than the desk measures, and `risk`, `marks`,
+`discovery`, `social`, `tca`, `strategy_selection`, `orders_day` are still cut mid-object with no marker.
+
+**Why it moved to #2 rather than being fixed.** It is a diagnosis-quality defect with no path into the
+JVM, and this cycle's slot was owed to a graded-BAD mechanism sitting live in the running code — a money
+defect outranks a reporting one. It stays open and ranked, not dropped.
+
+**Scope, re-confirmed against this run's report:** `signals_telemetry` is again well under the cap (its
+per-source rows for `momentum`, `reversion` and the rest are complete), so the standing "no source has
+measured edge" conclusion rests on the full source set. `scripts/score-change.py` still fetches
+`/api/risk` and `/api/attribution` over HTTP directly (`urlopen`, line 94), never through the report — **no
+ledger number has ever been computed from truncated input.** Invariant 7 holds.
+
+**VERIFY-BY:** every ```json``` block in `logs/report.md` parses with `json.loads`, or carries an explicit
+truncation marker naming what was dropped.
+
+---
 ## Verification block — 2026-08-03 19:30Z (**No change — `e3b33679d` is mid-evaluation.** ADR-0136 is ✅ VERIFIED on its stated mechanism from post-boot orders. A new defect displaces item #1: the loop's own report silently truncates 8 of 24 JSON sections into invalid JSON, so every cross-section diagnosis has been running on a partial view.)
 
 ### Step 0 — `e3b33679d` (ADR-0136): ✅ VERIFIED on mechanism — PnL verdict still accumulating

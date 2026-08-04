@@ -1,12 +1,23 @@
 # ADR-0136 — Below the conviction floor a name is held or flat, never re-sized
 
-**Status:** Implemented
+**Status:** Reverted
 **Date:** 2026-08-03
+**Reverted:** 2026-08-04 — see "Why it was reverted" at the foot of this record.
 **Supersedes:** nothing. Narrows the ADR-0065 waiver of the ADR-0059 conviction floor.
 **Related:** ADR-0059 (conviction floor), ADR-0065 (orphaned positions / the reduce waiver),
 ADR-0080 (partial adjustment), ADR-0086 (trailing risk cut), ADR-0090 (an exit is not buffered),
 ADR-0094/0101 (position buffer), ADR-0118 (trapped exit), ADR-0122 (edge gate off on the paper book),
 ADR-0132 (deploy capital), ADR-0134 (order origination triggers).
+
+> **REVERTED.** `scripts/score-change.py` scored the implementing commit `e3b33679d` **❌ BAD** at the
+> close of its ADR-0116 evaluation window; the ledger row carries the computed vector, the t-statistic,
+> the cycle count and the verdict — every number there is the scorer's, not this record's. The scorer's
+> own `git revert` conflicted on the loop's report files and did not land, so the running code was
+> reverted by hand in the next cycle, restoring **only** the two code paths (`FusionLifecycle` and the
+> `application.properties` provenance comment) and deleting `ConvictionFloorRoutingTest`, while leaving
+> this record and the loop's findings in place. The mechanism is **not** to be re-attempted as specified.
+> What the window established is at "Why it was reverted" below; a future ADR that wants the conviction
+> floor to bind on a partial reduce must supersede this one and answer that, not restate this design.
 
 ## Context
 
@@ -127,3 +138,29 @@ one-way property over the cross product.
 (it was 10 in the 18:00–19:00Z window: 6 BAC, 2 GOOG, 2 NVDA). Orders tagged
 `fusion exit — target decayed to flat` must still appear at sub-floor forecasts — their absence would
 mean an exit had been trapped, and would falsify this change rather than confirm it.
+
+## Why it was reverted (2026-08-04)
+
+The change **passed its own falsification test and still lost the vector.** Both halves held, verified
+the cycle after deployment by splitting the order log at the JVM boot time: sub-floor
+`fusion reduce toward a smaller target` orders went to zero (they had been 13 pre-boot — BAC ×9, GOOG ×2,
+NVDA ×2), while `fusion exit — target decayed to flat` still routed at a sub-floor forecast, so no exit
+was trapped. The suppression was real and not merely an absence of opportunity: `fusion_targets` in the
+same post-boot window still planned non-zero deltas on three sub-floor names (`NEE`, `JNJ`, `NVDA`) that
+never became orders. The mechanism did exactly what this ADR specified.
+
+The scorer then graded it ❌ BAD on the risk-adjusted return over the full evaluation window, with the
+t-statistic clearing the hurdle on the losing side. **That is the finding: the mechanism worked and the
+objective still got worse, which means the turnover it removed was not what was costing the money.**
+This ADR said so itself under "Scope, stated honestly" — the sub-floor dribble is a minority of the
+window's turnover — and the window has now priced that admission. The majority of the churn is the
+breadth-collapse round trip: at the equity close the effective source count drops to one, every combined
+forecast decays to flat, and the whole book is liquidated in a single sweep of
+`fusion exit — target decayed to flat [forecast=±0.0, sources=1]` orders. That path is untouched here,
+and it is where the fee bill is made.
+
+Three mechanisms have now been tried against this bleed and all three scored BAD: ADR-0135 (hold an
+unestimable view), its own revert, and this one. Read together they say the cost is not in *which* orders
+the floor lets through but in the **breadth collapse that empties the book at the close** — a
+sensor-availability defect upstream of every routing rule, not a routing rule. The next attempt belongs
+there, and it must not be another variation on the conviction floor.

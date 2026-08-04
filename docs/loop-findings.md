@@ -3778,3 +3778,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   unchanged fusion path. Mark drift plus that rebuild is the whole story; positions are cumulative so no
   per-name decomposition is claimed. `totalFees 349.04` against `firmTotal -271.70` on `$3,935,992` of
   turnover — the fee bill still exceeds the entire deficit.
+
+## 2026-08-04 13:30Z — a change can pass its own falsification test and still lose; three routing-rule remedies now say the defect is upstream
+
+- **Rule 279 — verifying a MECHANISM is not verifying a FIX.** ADR-0136 passed both halves of the
+  falsification test it wrote for itself (sub-floor `fusion reduce toward a smaller target` 13 → 0 across
+  the boot split; the sub-floor `fusion exit — target decayed to flat` still routing; `fusion_targets`
+  showing `NEE`/`JNJ`/`NVDA` planning non-zero sub-floor deltas that never became orders, so the
+  suppression was real and not an absence of opportunity) — and the scorer still graded it **❌ BAD** on
+  the risk-adjusted return over its ADR-0116 window. The register's VERIFY-BY grades whether the defect
+  went away. It does **not** grade whether removing the defect helped. When an ADR honestly scopes itself
+  as attacking a *minority* of the cost — as ADR-0136 did in writing — expect exactly this outcome, and
+  do not read a passing VERIFY-BY as evidence the objective will move.
+- **Rule 280 — when a change, its exact inverse, and an adjacent remedy all grade BAD, stop editing that
+  layer.** ADR-0135 (hold an unestimable view), its own revert, and ADR-0136 (bind the floor on partial
+  reduces) have now all scored ❌ BAD against the same bleed. All three are **routing rules**. The defect
+  is one layer up: post-boot on 2026-08-03 the entire routed book — `NEE`, `GOOG`, `JNJ`, `CAT`, `CVX`,
+  `PG`, `XOM`, `NVDA`, `AAPL`, `AMZN`, `BAC` — exited in a single sweep, every row
+  `fusion exit — target decayed to flat` and **every one `sources=1`**, where the preceding entries
+  carried `sources=2`/`sources=3`. Since ADR-0113 the price-driven sensors advance only on PRINTS, so they
+  fall silent at every cash close and leave one effective source. The desk is not deciding to be flat — it
+  is losing the ability to hold an opinion, and paying a full round trip for it. That is **sensor
+  availability**, upstream of every routing rule, which is why three routing rules could not reach it.
+- **Rule 281 — a failed auto-revert leaves a graded-BAD mechanism LIVE; complete it by hand the next
+  cycle unless completing it would re-apply a different graded-BAD mechanism.** `e3b33679d` sat live for a
+  full extra cycle because `git revert` conflicted on the loop's own report files. Revert the **code paths
+  only** (here: `FusionLifecycle`, the `application.properties` provenance comment, deleting
+  `ConvictionFloorRoutingTest`), keeping the ADR annotated **Reverted** and the findings intact, then grep
+  `app/src/` to confirm no identifier from the change survives. The one documented exception is the
+  revert-of-a-revert case: completing it would re-apply the mechanism the scorer rejected, and there the
+  precedent is refused in writing rather than followed procedurally.
+- **Trigger/attribution.** No PnL attribution is claimed this cycle and none is available: the session was
+  closed, the tape frozen, the window's move **+0.00** on total PnL with gross at **$0.00** (0.0% of the
+  $1,500,000 firm cap). The revert shipped here has not traded and will be graded on the next open.
+  `totalFees 356.521740` against `firmTotal -314.90914721` — the fee bill still exceeds the entire deficit,
+  and the close-time round trip is the bulk of it.

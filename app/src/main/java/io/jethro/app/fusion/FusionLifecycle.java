@@ -342,9 +342,12 @@ public final class FusionLifecycle implements AutoCloseable {
                     if (t.deltaQty().signum() == 0) {
                         continue; // inside the no-trade band — nothing to do
                     }
+                    // ADR-0065: the conviction floor asks "is this view strong enough to put risk ON?".
+                    // It has no business blocking a trade that takes risk OFF — and applied there it
+                    // would permanently trap exactly the positions whose view has decayed to nothing.
                     boolean reducing = TargetPlanner.isRiskReducing(t.deltaQty(), t.currentQty());
-                    if (!clearsConvictionFloor(t, reducing, minForecastToRoute)) {
-                        continue; // ADR-0059/0136 — below the conviction floor and not an exit
+                    if (!reducing && Math.abs(t.combinedForecast()) < minForecastToRoute) {
+                        continue; // ADR-0059: below the conviction floor — don't churn a weak/oscillating signal
                     }
                     if (executor.route(t.instrument(), t.deltaQty(), reducing,
                             originOf(t, reducing, stopped.contains(t.instrument()))).routed()) {
@@ -372,56 +375,6 @@ public final class FusionLifecycle implements AutoCloseable {
      * an hour of samples and the process lifetime is a fraction of that, so without the seed the sensor
      * would never speak and this control would be dead code.
      */
-    /**
-     * May this delta be routed, given how much conviction the desk has in the name (ADR-0059/0136)?
-     *
-     * <p><b>The rule.</b> Below the conviction floor a name has exactly two states — <b>held</b> or
-     * <b>flat</b>. It is never RE-SIZED. So the floor is waived for an order that takes the position
-     * exactly flat, and for nothing else:
-     * <pre>
-     *   |combined forecast| ≥ floor            → route (unchanged, whatever the delta does)
-     *   reducing AND currentQty + deltaQty = 0 → route: this is the EXIT, never blocked
-     *   otherwise                              → suppressed
-     * </pre>
-     *
-     * <p><b>What ADR-0065's waiver was for, and where it over-reached.</b> The floor asks "is this view
-     * strong enough to put risk ON?", so it was waived for every risk-REDUCING delta — the stated reason
-     * being that applying it there "would permanently trap exactly the positions whose view has decayed
-     * to nothing". That reason justifies letting a position OUT. It does not justify re-sizing one. The
-     * waiver was written against {@code isRiskReducing} alone, which is true of a partial rebalance just
-     * as much as of a close, so a name whose forecast had decayed below the floor was still walked toward
-     * a target computed FROM that sub-floor forecast, every cycle, paying fee and spread each time. The
-     * desk was declaring a view too weak to open a position on and then trading on it anyway — the two
-     * halves of the same cycle contradicting each other.
-     *
-     * <p><b>Why the exemption is "lands flat" and not "targetQty is flat".</b> A close does not only
-     * arrive as a flat target: ADR-0118's trapped-exit branch in {@link PositionBuffer} plans the whole
-     * position out while {@code targetQty} is still non-zero (the ADR-0102 clamp put the aim at flat
-     * because the target is on the other side). Keying the waiver on what the ORDER does to the position
-     * — rather than on which upstream field happens to say flat — is what makes "never trapped" hold for
-     * every path at once, including ones added later. Every control that means "get out" plans the name
-     * flat (the ADR-0086 chandelier cut, the ADR-0065 orphan unwind, the ADR-0027 breaker above them), so
-     * each of them lands exactly flat and passes here untouched: the deterministic floor is not narrowed
-     * by one order.
-     *
-     * <p><b>One-way.</b> This can only ever SUPPRESS a trade. It never routes an order the previous rule
-     * would have blocked, never enlarges one, and never changes a delta — every branch either returns the
-     * same answer as before or returns false where the old rule returned true. Risk can therefore only
-     * come off more slowly, never go on faster.
-     *
-     * <p>Exact decimal on the position arithmetic (invariant 1). {@code combinedForecast} is Carver-scaled
-     * and dimensionless — a conviction, never a price, a size or a return — so it is compared as a double,
-     * exactly as the floor has always been.
-     */
-    static boolean clearsConvictionFloor(FusionPlanner.Target t, boolean reducing, double floor) {
-        if (Math.abs(t.combinedForecast()) >= floor) {
-            return true;
-        }
-        // The exit: this order takes the name exactly flat. Never blocked, so no position is ever
-        // trapped by a view that has decayed — which is precisely what ADR-0065's waiver protected.
-        return reducing && t.currentQty().add(t.deltaQty()).signum() == 0;
-    }
-
     /**
      * The ORIGINATION trigger for one routed delta (ADR-0134) — why the desk wanted this trade, named
      * where the planner still knows it. Four triggers the post-mortem must be able to tell apart: a
