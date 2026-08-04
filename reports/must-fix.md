@@ -14,6 +14,69 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 17:00Z (**No change — `120b22b41` is at 1/6 cycles under ADR-0116 measurement.** ADR-0137 met its primary VERIFY-BY exactly: planned gross **$1,356,452.14 → $499,731.80**, **0.9995×** the $500,000 cap. It missed its secondary one, and the reason refutes its own causal premise: the fusion sizing map is **homogeneous of degree 1** in the target, so a uniform target scalar moves absolute notional and leaves churn-per-unit-of-book untouched. The turnover item stays open, but its mechanism is now **cadence**, not magnitude — and a new, larger candidate has appeared: the loop's own restart may be liquidating the book every cycle.)
+
+### Step 0 — `120b22b41` (ADR-0137): ✅ VERIFIED on the primary metric, ⚠️ STILL-BROKEN on what it was for
+
+Deployed and graded on live code: boot at `traffic.timestampMillis` **1785862802646** − `ops_jvm.uptimeSeconds`
+**845** ⇒ ≈**16:45:57Z**, after the commit. `traffic.up true`, `provider alpaca`, `ticksIn 7371`,
+`ticksDropped 0`. `GrossNotionalCapTest` 9 tests / 0 failures at commit.
+
+| VERIFY-BY | before | now | verdict |
+| --- | --- | --- | --- |
+| `/api/fusion/targets` Σ \|targetQty × price\| ≤ $500,000 | $1,356,452.14 (2.71×) | **$499,731.80** (0.9995×) | ✅ |
+| `insideBuffer` falls | 19 of 22 (0.86) | **18 of 20 (0.90)** | ⚠️ did not fall |
+
+**Why the second one could not move.** In `PositionBuffer`: `aim ← aim + a·(target − aim)`,
+`scale = |target| · TARGET_ABS / |forecast|`, `band = scale · width` (width dimensionless — ADR-0101
+measures it in bps of cost vs edge), `gap = aim − held`, `|gap| ≤ band → 0` else `gap − band·sgn(gap)`.
+Every term is linear in the target, so ADR-0137's uniform scalar multiplies aim, band, gap and delta
+alike: **which names trade, and turnover ÷ book, are scale-invariant.** The change cuts the dollar fee
+bill and shrinks the book by the same factor; it cannot cut churn per unit of book. Sound, harmless,
+aimed at the wrong variable. Its PnL verdict is the scorer's and is at 1/6 cycles — **not** touched here.
+
+`026cda49d`'s flagged auto-revert remains **deliberately not completed** (Rule 303): it is itself the
+revert of the graded-BAD ADR-0136, so completing it would re-apply a rejected mechanism.
+
+### Open items, re-ranked most-costly-first
+
+**#1 — the loop's own restart may liquidate and rebuild the whole book every cycle.** *(new — displaces
+the turnover item, which it may well explain)*
+The 16:45:57Z boot log shows `trend sensor still cold` for 14 equities — "still cold for CVX after seeding
+**164 of 193** stored prices", likewise GOOG, NEE, XOM, JPM, KO, MCD, PG, HD, JNJ, PFE, BAC, CAT, UNH — and
+`reversion sensor still cold` for JPM and JNJ. The warm-restart mark store is **short of the warm-up span**,
+so a restart blinds those sensors for minutes. A name with no warm sensors contributes no forecast,
+`sources` falls toward 1, and the live rule (the one restored when ADR-0135 was scored ❌ BAD and reverted)
+treats a one-source view as unestimable and plans the name **flat** — worked in full, not buffered.
+**Ten of the twelve flat equities are on that cold list.** The desk now holds **$20,131.72** = **4.03%** of
+its own **$499,731.80** plan with **13 of 20** names flat, against cumulative LIVE turnover of
+**$4,316,744.05** = **207.42×** the **$20,811.28585000** firm gross.
+*Stated as the leading hypothesis, not a proof:* the pre-boot exits (WMT 16:38:19Z, PFE SELL 249
+16:40:21Z) were on a warm JVM and are not explained by cold sensors.
+**Fix direction:** the warm restart — seed the sensors with enough stored history to publish at boot.
+**NOT** the routing rule: ADR-0135's "hold instead of liquidate" is graded ❌ BAD and must not be re-tried.
+**VERIFY-BY:** zero `trend sensor still cold` / `reversion sensor still cold` WARNs at boot for any name
+that has stored marks, **and** no `fusion exit — target decayed to flat [… sources=1]` order in the five
+minutes after the JVM starts.
+
+**#2 — turnover cost is the loss, and its mechanism is CADENCE (a 3600s forecast re-planned every 30s).**
+*(was #1; mechanism corrected this cycle — the magnitude hypothesis is closed by ADR-0137's own result)*
+Firm **-$599.89296437** against `totalFees` **$379.515318** ⇒ pre-fee trading of **-$220.37764637**:
+**fees are 63.26%** of the deficit. Rules 295/296 hold — a forecast measured at 3600s, re-planned every
+30s, produces sign-flip whipsaw. Rule 304 now rules out every *uniform-scalar* remedy a priori.
+**VERIFY-BY:** cumulative LIVE `turnover_cost_by_name` Σ`turnover_usd` ÷ `/api/risk` `.total.grossExposure`
+falls materially from **207.42×**, with gross not falling to produce it.
+
+**#3 — social never reaches the combiner, and it is the only source clearing the desk's own hurdle.**
+*(unchanged, re-confirmed)* Every `contributions` array in `/api/fusion/targets` lists only
+`trend`/`reversion`/`xsreversion`; `forecastScalars` has no `social` entry; yet `weights` carries
+`social 1.7911864985234398`, the largest of the five. Per Rule 292 this is a **superseding ADR** (gate and
+dial together), never a quiet dial turn — and per Rule 298 it stays behind the cost fix, because an
+hour-scale edge cannot be collected by a book that is liquidated every half hour.
+**VERIFY-BY:** a `social` entry appears in `/api/fusion/targets` `forecastScalars` and in at least one
+name's `contributions` array.
+
+---
 ## Verification block — 2026-08-04 16:30Z (**Change shipped: ADR-0137.** `026cda49d` scored ❌ BAD and its window closed, so the five-cycle code freeze is over. The turnover item held #1 and this cycle found its *mechanism*, which is structural rather than a dial: **every sizing control in the fusion pipeline is σ-relative and none constrains notional**, so the planner was targeting **$1,356,452.14** gross — **2.71×** the $500,000 the guardrail permits the routing book to hold and **14.74×** the **$91,999.52** it actually held. An unreachable target is what the churn is made of.)
 
 ### Step 0 — `026cda49d` (revert of ADR-0136): ⏹ SCORED ❌ BAD — window closed, freeze lifted

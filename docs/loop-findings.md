@@ -4040,3 +4040,45 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   behaviour, not the effect of any change**, since nothing had shipped in five cycles. Nothing here is
   claimed or blamed on code. JVM warm (`uptimeSeconds` **1428**, `streamVolMeasuredNames` **20** =
   `volBudgetNames`, `covarianceCoveredNames` **20**), so Rule 293's cold-start caveat does not apply.
+
+## 2026-08-04 17:00Z — ADR-0137 hit its number exactly, and that proved the number was the wrong variable
+
+- **Rule 304 — the fusion sizing map is HOMOGENEOUS OF DEGREE 1 in the target, so any uniform target
+  scalar changes absolute notional and NOTHING about churn per unit of book.** Reading `PositionBuffer`:
+  `aim ← aim + a·(target − aim)`, `scale = |target| · TARGET_ABS / |forecast|`, `band = scale · width`
+  (width dimensionless — ADR-0101 measures it in bps of cost vs edge), `gap = aim − held`, then
+  `|gap| ≤ band → 0` else `gap − band·sgn(gap)`. Multiply `target` by one scalar and the aim, band, gap
+  and order delta all scale by the same factor: **which names trade, and turnover ÷ book, are
+  scale-invariant.** ADR-0137's own telemetry confirms it — planned gross went **$1,356,452.14 →
+  $499,731.80** (**0.9995×** the $500,000 cap: the cap binds, primary VERIFY-BY ✅) while `insideBuffer`
+  went **19 of 22 (0.86) → 18 of 20 (0.90)** — the frozen fraction did not fall. Before capping,
+  shrinking or scaling any target, ask whether the quantity you want to move is scale-invariant.
+- **Rule 305 (corrects Rule 300) — the aim does not fail to converge because the target is UNREACHABLE;
+  it converges to the same FRACTION of any target. It fails because the target MOVES.** Rule 300 read the
+  right symptom (a desk permanently in transit) and inferred the wrong cause. By Rule 304 the ADR-0080
+  path is scale-free, so a $1.36M target and a $500k target are equally "far" in the units that matter.
+  The real driver is a 3600s forecast re-planned every 30s — Rules 295/296 already had it. ADR-0137 does
+  no harm and cuts the dollar fee bill, but it was aimed at magnitude when the defect is **cadence**.
+- **Rule 306 — a restart re-cools the trend/reversion sensors, `sources` collapses to 1, and the live
+  rule reads that as "plan the name flat" — i.e. the loop may be liquidating and rebuilding the whole
+  book every 30 minutes.** The 16:45:57Z boot log shows `trend sensor still cold` for 14 equities
+  ("after seeding 164 of 193 stored prices" — the warm-restart store is SHORT of the warm-up span) and
+  `reversion sensor still cold` for JPM/JNJ. **Ten of the twelve flat equities are on that cold list.**
+  Held equity is **$20,131.72** = **4.03%** of its own **$499,731.80** plan, 13 of 20 names flat, against
+  cumulative LIVE turnover of **$4,316,744.05** = **207.42×** the **$20,811.28585000** gross. Fees are
+  **63.26%** of the **-$599.89296437** firm loss (pre-fee **-$220.37764637** against `totalFees`
+  **$379.515318**). Fix the **warm restart**, not the routing rule — ADR-0135's "hold instead of
+  liquidate" is graded ❌ BAD and must not be re-attempted.
+- **Rule 307 — attribute an exposure collapse by checking whether the trigger fired on BOTH SIDES of the
+  deploy before blaming the new binary.** Gross fell **$73,074.32**, but the
+  `fusion exit — target decayed to flat [forecast=-0.0, sources=1]` wave ran WMT 16:38:19Z and PFE SELL
+  249 16:40:21Z **before** the 16:45:57Z boot and JPM SELL 60 16:46:37Z / PG BUY 103 16:47:38Z **after** —
+  identical reason string either side. ADR-0137 scales a target; it cannot produce `sources=1` or
+  `forecast=-0.0`. Not the change's doing. (Caveat, and stated as such: the two pre-boot exits were on a
+  warm JVM, so Rule 306 does not explain them — cold sensors are the leading hypothesis, not a proof.)
+- **Trigger/attribution.** No change shipped: `120b22b41` is at **1/6 cycles** (`.pending-baseline.json`
+  present), so the code was frozen and no baseline recorded. The window's **-$66.13** PnL and
+  **-$73,074.32** gross are the running desk's own exit-to-flat wave plus the follow-on
+  `auto-hedge EQUITY (ADR-0019)` ES trades — **baseline behaviour**. Nothing is claimed or blamed on code.
+  JVM was cold-ish (`uptimeSeconds` **845**), so per Rule 293 the `insideBuffer` reading is an observation
+  only; Rule 304 is an algebraic property of the code and does not rest on it.
