@@ -14,6 +14,91 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 18:30Z (**No change — `120b22b41` is at 4/6 cycles under ADR-0116 measurement.** Item #1 reproduced on a **fourth** independent boot (18:08:35Z → `sources=0` liquidations **40 seconds** later), and this cycle's own seed counts *falsify the idea that the short seed is a property of the name*: **NEE seeded 193 of 193 last boot and 181 of 193 this boot**, while **BAC seeded full on both**. That is Rule 313's coin flip, observed in the app's own log rather than in a replication script. The cycle's new product is a **second, additive restart defect, now measured**: `PositionBuffer`'s ADR-0080 **aim map is in-memory only**, so every restart re-seeds intent at the held position — and at the derived rate `a` the buffer does not release the **first** order in a name for **12.4 minutes** at best, **34.7 minutes** at the median, and **never** for 4 of 20 names. On a ~30-minute restart cadence the desk therefore holds **$32,767.885** of a **$494,262.182127365** plan — **6.63%** — under a $500k cap. Ranked **#2**; it stays behind #1 because a cold sensor plans the name FLAT, and a flat target snaps the aim to zero, so fixing intent while the sensors still blink out changes nothing.)
+
+### Step 0 — `120b22b41` (ADR-0137): ✅ still VERIFIED on its primary metric, fourth cycle running
+
+Live `/api/fusion/targets` this cycle: Σ |targetQty × price| over 22 names = **$494,262.182127365** against
+`jethro.risk.max-gross-exposure` **$500,000** — **0.98852436425473×**. The cap binds a fourth consecutive
+cycle and no name flipped side. Its PnL verdict is the scorer's and stands at **4/6 cycles**
+(`reports/.pending-baseline.json` present), which is why no code changed this cycle.
+
+`026cda49d`'s flagged auto-revert remains **deliberately not completed** (Rule 303): it is itself the
+revert of the graded-BAD ADR-0136, so completing it would re-apply a rejected mechanism.
+
+### Step 0 — Item #1 (restart liquidates the book): ⚠️ STILL-BROKEN on a fourth boot
+
+No fix was attempted (code frozen under measurement), so this is the defect's fourth reproduction:
+
+| check | reading | verdict |
+| --- | --- | --- |
+| JVM boot | `traffic.timestampMillis` **1785868202358** − `ops_jvm.uptimeSeconds` **1287** ⇒ **18:08:35.358Z** | — |
+| zero cold WARNs at boot | **13** equities cold on trend at 18:08:49–18:09:24Z (PFE, XOM, WMT, CAT, UNH, GOOG, PG, JNJ, CVX, JPM, MCD, KO, NEE); **4** cold on reversion (CAT, UNH, HD, JNJ); 12 rates names cold on both | ⚠️ failed |
+| no `sources≤1` exit within 5 min of boot | **18:09:15.234888Z** KO `BUY 12` `[forecast=0.0, sources=0]` FILLED and **18:09:15.386281Z** NEE `SELL 2` `[forecast=0.0, sources=0]` REJECTED — **40 s** after boot | ⚠️ failed |
+
+**Four independent boots, one signature: 16:45:57Z, 17:07:55Z, 17:39:05Z, 18:08:35Z — each followed within
+~40 s by a `target decayed to flat [sources≤1]` liquidation wave.**
+
+**New evidence — the seed depth is a property of the BOOT, not of the name.** Rule 313 predicted the seed
+fills iff a name's effective consumption spacing happens to land at or under `LOOKBACK_MULTIPLE`, i.e. a
+coin flip per boot. This cycle's log confirms it directly, no replication needed: **NEE seeded 193 of 193
+at the 17:39:05Z boot and 181 of 193 at the 18:08:35Z boot**, and **BAC seeded full at both** (absent from
+the cold list twice). A per-name allowlist or a per-name constant therefore cannot fix this — only sizing
+the read-back by what the walk actually consumes can, which is the fix already specified.
+
+### NEW — Item #2: a restart wipes the desk's INTENT, and the buffer then forbids re-entry for 12–35 minutes
+
+`PositionBuffer` holds the ADR-0080 aim in a plain `HashMap` field (`PositionBuffer.java:104`), constructed
+per-JVM in `FusionConfig.java:217` with nothing but the fraction — there is no store, no restore, and
+`nextAim` seeds `from = held` on first sight of a name. So every restart discards the intent the previous
+process had accumulated and restarts it at the (just-liquidated) held position.
+
+That interacts with the band multiplicatively. The band is `|target| × TARGET_ABS / |forecast| × width`,
+with `TARGET_ABS = 10.0` (`Forecast.java:20`), `width = 0.10` (`jethro.fusion.position-buffer.fraction`;
+the ADR-0101 measured width is inactive — `/api/fusion/targets` `edgeGate` is `null`). From a zero aim the
+first order in a name is released only once `1 − (1−a)^n ≥ 10·width/|forecast|`, at the derived rate
+`a = 1 − exp(−30/3600) = 0.008298707` (`jethro.fusion.adjustment-rate=0` ⇒ derived, ADR-0080). Computed
+from this cycle's live target book:
+
+| name | \|target\| | band | aim now | minutes of uptime to first order |
+| --- | --- | --- | --- | --- |
+| MSFT | $53,716 | $10,065 | $8,713 | **12.4** |
+| AAPL | $47,104 | $9,608 | $3,782 | 13.7 |
+| BAC | $61,549 | $13,153 | $3,875 | 14.4 |
+| JPM | $50,742 | $11,564 | $9,059 | 15.5 |
+| … median of the 20 sized names | | | | **34.7** |
+| KO / XOM | $14,142 / $10,709 | $13,556 / $10,336 | $4,031 / $89 | 191.0 / 201.4 |
+| MCD, WMT, NEE, NQ | band ≥ \|target\| | | | **never** |
+
+The loop restarts the JVM roughly every 30 minutes. So the desk spends the first ~40 s liquidating on cold
+sensors and the next 12–35 minutes unable to open anything, which is why **`insideBuffer` is 17 of 22** and
+held gross is **$32,767.885** against a **$494,262.182127365** plan — **6.63%** — with the firm cap at
+$500,000 and gross at **3.3%** of the $1,500,000 firm cap. Under ADR-0132 that undeployed capital is the
+failure to attack. The corroborating timeline: the prior JVM booted **17:39:05Z** and its first
+`fusion entry — target increase` fill lands at **17:55:28.697412Z**, ~16 minutes later, consistent with the
+table rather than with any market event.
+
+- **Rank #2, deliberately behind #1.** A cold sensor plans the name FLAT; `nextAim` snaps a flat target's
+  aim to zero and ADR-0090 works that exit in full. So restoring intent while the sensors still blink out
+  at boot restores nothing — #1 gates #2.
+- **This is NOT ADR-0133's band cap** (`e61c7f5aa`, graded ❌ BAD and not to be re-attempted). That change
+  capped the band at the target it polices, altering the steady-state no-trade region for every name in
+  every cycle. The defect here is that a *derived, in-memory* state is lost across a process boundary the
+  desk's own operations create — the same class of bug as the ADR-0071/ADR-0114 warm-restart seed, and
+  fixable by restoring intent rather than by widening or narrowing any band.
+- **VERIFY-BY:** at the first fusion cycle after a boot, `/api/fusion/targets` `aims` is materially
+  non-zero for names the previous process had aims in (today it is the held position), and the interval
+  from boot to the first `fusion entry — target increase` FILL drops from the observed **~16 minutes**
+  (17:39:05Z → 17:55:28Z) to under one fusion interval. Secondary: held-gross ÷ planned-gross rises from
+  **6.63%**.
+
+### Cost picture this cycle (unchanged in character)
+
+Firm total **-$606.83516377** against `totalFees` **$387.738249** ⇒ pre-fee trading of **-$219.09691477**,
+so **fees are 63.90%** of the deficit. `riskCuts []`, `bookVolBrake 1.0`, `portfolioRiskMultiplier
+0.6124247621887945`, breaker untripped.
+
+---
 ## Verification block — 2026-08-04 18:00Z (**No change — `120b22b41` is at 3/6 cycles under ADR-0116 measurement.** Item #1 reproduced on a **third** independent boot: 17:39:05Z, then **40 seconds later** PFE `SELL 12` on `sources=0` and HD `BUY 1` on `sources=1`. The cycle's real product is that **Rule 310's open question is now MEASURED and closed**: replaying `SensorWarmup.seedPrices` against the live store, **16 of 18 seeds end on read-window exhaustion, 2 are satisfied, and the `GAP_TOLERANCE` break fires ZERO times.** The window is sized `LOOKBACK_MULTIPLE (2) × samples × step`, but the walk consumes history at a measured **2.26×** `step` after its own `≥ interval` thinning — so the window delivers ~`samples` points in expectation and the seed is a coin flip. The two names that seeded FULL are exactly the two measuring **2.00**. The fix is now specified, not guessed.)
 
 ### Step 0 — `120b22b41` (ADR-0137): ✅ still VERIFIED on its primary metric, third cycle running

@@ -4159,3 +4159,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **$498,877.903542685** against the **$500,000** cap (**0.99775580708537×**). Cost picture: firm
   **-$599.45227577** against `totalFees` **$387.112525** ⇒ pre-fee **-$212.33975077**, **fees 64.58%** of
   the deficit; cumulative LIVE turnover **$4,402,699.14** = **89.20×** gross **$49,356.54110000**.
+
+## 2026-08-04 18:30Z — the restart wipes the desk's INTENT too, and the buffer locks the door for 12–35 minutes (no change; `120b22b41` at 4/6)
+
+- **Rule 315 — a restart discards the ADR-0080 aim, and because the no-trade band is scaled by the TARGET
+  and not by the aim, the desk is then forbidden to open a name for 12.4 minutes at best, 34.7 at the
+  median, and forever in 4 of 20 names.** `PositionBuffer` keeps the aim in a plain `HashMap` field
+  (`PositionBuffer.java:104`), built per-JVM in `FusionConfig.java:217` with no store and no restore, and
+  `nextAim` seeds `from = held` on first sight. From a zero aim the first order clears only when
+  `1 − (1−a)^n ≥ TARGET_ABS·width/|forecast|`, with `TARGET_ABS = 10.0`, `width = 0.10` (the ADR-0101
+  measured width is inactive — `edgeGate` is `null`) and the derived `a = 1 − exp(−30/3600) =
+  0.008298707`. On a ~30-minute reboot cadence that is most of the cycle spent unable to act:
+  `insideBuffer` **17 of 22**, held gross **$32,767.885** against a planned **$494,262.182127365** —
+  **6.63%** — with the firm cap at $500,000. Corroborated by the prior JVM's own timeline: booted
+  **17:39:05Z**, first `fusion entry — target increase` FILL at **17:55:28.697412Z**, ~16 minutes.
+  **Rule: derived state that survives only inside one process is a defect wherever the desk restarts
+  itself on a cadence shorter than that state's own time constant.** Fix it by restoring the state, never
+  by re-cutting the band — ADR-0133 (`e61c7f5aa`) already tried the band and is graded ❌ BAD.
+- **Rule 316 — rank the intent fix BEHIND the sensor fix, because a cold sensor plans the name FLAT and a
+  flat target snaps the aim to zero (ADR-0090 works that exit in full).** Restoring intent while the
+  sensors still blink out at boot restores nothing; #1 gates #2. Two coupled restart defects, and the
+  order matters.
+- **Rule 317 — the warm-restart seed depth is a property of the BOOT, not of the name, so no per-name
+  allowlist or per-name constant can fix it.** Rule 313 predicted a coin flip; this cycle the app's own
+  log shows it without any replication script: **NEE seeded 193 of 193 at the 17:39:05Z boot and 181 of
+  193 at the 18:08:35Z boot**, while **BAC seeded full at both**. Only sizing the read-back by what the
+  walk actually consumes can close it.
+- **Rule 318 — four boots, four identical waves: stop counting reproductions.** 16:45:57Z, 17:07:55Z,
+  17:39:05Z, 18:08:35Z; this cycle **13** equities cold on trend and **4** on reversion at 18:08:49–
+  18:09:24Z, then KO `BUY 12` `[forecast=0.0, sources=0]` at **18:09:15.234888Z** and NEE `SELL 2`
+  `[sources=0]` at **18:09:15.386281Z** — **40 s** after boot. A fifth confirmation buys nothing.
+- **Trigger/attribution.** No change shipped: `120b22b41` is at **4/6 cycles** (`.pending-baseline.json`
+  present), so the code was frozen and no baseline recorded. The window's **-$9.22** PnL is the running
+  desk's own liquidate-then-rebuild — **baseline behaviour**, nothing claimed or blamed on code.
+  ADR-0137's primary VERIFY-BY holds a fourth cycle: live planned gross **$494,262.182127365** against the
+  **$500,000** cap (**0.98852436425473×**). Cost picture: firm **-$606.83516377** against `totalFees`
+  **$387.738249** ⇒ pre-fee **-$219.09691477**, **fees 63.90%** of the deficit.
