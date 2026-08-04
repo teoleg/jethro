@@ -14,6 +14,133 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 19:00Z (**No change — `120b22b41` is at 5/6 cycles under ADR-0116 measurement; it scores next cycle.** Item #1 reproduced on a **fifth** boot with the same ~40-second signature — but this cycle stops counting reproductions (Rule 318) and **prices the defect instead**. Two new measurements. (a) **A single, complete, causally-timestamped round trip:** JPM `BUY 13 @ 359.130000` FILLED **18:38:08.400753Z** on `[forecast=+9.114237353210052, sources=3]`; the JVM's own `trend sensor still cold for JPM after seeding 137 of 193` WARN lands **18:38:09.591Z**, 1.19 s later; JPM `SELL 13 @ 359.006339` FILLED **18:38:35.165972Z** on `fusion exit — target decayed to flat [forecast=0.0, sources=1]`. The position lived **26.765219 s**, and cost **-$1.607593** of price move plus **$0.933577** of fee ⇒ **-$2.541170**, for zero information: the three-source view that opened it was never contradicted, the sensor simply went blind. (b) **The cumulative bill, from the app's own `fills`⋈`orders` join:** **63** LIVE fills carry an `origin_reason` with `sources ≤ 1` — **$388,348.116512140580** of notional and **$39.187210** of fee, which is **10.04%** of the firm's entire LIVE fee bill `totalFees` **$390.159780**, against a firm total PnL of **-$602.70613085**. And they are not spread across the cycle: **40 of the 58** blind *liquidation* fills (**68.97%**), carrying **68.89%** of their fee, land in the **first 10 minutes** of the loop's 30-minute cycle. Item #1 is no longer a mechanism with a story — it is a mechanism with an invoice, and it keeps #1.)
+
+### Step 0 — `120b22b41` (ADR-0137): ✅ still VERIFIED on its primary metric, fifth cycle running
+
+Live `/api/fusion/targets` this cycle: Σ |targetQty × price| over 21 names = **$500,000.000044975** against
+`jethro.risk.max-gross-exposure` **$500,000** — **1.00000000008995×**. The cap binds a fifth consecutive
+cycle and no name flipped side. Its PnL verdict is the scorer's; `reports/.pending-baseline.json` is
+present and the window holds **5 of 6** heartbeats since the baseline `2026-08-04T16:45:25Z`, so **no code
+changed this cycle** and no baseline was recorded. It scores next run.
+
+`026cda49d`'s flagged auto-revert remains **deliberately not completed** (Rule 303): it is itself the
+revert of the graded-BAD ADR-0136, so completing it would re-apply a rejected mechanism.
+
+### Step 0 — Item #1 (restart liquidates the book): ⚠️ STILL-BROKEN — and now PRICED
+
+No fix was attempted (code frozen under measurement). The fifth reproduction:
+
+| check | reading | verdict |
+| --- | --- | --- |
+| JVM boot | `traffic.timestampMillis` **1785870002122** − `ops_jvm.uptimeSeconds` **1327** ⇒ **18:37:55.122Z** | — |
+| zero cold WARNs at boot | **13** equities cold on trend at 18:38:09–18:38:24Z (JNJ 139/193, CAT 159, JPM 137, GOOG 178, MCD 163, HD 188, PFE 147, CVX 163, **BAC 192**, KO 178, PG 162, NEE 171, NQ 149); **6** cold on reversion (JNJ 224/241, CAT 225, JPM 239, HD 221, NQ 230, UNH 218); 12 rates names cold on both | ⚠️ failed |
+| no `sources≤1` exit within 5 min of boot | JPM `SELL 13` `fusion exit — target decayed to flat [forecast=0.0, sources=1]` FILLED **18:38:35.165972Z** — **40.043972 s** after boot | ⚠️ failed |
+| new seed log naming the terminator | not present (the fix has not shipped) | ⚠️ n/a |
+
+**Five boots, one signature: 16:45:57Z, 17:07:55Z, 17:39:05Z, 18:08:35Z, 18:37:55Z — each followed ~40 s
+later by a `target decayed to flat [sources≤1]` liquidation.**
+
+**The complete round trip, in the app's own timestamps.** This is the tightest evidence the loop has
+produced, because entry, blindness and exit are all inside 27 seconds of one boot:
+
+| t (UTC) | event | source |
+| --- | --- | --- |
+| 18:37:55.122 | JVM boot | `traffic` − `ops_jvm.uptimeSeconds` |
+| 18:38:08.400753 | JPM `BUY 13 @ 359.130000`, fee **$0.466869** — `fusion entry — target increase [forecast=9.114237353210052, sources=3]` | `fills` ⋈ `orders` |
+| 18:38:09.591 | `trend sensor still cold for JPM after seeding 137 of 193 stored prices` | boot log |
+| 18:38:35.165972 | JPM `SELL 13 @ 359.006339`, fee **$0.466708** — `fusion exit — target decayed to flat [forecast=0.0, sources=1]` | `fills` ⋈ `orders` |
+
+Held **26.765219 s**. Price move **13 × (359.006339 − 359.130000) = -$1.607593**; fees **$0.933577**;
+round trip **-$2.541170**. Nothing about the view changed — only whether the sensor could see.
+
+**The cumulative bill** (`select … from fills f join orders o on o.order_id=f.order_id where f.feed_mode='LIVE'
+and o.origin_reason like '%sources=0%' or '%sources=1%'`, grouped by trigger):
+
+| trigger | fills | notional | fee |
+| --- | --- | --- | --- |
+| `fusion exit — target decayed to flat` | 58 | $374,594.624477140580 | $37.811860 |
+| `fusion reduce toward a smaller target` | 5 | $13,753.492035000000 | $1.375350 |
+| **total** | **63** | **$388,348.116512140580** | **$39.187210** |
+
+That fee is **10.04%** of the firm's LIVE `totalFees` **$390.159780** and **6.50%** of the entire deficit
+**-$602.70613085**. Bucketing the 58 blind liquidation fills by minute-within-the-30-minute-cycle:
+**40 of 58 (68.97%)**, **$256,958.77** of notional and **$26.0483** of fee (**68.89%**), fall at
+`minute % 30 ≤ 10` — i.e. immediately after a reboot. On 2026-08-04 every single one lands at 15:37, 15:38,
+16:07, 16:38, 16:40, 16:46, 16:47, 17:08, 17:14, 17:39, 17:40, 17:45, 18:09 or 18:38. This is the restart
+cadence written into the fee ledger.
+
+### Step 0 — Item #2 (the aim is in-memory only): ⚠️ STILL-BROKEN, reproduced
+
+Live `/api/fusion/targets`: `insideBuffer` **16 of 21**, held **$34,292.8900** against a planned
+**$500,000.000044975** — **6.86%** (6.63% last cycle). `aims` at ~22 minutes of uptime are still far short
+of target (`BAC -155.100803` against `targetQty -1275.096134`; `NEE -67.12794` against `-738.512121`),
+which is the buffer walking from a restart-zeroed intent exactly as Rule 315 derived. Unchanged in
+mechanism; still ranked **#2** because #1 gates it.
+
+---
+### Open items, re-ranked most-costly-first
+
+**#1 — a restart blinds the equity sensors, and the desk liquidates what they held.**
+*(carried at #1 for the fifth cycle; this cycle it moved from "specified mechanism" to "priced mechanism")*
+A name whose sensors are cold contributes no forecast, `sources` falls to ≤1, and the live rule reads that
+as unestimable and plans the name **flat** — worked in full, not buffered. **Measured cost: $39.187210 of
+fee on $388,348.116512140580 of blind notional = 10.04% of the firm's entire LIVE fee bill**, 68.89% of it
+concentrated in the ten minutes after a reboot, against a firm deficit of **-$602.70613085** in which fees
+are **64.73%**. The JPM round trip above is one instance costing **-$2.541170** in 26.765219 seconds.
+**Fix — unchanged and concrete, and it is not a magic constant:** make the read window a function of the
+spacing the walk actually consumes at rather than of `step` — when the backward walk exhausts its window
+still short of `samples`, **re-read further back and continue** until the seed is full or a genuine
+gap/epoch boundary truncates it (self-calibrating; no fitted multiple). Ask for margin above the bare
+`warmupSamples()` minimum (Rule 309). And **log the terminator and the wall-clock span covered** on every
+short seed, so the next cycle grades this from the app's own log rather than from a replication script.
+Rule 317 forbids any per-name allowlist or per-name constant: the seed depth is a property of the **boot**
+(BAC seeded full at 17:39:05Z and 18:08:35Z, then **192 of 193** at 18:37:55Z; NEE **193 → 181 → 171**).
+Architecturally significant — it changes ADR-0071/ADR-0114 warm-restart semantics — so it ships with its
+ADR (`Status: Implemented`). **NOT** the routing rule: ADR-0135's "hold instead of liquidate" is graded
+❌ BAD and must not be re-tried.
+**VERIFY-BY:** zero `trend sensor still cold` / `reversion sensor still cold` WARNs at boot for any name
+with stored marks, **and** no `fusion exit — target decayed to flat [… sources≤1]` order in the five
+minutes after the JVM starts, **and** the `sources ≤ 1` fee share of `totalFees` falls materially from
+**10.04%**, **and** the new seed log names `window-exhausted` / `gap-break` and the span for any name still
+short.
+
+**#2 — a restart wipes the desk's INTENT, and the buffer then forbids re-entry for 12–35 minutes.**
+*(carried at #2; reproduced this cycle)* `PositionBuffer` holds the ADR-0080 aim in a plain `HashMap`
+field (`PositionBuffer.java:104`), built per-JVM in `FusionConfig.java:217` with no store and no restore;
+`nextAim` seeds `from = held` on first sight. Live: `insideBuffer` **16 of 21**, held **$34,292.8900** of a
+planned **$500,000.000044975** — **6.86%** — under a $500,000 cap while ADR-0132 asks the desk to deploy.
+**Fix direction:** persist and restore the aim across the process boundary (LMDB warm-restart state is
+derived data, ADR-0014). **Never** by re-cutting the band — ADR-0133 (`e61c7f5aa`) tried that and is graded
+❌ BAD. Stays behind #1 (Rule 316): a cold sensor plans the name FLAT, and a flat target snaps the aim to
+zero, so restoring intent while the sensors still blink out restores nothing.
+**VERIFY-BY:** `/api/fusion/targets` `insideBuffer` falls materially from **16 of 21** within five minutes
+of a boot, and held ÷ planned gross rises materially from **6.86%**.
+
+**#3 — turnover cost is the loss.** *(carried; a downstream symptom of #1 — a restart round trip IS
+turnover, and this cycle #1's share of it is priced)* Firm **-$602.70613085** against `totalFees`
+**$390.159780** ⇒ pre-fee trading of **-$212.54635085**: **fees are 64.73%** of the deficit. Σ`turnover_usd`
+= **$4,452,006.98** ÷ gross **$45,948.21197500** = **96.89×**, up from 89.20× last cycle — the ratio rose
+while gross fell, so this is ⚠️ worse, not better. Rules 295/296/304 hold.
+**VERIFY-BY:** Σ`turnover_usd` ÷ `/api/risk` `.total.grossExposure` falls materially from **96.89×**, with
+gross not falling to produce it.
+
+**#4 — social never reaches the combiner, and it is the only source clearing the desk's own hurdle.**
+*(unchanged, re-confirmed: `forecastScalars` carries `reversion`/`trend`/`xsreversion` only, while
+`weights` lists `social 1.6263786635913058` — the second-largest of the five)* Per Rule 292 this is a
+**superseding ADR** (gate and dial together), never a quiet dial turn; per Rule 298 it stays behind the
+cost fix, because an hour-scale edge cannot be collected by a book liquidated every half hour.
+**VERIFY-BY:** a `social` entry appears in `/api/fusion/targets` `forecastScalars` and in at least one
+name's `contributions` array.
+
+**#5 — a flat stored mark series can never warm the sensors, so 12 rates names are permanently sensorless.**
+*(carried, re-confirmed: `USD.TSY.*`, `USD.SOFR.*`, `USD_IRS_*` all seeded the full `193 of 193` and
+`241 of 241` at 18:38:44Z and stayed cold)* Ranked last: dead coverage on MACRO (**-$56.79950536**,
+realised, flat), not the live bleed.
+**VERIFY-BY:** either those names warm, or they are excluded from the sensor universe so the WARN stops
+masking the equity cold-starts that matter.
+
+---
 ## Verification block — 2026-08-04 18:30Z (**No change — `120b22b41` is at 4/6 cycles under ADR-0116 measurement.** Item #1 reproduced on a **fourth** independent boot (18:08:35Z → `sources=0` liquidations **40 seconds** later), and this cycle's own seed counts *falsify the idea that the short seed is a property of the name*: **NEE seeded 193 of 193 last boot and 181 of 193 this boot**, while **BAC seeded full on both**. That is Rule 313's coin flip, observed in the app's own log rather than in a replication script. The cycle's new product is a **second, additive restart defect, now measured**: `PositionBuffer`'s ADR-0080 **aim map is in-memory only**, so every restart re-seeds intent at the held position — and at the derived rate `a` the buffer does not release the **first** order in a name for **12.4 minutes** at best, **34.7 minutes** at the median, and **never** for 4 of 20 names. On a ~30-minute restart cadence the desk therefore holds **$32,767.885** of a **$494,262.182127365** plan — **6.63%** — under a $500k cap. Ranked **#2**; it stays behind #1 because a cold sensor plans the name FLAT, and a flat target snaps the aim to zero, so fixing intent while the sensors still blink out changes nothing.)
 
 ### Step 0 — `120b22b41` (ADR-0137): ✅ still VERIFIED on its primary metric, fourth cycle running

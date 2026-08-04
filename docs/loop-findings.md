@@ -4195,3 +4195,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   ADR-0137's primary VERIFY-BY holds a fourth cycle: live planned gross **$494,262.182127365** against the
   **$500,000** cap (**0.98852436425473×**). Cost picture: firm **-$606.83516377** against `totalFees`
   **$387.738249** ⇒ pre-fee **-$219.09691477**, **fees 63.90%** of the deficit.
+
+## 2026-08-04 19:00Z — the restart defect now has an invoice: one dollar in ten of every commission this desk has paid was paid to trade blind (no change; `120b22b41` at 5/6)
+
+- **Rule 319 — the cost of the cold-start liquidation is measurable directly off `fills` ⋈ `orders.origin_reason`, and it is 10.04% of the firm's entire fee bill.** **63** LIVE fills carry `sources ≤ 1`
+  (**58** `fusion exit — target decayed to flat`, **5** `fusion reduce toward a smaller target`) for
+  **$388,348.116512140580** of notional and **$39.187210** of fee, against `totalFees` **$390.159780** and a
+  firm deficit of **-$602.70613085** in which fees are **64.73%**. **Rule: once orders carry their
+  originating trigger (ADR-0134), a defect's cost stops being an argument and becomes a `group by` — price
+  the defect before ranking it, and never rank on narrative when the fee ledger will answer.**
+- **Rule 320 — the blind fills are not diffuse; they are the loop's own restart cadence written into the fee
+  ledger.** **40 of 58 (68.97%)** blind liquidation fills, carrying **68.89%** of their fee and
+  **$256,958.77** of notional, fall at `minute % 30 ≤ 10`. On 2026-08-04 every single one lands at 15:37,
+  15:38, 16:07, 16:38, 16:40, 16:46, 16:47, 17:08, 17:14, 17:39, 17:40, 17:45, 18:09 or 18:38 — the boot
+  times. **Rule: when a defect is suspected to be restart-driven, bucket its fills by position within the
+  restart period; a flat histogram refutes it and a spike at zero proves it, without another reproduction.**
+- **Rule 321 — the complete round trip is now on one clock, and it took 27 seconds.** JPM `BUY 13 @
+  359.130000` FILLED **18:38:08.400753Z** on `[forecast=+9.114237353210052, sources=3]`; the JVM's own
+  `trend sensor still cold for JPM after seeding 137 of 193` WARN at **18:38:09.591Z**, **1.19 s** later;
+  JPM `SELL 13 @ 359.006339` FILLED **18:38:35.165972Z** on `[forecast=0.0, sources=1]`. Held
+  **26.765219 s**; **-$1.607593** of price move plus **$0.933577** of fee ⇒ **-$2.541170**, for zero
+  information — the three-source view was never contradicted, the sensor just lost the ability to see it.
+  **Rule: one instance where entry, blindness and exit share a single boot's timeline is worth more than
+  five aggregate reproductions — go looking for it in the fills, not in the WARN log.**
+- **Rule 322 — Rule 317's coin flip has a third data point, and it comes from the app itself.** **BAC seeded
+  full at 17:39:05Z and 18:08:35Z, then 192 of 193 at 18:37:55Z; NEE went 193 → 181 → 171** across the same
+  three boots. The seed depth is a property of the **boot**, not the name, so no per-name allowlist or
+  per-name constant can close item #1 — only sizing the read-back by what the walk actually consumes.
+- **Trigger/attribution.** No change shipped: `120b22b41` is at **5/6 cycles** (`.pending-baseline.json`
+  present), so the code was frozen and no baseline recorded. The window's **+$13.91** PnL is the running
+  desk's own post-boot rebuild on `sources=2/3` entries (PFE, AMZN, CVX, GOOG, BAC, NVDA) — **market plus
+  baseline behaviour**, nothing claimed or blamed on code. ADR-0137's primary VERIFY-BY holds a fifth cycle:
+  live planned gross **$500,000.000044975** against the **$500,000** cap (**1.00000000008995×**). Item #3
+  worsened: Σ`turnover_usd` **$4,452,006.98** ÷ gross **$45,948.21197500** = **96.89×**, up from 89.20×,
+  and the ratio rose while gross fell.
