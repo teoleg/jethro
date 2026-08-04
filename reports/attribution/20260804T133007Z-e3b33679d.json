@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-08-04T13:30:07Z",
+    "fees": "356.521740",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "113.11464104",
+      "netExposure": "0.00000000",
+      "realizedPnl": "-314.90914721",
+      "strategyAlpha": "-428.02378825",
+      "totalFees": "356.521740",
+      "totalPnl": "-314.90914721",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "-314.90914721"
+  },
+  "before": {
+    "at": "2026-08-03T19:15:38Z",
+    "gross": "54092.65606250",
+    "net": "7092.28393750",
+    "total_pnl": "-274.88377843"
+  },
+  "commit": "e3b33679d0e1d0b52aafdb7b9c4c78cd75da69d5",
+  "delta": {
+    "gross": "-54092.65606250",
+    "net": "-7092.28393750",
+    "total_pnl": "-40.02536878"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.001053 over 38 cycles, t=-1.80 (hurdle 1.5); gross 54,093\u21920 \u2014 \u26a0\ufe0f REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert",
+  "revert": true,
+  "revertApplied": false,
+  "scoredAt": "2026-08-04T13:30:07Z",
+  "summary": "below the conviction floor a name is held or flat and is never re-sized \u2014 a partial reduce on a sub-floor view no longer routes, while any order that takes the position exactly flat is still never blocked (ADR-0136)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 0.0,
+    "gross_start": 54092.6560625,
+    "mean_ret_per_cycle": -0.0010533,
+    "n": 38,
+    "scale": 1000.0,
+    "t": -1.797
+  }
+}
