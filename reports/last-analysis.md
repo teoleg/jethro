@@ -1,63 +1,68 @@
-The desk planned 21 targets and routed none — and the report physically cannot say which suppressor did it, because `/api/fusion/targets` is cut at a 6000-char cap exactly before the `edgeGate` and `insideBuffer` fields.
+Fixed the report truncation that hid the suppressor — and it named it on the first read: the ADR-0094 buffer holds all 22 names, the edge gate is open, and the risk-scaling stage zeroes almost every aim.
 
 *(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`, `ops_jvm`,
 `traffic`, `recent_orders`, or the scorer's own output. None is authored here — invariant 7 / ADR-0016.)*
 
-## Step 0 — last cycle's change (`026cda49d`, the ADR-0136 revert): ✅ DEPLOYED, ⏳ NOT YET SCORED
+## Step 0 — last cycle's change (`026cda49d`, the ADR-0136 revert): ✅ DEPLOYED, ⏳ STILL NOT SCORED
 
-Deployment is confirmed, so this is live code and not a stranded commit: the commit is stamped
-`2026-08-04T13:37:19Z`, and `ops_jvm.uptimeSeconds` **`1325`** against `traffic.timestampMillis`
-**`1785852002696`** (`2026-08-04T14:00:02Z`) puts boot at **`2026-08-04T13:37:57Z`** — after it. The
-mechanism is gone from the running code: `grep` over `app/` for `clearsConvictionFloor` and `ADR-0136`
-returns nothing.
+Deployment re-confirmed against this run's telemetry: `ops_jvm.uptimeSeconds` **`1390`** at
+`traffic.timestampMillis` **`1785853801356`** (`2026-08-04T14:30:01Z`) → boot **`2026-08-04T14:06:51Z`**,
+well after the commit's `13:37:19Z`. There is still no ledger row for it and
+`reports/.pending-baseline.json` still holds its snapshot, so its ADR-0116 window is still accumulating.
+It has placed **no orders**: the newest `recent_orders` row remains `2026-08-04 13:34:31`, before its boot.
 
-**It is not graded and must not be disturbed.** There is no ledger row for `026cda49d` and
-`reports/.pending-baseline.json` still exists — the ADR-0116 window is still accumulating. Per the
-contract that means **no code change this cycle**. What follows is diagnosis for the next one.
+**Its evidence is untouched by this cycle.** The one change made here is to `scripts/system-report.py` —
+the offline report generator. It is not in the JVM, not on the trade path, and cannot alter PnL, exposure
+or any routing decision, so it cannot contaminate the pending measurement. I deliberately did **not** run
+the `score-change.py baseline` command, so `026cda49d` keeps the baseline it must be graded against.
 
 ## Situation — the live money, in plain numbers
 
-1. **Money.** Total PnL **$-314.91** (`/api/risk` `.total`, firm headline incl. the hedge). Unchanged
-   since last run and across the last three (**+0.00**, **+0.00**). `UNDERWATER`. Diagnostic split:
-   `ALPHA -371.22428289`, `HEDGE +113.11464104`, `MACRO -56.79950536` against `totalFees 356.521740` —
-   **the fee bill is still larger than the entire firm deficit.** Gross of fees this desk is roughly
-   flat; the cost is the loss.
-2. **Risk.** Gross **$0.00**, net **$0.00** — **0.0%** of the $1,500,000 firm cap, **$1,500,000** of
-   headroom. `var95 0.00` with note `"no positions"`; `breaker.halted false`; hedge axis `EQUITY`
-   `netExposureUsd 0.0`, status `FLAT`. The book is **DORMANT** — a failure to attack, not safety.
-3. **Cause.** Not attributable to last cycle's revert. It has been live 22 minutes and has **placed no
-   orders at all**: the newest row in `recent_orders` is `2026-08-04 13:34:31`, *before* the
-   `13:37:57Z` boot. The book was already flat when it booted.
-4. **Danger.** No. Bleeding-near-the-cap is the danger state and gross is at 0.0% of cap with the
-   breaker clear. The live problem is the exact inverse — the largest *opportunity*, not a risk.
+1. **Money.** Total PnL **$-314.91** (`/api/risk` `.total`, firm headline incl. hedge). Unchanged since
+   last run and across the last three (**+0.00**, **+0.00**). `UNDERWATER`, `stale=true`, `on_track=false`.
+   `totalFees 356.521740` against a firm deficit of `-314.90914721` — **the fee bill is still larger than
+   the entire loss**; gross of costs this desk is roughly flat, and the cost is the loss.
+2. **Risk.** Gross **$0.00**, net **$0.00** — **0.0%** of the $1,500,000 firm cap, **$1,500,000** headroom.
+   `DORMANT`. A failure to attack, not safety.
+3. **Cause.** Not attributable to code. The book was already flat before the current boot and nothing has
+   traded since `13:34:31`.
+4. **Danger.** No. `DANGER` requires bleeding near the cap; gross is at 0.0% of cap and the breaker is
+   clear. The live state is the inverse — the largest *opportunity*, not a risk.
 
-## The real finding — the desk has opinions and is not acting on them
+## The change: stop the report from silently discarding the fields that name the suppressor
 
-The session is open (`feeds` alpaca `connected true`, `lastUpdateAgeMillis 16`, `delayed false`;
-`ticksIn 26538`, `ticksDropped 0`; `AAPL` mark `ageMillis 333`). `fusion_targets` at
-`atMillis 1785851991548` reports `routing: true` over **21 instruments** with real conviction —
-`JPM combinedForecast 13.201644846856365 → targetQty 921.47787`, `BAC 11.759593061749303 → 4682.485093`,
-`PG 9.730455372959304 → 1672.761797` — and **every visible target carries `currentQty 0` and
-`deltaQty 0`**. This is not an absence of opportunity. The desk sized 21 names and planned to trade
-none of them, 22 minutes into an open session.
+`scripts/system-report.py:405` rendered each endpoint as `json.dumps(data, indent=1)[:6000]` — a cut of
+the *string* at a fixed offset. On any endpoint larger than the budget, every field ordered after the
+bulky one was discarded and the block ended mid-object. Measured against this run's live payloads,
+`/api/fusion/targets` serialises to 14,266 chars and the old form lost **17 of its 22 top-level fields** —
+`edgeGate`, `insideBuffer`, `aims`, `riskCuts`, `portfolioRiskMultiplier` and the whole vol-budget group,
+all of which sort after the long `targets` array. `/api/risk` (10,881) and `/api/discovery` (20,757) were
+cut the same way.
 
-**Two mechanisms can produce exactly that, and the report cannot distinguish them.** In
-`FusionLifecycle` the gate clamp runs at line 302 (`reduceOnlyWhere`) and the buffer at line 321, both
-*before* `lastBook` is published at line 324 — so the `deltaQty 0` in telemetry is post-both. Either
-(a) `EdgeGate` is shut, and `TargetPlanner.reduceOnly` projects every increase onto zero because
-`currentQty` is zero; or (b) the ADR-0094 `PositionBuffer` is holding every name inside its band. These
-call for **opposite** remedies, and nothing in the report picks between them.
+The fix elides the **bulk** instead of the tail: long arrays are progressively capped until the object
+fits, each elision stated explicitly (`… N of M elements shown`). Every top-level key now survives — on
+the live payloads, lost-fields goes from 17 to **0** for `fusion_targets`, and the rendered block is
+*smaller* (5,449 chars in a full end-to-end run) than the old truncated one, so this costs no budget.
+Where an object cannot fit even with every array emptied it now says `CUT — treat the tail as UNKNOWN,
+not absent` instead of ending mid-object. A full `system-report.py` run completes with no block at or
+over budget.
 
-**Why it can't: a truncation bug in the report generator.** `scripts/system-report.py:405` emits
-`json.dumps(data, indent=1)[:6000]` per endpoint. The delivered `fusion_targets` block measures
-**6001 characters** — hard-cut mid-object inside the `targets` array. The `TargetBook` record orders its
-fields `… targets, edgeGate, portfolioRiskMultiplier, …, aims, insideBuffer, …`, so **every field that
-would name the suppressor sits after the cut and is discarded every single cycle.** The controller
-serializes them; the report throws them away.
+## It paid immediately — and it overturns the diagnosis three BAD changes were built on
 
-That is the honest explanation for the ledger's recent shape. ADR-0135, its own revert, and ADR-0136
-were three consecutive routing-rule changes at this layer, all graded ❌ BAD. Rule 280 concluded the
-defect was one layer up. It is — but the layer up is **observability**: the loop has been proposing
-fixes to a suppressor it cannot see. Restoring those fields costs no risk and puts no money on; it is
-what makes the *next* change aimed instead of guessed. It is now must-fix **#1**, ahead of the breadth
-collapse, and it is the one change for next cycle — once `026cda49d` has a ledger row.
+Reading the previously-hidden tail from the live endpoint this cycle resolves the ambiguity Rule 283
+recorded, in one line: **`edgeGate` is `null`** — the edge gate is *not* shutting the book — and
+**`insideBuffer` is `22`**, i.e. *every* name is being held inside its ADR-0094 position-buffer band. The
+suppressor is mechanism (b), the buffer, not mechanism (a), the gate. `routing` is `true`, `riskCuts` is
+`[]`, `riskCutStoppedNames` `0`, `breaker.halted false`.
+
+The `aims` map — also previously discarded — shows why the two readings looked alike: `GOOG 2.445123`,
+`NVDA -8.537723`, `AAPL -8.609491`, `CAT 0.984813`, `AMZN 3.444406`, and **zero for the other 17 names**,
+against `targets` entries carrying far larger `targetQty` with `currentQty 0` throughout. So the desk is
+not being blocked from acting on 21 strong views; the risk-scaling stage collapses almost all of them to a
+zero aim, and the handful that survive are single-digit share counts the buffer band then absorbs. That is
+a **sizing** question, not a routing-permission question — the opposite of what ADR-0135, its revert, and
+ADR-0136 each assumed. All three graded ❌ BAD prescribing into this blind spot.
+
+No PnL or exposure move is claimed for this change and none is possible: it alters no trading code. Next
+cycle's change targets the sizing collapse, aimed with numbers instead of guessed — but only once
+`026cda49d` has a ledger row.

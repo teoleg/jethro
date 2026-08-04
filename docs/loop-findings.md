@@ -3844,3 +3844,36 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   has placed **no orders**: the newest `recent_orders` row is `2026-08-04 13:34:31`, *before* that boot. The
   window's move was **+0.00** on total PnL with gross **$0.00** (0.0% of the $1,500,000 firm cap).
   `totalFees 356.521740` against `firmTotal -314.90914721` — the fee bill still exceeds the entire deficit.
+
+## 2026-08-04 14:30Z — the truncation is fixed, and the hidden fields overturned the diagnosis
+
+- **Rule 284 — fix the instrument before prescribing again; it cost three ❌ BAD changes not to.**
+  `scripts/system-report.py` cut each endpoint with `json.dumps(data, indent=1)[:6000]` — a cut of the
+  *string*, so every field ordered after a bulky one was discarded. Measured on live payloads:
+  `/api/fusion/targets` is **14,266** chars and the old form lost **17 of its 22 top-level fields**;
+  `/api/risk` (**10,881**) and `/api/discovery` (**20,757**) were cut too. Fixed by eliding long *arrays*
+  progressively until the object fits, each elision marked. Lost fields **17 → 0**, rendered block
+  **5,449** chars — *smaller* than the old truncated one, so the blindness never bought any budget. When an
+  object can't fit even with arrays emptied it now says `CUT — treat the tail as UNKNOWN, not absent`.
+- **Rule 285 — `deltaQty 0` was never the routing story; the aim was zero before routing ever ran.** The
+  recovered fields answer Rule 283's ambiguity outright: `edgeGate` **`null`** (gate open, not the
+  suppressor), `routing` **`true`**, `riskCuts` **`[]`**, `riskCutStoppedNames` **`0`** — and
+  `insideBuffer` **`22`**. But the decisive field is `aims`: `GOOG 2.445123`, `NVDA -8.537723`,
+  `AAPL -8.609491`, `CAT 0.984813`, `AMZN 3.444406`, **`0.0` for the other 17**, against `targets` carrying
+  e.g. `JPM … → targetQty 921.47787` with `currentQty 0`. The buffer is only the *proximate* blocker — a
+  band cannot be blamed for failing to cross a 2-share aim drawn from a 921-share target. **The defect is
+  sizing, between `targetQty` and `aim`** — the opposite of what ADR-0135, its revert, and ADR-0136 each
+  assumed, all three graded ❌ BAD. `portfolioRiskMultiplier 0.977`, `volBudgetLeverCap 0.995`,
+  `bookVolBrake 0.880` are none of them near zero, so multiplication doesn't explain 921 → 0.0; suspect a
+  per-name gate/floor in the vol-budget allocation, with `streamVolMeasuredNames` only **6** of
+  `volBudgetNames 20`. Diagnose the stage before changing it.
+- **Rule 286 — a reports-only change is compatible with a pending measurement; a new baseline is not.** The
+  ADR-0116 hold exists to protect evidence. `scripts/system-report.py` is offline tooling outside the JVM
+  and cannot move PnL, exposure or a routing decision, so editing it is safe mid-window — but running
+  `score-change.py baseline` would overwrite `.pending-baseline.json` and destroy the very evidence.
+  Committed the fix, deliberately did **not** record a baseline, so `026cda49d` keeps its window.
+- **Trigger/attribution.** None claimed and none possible: no trading code was touched. The window's move
+  was **+0.00** on total PnL with gross **$0.00** (0.0% of the $1,500,000 firm cap) and no orders since
+  `2026-08-04 13:34:31`. `026cda49d` is deployed (`ops_jvm.uptimeSeconds 1390` at `traffic.timestampMillis
+  1785853801356` → boot `2026-08-04T14:06:51Z`) and still unscored. `totalFees 356.521740` against
+  `firmTotal -314.90914721` — the fee bill still exceeds the entire deficit.

@@ -14,6 +14,53 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 14:30Z (**Fixed the report truncation (item #1).** The previously-hidden fields answered the question on the first read: the edge gate is open and the ADR-0094 buffer is holding all 22 names — but the `aims` map shows the real defect is upstream of both, in **sizing**: the risk-scaling stage collapses 17 of 22 aims to zero and leaves the rest at single-digit share counts the buffer then absorbs. That becomes item **#1**. `026cda49d` remains under measurement and was NOT disturbed — this change is to the offline report generator, not the JVM, and no new baseline was recorded.)
+
+### Step 0 — Item #1 of the 14:00Z block (report truncation): ✅ VERIFIED — fixed and struck
+
+`scripts/system-report.py` rendered each endpoint as `json.dumps(data, indent=1)[:6000]`, cutting the
+*string* at a fixed offset. Measured against this run's live payloads: `/api/fusion/targets` serialises to
+**14,266** chars and the old form lost **17 of its 22 top-level fields**; `/api/risk` (**10,881**) and
+`/api/discovery` (**20,757**) were cut the same way. The fix elides long *arrays* progressively until the
+object fits, marking each elision explicitly. Proving numbers, from a full end-to-end `system-report.py`
+run: lost top-level fields on `fusion_targets` **17 → 0**; rendered block **5,449** chars (smaller than the
+old truncated 6,000, so no budget cost); **zero** endpoint blocks at or over budget. `./gradlew -Pci test`
+BUILD SUCCESSFUL.
+
+### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ STILL NOT SCORED — held, undisturbed
+
+`ops_jvm.uptimeSeconds` **`1390`** at `traffic.timestampMillis 1785853801356` (`2026-08-04T14:30:01Z`) →
+boot **`2026-08-04T14:06:51Z`**, after its `13:37:19Z` commit. Still no ledger row; `.pending-baseline.json`
+still holds its snapshot. No orders since `2026-08-04 13:34:31`. **No baseline was recorded this cycle**, so
+its ADR-0116 window is intact. No trading code was touched.
+
+### Item #1 — the risk-scaling stage collapses 17 of 22 aims to zero, so a fully-routing desk stays flat (⚠️ OPEN, #1 — NEW, promoted above the breadth collapse)
+
+Read from the fields the truncation had been discarding, live this cycle. The desk is **not** being denied
+permission to trade: `routing` **`true`**, **`edgeGate` `null`** (gate not shut), `riskCuts` **`[]`**,
+`riskCutStoppedNames` **`0`**, `breaker.halted` **`false`**. What it lacks is size. The `aims` map carries
+`GOOG 2.445123`, `NVDA -8.537723`, `AAPL -8.609491`, `CAT 0.984813`, `AMZN 3.444406` and **`0.0` for the
+other 17 names** — against `targets` entries with far larger `targetQty` (e.g. `JPM … → 921.47787`) and
+`currentQty 0` throughout. `insideBuffer` is **`22`**: the five surviving single-digit aims are then
+absorbed by the ADR-0094 band, which is why the book shows `deltaQty 0` everywhere and gross **$0.00**
+(0.0% of the $1,500,000 firm cap) in an open session.
+
+So the buffer is the *proximate* suppressor but not the root: a band cannot be the problem when the aim it
+is asked to cross is 2 shares against a 921-share target. The root is between `targetQty` and `aim`.
+Candidate scalers, all now visible: `portfolioRiskMultiplier 0.977009632409871`, `volBudgetLeverCap
+0.9946240255628247`, `bookVolBrake 0.8800080087567065`, `volBudgetDispersion 2.49171157141781`,
+`bookVolPlannedSigmaUsd 382.73752692272154` vs `bookVolReferenceSigmaUsd 336.81208894373054`,
+`volBudgetNames 20`, `covarianceCoveredNames 20`, `covarianceBasis "mark-stream"`, `streamVolMeasuredNames`
+only **6**. None of those multipliers is near zero, so multiplication alone does not explain 921 → 0.0 —
+which points at a per-name gate or floor inside the vol-budget allocation, most likely tied to the 6-of-20
+names with measured stream vol. **Diagnose which stage zeroes the aim before changing anything**; do not
+ship another routing-permission rule (ADR-0135, its revert, and ADR-0136 all graded ❌ BAD doing that).
+
+**VERIFY-BY (next run):** in `fusion_targets`, the count of names with non-zero `aims` rises above **5**
+of 22, and `insideBuffer` falls below **22** — with gross exposure moving off **$0.00** against the
+$1,500,000 cap. If the next change is diagnostic only, the VERIFY-BY is instead a named stage: the specific
+multiplier/floor whose live value maps `targetQty` to `aim 0.0`, quoted from telemetry.
+
 ## Verification block — 2026-08-04 14:00Z (**No change this cycle — the ADR-0136 revert `026cda49d` is still under measurement** (no ledger row, `reports/.pending-baseline.json` present), so touching the code would destroy its evidence. The cycle's value is a diagnosis: the desk planned 21 targets and routed none, and the report is **structurally incapable** of naming which suppressor did it. That blindness — not any routing rule — is why three consecutive changes at this layer graded ❌ BAD, so it takes over as item **#1**.)
 
 ### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ NOT YET SCORED — hold, do not disturb

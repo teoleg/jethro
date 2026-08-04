@@ -389,6 +389,47 @@ def situation_block(ops_raw):
     return "\n".join(lines)
 
 
+JSON_BLOCK_BUDGET = 6000  # chars per endpoint block — a token budget, not a risk/money parameter
+
+
+def _elide_lists(node, cap):
+    """Recursively cap every list at `cap` elements, replacing the dropped tail with an explicit
+    marker so an elision can never be mistaken for an absent field."""
+    if isinstance(node, dict):
+        return {k: _elide_lists(v, cap) for k, v in node.items()}
+    if isinstance(node, list):
+        kept = [_elide_lists(v, cap) for v in node[:cap]]
+        if len(node) > cap:
+            kept.append("… %d of %d elements shown, %d elided" % (cap, len(node), len(node) - cap))
+        return kept
+    return node
+
+
+def render_json_block(data, budget=JSON_BLOCK_BUDGET):
+    """Render an endpoint as JSON that fits the per-endpoint budget WITHOUT losing any top-level field.
+
+    The previous form — `json.dumps(data, indent=1)[:budget]` — cut the *string* at a fixed offset, so
+    on any endpoint bigger than the budget every field ordered after the bulky one was discarded and the
+    block ended mid-object. On `/api/fusion/targets` that silently dropped `edgeGate`, `insideBuffer`,
+    `aims` and the vol-budget fields every cycle (they serialise after the long `targets` array), which
+    is precisely the set that says WHY a planned target did not route — and their absence was repeatedly
+    misread as evidence about the system rather than as a hole in the instrument.
+
+    So shrink the BULK instead: progressively cap long arrays until the whole object fits. Every key
+    survives, and anything dropped says so."""
+    full = json.dumps(data, indent=1)
+    if len(full) <= budget:
+        return full
+    out = full
+    for cap in (24, 12, 6, 3, 2, 1, 0):
+        out = json.dumps(_elide_lists(data, cap), indent=1)
+        if len(out) <= budget:
+            return out
+    # Too large even with every array emptied: cut, but never silently — an unreadable tail is UNKNOWN.
+    return (out[:budget] + "\n… CUT — this object exceeds the per-endpoint budget even with all arrays "
+            "elided; treat the tail as UNKNOWN, not absent.")
+
+
 def render_markdown(ops_raw, db_sheets, logs_text):
     """Compact, model-readable digest of the same data as the xlsx bundle — cheap to read every
     cycle (the .xlsx is binary and token-heavy). Row-level detail (positions, fills, TCA,
@@ -402,7 +443,7 @@ def render_markdown(ops_raw, db_sheets, logs_text):
     for name, data in ops_raw.items():
         L.append("### %s" % name)
         L.append("```json")
-        L.append(json.dumps(data, indent=1)[:6000])
+        L.append(render_json_block(data))
         L.append("```")
     L.append("## Postgres aggregates (behaviour over the run)")
     for name, h, r in db_sheets:
