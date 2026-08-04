@@ -104,9 +104,10 @@ class SensorWarmupTest {
                 points.stream().filter(p -> p.timestampMillis() >= since).toList();
 
         var warmed = new RangeReversionForecaster(params);
-        int replayed = SensorWarmup.warm(history, "AAPL", NOW, 2_000L, needed,
+        var replayed = SensorWarmup.warm(history, "AAPL", NOW, 2_000L, needed,
                 price -> warmed.update("AAPL", price));
-        assertThat(replayed).isEqualTo(needed);
+        assertThat(replayed.size()).isEqualTo(needed);
+        assertThat(replayed.termination()).isEqualTo(SensorWarmup.Termination.FULL);
 
         var cold = new RangeReversionForecaster(params);
 
@@ -196,6 +197,91 @@ class SensorWarmupTest {
 
         assertThat(seed).containsExactly(new BigDecimal("700"), new BigDecimal("701"),
                 new BigDecimal("702"), new BigDecimal("703"));
+    }
+
+    /**
+     * ADR-0138 — the defect. The read window is an ESTIMATE made before the walk: {@code 2 ×} the needed
+     * span at the name's median print interval. Print gaps are heavy-tailed (the class doc says so), so
+     * the median systematically understates how much wall-clock {@code samples} accepted points actually
+     * occupy — and the median-based widening cannot help, because at the median the step already equals
+     * the poll cadence. The walk then runs off the oldest point it READ while the stored series continues
+     * below it, and the sensor boots cold on a store that had everything it needed. Extending the read
+     * and continuing must fill the seed from the same history.
+     */
+    @Test
+    void extendsTheReadWhenTheWindowCutsTheWalkOffMidStream() {
+        int samples = 50;
+        long interval = 10_000L;
+        // Nine prints at the sensor's cadence, then one 200 s lull — inside the gap tolerance, so this is
+        // one continuous stream, but it makes the mean gap ~3x the median the window is sized on.
+        List<SensorWarmup.Point> points = new ArrayList<>();
+        long t = NOW - 4_000_000L;
+        int price = 100;
+        while (t <= NOW) {
+            for (int i = 0; i < 9 && t <= NOW; i++, price++) {
+                points.add(new SensorWarmup.Point(t, BigDecimal.valueOf(price)));
+                t += interval;
+            }
+            t += 200_000L - interval;
+        }
+        List<SensorWarmup.Point> series = List.copyOf(points);
+        SensorWarmup.History history = (instrumentId, since) ->
+                series.stream().filter(p -> p.timestampMillis() >= since).toList();
+
+        var seed = SensorWarmup.seed(history, "AAPL", NOW, interval, samples);
+
+        assertThat(seed.termination()).isEqualTo(SensorWarmup.Termination.FULL);
+        assertThat(seed.prices()).hasSize(samples);
+        assertThat(seed.reads()).isGreaterThan(1);  // it took a deeper read to get there
+        // Ends at the newest stored price, exactly as a single-window seed does.
+        assertThat(seed.prices().get(samples - 1))
+                .isEqualByComparingTo(series.get(series.size() - 1).price());
+    }
+
+    /**
+     * ADR-0138 — the extension must not become an unbounded rescan. A store that genuinely holds less
+     * history than the sensor needs terminates, reports why, and seeds with everything it does hold.
+     */
+    @Test
+    void aStoreShorterThanTheWarmUpTerminatesAndSaysSo() {
+        // 20 prints at the sensor's cadence against a warm-up of 200: the series really does end here.
+        List<SensorWarmup.Point> points = new ArrayList<>();
+        for (int i = 19; i >= 0; i--) {
+            points.add(new SensorWarmup.Point(NOW - i * 10_000L, BigDecimal.valueOf(500 + (19 - i))));
+        }
+        SensorWarmup.History history = (instrumentId, since) ->
+                points.stream().filter(p -> p.timestampMillis() >= since).toList();
+
+        var seed = SensorWarmup.seed(history, "AAPL", NOW, 10_000L, 200);
+
+        assertThat(seed.prices()).hasSize(20);
+        assertThat(seed.termination()).isIn(SensorWarmup.Termination.HISTORY_EXHAUSTED,
+                SensorWarmup.Termination.GAP_BREAK);
+        assertThat(seed.spanMillis()).isEqualTo(19 * 10_000L);
+    }
+
+    /**
+     * ADR-0138 — a deeper read may never turn a genuine outage into a bridge. The cash-close halt still
+     * truncates, and the seed now NAMES that as the reason it is short, so a cold sensor is diagnosable
+     * from the app's own log rather than from a replication script.
+     */
+    @Test
+    void reportsAGenuineHoleAsTheReasonTheSeedIsShort() {
+        List<SensorWarmup.Point> points = new ArrayList<>();
+        for (int i = 0; i < 300; i++) {
+            points.add(new SensorWarmup.Point(NOW - 10_800_000L - (299 - i) * 12_000L, BigDecimal.valueOf(300 + i)));
+        }
+        for (int i = 0; i < 4; i++) {
+            points.add(new SensorWarmup.Point(NOW - (3 - i) * 12_000L, BigDecimal.valueOf(700 + i)));
+        }
+        SensorWarmup.History history = (instrumentId, since) ->
+                points.stream().filter(p -> p.timestampMillis() >= since).toList();
+
+        var seed = SensorWarmup.seed(history, "AAPL", NOW, 10_000L, 200);
+
+        assertThat(seed.prices()).hasSize(4);
+        assertThat(seed.termination()).isNotEqualTo(SensorWarmup.Termination.FULL);
+        assertThat(seed.spanMillis()).isEqualTo(3 * 12_000L);
     }
 
     /**

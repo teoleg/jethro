@@ -4229,3 +4229,38 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   live planned gross **$500,000.000044975** against the **$500,000** cap (**1.00000000008995×**). Item #3
   worsened: Σ`turnover_usd` **$4,452,006.98** ÷ gross **$45,948.21197500** = **96.89×**, up from 89.20×,
   and the ratio rose while gross fell.
+
+## 2026-08-04 19:30Z — the seed's read window was an estimate made before the walk, and the median is the wrong statistic to make it with (ADR-0138 shipped; `120b22b41` scored ⚠️ INCONCLUSIVE)
+
+- **Rule 323 — a window sized on the MEDIAN gap cannot cover a SUM of gaps when the distribution is
+  heavy-tailed, and the class that says gaps are heavy-tailed is the same class that did it.**
+  `SensorWarmup` read `2 × samples × median-step` of history and then thinned `samples` points out of it.
+  The median describes the typical gap; the window has to span the sum of `samples` of them, which the
+  tail dominates — so the window came up short by a boot-dependent amount, which is exactly the
+  unexplainable signature Rule 322 recorded (BAC 193→192, NEE 193→181→171). **Rule: when a bound must
+  cover a SUM, a central statistic of the summand is never the right size for it — either sum the actual
+  spacing or stop guessing and ask the series, by extending the read until the walk is satisfied.**
+- **Rule 324 — "the stored series ends here" is answerable from the read you already did, with no new
+  store API and no extra scan.** A read from `since` returns points at or after it; if the walk stops at
+  an oldest point more than one gap tolerance NEWER than `since`, nothing was held in `[since, oldest)`,
+  so the next older point is further off than the tolerance permits and a deeper read could only have
+  broken there anyway. **Rule: before adding a capability to a store, check whether the bound you already
+  passed it already encodes the answer.**
+- **Rule 325 — when a deeper read is downsampled more coarsely, the derived step must be MONOTONE.**
+  The LMDB read path stride-downsamples to 2,000 points, so doubling the window coarsens the returned
+  spacing. Recomputing the consumption step from the wider set is right; letting it NARROW would turn the
+  finer series' normal print gaps into fabricated outages and truncate the very seed the extension was
+  meant to fill. **Rule: any statistic re-derived across a widening read gets a `max` with its previous
+  value, or the widening can defeat itself.**
+- **Rule 326 — a defect that took five cycles to diagnose gets its diagnosis shipped as a log line.**
+  Every seed now reports terminator (`FULL`/`GAP_BREAK`/`HISTORY_EXHAUSTED`/`NO_HISTORY`), span, step and
+  read count. "Seeded n of needed" could not distinguish a window that cut the walk off from a series that
+  genuinely ended — opposite responses — so every past cycle re-derived it with a replication script.
+  **Rule: when a cycle has to write a script to explain a WARN, the missing information belongs in the
+  WARN.**
+- **Trigger/attribution.** `120b22b41` scored **⚠️ INCONCLUSIVE** (risk-adj **-0.000284**/cycle over 7,
+  **t = -1.39** vs the 1.5 hurdle) — kept, and its mechanism VERIFIED to the last cycle (planned gross
+  **$500,000.000044975** against the **$500,000** cap). The window's **-$17.73** ran with no change live:
+  the desk's own liquidate-and-rebuild plus market, **baseline behaviour**, claimed by nothing. Book is
+  DORMANT at **$26,441.20** gross — **1.8%** of the firm cap, **$1,473,559** of headroom — while bleeding,
+  so the answer is to stop the liquidation, not to de-risk.

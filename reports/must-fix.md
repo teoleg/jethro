@@ -14,6 +14,48 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 19:30Z (**Item #1 FIXED and shipped — ADR-0138.** `120b22b41` has been SCORED ⚠️ INCONCLUSIVE, `reports/.pending-baseline.json` is gone, and the ADR-0116 freeze is lifted — so this cycle makes the first code change in six, and it goes to item #1. The diagnosis finally closed on a single line rather than another reproduction: `SensorWarmup` sized its history read as `2 × samples × step` with `step` the **median** inter-print gap, and the median is the wrong statistic to bound a **sum** of `samples` gaps when the distribution is heavy-tailed — which the class's own documentation states. That makes the window short by a boot-dependent amount, which is precisely the signature Rule 322 could not attribute to any per-name rule (BAC **193 → 192**, NEE **193 → 181 → 171**). The walk then ran off the oldest point it *read* while the stored series continued below it — 12h retention against seeds spanning tens of minutes — and reported short as though the history had ended. The fix makes the window a consequence of the walk: it doubles and the walk repeats until the seed fills, a genuine hole truncates it, or the series demonstrably ends, with the shallowest filling window used. "The series ends here" is inferred from the `since` already passed to the store — no new API, no extra scan. Every seed now names its terminator, span, step and read count, so the next cycle grades this from the app's own log rather than from a replication script.)
+
+### Step 0 — `120b22b41` (ADR-0137): SCORED ⚠️ INCONCLUSIVE, mechanism ✅ VERIFIED to the end
+
+Risk-adjusted return **-0.000284**/cycle over 7 cycles, **t = -1.39** against the 1.5 hurdle → kept, not
+reverted (ADR-0116). Its primary VERIFY-BY held every cycle it ran: live `/api/fusion/targets` planned
+gross **$500,000.000044975** against the **$500,000** `jethro.risk.max-gross-exposure` cap —
+**1.00000000008995×** — where before it the planner targeted a book it was forbidden to hold. The claimed
+mechanism is verified; the PnL effect is indistinguishable from noise, the honest verdict for a
+planning-side identity. Moved below the line.
+
+`026cda49d`'s flagged auto-revert stays **deliberately not completed** (Rule 303): it is itself the revert
+of the graded-BAD ADR-0136, so completing it would re-apply a rejected mechanism.
+
+### Step 0 — Item #1 (restart liquidates the book): ⚠️ STILL-BROKEN on entry, **fix now shipped**
+
+| check | reading | verdict |
+| --- | --- | --- |
+| `sources ≤ 1` share of `totalFees` | **$39.187210** of **$390.159780** = **10.04%** (63 fills, **$388,348.116512140580** notional) | ⚠️ unchanged — the fix had not shipped |
+| concentration in the ten minutes after a boot | **40 of 58** blind liquidation fills (**68.97%**), **68.89%** of their fee | ⚠️ unchanged |
+| root cause identified to a line | `SensorWarmup` read window = `2 × samples × median-step`; median bounds a typical gap, the window must span a **sum** of gaps | ✅ closed |
+| fix deployed | ADR-0138, `-Pci test` green, three new tests covering fill / genuine-end / genuine-hole | ✅ shipped |
+
+The fix is deliberately **not** ADR-0135's "hold instead of liquidate" (graded ❌ BAD, never re-tried) and
+**not** a per-name allowlist (Rule 317 forbids it — seed depth is a property of the boot). It introduces no
+money, risk or exposure number: the class replays prices into a sensor that publishes a conviction, with
+fusion, the edge gate, the conviction floor and the pre-trade guardrail all still between it and a fill.
+
+**VERIFY-BY next run (unchanged, now gradeable from the app's own log):** zero `sensor still cold` WARNs at
+boot for any name with stored marks; **no** `fusion exit — target decayed to flat [… sources ≤ 1]` order in
+the five minutes after JVM start; the `sources ≤ 1` fee share falling materially from **10.04%**; and any
+seed still short naming `GAP_BREAK` / `HISTORY_EXHAUSTED` with its span, which distinguishes a defect that
+remains from a cash-close truncation that is correct behaviour.
+
+### Step 0 — Item #2 (the aim is in-memory only): ⚠️ STILL-BROKEN, unchanged
+
+Live `/api/fusion/targets` `insideBuffer` **16 of 21**, held **$34,292.8900** against a planned
+**$500,000.000044975** — **6.86%**. Still ranked **#2** because #1 gates it: a cold sensor plans the name
+flat and a flat target snaps the aim to zero, so restoring intent while the sensors still blink out
+restores nothing. It becomes actionable once #1 verifies.
+
+---
 ## Verification block — 2026-08-04 19:00Z (**No change — `120b22b41` is at 5/6 cycles under ADR-0116 measurement; it scores next cycle.** Item #1 reproduced on a **fifth** boot with the same ~40-second signature — but this cycle stops counting reproductions (Rule 318) and **prices the defect instead**. Two new measurements. (a) **A single, complete, causally-timestamped round trip:** JPM `BUY 13 @ 359.130000` FILLED **18:38:08.400753Z** on `[forecast=+9.114237353210052, sources=3]`; the JVM's own `trend sensor still cold for JPM after seeding 137 of 193` WARN lands **18:38:09.591Z**, 1.19 s later; JPM `SELL 13 @ 359.006339` FILLED **18:38:35.165972Z** on `fusion exit — target decayed to flat [forecast=0.0, sources=1]`. The position lived **26.765219 s**, and cost **-$1.607593** of price move plus **$0.933577** of fee ⇒ **-$2.541170**, for zero information: the three-source view that opened it was never contradicted, the sensor simply went blind. (b) **The cumulative bill, from the app's own `fills`⋈`orders` join:** **63** LIVE fills carry an `origin_reason` with `sources ≤ 1` — **$388,348.116512140580** of notional and **$39.187210** of fee, which is **10.04%** of the firm's entire LIVE fee bill `totalFees` **$390.159780**, against a firm total PnL of **-$602.70613085**. And they are not spread across the cycle: **40 of the 58** blind *liquidation* fills (**68.97%**), carrying **68.89%** of their fee, land in the **first 10 minutes** of the loop's 30-minute cycle. Item #1 is no longer a mechanism with a story — it is a mechanism with an invoice, and it keeps #1.)
 
 ### Step 0 — `120b22b41` (ADR-0137): ✅ still VERIFIED on its primary metric, fifth cycle running

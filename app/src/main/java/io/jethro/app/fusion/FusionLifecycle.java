@@ -594,17 +594,20 @@ public final class FusionLifecycle implements AutoCloseable {
         long anchor = providerMillis != null && providerMillis > 0 ? providerMillis : System.currentTimeMillis();
         // The seed is counted in PRICES, the sensor in RETURNS, and a return needs two prices
         // (ADR-0117) — asking for warmupSamples() prices lands the replay one return short every time.
-        int n = SensorWarmup.warm(markHistory, instrument, anchor, intervalSeconds * 1_000L,
+        var seed = SensorWarmup.warm(markHistory, instrument, anchor, intervalSeconds * 1_000L,
                 streamVol.warmupPrices(), price -> streamVol.update(instrument, price));
         if (streamVol.sigmaPerSample(instrument).isEmpty()) {
             // WARN, not INFO: an unmeasured name is one the risk cut can never protect, and that has
             // to be loud enough to reach the report (the ADR-0071 correction's lesson). Quoted against
-            // what the seed ASKED FOR, so "n of n, still cold" can only ever mean a genuine cold start.
-            log.warn("risk-cut σ sensor still cold for {} after seeding {} of {} stored prices — this "
-                    + "name cannot be stopped out until its mark history has accumulated", instrument, n,
-                    streamVol.warmupPrices());
+            // what the seed ASKED FOR, so "n of n, still cold" can only ever mean a genuine cold start,
+            // and with the terminator so a short seed says WHY it is short (ADR-0138).
+            log.warn("risk-cut σ sensor still cold for {} after seeding {} of {} stored prices — stopped "
+                    + "on {} covering {}s in {} read(s) at a {}ms step; this name cannot be stopped out "
+                    + "until its mark history has accumulated", instrument, seed.size(),
+                    streamVol.warmupPrices(), seed.termination(), seed.spanMillis() / 1000L, seed.reads(),
+                    seed.stepMillis());
         } else {
-            log.info("risk-cut σ sensor warmed {} from {} stored prices (ADR-0086)", instrument, n);
+            log.info("risk-cut σ sensor warmed {} from {} stored prices (ADR-0086)", instrument, seed.size());
         }
     }
 
