@@ -14,6 +14,80 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 15:30Z (**No change — `026cda49d` is at 4/6 cycles, so the code is frozen.** The cycle's value is that the standing "does ANY source have edge?" question is now **answered from live telemetry**: `social` at the 3600s horizon carries `avgReturnBps` **+9.4817** with the highest clustered t of all fifteen (source, horizon) pairs — and `jethro.fusion.social.per-channel=0` multiplies its every forecast to exactly `0.0`. Last block's item #1 is struck: 20 names traded with no trading commit in between, so the band was a convergence lag, not a wall.)
+
+### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ STILL NOT SCORED — held, undisturbed
+
+`scripts/score-change.py score` prints `026cda49d still accumulating evidence (4/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` still holds its snapshot (`ts 2026-08-04T13:37:23Z`).
+Deployment re-confirmed: `ops_jvm.uptimeSeconds` **`1316`** at `traffic.timestampMillis` **`1785857401923`**
+→ a fresh JVM booted after the commit. Per ADR-0116 that forbids a code change this cycle. **No baseline
+was recorded**, so its window is intact.
+
+### Step 0 — Item #1 of the 15:00Z block (the band `|target|/|forecast|` blocks opening from flat): 🔴 FALSIFIED — struck, not fixed
+
+Its VERIFY-BY was that a flat name cannot open. **It opened, on 20 names, with no trading commit in
+between** (only `4f9ff26`/`685f01a`, the report generator and docs). `insideBuffer` went **22 → 20 → 16**
+of 21 while `streamVolMeasuredNames` reached **20** = `volBudgetNames` and `covarianceCoveredNames`
+**20**; aims grew to `PFE -824.468683`, `NEE -191.515729`, `KO +169.115440`, `JPM +80.451761`,
+`JNJ +79.504232`, and gross went **$0.00 → $51,339.05**. The 6-of-6 reconciliation was arithmetically
+right about that *instant* and wrong about the *mechanism*: it measured a **cold-JVM convergence lag**,
+not a structural barrier. **Fourth time** (Rule 287) — struck without prescribing into it.
+
+### Item #1 — the ONLY source with measured positive expectancy contributes a forecast of exactly 0.0 (⚠️ OPEN, #1 — NEW; needs an OWNER DECISION / superseding ADR, not a dial turn)
+
+Computing the desk's own ADR-0077/0081 clustered statistic `avgReturnBps ÷ (stdCohortMeanBps ÷ √cohorts)`
+across all fifteen (source, horizon) pairs in `/api/signals/telemetry`, **`social` @ 3600s is the highest
+t of the whole set**:
+
+| horizon | source | resolved | cohorts | avgReturnBps | clustered t |
+| --- | --- | --- | --- | --- | --- |
+| 3600 | **social** | 344 | 32 | **+9.4817** | **+1.75** |
+| 3600 | reversion | 649 | 87 | +2.7012 | +0.93 |
+| 3600 | trend | 696 | 98 | −0.7778 | −0.30 |
+| 3600 | xsreversion | 634 | 39 | −4.9878 | −1.03 |
+| 900 | social | 675 | 67 | +1.6706 | +0.90 |
+| 900 | trend | 2347 | 316 | +0.2513 | +0.36 |
+| 225 | trend | 5873 | 500 | +0.0298 | +0.13 |
+
+Its expectancy is 3.5× the next-best and rises monotonically with horizon (**+0.2849 → +1.6706 → +9.4817**
+bps at 225/900/3600s) — information that pays out over about an hour. Cost does not eat it: `/api/tca`
+`avgSlippageBps` is sub-bps on the liquid names (`MSFT 0.594`, `PFE 0.633`, `AMZN 0.658`, `GOOG 0.746`) and
+`turnover_cost_by_name` `fee_bps` is **1.00** per equity side → a round trip near **3.3 bps**, cleared ~3×.
+
+**The block:** `jethro.fusion.social.per-channel` is **`0`**, and `SourceForecasts.fromSocial` computes
+`strength = max(1, corroboratingChannels) × perChannel` — so every social forecast is exactly `0.0`
+regardless of direction or corroboration. `/api/fusion/targets` `weights` showing `social 1.725995` — the
+largest of the five, above `reversion 1.500165`, `momentum 0.761144`, `trend 0.712538`,
+`xsreversion 0.300158` — is **decorative**; the telemetry weighting optimises a source multiplied out
+downstream. The book is therefore sized entirely off trend/reversion/xsreversion/momentum, **none of which
+has a significantly positive expectancy at any horizon**.
+
+**Why this is NOT a dial turn.** `per-channel=0` is `ADVISORY-ONLY ENFORCEMENT (Oleg, 2026-07-27)`,
+restoring **ADR-0049** ("a social subject can NEVER originate an order"). Settled decision → superseding
+ADR + owner call, never a quiet edit. Its stated justification (*"Social's own OOS edge was measured
+negative anyway"*) is what the live telemetry now contradicts — and because social has never sized, that
+telemetry is an **uncontaminated OOS measurement**, exactly the evidence ADR-0049 asks for. But its stated
+restore condition (*"still behind the OOS edge gate"*) does **not** currently hold:
+`jethro.fusion.edge-gate.enabled=false` under ADR-0122. Restoring `4.0` today is therefore a *different*
+decision from the one that comment authorises, and must not be conflated with it.
+
+**VERIFY-BY (next run, read from `/api/signals/telemetry`):** `social` @ `horizonSeconds 3600` still has
+`avgReturnBps` **> 0** with `cohorts` **> 32** and a clustered t **≥ 1.75** (ideally clearing the desk's
+own `edge-gate.t-hurdle` **2.0**). If it holds two more cycles, the one change is the superseding ADR that
+re-admits corroborated social to sizing **with** the ADR-0064 per-name edge gate re-enabled for that source
+— gate and dial together, since t=1.75 on 32 cohorts is suggestive, not proven. If it decays back toward
+0, strike this item and say so plainly.
+
+### Item #2 — the fee bill exceeds the deficit, but is sunk, not bleeding (⚠️ OPEN, #2 — deliberately NOT ranked #1)
+
+`totalFees` **360.289492** against `firmTotal` **-297.161461** still means the desk is positive gross of
+cost. Rule 289's test settles the ranking with this window's own numbers: fees grew about **$2.60** while
+gross grew **$32,374.63**, over **5148** lifetime FILLED orders most of which predate
+ADR-0064/0084/0094/0101. **VERIFY-BY:** re-rank to #1 only if `totalFees` growth per unit of *new* gross
+exceeds the prior window's — i.e. a live cost rate, never the cumulative figure.
+
+---
 ## Verification block — 2026-08-04 15:00Z (**No change — `026cda49d` is at 3/6 cycles, so the code is frozen.** The cycle's value is that last block's item #1 is ✅ VERIFIED-RESOLVED *without any code*, which falsifies its stated root cause and replaces it with an arithmetically proven one: the ADR-0094 band is `|target|/|forecast|`, the aim path has only converged to 6–20% of target, and the two are mismatched from flat — so a name with zero holding **cannot open**. Reconciled exactly on 6 of 6 rendered names.)
 
 ### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ STILL NOT SCORED — held, undisturbed

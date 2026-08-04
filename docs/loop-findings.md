@@ -3912,3 +3912,45 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **+$11,313.99** gross came from four normal `fusion entry — target increase` fills (`AMZN BUY 10`,
   `GOOG BUY 5`, the follow-on `HEDGE ES SELL 0.013712`, `AMZN BUY 5`) plus mark movement — **market and
   ordinary desk behaviour, not code**. Nothing is claimed for any change.
+
+## 2026-08-04 15:30Z — the one source with edge is multiplied to zero; the band was a warm-up lag, not a wall
+
+- **Rule 290 — `social` @ 3600s is the only source in this universe with measured positive expectancy, and
+  `per-channel=0` makes its every forecast exactly `0.0`.** Computing the desk's own ADR-0077/0081
+  clustered statistic `avgReturnBps ÷ (stdCohortMeanBps ÷ √cohorts)` over all fifteen (source, horizon)
+  pairs in `/api/signals/telemetry`, `social` @3600s is the **highest t of the set**: `avgReturnBps`
+  **+9.4817**, `resolved` **344**, `cohorts` **32** → t **+1.75**. Next best is `reversion` @3600s at
+  **+2.7012** (t **+0.93**); `trend` **−0.7778**, `xsreversion` **−4.9878**, `momentum` **−1.9772** are
+  all negative there. Social rises monotonically with horizon (**+0.2849 → +1.6706 → +9.4817** bps at
+  225/900/3600s) — hour-scale information — and clears cost ~3× (`/api/tca` slippage `MSFT 0.594`,
+  `PFE 0.633`, `AMZN 0.658`, `GOOG 0.746` bps; `fee_bps` **1.00** per equity side ⇒ round trip ~3.3 bps).
+  But `SourceForecasts.fromSocial` is `strength = max(1, corroboratingChannels) × perChannel` with
+  `jethro.fusion.social.per-channel=0`. **So the answer to the standing "does ANY signal predict returns
+  here?" is yes — and the desk is sized entirely off the four that don't.**
+- **Rule 291 — a fusion `weights` entry is not evidence a source contributes; check its per-source
+  multiplier before reading anything into it.** `/api/fusion/targets` `weights` shows `social 1.725995`,
+  the **largest** of the five (`reversion 1.500165`, `momentum 0.761144`, `trend 0.712538`,
+  `xsreversion 0.300158`). It is decorative: the telemetry weighting is optimising a source that is
+  multiplied out downstream. Never infer contribution from a weight alone.
+- **Rule 292 — new evidence against an owner-set premise justifies a superseding ADR, never a quiet dial
+  turn — and never a *different* decision smuggled in as the same one.** `per-channel=0` is
+  `ADVISORY-ONLY ENFORCEMENT (Oleg, 2026-07-27)` restoring ADR-0049. Its stated justification ("Social's
+  own OOS edge was measured negative anyway") is now contradicted by live telemetry — and since social has
+  never sized, that telemetry is an **uncontaminated OOS measurement**, which is the evidence ADR-0049
+  asks for. But its stated restore condition ("still behind the OOS edge gate") does not hold today:
+  `jethro.fusion.edge-gate.enabled=false` (ADR-0122). Restoring `4.0` alone is therefore NOT the decision
+  that comment authorises. Gate and dial move together, or not at all.
+- **Rule 293 (extends 287) — a band/threshold reconciliation can be exactly right about the instant and
+  wrong about the mechanism.** Last cycle proved 6-of-6 that `|gap| < band` blocked every flat name, and
+  concluded the ADR-0094 band structurally prevents opening. This cycle **20 names opened with no trading
+  commit in between**: `insideBuffer` **22 → 20 → 16** of 21 as `streamVolMeasuredNames` reached **20** =
+  `volBudgetNames`, aims grew to `PFE -824.468683` / `NEE -191.515729` / `KO +169.115440`, gross **$0.00 →
+  $51,339.05**. It had measured a cold-JVM **convergence lag**. **Fourth time.** Before concluding
+  "structural", re-read the same quantity on a warm JVM — arithmetic on one snapshot cannot distinguish a
+  wall from a lag.
+- **Trigger/attribution.** No change shipped: `026cda49d` is at **4/6 cycles** (`.pending-baseline.json`
+  present), so the code was frozen and no baseline recorded. The window's **+$33.00** PnL and
+  **+$32,374.63** gross came from 23 ordinary `fusion entry — target increase` fills
+  (CAT/AMZN/GOOG/JPM/PFE/UNH/NEE/JNJ) plus the follow-on `auto-hedge EQUITY (ADR-0019)` ES sells, and
+  ALPHA's **+45.61** unrealized is mark movement on positions opened this window — **market and normal
+  desk behaviour, not code**. Nothing is claimed for any change.
