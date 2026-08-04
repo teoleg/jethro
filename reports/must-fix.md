@@ -14,6 +14,105 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 16:00Z (**No change — `026cda49d` is at 5/6 cycles; the code stays frozen.** The book is now fully deployed (21 equity positions, gross **$71,398.69**) and that changes the ranking: decomposing the firm total shows the desk's **direction is roughly flat and its COST is the loss**. Firm total **-$458.07** = pre-fee trading **-$94.09** − fees **$363.98**; fees are **79.46%** of the loss. Cumulative LIVE turnover **$4,120,150.44** is **57.71×** the current gross. A new item #1 is therefore ranked above the social dial — with the reason stated, not assumed.)
+
+### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ STILL NOT SCORED — held, undisturbed
+
+`scripts/score-change.py score` prints `026cda49d still accumulating evidence (5/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` still holds its snapshot (`ts 2026-08-04T13:37:23Z`,
+`gross_exposure 0E-8`). Deployment re-confirmed on a warm JVM: `ops_jvm.uptimeSeconds` **`1363`** at
+`traffic.timestampMillis` **`1785859202173`**, `traffic.up true`, `provider alpaca`, `ticksIn 13234`,
+`ticksDropped 0`. Per ADR-0116 this **forbids a code change this cycle**; **no baseline was recorded**, so
+its evaluation window is intact and it should score next cycle.
+
+### Step 0 — Item #1 of the 15:30Z block (`social` is the only source with edge and contributes `0.0`): ⚠️ STILL-BROKEN — confirmed, and now confirmed *structurally*
+
+Re-measured on this run's `/api/signals/telemetry` with the desk's own ADR-0077/0081 clustered statistic
+`avgReturnBps ÷ (stdCohortMeanBps ÷ √cohorts)` over all fifteen (source, horizon) pairs — `social` @3600s is
+again the **highest t of the whole set**, and it is the **only** source that clears the desk's own **1.5**
+hurdle:
+
+| horizon | source | resolved | cohorts | hitRate | avgReturnBps | clustered t |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3600 | **social** | 345 | 32 | **0.5977** | **+8.7221** | **+1.601** |
+| 3600 | reversion | 658 | 87 | 0.4959 | +3.2504 | +1.079 |
+| 3600 | trend | 700 | 97 | 0.5250 | −1.5295 | −0.582 |
+| 3600 | momentum | 58 | 9 | 0.4375 | −3.6586 | −0.701 |
+| 3600 | xsreversion | 650 | 39 | — | −5.4256 | −1.130 |
+| 900 | social | 684 | 69 | — | +1.8322 | +1.010 |
+| 225 | social | 750 | 75 | — | +0.1611 | +0.246 |
+
+Still monotonic in horizon (**+0.1611 → +1.8322 → +8.7221** bps at 225/900/3600s) — hour-scale information.
+`jethro.fusion.social.per-channel=0` is still live at `application.properties:274`.
+
+**New, stronger evidence than last cycle's arithmetic:** with the book deployed, `/api/fusion/targets`
+shows social is not merely multiplied to zero *downstream* — it never reaches the combiner at all. Every
+`contributions` array on every name lists only `trend`/`reversion`/`xsreversion` (`sources: 3`), and
+`forecastScalars` has **no `social` entry** (only `momentum` 2 readings, `reversion` 2018, `trend` 2762,
+`xsreversion` 2514). Yet `weights` still carries `social 1.8401656178888028` — the **largest** of the five.
+Rule 291 holds and hardens.
+
+### Item #1 — the desk's loss is TURNOVER COST, not direction: fees are 79.46% of the firm loss and cumulative turnover is 57.71× the book (⚠️ OPEN, #1 — NEW)
+
+Decomposing `/api/risk` `.total` against `/api/attribution` `totalFees` (computed by script, not authored):
+
+| quantity | value |
+| --- | --- |
+| firm total PnL | **-$458.07450234** |
+| total fees | **$363.980201** |
+| **pre-fee trading PnL** | **-$94.09430134** |
+| fees as a share of the loss | **79.46%** |
+| ALPHA pre-fee (fees $351.971487) | -$172.59748123 |
+| HEDGE pre-fee (fees $10.899560) | +$77.39402589 |
+
+Pre-fee, the desk is **-$94.09 on $71,398.69 of gross** — statistically indistinguishable from flat. The
+**$363.98** of fees is what makes it a loss. Its source is churn: summing `turnover_cost_by_name`
+`turnover_usd` over the LIVE epoch gives **$4,120,150.44** against a current gross of **$71,398.69** —
+**57.71×**. At `fee_bps` **1.00** per equity side that turnover costs exactly the fees observed.
+
+**Mechanism (from `recent_orders`, each row carrying its ADR-0134 `originReason`):** an hour-scale forecast
+is routed on a ~30-second replan. PFE is the exemplar — built short on `fusion entry — target increase` at
+`forecast` **-8.6125 → -7.0929 → -5.8472 → -5.5667 → -5.1482 → -5.1178**, then within ~6 minutes the same
+name flipped to `fusion reduce toward a smaller target` at `forecast` **+0.0134 → +0.0209 → +0.0274 →
++0.1017 → +0.1634 → +0.5167 → +0.5841**, buying back **3 shares at a time** every ~30s. PFE now shows
+**133 fills**, **$219,600.58** turnover and **$21.9601** fees against a **$9,166.59** position — a
+**23.96×** re-trade — and it is the **worst name on the desk at -$195.29620728** (short 358 @ avgCost
+`25.35220624` vs mark `25.60500000`). MSFT is worse on the ratio: **$200,516.55** turnover, **192 fills**,
+**$5,970.66** position → **33.58×**. Book-wide, `orders_by_status` shows **1,911 CANCELLED** against
+**5,179 FILLED** — the `fusion re-plan — passive order superseded by a fresh target (ADR-0084)` path
+re-issuing faster than the market resolves the signal.
+
+**Why this outranks the social dial** (stated, not assumed): social's edge is **+8.7221 bps at a 3600s
+horizon** — it pays out over about an hour. A book that re-trades itself **57.71×** cannot hold a position
+long enough to collect an hour-scale forecast, and would spend the new edge on fees the same way it is
+spending the current one. Cost control is the precondition for item #2 paying, not a competing priority.
+
+**VERIFY-BY (next run, all read live):** (a) `/api/attribution` `totalFees` growth over the window falls
+relative to this window's, while pre-fee PnL (`.total.totalPnl` + `totalFees`) does **not** deteriorate;
+(b) the top `turnover_cost_by_name` `turnover_usd ÷ /api/risk` per-name `grossExposure` ratio drops below
+the **23.96×** (PFE) / **33.58×** (MSFT) recorded here; (c) `orders_by_status` CANCELLED-to-FILLED falls
+below the **1,911 / 5,179** recorded here. If (a) improves only because the desk stopped trading, that is
+**not** a pass — gross must stay materially deployed (it is only **4.8%** of the $1,500,000 firm cap, with
+**$1,428,601** of headroom, so there is no reason to shrink).
+
+### Item #2 — the ONLY source with measured positive expectancy contributes a forecast of exactly 0.0 (⚠️ OPEN, #2 — was #1; needs an OWNER DECISION / superseding ADR, not a dial turn)
+
+Evidence re-measured above (t **+1.601**, the only source clearing the desk's own **1.5** hurdle; absent
+from every `contributions` array and from `forecastScalars`). The desk sizes entirely off `reversion`
+(weight **1.6969247455912904**, t **+1.079**), `trend` (**0.5718732950667389**, t **−0.582**) and
+`xsreversion` (**0.2799728684361928**, t **−1.130**) — **two of the three effective sources measure
+negative** at the 3600s horizon.
+
+Per Rule 292 this is **not** a dial turn. `per-channel=0` is `ADVISORY-ONLY ENFORCEMENT (Oleg, 2026-07-27)`
+restoring ADR-0049, and its stated restore condition ("still behind the OOS edge gate") does **not** hold
+today — `jethro.fusion.edge-gate.enabled=false` (ADR-0122). Gate and dial move together in one superseding
+ADR, or not at all.
+
+**VERIFY-BY:** `/api/fusion/targets` `contributions` contains a `social` entry on ≥1 name with a non-zero
+`forecast`, **and** `forecastScalars` gains a `social` entry with `readings > 0` — while the edge gate's
+state is whatever the superseding ADR sets, stated explicitly in that ADR.
+
+---
 ## Verification block — 2026-08-04 15:30Z (**No change — `026cda49d` is at 4/6 cycles, so the code is frozen.** The cycle's value is that the standing "does ANY source have edge?" question is now **answered from live telemetry**: `social` at the 3600s horizon carries `avgReturnBps` **+9.4817** with the highest clustered t of all fifteen (source, horizon) pairs — and `jethro.fusion.social.per-channel=0` multiplies its every forecast to exactly `0.0`. Last block's item #1 is struck: 20 names traded with no trading commit in between, so the band was a convergence lag, not a wall.)
 
 ### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ STILL NOT SCORED — held, undisturbed

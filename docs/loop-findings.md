@@ -3954,3 +3954,48 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   (CAT/AMZN/GOOG/JPM/PFE/UNH/NEE/JNJ) plus the follow-on `auto-hedge EQUITY (ADR-0019)` ES sells, and
   ALPHA's **+45.61** unrealized is mark movement on positions opened this window — **market and normal
   desk behaviour, not code**. Nothing is claimed for any change.
+
+## 2026-08-04 16:00Z — the desk's loss is COST, not direction (fees are 79% of it)
+
+- **Rule 294 — before hunting for edge, decompose the loss into direction and cost; here cost is 79% of
+  it.** `/api/risk` `.total.totalPnl` **-$458.07450234** against `/api/attribution` `totalFees`
+  **$363.980201** gives **pre-fee trading of -$94.09430134** — on **$71,398.69147500** of gross, that is
+  indistinguishable from flat. **Fees are 79.46% of the loss.** By book, ALPHA pre-fee is -$172.60 (fees
+  $351.97) and HEDGE pre-fee is +$77.39 (fees $10.90). The desk is not picking the wrong direction; it is
+  paying its edge away. Five cycles of "which source has edge?" analysis had never run this decomposition.
+- **Rule 295 — a 3600s forecast routed on a ~30s replan produces sign-flip whipsaw, and the turnover
+  ratio is where it shows.** Summing `turnover_cost_by_name` `turnover_usd` over the LIVE epoch gives
+  **$4,120,150.44** against a current gross of **$71,398.69** — the book re-trades itself **57.71×**.
+  Per name: MSFT **$200,516.55** turnover / **192 fills** on a **$5,970.66** position = **33.58×**; PFE
+  **$219,600.58** / **133 fills** on **$9,166.59** = **23.96×**; AMZN **19.91×**; CAT **17.98×**.
+  `orders_by_status` is **1,911 CANCELLED** vs **5,179 FILLED** — the ADR-0084 `fusion re-plan — passive
+  order superseded by a fresh target` path re-issues faster than the signal resolves. **Watch the
+  turnover-to-position ratio, not the fill count** — 25 fills on MCD (7.86×) is fine; 192 on MSFT is not.
+- **Rule 296 — the whipsaw signature is visible in the `originReason` forecast trail; read it before
+  blaming the position.** PFE (worst name, **-$195.29620728**) was built short at `fusion entry — target
+  increase` `forecast` **-8.6125 → -7.0929 → -5.8472 → -5.5667 → -5.1482 → -5.1178`, then within ~6 minutes
+  the SAME name flipped to `fusion reduce toward a smaller target` at **+0.0134 → +0.0209 → +0.1017 →
+  +0.5167 → +0.5841**, buying back **3 shares at a time**. The trigger to fix is the **cadence**, not the
+  direction call. ADR-0134's `originReason` is what made this readable — it earned its keep here.
+- **Rule 297 (extends 290/291) — with the book deployed, social is not merely zeroed downstream: it never
+  reaches the combiner.** Every `contributions` array in `/api/fusion/targets` lists only
+  `trend`/`reversion`/`xsreversion` (`sources: 3`), and `forecastScalars` has **no `social` entry**
+  (`momentum` 2 readings, `reversion` 2018, `trend` 2762, `xsreversion` 2514) — yet `weights` still shows
+  `social 1.8401656178888028`, the **largest** of the five. Re-measured this run, social @3600s is
+  `avgReturnBps` **+8.7221**, `resolved` 345, `cohorts` 32, `hitRate` **0.5977** → clustered t **+1.601**:
+  the **only** source of the fifteen (source, horizon) pairs clearing the desk's own **1.5** hurdle
+  (`reversion` +1.079, `trend` −0.582, `momentum` −0.701, `xsreversion` −1.130). **Two of the three sources
+  that actually size measure negative.**
+- **Rule 298 — rank cost above edge when the edge is slow: a 57.71×-turnover book cannot collect an
+  hour-scale forecast.** Social's expectancy rises monotonically with horizon (**+0.1611 → +1.8322 →
+  +8.7221** bps at 225/900/3600s), so it only pays if a position is *held* for about an hour. Wiring it
+  into a book that re-trades itself 58 times would spend the new edge on fees exactly as the current one is
+  being spent. Cost control is the **precondition** for the social decision, not a competing priority —
+  this is why must-fix #1 and #2 swapped this cycle.
+- **Trigger/attribution.** No change shipped: `026cda49d` is at **5/6 cycles** (`.pending-baseline.json`
+  present, `ts 2026-08-04T13:37:23Z`), so the code was frozen and no baseline recorded. The window's
+  **-$153.84** PnL and **+$16,039.48** gross came from the running code's own fusion entries and the
+  follow-on `auto-hedge EQUITY (ADR-0019)` ES trades across PFE/MCD/NVDA/MSFT/JPM/NEE/WMT/UNH/JNJ. That is
+  **baseline behaviour, not the effect of any change** — nothing is claimed or blamed on code. JVM was warm
+  (`uptimeSeconds 1363`, `insideBuffer 17` of 21, `streamVolMeasuredNames 20` = `volBudgetNames`), so
+  Rule 293's cold-start caveat does not apply to anything read here.
