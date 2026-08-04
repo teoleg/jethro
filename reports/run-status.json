@@ -1,5 +1,29 @@
 [
   {
+    "ts": "2026-08-04T15:36:54Z",
+    "feedMode": "LIVE",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-304.23199142",
+    "gross": "55359.21343750",
+    "net": "-22159.52343750",
+    "fees": "360.723739",
+    "pnl_pct": 7.85,
+    "gross_pct": 191.91,
+    "pnl_growth_pct": 3.39,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": true,
+    "stale": false,
+    "underwater": true,
+    "action": "revert-failed",
+    "last_verdict": "\u274c BAD",
+    "revert_failed": true,
+    "decision": "\u26a0\ufe0f e3b33679d scored \u274c BAD but the auto-revert FAILED (git conflict) \u2014 the commit is STILL LIVE and needs a manual revert; NOT backed off",
+    "reasoning": "Held the code frozen for the pending measurement \u2014 and found the answer to the standing question: one source DOES have edge, and it is multiplied to exactly zero by an owner-set dial.\n\n*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/signals/telemetry`,\n`/api/fusion/targets`, `/api/tca`, `ops_jvm`, `traffic`, `recent_orders`, `application.properties`, or the\nscorer's own output. None is authored here \u2014 invariant 7 / ADR-0016.)*\n\n## Step 0 \u2014 last cycle's pending change (`026cda49d`, the ADR-0136 revert): \u2705 DEPLOYED, \u23f3 STILL NOT SCORED\n\n`scripts/score-change.py score` prints `026cda49d still accumulating evidence (4/6 cycles) \u2014 held, not\nscored this run`, and `reports/.pending-baseline.json` still holds its snapshot (`ts 2026-08-04T13:37:23Z`).\nDeployment re-confirmed: `ops_jvm.uptimeSeconds` **`1316`** at `traffic.timestampMillis` **`1785857401923`**\n\u2192 a fresh JVM booted well after the commit. Per ADR-0116 that **forbids a code change this cycle**; I\nrecorded **no baseline**, so its window is intact. What follows aims next cycle's one change.\n\n## Situation \u2014 the live money, in plain numbers\n\n1. **Money.** Total PnL **$-297.16** (`/api/risk` `.total`, firm headline incl. hedge) \u2014 **+$33.00** since\n   last run, **+$17.75** across the last three. Still `UNDERWATER`, but rising. Books: `ALPHA -329.04`\n   (realized **-374.65**, unrealized **+45.61**), `HEDGE +88.67`, `MACRO -56.80`.\n2. **Risk.** Gross **$51,339.05**, net **$-20,634.40** \u2014 **3.4%** of the $1,500,000 firm cap, headroom\n   **$1,448,661**; net **2.1%** of the $1,000,000 net cap. The book has come decisively **off dormant**\n   ($0.00 \u2192 $11,313.99 \u2192 $51,339.05 over three cycles). With this much room that is the goal, not a concern.\n3. **Cause.** Not attributable to any change. 23 fills today, all `fusion entry \u2014 target increase` on\n   CAT/AMZN/GOOG/JPM/PFE/UNH/NEE/JNJ plus the follow-on `auto-hedge EQUITY (ADR-0019)` ES sells \u2014 the\n   normal entry path warming up. The **+$45.61 of ALPHA unrealized** is mark movement on positions this\n   window opened; **market, not code**. Nothing is claimed for the pending revert.\n4. **Danger.** No. `DANGER` needs bleeding near the cap; gross is at 3.4% of it, `breaker.halted` **false**,\n   `riskCuts` **`[]`**, `riskCutStoppedNames` **0**, `routing` **true**.\n\n## Last block's item #1 is falsified \u2014 again by state, not by code (the fourth time)\n\nIts claim was that the ADR-0094 band `|target|/|forecast|` structurally prevents a flat name from opening.\nIt reconciled 6-of-6 at the time, yet **20 names traded this window with no trading commit in between**.\n`insideBuffer` fell **22 \u2192 20 \u2192 16** of 21 as `streamVolMeasuredNames` reached **20** = `volBudgetNames`\nand `covarianceCoveredNames` **20**; the aims grew with it (`PFE -824.47`, `NEE -191.52`, `KO +169.12`,\n`JPM +80.45`, `JNJ +79.50`). The band was never a wall \u2014 it was a **convergence lag** on a cold JVM.\nRule 287 exactly, and I am striking the item rather than prescribing into it: three \u274c BAD changes\n(ADR-0135, its revert, ADR-0136) were each built on reading warm-up as structure.\n\n## The real finding: the only source with measured edge contributes a forecast of exactly 0.0\n\nThe standing priority asks \"does ANY signal predict returns here?\" Computing the desk's own ADR-0077/0081\nclustered statistic \u2014 `avgReturnBps \u00f7 (stdCohortMeanBps \u00f7 \u221acohorts)` \u2014 over all 15 (source, horizon) pairs\nin `/api/signals/telemetry`, one stands clear of the field:\n\n| horizon | source | resolved | cohorts | avgReturnBps | clustered t |\n| --- | --- | --- | --- | --- | --- |\n| 3600 | **social** | 344 | 32 | **+9.4817** | **+1.75** |\n| 3600 | reversion | 649 | 87 | +2.7012 | +0.93 |\n| 3600 | trend | 696 | 98 | \u22120.7778 | \u22120.30 |\n| 3600 | xsreversion | 634 | 39 | \u22124.9878 | \u22121.03 |\n| 900 | social | 675 | 67 | +1.6706 | +0.90 |\n| 900 | trend | 2347 | 316 | +0.2513 | +0.36 |\n| 225 | trend | 5873 | 500 | +0.0298 | +0.13 |\n\nSocial is the **highest t of all fifteen**, its expectancy is 3.5\u00d7 the next-best, and it rises monotonically\nwith horizon (**+0.28 \u2192 +1.67 \u2192 +9.48 bps** at 225/900/3600s) \u2014 the shape of information that pays out over\nabout an hour. Against measured cost it is not marginal: `/api/tca` gives sub-bps slippage on the liquid\nnames (`MSFT 0.594`, `PFE 0.633`, `AMZN 0.658`, `GOOG 0.746`) and `turnover_cost_by_name` gives **1.00 bps**\nequity fee per side, so a round trip is roughly **3.3 bps** \u2014 social's 1-hour expectancy clears it ~3\u00d7.\n\n**And the desk cannot act on any of it.** `jethro.fusion.social.per-channel` is **`0`**, and\n`SourceForecasts.fromSocial` computes `strength = max(1, corroboratingChannels) \u00d7 perChannel` \u2014 so **every**\nsocial forecast is exactly `0.0`, whatever its direction or corroboration. The `weights` map showing\n`social 1.725995` (the largest of the five, above `reversion 1.500`, `momentum 0.761`, `trend 0.713`,\n`xsreversion 0.300`) is **decorative**: the telemetry weighting is optimising a source that is multiplied\nout downstream. So the book is sized entirely off trend / reversion / xsreversion / momentum \u2014 **not one of\nwhich has a significantly positive expectancy at any horizon** \u2014 while the one source that does reads zero.\n\nOne clean property worth stating: because social has never sized, its telemetry is an **uncontaminated\nout-of-sample measurement** of following it. That is the honest version of the OOS evidence ADR-0049 asks for.\n\n## Why I am not flipping that dial, and what has to happen instead\n\n`per-channel=0` is **owner-set** (`ADVISORY-ONLY ENFORCEMENT (Oleg, 2026-07-27)`) and restores **ADR-0049**\n\u2014 \"a social subject can NEVER originate an order\". That is a settled decision, not a tuning knob, so it\nneeds a **superseding ADR and the owner's call**, never a quiet edit. Two things must be said honestly\nalongside the evidence:\n\n- The comment's own stated justification \u2014 *\"Social's own OOS edge was measured negative anyway\"* \u2014 is what\n  the live telemetry now contradicts. That is new evidence against a premise, which is exactly the ground on\n  which an ADR may be superseded.\n- But the comment also sets the condition: *\"Restore to 4.0 ONLY to deliberately let corroborated social\n  size again (still behind the OOS edge gate).\"* That gate is currently **`jethro.fusion.edge-gate.enabled=false`**\n  (ADR-0122 exploration mode). So restoring `4.0` today would let social size **without** the safeguard the\n  owner's own sentence assumed \u2014 a materially different decision from the one that comment authorises. I\n  will not conflate the two (CLAUDE.md: one concept per decision request).\n- And t=**1.75** on **32** cohorts is suggestive, not proven: it sits below the desk's own `t-hurdle=2.0`.\n  Two cycles of cohort growth will tell us whether it holds. That is the VERIFY-BY now at #1 in\n  `reports/must-fix.md`, and it costs nothing to watch while `026cda49d` finishes its window.\n\nI deliberately did **not** re-rank the fee bill: `totalFees` **360.289492** still exceeds the **-297.16**\ndeficit, but Rule 289's test settles it with this window's own numbers \u2014 fees grew about **$2.60** while\ngross grew **$32,374.63**, so it is a sunk figure over **5148** lifetime fills, not a live bleed.",
+    "commit": "b239005"
+  },
+  {
     "ts": "2026-08-04T15:07:25Z",
     "feedMode": "LIVE",
     "available": true,
@@ -7114,28 +7138,5 @@
     "decision": "\ud83c\udf19 Market closed \u2014 analysis skipped this cycle (no Claude call). The US session is closed, so the tape is frozen and there is nothing to analyse; the loop resumes at the next open. Flat/unchanged here is expected, not a failure.",
     "reasoning": "",
     "commit": "0094339"
-  },
-  {
-    "ts": "2026-07-28T12:30:02Z",
-    "feedMode": "LIVE",
-    "available": true,
-    "brain_ran": false,
-    "total_pnl": "0E-8",
-    "gross": "0E-8",
-    "net": "0E-8",
-    "fees": "0",
-    "pnl_pct": null,
-    "gross_pct": null,
-    "pnl_growth_pct": null,
-    "pnl_growth_window": 3,
-    "pnl_target_pct": 1.0,
-    "on_track": false,
-    "stale": false,
-    "underwater": true,
-    "action": "market-closed",
-    "last_verdict": null,
-    "decision": "\ud83c\udf19 Market closed \u2014 analysis skipped this cycle (no Claude call). The US session is closed, so the tape is frozen and there is nothing to analyse; the loop resumes at the next open. Flat/unchanged here is expected, not a failure.",
-    "reasoning": "",
-    "commit": "cfa4a08"
   }
 ]
