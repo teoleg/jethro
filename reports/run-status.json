@@ -1,5 +1,29 @@
 [
   {
+    "ts": "2026-08-04T15:07:25Z",
+    "feedMode": "LIVE",
+    "available": true,
+    "brain_ran": true,
+    "total_pnl": "-330.16050550",
+    "gross": "18964.42162500",
+    "net": "832.18837500",
+    "fees": "357.693428",
+    "pnl_pct": -4.84,
+    "gross_pct": null,
+    "pnl_growth_pct": -4.84,
+    "pnl_growth_window": 3,
+    "pnl_target_pct": 1.0,
+    "on_track": false,
+    "stale": true,
+    "underwater": true,
+    "action": "revert-failed",
+    "last_verdict": "\u274c BAD",
+    "revert_failed": true,
+    "decision": "\u26a0\ufe0f e3b33679d scored \u274c BAD but the auto-revert FAILED (git conflict) \u2014 the commit is STILL LIVE and needs a manual revert; NOT backed off",
+    "reasoning": "Held the code frozen for the pending measurement \u2014 and found why the book cannot open a position: the no-trade band is wider than the aim on every flat name, reconciled to the routed share.\n\n*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`, `ops_jvm`,\n`traffic`, `recent_orders`, `orders_by_status`, or the scorer's own output. None is authored here \u2014\ninvariant 7 / ADR-0016.)*\n\n## Step 0 \u2014 last cycle's pending change (`026cda49d`, the ADR-0136 revert): \u2705 DEPLOYED, \u23f3 STILL NOT SCORED\n\n`scripts/score-change.py score` reports `026cda49d still accumulating evidence (3/6 cycles) \u2014 held, not\nscored this run`, and `reports/.pending-baseline.json` still holds its snapshot. Per ADR-0116 that\n**forbids a code change this cycle** \u2014 piling one on top destroys the evidence. I recorded **no new\nbaseline**, so its window is intact. What follows is the diagnosis that aims next cycle's one change.\n\n## Situation \u2014 the live money, in plain numbers\n\n1. **Money.** Total PnL **$-308.37** (`/api/risk` `.total`, firm headline incl. hedge), **+$6.54** since\n   last run and **+$6.54** across the last three. Still `UNDERWATER`, `on_track=false`. The books:\n   `ALPHA -364.45167289`, `HEDGE +112.87993718`, `MACRO -56.79950536`.\n2. **Risk.** Gross **$11,313.99**, net **$748.56** \u2014 **0.8%** of the $1,500,000 firm cap, **$1,488,686**\n   of headroom. The book came **off dormant** this cycle (gross was $0.00). Rising exposure with this much\n   room is the goal, not a concern.\n3. **Cause.** The move is **not** attributable to the pending revert, and not to any code. Four orders\n   filled in the window, all `fusion entry \u2014 target increase`: `AMZN BUY 10` and `GOOG BUY 5` at\n   `14:55:08`, the `HEDGE ES SELL 0.013712` that followed them, and `AMZN BUY 5` at `14:59:41`. That is\n   the desk's normal entry path resuming, not a changed rule.\n4. **Danger.** No. `DANGER` needs bleeding *near* the cap; gross is at **0.8%** of it, `breaker.halted`\n   **false**, `riskCuts` **[]**. The live problem is the inverse \u2014 **99.2% of the budget is undeployed**.\n\n## The 14:30Z item #1 was resolved without any code \u2014 which falsifies its root cause\n\nIts VERIFY-BY was met on all three legs: non-zero `aims` **5 \u2192 20** of 22, `insideBuffer` **22 \u2192 20**,\ngross **$0.00 \u2192 $11,313.99**. But the only commit since was `4f9ff26`, the **offline report generator**.\nWhat actually moved was JVM state: `streamVolMeasuredNames` **6 \u2192 20**, `bookVolBrake` **0.880 \u2192 1.0**,\n`portfolioRiskMultiplier` **0.977 \u2192 1.0**. The zero aims were a **cold-start coverage artifact** on an\nephemeral ~25-minute JVM \u2014 not the structural sizing defect the register asserted. That is the third time\nthis loop has read a warm-up state as a permanent defect, and the previous attempts at it graded \u274c BAD.\n\n## The real item #1, closed-form and reconciled to the share\n\n`PositionBuffer.band` is `scale \u00d7 fraction`, `scale = |target| \u00d7 Forecast.TARGET_ABS / |forecast|`, with\n`TARGET_ABS` **10.0** and `position-buffer.fraction` **0.10** \u2014 and `widthFor` returns that floor\nunchanged because `edgeGate` is **`null`**, so ADR-0101's measured width never applies. The band is\ntherefore exactly **`|target| / |forecast|`**. Against `aims` \u22c8 `targets` from this cycle, every\nzero-`deltaQty` name has `|gap| < band`: NVDA gap **65.07** vs band **92.00**, XOM **90.96** vs **116.53**,\nCAT **9.05** vs **20.38**, PG **66.61** vs **203.41**, AAPL **38.25** vs **101.60**. AMZN is the single\nname that trades, and it trades to the band's near edge \u2014 `80.236431 \u2212 75.16 = 5.07` against the observed\n`deltaQty` **5.074178**. **6 of 6 reconcile**, so this is measured, not hypothesised.\n\nThe opening condition reduces to `|aim|/|target| > 1/|forecast|`: at the forecasts carried (**4.81\u20135.98**)\nthe aim must reach **17\u201321%** of target, while the ADR-0080/ADR-0117 adjustment path has it at\n**6.5\u201320.1%**. From a flat holding the desk is stalled a few percent short of its own trigger on every\nname \u2014 a weak view is handed a band *wider than its own target*. AMZN cleared it only by already holding 10.\n\n**Next cycle's one change targets that**, once `026cda49d` is scored, and it needs a superseding ADR\nstating which quantity is re-based \u2014 the band's typical-strength `scale`, or the aim path \u2014 not a quiet\ndial turn on Carver's convention or on ADR-0117's identity. I deliberately did **not** re-rank the fee bill\nto #1: `totalFees` **357.229782** exceeds the deficit **\u2212308.37124107**, but that is lifetime across\n**5129** filled orders and mostly predates the cost-aware work (ADR-0064/0084/0094/0101), while this window\nplaced **4** orders. Chasing it would be overfitting a sunk number.",
+    "commit": "685f01a"
+  },
+  {
     "ts": "2026-08-04T14:35:01Z",
     "feedMode": "LIVE",
     "available": true,
@@ -7113,28 +7137,5 @@
     "decision": "\ud83c\udf19 Market closed \u2014 analysis skipped this cycle (no Claude call). The US session is closed, so the tape is frozen and there is nothing to analyse; the loop resumes at the next open. Flat/unchanged here is expected, not a failure.",
     "reasoning": "",
     "commit": "cfa4a08"
-  },
-  {
-    "ts": "2026-07-28T12:00:02Z",
-    "feedMode": "LIVE",
-    "available": true,
-    "brain_ran": false,
-    "total_pnl": "0E-8",
-    "gross": "0E-8",
-    "net": "0E-8",
-    "fees": "0",
-    "pnl_pct": null,
-    "gross_pct": null,
-    "pnl_growth_pct": null,
-    "pnl_growth_window": 3,
-    "pnl_target_pct": 1.0,
-    "on_track": false,
-    "stale": false,
-    "underwater": true,
-    "action": "market-closed",
-    "last_verdict": null,
-    "decision": "\ud83c\udf19 Market closed \u2014 analysis skipped this cycle (no Claude call). The US session is closed, so the tape is frozen and there is nothing to analyse; the loop resumes at the next open. Flat/unchanged here is expected, not a failure.",
-    "reasoning": "",
-    "commit": "74c05d1"
   }
 ]
