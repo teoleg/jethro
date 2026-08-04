@@ -3999,3 +3999,44 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **baseline behaviour, not the effect of any change** — nothing is claimed or blamed on code. JVM was warm
   (`uptimeSeconds 1363`, `insideBuffer 17` of 21, `streamVolMeasuredNames 20` = `volBudgetNames`), so
   Rule 293's cold-start caveat does not apply to anything read here.
+
+## 2026-08-04 16:30Z — the churn was an UNREACHABLE TARGET: every sizing control is σ-relative, none constrains notional
+
+- **Rule 299 — when a book churns, measure the TARGET book against the cap before blaming any routing
+  rule.** `/api/fusion/targets` summed to **$1,356,452.14** of planned gross against
+  `jethro.risk.max-gross-exposure` **$500,000** (**2.71×**) and held equity gross **$91,999.52**
+  (**14.74×**). Nothing bound: `volBudgetLeverCap` **1.0**, `bookVolBrake` **1.0**,
+  `portfolioRiskMultiplier` **0.8726…**. ADR-0083, ADR-0079 and ADR-0104 are all σ-*relative* — they
+  decide how risk is shared out and what σ level the book carries, and **not one of them states a
+  notional**. On a `CALM` tape a measured σ is small, so none of them binds. Four cycles of routing-rule
+  changes (ADR-0135, its revert, ADR-0136) were aimed downstream of this.
+- **Rule 300 — an unreachable target is not a safety problem, it is a COST problem, and it is paid every
+  cycle.** The guardrail still refuses the order, so no risk went on. But the whole ADR-0080/ADR-0094 path
+  is a function of the *distance* to the target: the aim e-folds toward something it can never reach and
+  settles at a small constant fraction of it, the step `a × gap` inflates with `gap`, the ADR-0094 band is
+  ∝ |target| so it widens past the gap for most names (`insideBuffer` **19** of 22) while a handful chase,
+  and a desk permanently in transit never holds through the 3600s horizon its edge was measured over.
+  That is the missing *why* behind cumulative LIVE turnover **$4,120,150.44** and `orders_by_status`
+  **1,930 CANCELLED** vs **5,214 FILLED**.
+- **Rule 301 — a chain of identical tiny fills at a walking forecast is the signature; read the
+  `originReason` trail, not the position.** PFE took ~20 consecutive `BUY 2.000000` fills, one per 30s
+  cycle from 16:18:33Z to 16:28:42Z, `[forecast=…]` walking **+0.0968 → +2.045 → +2.822 → +3.526 →
+  +4.797 → +6.032 → +9.144**, against `targetQty` **3319.769516** / `aim` **530.737491** / `currentQty`
+  **-267.0**. Two minutes later the same name's target had flipped to **-$69,827** at forecast **-6.04**.
+  The desk was not picking a wrong direction — it was grinding toward a destination moving faster than it
+  could travel. ADR-0134's `originReason` earned its keep again.
+- **Rule 302 — a control that only ever SHRINKS a target is not a de-risking change; say so explicitly so
+  a future cycle does not misread it.** ADR-0137 caps *planned* gross, not held gross. The desk holds
+  $91,999.52 and will now plan against $500,000, so held gross is expected to **rise** toward a reachable
+  book. Under ADR-0132 the failure mode to avoid is confusing "shrink the target" with "cut the position".
+- **Rule 303 — do NOT complete a flagged auto-revert when the commit being reverted is itself the revert
+  of a graded-BAD change.** The ledger flagged `026cda49d`'s `git revert` as failed, but `026cda49d` is
+  the revert of ADR-0136, which was also ❌ BAD — completing it would re-apply a rejected mechanism.
+  Related, and worth watching: both ❌ verdicts measured a baseline of `gross_exposure 0E-8` (a dormant
+  book) against a deployed one, so the "exposure grew" leg fires automatically on a book coming off
+  dormant, which ADR-0132 calls the goal. Read a BAD verdict's baseline before acting on it.
+- **Trigger/attribution.** The window's **-$30.53** PnL and **+$53,463.22** gross came from the running
+  code's own fusion entries and the follow-on `auto-hedge EQUITY (ADR-0019)` ES trades — **baseline
+  behaviour, not the effect of any change**, since nothing had shipped in five cycles. Nothing here is
+  claimed or blamed on code. JVM warm (`uptimeSeconds` **1428**, `streamVolMeasuredNames` **20** =
+  `volBudgetNames`, `covarianceCoveredNames` **20**), so Rule 293's cold-start caveat does not apply.

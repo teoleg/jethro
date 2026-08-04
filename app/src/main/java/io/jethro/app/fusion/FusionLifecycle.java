@@ -99,6 +99,8 @@ public final class FusionLifecycle implements AutoCloseable {
     /** ADR-0104: the absolute book-level risk anchor — null ⇒ not wired, the book keeps whatever
      *  risk level the cross-section happened to plan. */
     private final BookVolatilityBrake bookVolBrake;
+    /** ADR-0137: the planned book's gross-notional cap — null ⇒ not wired, the book is byte-identical. */
+    private final GrossNotionalCap grossCap;
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -179,6 +181,25 @@ public final class FusionLifecycle implements AutoCloseable {
                            SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
                            StreamCovariance streamCov, PositionBuffer positionBuffer,
                            BookVolatilityBrake bookVolBrake) {
+        this(registry, priceFor, multiplierFor, positionsSupplier, heldSupplier, weightsSupplier, params,
+                routeOrders, executor, scheduler, intervalSeconds, minForecastToRoute, edgeGate,
+                covariance, baseHorizonSeconds, volBudgetWinsorPct, streamVol, riskCut, markHistory,
+                markTimeFor, streamCov, positionBuffer, bookVolBrake, null);
+    }
+
+    public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
+                           Function<String, BigDecimal> multiplierFor,
+                           Supplier<Map<String, BigDecimal>> positionsSupplier,
+                           Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
+                           FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
+                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
+                           Supplier<EdgeGate.Decision> edgeGate,
+                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
+                           double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
+                           SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
+                           StreamCovariance streamCov, PositionBuffer positionBuffer,
+                           BookVolatilityBrake bookVolBrake, GrossNotionalCap grossCap) {
+        this.grossCap = grossCap;
         this.bookVolBrake = bookVolBrake;
         this.positionBuffer = positionBuffer;
         this.streamCov = streamCov;
@@ -293,6 +314,19 @@ public final class FusionLifecycle implements AutoCloseable {
                     ? new BookVolatilityBrake.Result(targets, 1.0, null, null, 0, 0)
                     : bookVolBrake.apply(targets, multiplierFor, cov, cycleParams);
             targets = braked.targets();
+            // ADR-0137: every control above is σ-RELATIVE — they decide how the book's risk is shared
+            // out, how much of it is one bet, and what σ level it carries. None of them states a
+            // NOTIONAL, and on a calm tape a measured σ is small, so none of them binds: the planned
+            // book ran to several times the gross the deterministic guardrail permits the routing book
+            // to hold. That does not put risk on — the guardrail still refuses the order — it makes the
+            // target permanently unreachable, so the ADR-0094 aim never converges, the held book stays a
+            // small fraction of its own target, and the ADR-0080 step a×gap pays that inflation in
+            // turnover every cycle. Cap the planned gross at the cap the guardrail already enforces:
+            // one-way, uniform, and introducing no money number of its own. Unwired ⇒ book unchanged.
+            var capped = grossCap == null
+                    ? new GrossNotionalCap.Result(targets, 1.0, BigDecimal.ZERO, 0)
+                    : grossCap.apply(targets, multiplierFor, cycleParams);
+            targets = capped.targets();
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
             // paying for are the ones that take risk OFF. ADR-0072 asks the same question per name, so
             // a name whose own round trip costs more than the passing source's measured edge is

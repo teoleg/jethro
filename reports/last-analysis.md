@@ -1,74 +1,96 @@
-Held the code frozen for the pending measurement — and found that the desk's direction is roughly flat while its **turnover cost is 79% of the loss**.
+The planner was targeting a book 2.71× the gross the guardrail permits and 14.74× what the desk holds — so the target was unreachable, the aim never converged, and the desk paid that inflation in turnover every cycle; capped the planned gross at the guardrail's own cap (ADR-0137).
 
-*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/signals/telemetry`,
-`/api/fusion/targets`, `ops_jvm`, `traffic`, `recent_orders`, `orders_by_status`, `turnover_cost_by_name`,
-`application.properties`, or the scorer's own output; the decompositions are computed by script. None is
-authored here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`,
+`/api/signals/telemetry`, `/api/hedging`, `ops_jvm`, `traffic`, `recent_orders`, `orders_by_status`,
+`turnover_cost_by_name`, `application.properties`, or the scorer's own output. None is authored here —
+invariant 7 / ADR-0016.)*
 
-## Step 0 — last cycle's pending change (`026cda49d`, the ADR-0136 revert): ✅ DEPLOYED, ⏳ STILL NOT SCORED
+## Step 0 — `026cda49d` (the ADR-0136 revert): ⏹ SCORED ❌ BAD — window closed, code now free
 
-`scripts/score-change.py score` prints `026cda49d still accumulating evidence (5/6 cycles) — held, not
-scored this run`, and `reports/.pending-baseline.json` still holds its snapshot (`ts 2026-08-04T13:37:23Z`).
-Deployment re-confirmed on a warm JVM: `ops_jvm.uptimeSeconds` **`1363`** at `traffic.timestampMillis`
-**`1785859202173`**, `traffic.up true`, `ticksIn 13234`, `ticksDropped 0`. Per ADR-0116 that **forbids a
-code change this cycle**; I recorded **no baseline**, so its window is intact and it should score next run.
+`scripts/score-change.py score` prints `no pending change to score — nothing to do` and
+`reports/.pending-baseline.json` is **gone**: the ledger row `2026-08-04T16:30:08Z` closed the ADR-0116
+window at 7 cycles with `t=-1.22` against the 1.5 hurdle. That releases the freeze the last five cycles
+were under, so this cycle makes a change.
+
+**I did NOT complete the auto-revert of `026cda49d`.** The ledger flags its `git revert` as failed, but
+`026cda49d` is *itself* the revert of ADR-0136, which was also scored ❌ BAD. Reverting it would
+**re-apply a graded-BAD mechanism** — the one thing the contract forbids ("never re-attempting the
+reverted idea"). Both verdicts share a scorer artefact worth naming: each measured a baseline of
+`gross_exposure 0E-8` (a dormant book) against a deployed one, so "exposure grew" fired on a book coming
+off dormant — which ADR-0132 calls the goal, not a fault. The ledger owns its verdicts and I have not
+touched them; I am recording why the flagged revert is deliberately not being completed.
 
 ## Situation — the live money, in plain numbers
 
-1. **Money.** Total PnL **$-458.07450234** (`/api/risk` `.total`, firm headline incl. hedge) — **down
-   $153.84** since last run, **down $143.17** over the last 3. The book is **bleeding**, and `UNDERWATER`
-   is the live flag. By book: ALPHA **-$467.76946287**, HEDGE **+$66.49446589**, MACRO **-$56.79950536**.
-2. **Risk.** Gross **$71,398.69147500** = **4.8%** of the $1,500,000 firm cap, headroom **$1,428,601**;
-   net **$-8,366.62147500** = **0.8%** of the $1,000,000 net cap. Gross rose **+$16,039.48** this window
-   and **+$71,398.69** over 3 runs — the book came fully off dormant (21 equity positions + the ES hedge).
-   That rise is the **goal**, not a danger: no `NEAR FIRM CAP` flag, `riskCuts []`, `riskCutStoppedNames 0`,
-   `bookVolBrake 1.0`, and `breaker` untripped. **Not** a DANGER state — bleeding, but nowhere near a cap.
-3. **Cause.** No change has shipped in five cycles, so nothing here is attributable to a code change. What
-   IS attributable is the running code's own trading, and decomposing it is the finding of the cycle:
-   firm total **-$458.07** = **pre-fee trading -$94.09430134** minus **fees $363.980201**. **Fees are
-   79.46% of the loss.** Pre-fee, -$94.09 on $71,398.69 of gross is indistinguishable from flat — the desk
-   is not losing on direction, it is losing on **churn**. Summing `turnover_cost_by_name` `turnover_usd`
-   over the LIVE epoch gives **$4,120,150.44** against the current gross — **57.71×** the book.
-4. **Danger.** No. Bleeding, yes; near the cap or the breaker, no. So the correct response is to fix the
-   cost mechanism, **not** to de-risk — cutting gross here would forfeit $1.43M of unused headroom against
-   the ADR-0132 objective.
+1. **Money.** Total PnL **$-524.66210431** (`/api/risk` `.total`, firm headline incl. hedge) — **down
+   $30.53** since last run, **down $194.50** over the last 3. `UNDERWATER` is the live flag. By book:
+   ALPHA **-$519.46439487**, HEDGE **+$51.60179592**, MACRO **-$56.79950536**.
+2. **Risk.** Gross **$124,911.39447500** = **8.3%** of the $1,500,000 firm cap, headroom **$1,375,089**;
+   net **$-33,192.05447500** = **3.3%** of the $1,000,000 net cap. Gross rose **+$53,463.22** this window
+   and **+$105,946.97** over 3 runs — the book is fully deployed (21 equity positions + the ES hedge).
+   Not a danger state: no `NEAR FIRM CAP` flag, `riskCuts []`, `riskCutStoppedNames 0`, `bookVolBrake 1.0`,
+   breaker untripped.
+3. **Cause.** No change had shipped in five cycles, so this window is the running code's own behaviour.
+4. **Danger.** No — bleeding, but at 8.3% of the gross cap. So the answer is to fix the loss mechanism,
+   not to de-risk; cutting here would forfeit $1.375M of unused headroom against ADR-0132.
 
-5. **Order-level post-mortem.** `recent_orders` shows an hour-scale forecast routed on a ~30-second replan.
-   PFE is the exemplar: built short on `fusion entry — target increase` at `forecast` **-8.6125 → -7.0929
-   → -5.8472 → -5.5667 → -5.1482 → -5.1178**, then within ~6 minutes flipped to `fusion reduce toward a
-   smaller target` at **+0.0134 → +0.0209 → +0.1017 → +0.5167 → +0.5841**, buying back **3 shares at a
-   time** every ~30s. PFE now carries **133 fills / $219,600.58 turnover / $21.9601 fees** against a
-   **$9,166.59** position (**23.96×**) and is the **worst name at -$195.29620728**. MSFT is worse on the
-   ratio (**$200,516.55** turnover, **192 fills**, **$5,970.66** position → **33.58×**). Book-wide,
-   `orders_by_status` is **1,911 CANCELLED** vs **5,179 FILLED** — the `fusion re-plan — passive order
-   superseded by a fresh target (ADR-0084)` path re-issuing faster than the signal resolves. The losing
-   trigger is not a bad direction call; it is the **cadence** at which a slow forecast is re-planned.
-6. **Memory.** Rules 290–293 applied. Rule 293 in particular: this JVM is **warm** (`uptimeSeconds 1363`,
-   `insideBuffer 17` of 21, `streamVolMeasuredNames 20` = `volBudgetNames`, `covarianceCoveredNames 20`),
-   so the cold-start convergence caveat does not apply to anything read here.
-7. **Change vs. market.** No change shipped, so **nothing is claimed or blamed on code**. The window's
-   -$153.84 is on names the running code actively traded (PFE, MCD, NVDA, MSFT, JPM, NEE, WMT, UNH, JNJ all
-   have fills in this window), so it is the desk's own behaviour rather than drift on untouched positions —
-   but it is the *baseline* behaviour the pending change is being measured against, not an effect of it.
+## The finding: every sizing control is σ-relative, so nothing constrains NOTIONAL
 
-## What I decided, and why
+Last cycle established that cost, not direction, is the loss (`firmTotal -524.66210431` against
+`totalFees 369.021411` → pre-fee trading of only **-$155.64**, so fees are the majority of the deficit).
+It could not say *why* the desk churns. This cycle the mechanism is in the open, and it is structural.
 
-**No code change** — `026cda49d` is at 5/6 cycles and ADR-0116 requires the window stay clean. The cycle's
-work went into re-ranking `reports/must-fix.md`, and the ranking changed on evidence:
+Summing `/api/fusion/targets` gives a planned target book of **$1,356,452.14** gross against:
 
-- **New item #1 — turnover cost.** Fees are **79.46%** of the firm loss and cumulative turnover is
-  **57.71×** the book. This is a measured, certain, dominant loss term.
-- **Item #2 (was #1) — social contributes exactly 0.0.** Re-measured, it still holds and hardened: on this
-  run's telemetry `social` @3600s is `avgReturnBps` **+8.7221**, `resolved` 345, `cohorts` 32, `hitRate`
-  **0.5977** → clustered t **+1.601**, the **only** source clearing the desk's own **1.5** hurdle
-  (`reversion` +1.079, `trend` −0.582, `momentum` −0.701, `xsreversion` −1.130). With the book deployed
-  there is now *structural* proof, not just arithmetic: every `contributions` array lists only
-  `trend`/`reversion`/`xsreversion`, and `forecastScalars` has **no `social` entry at all** — while
-  `weights` still shows `social 1.8401656178888028`, the largest of the five.
+| quantity | value | ratio |
+| --- | --- | --- |
+| planned target book (Σ \|targetQty × price\|, 22 names) | **$1,356,452.14** | — |
+| `jethro.risk.max-gross-exposure` (guardrail's cap on the routing book) | $500,000 | **2.71×** |
+| held equity gross | $91,999.52 | **14.74×** |
 
-**Why cost outranks the edge dial:** social's edge is hour-scale (**+0.1611 → +1.8322 → +8.7221** bps at
-225/900/3600s). A book that re-trades itself **57.71×** cannot hold a position long enough to collect an
-hour-scale forecast — it would spend the new edge on fees exactly as it is spending the current one. Fixing
-the cadence is the **precondition** for the social decision paying, not a competing priority. Next cycle's
-one change targets item #1, and item #2 remains an owner-facing superseding ADR (gate and dial together,
-Rule 292), not a quiet dial turn.
+**Why nothing stopped it:** ADR-0083 shares a per-name cash budget out by measured σ; ADR-0079 scales the
+book by how much of it is one bet; ADR-0104 caps its ex-ante σ at the median of its own series. All three
+are σ-*relative*. **None states a notional**, and on a calm tape a measured σ is small, so none binds —
+live: `volBudgetLeverCap 1.0`, `bookVolBrake 1.0`, `portfolioRiskMultiplier 0.8726…`.
+
+That never put risk on — the guardrail still refuses the order. The damage is that the target became
+**unreachable**, and the entire ADR-0080/ADR-0094 trading path is a function of the *distance* to it:
+
+- **The aim never converges.** PFE live: `targetQty 3319.769516`, `aim 530.737491`, `currentQty -267.0` —
+  short a name whose own target is long twelve times the size, closing at 43 shares per 30s cycle.
+- **Turnover scales with the inflation.** The step is `a × gap` at `a = 1 − exp(−30/3600) = 0.0082987…`;
+  inflating the target inflates `gap` by the same factor, paid in turnover every cycle. That is the
+  missing explanation for cumulative LIVE turnover of **$4,120,150.44** and `orders_by_status` of
+  **1,930 CANCELLED** vs **5,214 FILLED**.
+- **It over-trades the few and freezes the many.** The ADR-0094 band is also ∝ |target|, so an inflated
+  book widens the band past the gap for most names while a handful chase: `insideBuffer` **19** of 22.
+- **It never holds for its horizon.** The edge is measured at 3600s; a desk permanently in transit never
+  holds through it, so it pays round trips against credit it never collects.
+
+**Order-level post-mortem confirms it.** PFE took ~20 consecutive `BUY 2.000000` fills, one per 30s cycle
+from 16:18:33Z to 16:28:42Z, while its `[forecast=…]` walked **+0.0968 → +2.045 → +2.822 → +3.526 →
++4.797 → +6.032 → +9.144**; two minutes later the same name's target had flipped to **-$69,827** at
+forecast **-6.04**. That is not a direction call the desk got wrong — it is a book grinding toward a
+destination that moves faster than it can travel.
+
+## The change (ADR-0137, `**Status:** Implemented`)
+
+`GrossNotionalCap`, applied after ADR-0104 and before the ADR-0064 gate / ADR-0086 cut / ADR-0094 buffer
+so the operator's target book shows what routes:
+`plannedGross = Σᵢ |qᵢ·pᵢ·mᵢ|`, `GNM = min(1, capUsd / plannedGross)`, `qᵢ' = qᵢ · GNM`.
+
+**No new money number.** `capUsd` is *wired from* `jethro.risk.max-gross-exposure` — the very cap the
+deterministic guardrail already enforces on the routing book. The decision is an identity the desk was
+violating, not a dial: *do not plan a book you are forbidden to hold*. One-way (the `min` with 1 means it
+can only shrink, never lever up), uniform (no name flips side; the σ controls' cross-sectional shape is
+untouched), exact decimal rounded DOWN so the scaled gross is ≤ cap by construction. Byte-identical when
+the plan already fits.
+
+**This is not de-risking (ADR-0132).** It shrinks the *target*, not the position — the desk holds $91,999
+and will now plan against $500,000. Held gross should *rise* toward a book it can actually reach and hold
+through a horizon, instead of chasing one it cannot. The deterministic floor is untouched: guardrail,
+firm drawdown breaker, conviction floor, edge gate and instrument cap all still stand.
+
+**VERIFY-BY next run:** from `/api/fusion/targets`, `Σ |targetQty × price|` must be **≤ 500,000** (it was
+**1,356,452.14**); secondarily `insideBuffer` should fall from **19** of 22 and the per-cycle
+`Σ |deltaQty × price|` should fall materially. `./gradlew -Pci test` green.

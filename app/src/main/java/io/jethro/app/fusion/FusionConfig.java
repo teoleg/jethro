@@ -100,6 +100,12 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.book-vol-brake.enabled:true}") boolean bookVolBrakeEnabled,
                                     @Value("${jethro.fusion.book-vol-brake.span:120}") int bookVolBrakeSpan,
                                     @Value("${jethro.fusion.book-vol-brake.min-sample:30}") int bookVolBrakeMinSample,
+                                    // ADR-0137: the planner's gross-notional cap. NOT a new money number
+                                    // — it reads the very cap the deterministic pre-trade guardrail
+                                    // already enforces on the book these orders route to, so the desk
+                                    // cannot plan a book it is forbidden to hold. 0 disables the control.
+                                    @Value("${jethro.fusion.gross-cap-usd:${jethro.risk.max-gross-exposure:0}}")
+                                    BigDecimal fusionGrossCapUsd,
                                     @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
@@ -218,7 +224,15 @@ public class FusionConfig {
                 bookVolBrakeEnabled
                         ? new BookVolatilityBrake(
                                 new BookVolatilityBrake.Params(bookVolBrakeSpan, bookVolBrakeMinSample))
-                        : null);
+                        : null,
+                // ADR-0137: the notional level. Every control above is σ-relative and none of them binds
+                // on a calm tape, so the planned book ran to several times the gross the guardrail lets
+                // the routing book hold — an unreachable target, which under ADR-0080 is paid for in
+                // turnover every cycle. The cap is the guardrail's own, not a figure chosen here.
+                // Non-positive ⇒ null and the book is byte-identical.
+                fusionGrossCapUsd == null || fusionGrossCapUsd.signum() <= 0
+                        ? null
+                        : new GrossNotionalCap(fusionGrossCapUsd));
         lifecycle.start();
         return lifecycle;
     }

@@ -14,6 +14,82 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 16:30Z (**Change shipped: ADR-0137.** `026cda49d` scored ❌ BAD and its window closed, so the five-cycle code freeze is over. The turnover item held #1 and this cycle found its *mechanism*, which is structural rather than a dial: **every sizing control in the fusion pipeline is σ-relative and none constrains notional**, so the planner was targeting **$1,356,452.14** gross — **2.71×** the $500,000 the guardrail permits the routing book to hold and **14.74×** the **$91,999.52** it actually held. An unreachable target is what the churn is made of.)
+
+### Step 0 — `026cda49d` (revert of ADR-0136): ⏹ SCORED ❌ BAD — window closed, freeze lifted
+
+`scripts/score-change.py score` now prints `no pending change to score — nothing to do` and
+`reports/.pending-baseline.json` is **gone**. The ledger row `2026-08-04T16:30:08Z` closed the ADR-0116
+window at 7 cycles, `t=-1.22` against the 1.5 hurdle. JVM warm and deployed throughout
+(`ops_jvm.uptimeSeconds` **1428** at `traffic.timestampMillis` **1785861003017**, `traffic.up true`,
+`provider alpaca`, `ticksIn 12860`, `ticksDropped 0`), so this graded live code.
+
+**The flagged auto-revert of `026cda49d` is deliberately NOT completed.** `026cda49d` *is* the revert of
+ADR-0136, which was itself scored ❌ BAD — reverting it would re-apply a graded-BAD mechanism, which the
+contract forbids. Recorded here rather than acted on. Worth naming for the register: both ❌ verdicts
+measured a baseline of `gross_exposure 0E-8` (a dormant book) against a deployed one, so the "exposure
+grew" leg fired on a book coming off dormant, which ADR-0132 calls the goal. The ledger owns its numbers
+and nothing there has been touched.
+
+### Item #1 of the 16:00Z block (turnover cost is the loss): ⚠️ STILL-BROKEN — and its MECHANISM is now identified
+
+Re-measured on this run's telemetry, the cost decomposition holds: firm total **-$524.66210431** against
+`totalFees` **369.021411** → pre-fee trading of only **-$155.64**, so **fees are the majority of the
+deficit**. Cumulative LIVE turnover **$4,120,150.44**; `orders_by_status` **1,930 CANCELLED** vs
+**5,214 FILLED**.
+
+What is new is *why*. Read from `/api/fusion/targets`:
+
+| quantity | value | ratio |
+| --- | --- | --- |
+| planned target book, Σ \|targetQty × price\| over 22 names | **$1,356,452.14** | — |
+| `jethro.risk.max-gross-exposure` — the guardrail's cap on the routing book | $500,000 | **2.71×** |
+| held equity gross | $91,999.52 | **14.74×** |
+
+Nothing bound: `volBudgetLeverCap` **1.0**, `bookVolBrake` **1.0**, `portfolioRiskMultiplier`
+**0.8726121632212922**. ADR-0083 / ADR-0079 / ADR-0104 are all σ-*relative* — they decide how risk is
+shared out and what σ level the book carries; **none of them states a notional**, and on a `CALM` tape a
+measured σ is small, so none of them binds.
+
+That put no risk on (the guardrail still refuses the order) but made the target **unreachable**, and the
+whole ADR-0080/ADR-0094 path is a function of the distance to the target:
+
+- **The aim never converges.** PFE: `targetQty` **3319.769516**, `aim` **530.737491**, `currentQty`
+  **-267.0** — short a name whose own target is long twelve times the size, closing at 43 shares/cycle.
+- **Turnover ∝ the inflation.** The step is `a × gap` at `a = 1 − exp(−30/3600) = 0.0082987…`.
+- **Over-trades the few, freezes the many.** The ADR-0094 band is ∝ |target| too: `insideBuffer`
+  **19** of 22.
+- **Never holds for its horizon.** Edge is measured at 3600s; a desk permanently in transit never
+  collects it.
+
+Order trail: PFE took ~20 consecutive `BUY 2.000000` fills, one per 30s cycle, 16:18:33Z → 16:28:42Z,
+`[forecast=…]` walking **+0.0968 → +2.045 → +2.822 → +3.526 → +4.797 → +6.032 → +9.144** — then two
+minutes later the same name's target had flipped to **-$69,827** at forecast **-6.04**.
+
+**ADDRESSED THIS CYCLE by ADR-0137** — `GrossNotionalCap`, applied after ADR-0104 and before the ADR-0064
+gate / ADR-0086 cut / ADR-0094 buffer: `GNM = min(1, capUsd / plannedGross)` applied uniformly to every
+priced name. `capUsd` is **wired from `jethro.risk.max-gross-exposure`** — no money number is introduced
+(invariant 7 / ADR-0016). One-way, sign-preserving, exact decimal rounded DOWN.
+
+**VERIFY-BY next run:** from `/api/fusion/targets`, `Σ |targetQty × price|` over the planned book must be
+**≤ 500,000** (it was **1,356,452.14**). Secondary, same endpoint: `insideBuffer` should fall from **19**
+of 22, and the per-cycle `Σ |deltaQty × price|` should fall materially. Tertiary, next-next run once the
+book has re-planned: `turnover_cost_by_name` turnover growth per cycle should slow relative to held gross.
+
+### Item #2 — `social` is the only source with measured edge and never reaches the combiner (⚠️ OPEN, #2 — carried)
+
+Unchanged and still true; deliberately not touched this cycle because **cost control is its
+precondition** — social's expectancy is hour-scale (**+0.1611 → +1.8322 → +8.7221** bps at 225/900/3600s)
+and a book that cannot hold a position for an hour cannot collect it. `jethro.fusion.social.per-channel=0`
+is still live at `application.properties:274`; `/api/fusion/targets` still shows `weights` carrying
+`social 1.8665040235026624` (the largest of five) while `forecastScalars` has **no `social` entry** and
+every `contributions` array lists only `trend`/`reversion`/`xsreversion`. Remains an owner-facing
+superseding ADR (gate and dial together, Rule 292), not a quiet dial turn.
+
+**VERIFY-BY:** unchanged — `social` present in `forecastScalars` and in at least one `contributions`
+array, and its clustered t re-measured on a grown cohort count.
+
+---
 ## Verification block — 2026-08-04 16:00Z (**No change — `026cda49d` is at 5/6 cycles; the code stays frozen.** The book is now fully deployed (21 equity positions, gross **$71,398.69**) and that changes the ranking: decomposing the firm total shows the desk's **direction is roughly flat and its COST is the loss**. Firm total **-$458.07** = pre-fee trading **-$94.09** − fees **$363.98**; fees are **79.46%** of the loss. Cumulative LIVE turnover **$4,120,150.44** is **57.71×** the current gross. A new item #1 is therefore ranked above the social dial — with the reason stated, not assumed.)
 
 ### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ STILL NOT SCORED — held, undisturbed
