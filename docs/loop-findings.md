@@ -3813,3 +3813,34 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   $1,500,000 firm cap). The revert shipped here has not traded and will be graded on the next open.
   `totalFees 356.521740` against `firmTotal -314.90914721` — the fee bill still exceeds the entire deficit,
   and the close-time round trip is the bulk of it.
+
+## 2026-08-04 14:00Z — the loop has been prescribing fixes for a suppressor the report never delivers
+
+- **Rule 282 — before changing a mechanism, confirm the report actually DELIVERS the field that names it.**
+  `scripts/system-report.py:405` truncates every endpoint at `json.dumps(data, indent=1)[:6000]`. The
+  delivered `fusion_targets` block measures exactly **6001 characters** — cut mid-object inside the
+  `targets` array. `TargetBook` orders its fields `… targets, edgeGate, portfolioRiskMultiplier, …, aims,
+  insideBuffer, …`, so **every field after `targets` has been silently discarded every cycle**.
+  `FusionController` serializes them; the report throws them away. A field's absence from the report is not
+  evidence about the system — and here it was mistaken for that three times running. When an endpoint's
+  block ends mid-object, treat the tail as UNKNOWN, not as absent.
+- **Rule 283 — `deltaQty 0` on a flat book is ambiguous by construction; do not read a cause into it.** In
+  `FusionLifecycle` the gate clamp (line 302, `reduceOnlyWhere`) and the ADR-0094 buffer (line 321) both run
+  *before* `lastBook` is published (line 324). So a zeroed delta means either `EdgeGate` shut — with
+  `TargetPlanner.reduceOnly` projecting every increase onto zero because `currentQty` is zero — or the
+  `PositionBuffer` holding the name inside its band. **The two call for opposite remedies.** This is the
+  layer Rule 280 said was "one up" from the routing rules: it is not a better routing rule, it is
+  observability. ADR-0135, its own revert, and ADR-0136 all graded ❌ BAD prescribing into this blind spot.
+- **The live shape of it.** 22 minutes into an open session (`feeds` alpaca `connected true`,
+  `lastUpdateAgeMillis 16`; `ticksIn 26538`, `ticksDropped 0`), `fusion_targets` reported `routing: true`
+  over **21 instruments** with real conviction — `JPM combinedForecast 13.201644846856365 →
+  targetQty 921.47787`, `BAC 11.759593061749303 → 4682.485093` — and **every visible target `currentQty 0`,
+  `deltaQty 0`**. The desk sized 21 names and planned to trade none. `DORMANT` is a suppression symptom
+  here, not an absence of opportunity.
+- **Trigger/attribution.** None claimed and none available. No change shipped this cycle: `026cda49d` (the
+  ADR-0136 revert) is still under measurement — no ledger row, `reports/.pending-baseline.json` present — so
+  editing code would have destroyed its evidence. It is deployed (`ops_jvm.uptimeSeconds 1325` at
+  `traffic.timestampMillis 1785852002696` → boot `2026-08-04T13:37:57Z`, after its `13:37:19Z` commit) and
+  has placed **no orders**: the newest `recent_orders` row is `2026-08-04 13:34:31`, *before* that boot. The
+  window's move was **+0.00** on total PnL with gross **$0.00** (0.0% of the $1,500,000 firm cap).
+  `totalFees 356.521740` against `firmTotal -314.90914721` — the fee bill still exceeds the entire deficit.

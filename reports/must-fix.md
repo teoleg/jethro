@@ -14,6 +14,70 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-04 14:00Z (**No change this cycle — the ADR-0136 revert `026cda49d` is still under measurement** (no ledger row, `reports/.pending-baseline.json` present), so touching the code would destroy its evidence. The cycle's value is a diagnosis: the desk planned 21 targets and routed none, and the report is **structurally incapable** of naming which suppressor did it. That blindness — not any routing rule — is why three consecutive changes at this layer graded ❌ BAD, so it takes over as item **#1**.)
+
+### Step 0 — `026cda49d` (revert of ADR-0136): ✅ DEPLOYED / ⏳ NOT YET SCORED — hold, do not disturb
+
+Deployment confirmed, so this is live code and not a stranded commit: commit stamped `2026-08-04T13:37:19Z`;
+`ops_jvm.uptimeSeconds` **`1325`** at `traffic.timestampMillis 1785852002696` (`2026-08-04T14:00:02Z`) →
+boot **`2026-08-04T13:37:57Z`**, after it. The rejected mechanism is gone from the running code: `grep` over
+`app/` for `clearsConvictionFloor` and `ADR-0136` returns nothing.
+
+**No verdict is claimed and none is available.** There is no ledger row for `026cda49d` and the pending
+baseline still exists — the ADR-0116 window is accumulating. The revert has also placed **no orders**: the
+newest `recent_orders` row is `2026-08-04 13:34:31`, *before* the boot. It will be graded on its window.
+
+### Item #1 — the report truncates `/api/fusion/targets` before the fields that name the suppressor (⚠️ OPEN, #1 — NEW, promoted above the breadth collapse)
+
+`fusion_targets` at `atMillis 1785851991548` reports `routing: true` over **21 instruments** with real
+conviction — `JPM combinedForecast 13.201644846856365 → targetQty 921.47787`,
+`BAC 11.759593061749303 → 4682.485093`, `PG 9.730455372959304 → 1672.761797` — and **every visible target
+carries `currentQty 0` and `deltaQty 0`**, 22 minutes into an open session (`feeds` alpaca `connected true`,
+`lastUpdateAgeMillis 16`; `ticksIn 26538`, `ticksDropped 0`). Gross **$0.00**, `var95 0.00` note
+`"no positions"`, `breaker.halted false`. The desk sized 21 names and planned to trade none of them. That is
+not an absence of opportunity — it is suppression.
+
+**Two mechanisms produce exactly that pattern and the report cannot tell them apart.** In `FusionLifecycle`
+the gate clamp runs at line 302 (`reduceOnlyWhere`) and the ADR-0094 buffer at line 321, both *before*
+`lastBook` is published at line 324 — so the telemetry `deltaQty 0` is post-both. Either (a) `EdgeGate` is
+shut and `TargetPlanner.reduceOnly` projects every increase onto zero because `currentQty` is zero, or
+(b) the `PositionBuffer` is holding every name inside its band. **The remedies are opposite.**
+
+**Root cause is a truncation in the report generator, not in the trading code.**
+`scripts/system-report.py:405` emits `json.dumps(data, indent=1)[:6000]` per endpoint. The delivered
+`fusion_targets` block measures exactly **6001 characters** — hard-cut mid-object inside the `targets`
+array. The `TargetBook` record orders its fields `… targets, edgeGate, portfolioRiskMultiplier, …, aims,
+insideBuffer, …`, so **every field that would name the suppressor sits after the cut and is discarded every
+cycle.** `FusionController` serializes them correctly; the report throws them away.
+
+**Why this outranks the breadth collapse.** ADR-0135, its own revert, and ADR-0136 were three consecutive
+routing-rule changes at this layer, all graded ❌ BAD. Rule 280 said the defect was one layer up. It is —
+and the layer up is **observability**: the loop has been prescribing fixes for a suppressor it has never
+been able to see. This costs no risk, puts no money on, cannot move the vector, and is what makes the next
+change aimed instead of guessed.
+
+**VERIFY-BY (next run):** the `fusion_targets` block in `logs/report.md` contains a non-null **`edgeGate`**
+object (its `mayIncrease` boolean and `reason` prose) and a numeric **`insideBuffer`** count — neither of
+which appears in this run's block. Then, from those two fields, state in one sentence which mechanism
+zeroed the deltas. Do **not** change any routing rule until that sentence can be written from telemetry.
+
+### Item #2 — the breadth collapse liquidates the whole book at the equity close (⚠️ OPEN, #2 — demoted from #1, unchanged evidence)
+
+Demoted only because item #1 is its prerequisite, not because it got cheaper: the same `sources=1` sweep is
+still the largest single identified cost. Evidence unchanged and still visible in this run's
+`recent_orders` — on 2026-08-03 the entire routed book (`NEE`, `GOOG`, `JNJ`, `CAT`, `CVX`, `PG`, `XOM`,
+`NVDA`, `AAPL`, `AMZN`, `BAC`) exited in one sweep, every row `fusion exit — target decayed to flat` and
+**every one carrying `sources=1`**, where the entries that preceded them carried `sources=2`/`sources=3`.
+Since ADR-0113 the price-driven sensors advance only on PRINTS, so they fall silent at every cash close and
+leave the snapshot-based cross-sectional source alone. `totalFees 356.521740` against
+`firmTotal -314.90914721` — the fee bill still exceeds the entire deficit, and this round trip is the bulk.
+
+**VERIFY-BY:** at the next cash close, no `fusion exit — target decayed to flat` row carries `sources=1`
+while the preceding entry for that name carried `sources≥2`. **Blocked on item #1** — three routing-rule
+remedies have already been graded ❌ BAD here, so the next attempt must be aimed by the restored
+`edgeGate`/`insideBuffer` telemetry rather than guessed.
+
+---
 ## Verification block — 2026-08-04 13:30Z (**Revert shipped.** `e3b33679d`/ADR-0136 was scored ❌ BAD and the scorer's own `git revert` conflicted, leaving the graded-bad mechanism LIVE for a full cycle. Completing that revert is this cycle's one change. The finding it leaves behind is the important part: the mechanism **passed its own falsification test and still lost the vector** — so item #1 is re-ranked onto the breadth collapse.)
 
 ### Step 0 — `e3b33679d` (ADR-0136): 🔴 REGRESSED on the objective, ✅ VERIFIED on its own mechanism
