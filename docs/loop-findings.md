@@ -4463,3 +4463,42 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   claims the window; it is baseline. Sensors warm this boot (`streamVolMeasuredNames`/`volBudgetNames`/
   `covarianceCoveredNames` all **20**, 22 targets planned) and still zero orders — the warm-up item stays
   demoted, the buffer stays #1.
+
+## 2026-08-05 16:00Z — the dormancy broke at an outlier forecast: the band's gate is confirmed, and it is a trap as well as a gate
+
+- **Rule 346 — a mechanism that predicts an ORDINAL threshold is tested the moment the system crosses it;
+  wait for that event rather than counting more snapshots of the frozen state.** Two cycles were spent
+  re-observing `deltaQty = 0` across the plan. This cycle the desk traded once — ALPHA NVDA `SELL 7.000000`
+  on `fusion entry — target increase [forecast=-9.608504615051698, sources=3]`, `orders_day.total` **2**,
+  gross **$0.00 → $4224.88160000** — and that single event tested the band mechanism harder than any number
+  of static reads: the only name that escaped is the one whose `|forecast|` **9.608505** was far the largest,
+  and every planned name visible at `|combinedForecast| ≤ 3.722563` is still at `deltaQty` **0.0**. **Rule:
+  when a derivation predicts "only X will happen", the confirming evidence is X happening — go quiet and
+  watch for it, don't re-measure not-X.**
+- **Rule 347 — a no-trade band that gates ENTRY at conviction width also gates the RETREAT from a reversed
+  view at that same width, so it preferentially retains the positions most likely to be wrong.** NVDA's
+  `combinedForecast` inverted **-9.608505** (at the fill) → **+3.722563** (at the plan ~14 min later). The
+  desk holds **-7.0** against `targetQty` **+176.077255** and the band releases `deltaQty` **+0.058091** per
+  cycle. Entry required an outlier; the unwind toward the desk's own current view is throttled at the same
+  width. This is strictly worse than the "book can never be built" framing carried for two cycles — it is
+  build-blocking *plus* an adverse-selection ratchet. **Rule: size an entry band and an unwind band
+  separately; a move that reduces a sign inversion against the current forecast is not a discretionary
+  rebalance and must not be buffered like one.**
+- **Rule 348 — a second instance of an anomaly upgrades it from "noise" to "my model is wrong", even when
+  the money impact stays nil.** Rule 343's NQ row (target **0.136033**, held **0**, fc **3.146893**, delta
+  **0.001584**) is now joined by NVDA (target **176.077255**, held **-7.0**, fc **3.722563**, delta
+  **+0.058091**). Hand-working the published `bufferedDelta` path gives `edge = 0` for both at any
+  `width ≥ 0.5`, `rate ≤ 1`. Still unresolved, still not guessed at, now carried as a required unit test the
+  band fix must pass *before* the band is touched. **Rule: one unexplained row is a note; two of the same
+  shape is a defect in your model — stop reasoning from the model until the test reproduces them.**
+- **Rule 337 re-confirmed a fifth time.** `social` **8.855736 → 4.837178 → 7.810160 → 8.351863 → 8.808298**
+  bps on eight more resolved observations (373 → 381), cohorts 37 → 38. The owner ask on
+  `jethro.fusion.social.per-channel` stays open and **NOT-YET-SUPPORTED**.
+- **Trigger/attribution — honest split.** No code change: scorer prints `d51f179a2 still accumulating
+  evidence (5/6 cycles)`, `.pending-baseline.json` still names `d51f179a2`, ledger newest still `629dbbdf8`;
+  the ADR-0116 freeze held a fifth cycle and lifts next run. PnL **-$603.08 → -$599.78** (**+3.30**). Only two
+  positions are non-flat, both opened this window, so **0%** of the move is market-on-untouched-positions and
+  **100%** is the mark on the two new fills (NVDA `unrealizedPnl` **+4.27000000**, ES **-0.75758615**, fees
+  **398.004411 → 398.212047**) — but no change of mine landed this window, so the credit belongs to neither
+  market nor change: it is 7 shares marked over ~14 minutes, and it is noise. ADR-0139 mechanism ✅ on a fifth
+  boot: **15** corroborations in **1439 s** vs **18 in 64,010 s** pre-fix.

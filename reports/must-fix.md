@@ -14,6 +14,130 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-05 16:00Z (**NO CODE CHANGE — `d51f179a2` (ADR-0139) is at 5/6 cycles**; the scorer prints `still accumulating evidence (5/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `d51f179a2`, and the ledger's newest row is still `629dbbdf8`. The ADR-0116 freeze holds for a **fifth** cycle — and lifts next cycle. Step 0 ran anyway, and **the dormancy broke during this window**, which is the most informative event the register has recorded on item #1. (1) The desk placed its first orders in ~19 h: `orders_day.total` **2** — ALPHA NVDA `SELL 7` on `fusion entry — target increase [forecast=-9.608504615051698, sources=3]`, and the ADR-0019 auto-hedge ES `BUY 0.006928` that followed it. Gross **$0.00 → $4224.88**. (2) **That escape CONFIRMS item #1's mechanism ordinally rather than refuting it**: the one name that traded is the one whose combined forecast was far the largest, and every name in the current plan at `|combinedForecast| ≤ 3.722563` is still at `deltaQty` **0.0**. (3) **Item #1 stays #1 and its severity is UPGRADED — it is not only a build-blocker, it is a wrong-side trap.** NVDA is now held **-7** against a current `targetQty` of **+176.077255** at `combinedForecast` **+3.722563** — the view flipped sign within ~7 minutes of the fill — and the band releases `deltaQty` **+0.058091** per cycle against it. The desk is positioned opposite its own forecast and cannot get back. (4) The tiny-non-zero-delta anomaly Rule 343 flagged on NQ last cycle now has a **second instance** (NVDA) and is still unexplained by the source arithmetic; it is carried as a required unit test for the fix, not smoothed away. (5) ADR-0139's mechanism ✅ holds on a **fifth** independent boot; social's expectancy swung a **fifth** time, so the owner ask stays NOT-YET-SUPPORTED.)
+
+### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ VERIFIED on a fifth boot; PnL verdict still pending (5/6)
+
+Boot at `traffic.timestampMillis` **1785945601801** − `ops_jvm.uptimeSeconds` **1439**; report snapshot
+**16:00:01Z**. That boot instant differs from last cycle's (**1785943801685** − **1362**), so this is a
+fifth independent boot, not a continuation.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| `counters.corroborated` rate sustained (Rule 334 — the counter resets at boot, so grade the RATE) | **15** in **1439 s**, versus **17/1362 s**, **17/1377 s**, **17/1252 s**, **16/~900 s** on the four prior boots, and **18 in 64,010 s** pre-fix | ✅ still ~3 orders of magnitude above the pre-fix rate on a fifth boot |
+| ≥1 tracked name at `channels ≥ 2` | `signals[]` empty at this snapshot again; `counters.corroborated` **15** and `manipulationSuspected` **39** against `ingested` **3540** / `kept` **855** | ✅ carried by last cycle's positive reading (the app's own WARN naming a corroborated subject); `signals[]` is point-in-time and cannot answer this — Rule 345 |
+
+### Social's expectancy swung a fifth time — Rule 337 re-confirmed, the owner ask stays NOT-YET-SUPPORTED
+
+Same endpoint, same 3600 s horizon, five consecutive cycles:
+
+| field | 14:00Z | 14:30Z | 15:00Z | 15:30Z | 16:00Z |
+| --- | --- | --- | --- | --- | --- |
+| `avgReturnBps` | **8.855736** | **4.837178** | **7.810160** | **8.351863** | **8.808298** |
+| `resolved` | **373** | **374** | **378** | **380** | **381** |
+| `hitRate` | **0.619** | **0.615789** | **0.626943** | **0.625641** | **0.630769** |
+| `cohorts` | **37** | **37** | **38** | **38** | **38** |
+| `stdCohortMeanBps` | **26.863** | **35.424588** | **25.820255** | **25.385394** | **25.380012** |
+
+The mean has traversed **8.86 → 4.84 → 7.81 → 8.35 → 8.81** bps on **eight** additional resolved
+observations. The standing decision request to Oleg (restore `jethro.fusion.social.per-channel` from 0 to
+4.0, still behind the ADR-0049 OOS gate) **remains open and remains explicitly NOT-YET-SUPPORTED**. That
+dial is the owner's; the loop does not touch it.
+
+### Item #1 — the no-trade band admits only extreme forecasts, then traps the position when the view reverts: ⚠️ OPEN, severity UPGRADED
+
+Still #1. The dormancy broke during this window and, in breaking, produced the clearest evidence yet for
+this item — and a worse failure mode than the one previously recorded.
+
+**The escape, and what it confirms.** `orders_day.total` is **2**. The alpha order is ALPHA NVDA
+`SELL 7.000000` FILLED, `originReason` = `fusion entry — target increase
+[forecast=-9.608504615051698, sources=3]`, `createdAtMillis` **1785944750040**. The ADR-0019 auto-hedge
+followed it: HEDGE ES `BUY 0.006928` FILLED, `createdAtMillis` **1785944762554**, `originReason` =
+`structural β-hedge ES: Σβ·E = -2691.82 systematic`. Gross exposure moved **$0.00 → $4224.88**
+(EQUITY **$1533.70**, FUTURE **$2691.18**) — **0.3%** of the **$1,500,000** firm gross cap.
+
+Read off `PositionBuffer` (`band`, `bufferedDelta`, `nextAim`/`withinTarget`) the escape condition for a
+name the desk holds flat is `rate > width × TARGET_ABS / |forecast|` — i.e. the required forecast rises as
+the band's `|target| × TARGET_ABS / |forecast|` scaling shrinks it. `TARGET_ABS` is **10.0**
+(`Forecast.java:20`) and `widthFor` floors `width` at `bufferFraction` **0.5**
+(`application.properties:313`) and caps it at **1.0**. The live `rate` and `width` are not exposed, so the
+exact threshold is not derivable from this snapshot — but the **ordinal** prediction is, and it held: the
+only name that traded carried `|forecast|` **9.608505**, and every name in the plan at this snapshot
+(`|combinedForecast| ≤ 3.722563`) is at `deltaQty` **0.0**. That is a prediction made last cycle from source
+and observed this cycle in the order book, which is stronger evidence than the arithmetic alone. Per Rule
+344 the claim is stated over the population observed: **6 of the 23 planned rows are visible in this
+snapshot** (17 elided by the report's truncation), and of those 6, the 5 at `|fc| ≤ 3.174470` are all at
+`deltaQty` **0.0**.
+
+**The new and worse failure mode — the trap.** The buffer let the desk in at an extreme forecast and will
+not let it out when the forecast reverts:
+
+| field (`/api/fusion/targets`, NVDA) | reading |
+| --- | --- |
+| `combinedForecast` at the fill (`originReason`) | **-9.608504615051698** |
+| `combinedForecast` at this snapshot | **+3.722563** |
+| `currentQty` | **-7.0** |
+| `targetQty` | **+176.077255** |
+| `deltaQty` | **+0.058091** |
+| `sources` / `agreement` | **3** / **0.585743** |
+
+The sign of the view inverted between the fill (`createdAtMillis` **1785944750040**) and the plan
+(`atMillis` **1785945600418**). The desk is short a name its own planner now wants it long **176.077255** of,
+and the band is releasing **0.058091** per cycle toward it. This is not the same defect as "the book can
+never be built" — it is that defect plus an asymmetry: entry is gated at extreme conviction, exit toward a
+reversed view is gated at the same width, so the buffer preferentially retains positions opened on the
+forecasts most likely to mean-revert. It is currently cheap (`unrealizedPnl` on NVDA **+4.27000000**, and
+the position is in profit) but it is directionally wrong by the desk's own measure, and it is the mechanism
+by which this book would accumulate stale, view-contradicting risk once it is no longer flat.
+
+**Rule 343's open question is now a pair, not a one-off — and still unexplained.** Two rows show a small
+non-zero `deltaQty` that the source arithmetic says should be zero:
+
+| name | cycle | `targetQty` | `currentQty` | `combinedForecast` | `deltaQty` |
+| --- | --- | --- | --- | --- | --- |
+| NQ | 15:30Z | **0.136033** | **0** | **3.146893** | **0.001584** |
+| NVDA | 16:00Z | **176.077255** | **-7.0** | **3.722563** | **+0.058091** |
+
+Working the published `bufferedDelta` path by hand for either row gives `|gap| ≤ band` and therefore
+`edge = 0` for any `width ≥ 0.5` and any `rate ≤ 1`, so the observed deltas come from a path this reading
+does not capture. **I did not resolve it this cycle and I am not guessing at it.** It does not change the
+money conclusion — **0.058091** against a target of **176.077255** is a build measured in thousands of
+cycles — but a fix aimed at a mechanism that mis-predicts two of its own rows may be aimed at the wrong
+line.
+
+**VERIFY-BY (for the fix, next cycle, when the ADR-0116 freeze lifts):**
+1. **The required unit test, written before the band is touched:** reproduce both rows above from their
+   exact inputs and explain the non-zero `deltaQty`. A fix that cannot reproduce them is not aimed.
+2. **The trap closes:** a name whose `currentQty` is on the opposite side of its `combinedForecast` shows a
+   `deltaQty` that removes the sign inversion within one cycle — an unwind toward a reversed view is not
+   buffered at entry width. Read from `/api/fusion/targets`.
+3. **The book builds:** `orders_day.total` shows at least one `fusion entry` whose `originReason` forecast
+   is **below** the largest `|combinedForecast|` in the plan — i.e. entry no longer requires an outlier —
+   and firm `grossExposure` rises above this cycle's **$4224.88** without breaching the cap.
+
+### Item #2 — nothing the desk is *allowed* to size beats its own trading cost: ⚠️ OPEN (unchanged, and now with a fill to price)
+
+Unchanged in rank and mechanism. The window's evidence is thin but consistent: `signals_telemetry` at
+3600 s still has `social` **+8.808298** bps as the only clearly cost-beating source, while the three that
+actually size the book measure `trend` **+1.221202**, `reversion` **+0.448958**, `xsreversion`
+**-2.808272**. The NVDA entry that finally routed was built from `trend` **+0.137218**, `reversion`
+**+6.842818** and `xsreversion` **+16.148632** — i.e. from the two weakest-measured sources plus the one
+with negative measured expectancy. `attribution.totalFees` moved **398.004411 → 398.212047** on those two
+orders. This item is downstream of #1 (a book that cannot build cannot demonstrate edge either way) and
+stays at #2.
+
+### Item #3 — an equity sensor's warm-up seed cannot cross the overnight session close: ✅ mechanism CONFIRMED, stays DEMOTED
+
+Re-confirmed self-healing for a second cycle. `selector.measured` **33**, `tradable` **14**, the planner is
+`routing: true` over **23** instruments, and the desk traded within this session. The warm-up is not what
+holds the book flat; the band is. Stays below the line.
+
+### Item #4 — the cash close liquidates the whole book on a freshness artifact: ⚠️ OPEN, parked
+
+Unchanged and parked. The 21:00Z `fusion exit — target decayed to flat [forecast=0.0, sources=1]` orders
+from **2026-08-04** are still the newest exits in the book. Not actionable while #1 blocks the build.
+
+---
 ## Verification block — 2026-08-05 15:30Z (**NO CODE CHANGE — `d51f179a2` (ADR-0139) is at 4/6 cycles**; the scorer prints `still accumulating evidence (4/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `d51f179a2`, and the ledger's newest row is still `629dbbdf8`. The ADR-0116 freeze holds for a **fourth** cycle. Step 0 ran anyway. (1) ADR-0139's mechanism ✅ holds on a **fourth** independent boot. (2) Social's expectancy swung a **fourth** time — back up to near its first reading — re-confirming Rule 337; the owner ask stays NOT-YET-SUPPORTED. (3) **Item #1 (the no-trade band deadlock) is re-verified ⚠️ OPEN and stays #1**, but this cycle **refines its mechanism and records one reading it does not explain**: `insideBuffer` moved **22 → 21 of 22**, and one name (NQ) shows a non-zero `deltaQty` **0.001584** at a combined forecast of **3.146893** — which the band arithmetic read off the source says should be inside. The deadlock claim is unchanged for the other 21 and `orders_day.total` is still **0**, but the escape is flagged as an open question the fix's test must answer rather than glossed over. (4) Item #3 (warm-up across the close) re-confirmed as self-healing — sensors are warm again this boot and the book is still flat.)
 
 ### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ VERIFIED on a fourth boot; PnL verdict still pending (4/6)
