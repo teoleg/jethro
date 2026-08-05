@@ -15,6 +15,68 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-05 20:00Z (**🔴 REGRESSED — ADR-0140 stopped the app from booting.** The Flyway migration it shipped, `V48__fusion_aim.sql`, collides with the pre-existing `V48__sector_breadth_equities.sql` (ADR-0125, `modules/reference-data`). `PersistenceConfig.flyway()` runs ONE Flyway over `classpath:db/migration`, merging every module's migrations, so a version is a GLOBAL identifier — Flyway refused to resolve, every DB-backed bean failed, and the process died at startup. **This cycle repairs that**, which outranks the ADR-0116 freeze: the pending change never executed, so there is nothing to measure and nothing to pile onto.)
+
+### Step 0 — `3cc91bc46` (ADR-0140, the durable fusion aim): 🔴 **REGRESSED — boot-breaking, repaired this cycle**
+
+The change was committed and its baseline recorded at **19:44:13Z** — from the *previous* still-running
+process. The new build then failed to start at **15:44:54.448-04:00** (= **19:44:54Z**), and every
+endpoint has been dead since. The proving line from `logs/jethro-app.log` and `logs/report.md`:
+
+```
+Caused by: org.flywaydb.core.api.FlywayException: Found more than one migration with version 48
+    at ...CompositeMigrationResolver.checkForIncompatibilities(CompositeMigrationResolver.java:92)
+    at ...PersistenceConfig.flyway(PersistenceConfig.java:41)
+```
+
+Every live reading this run is therefore `URLError: <urlopen error [Errno 111] Connection refused>` —
+`ops_jvm`, `traffic`, `feeds`, `marks`, `signals_telemetry`, `fusion_targets`, `var`, `breaker`,
+`regime`, `hedging` — and the SITUATION header reads `(risk endpoint unavailable — could not read live
+PnL/exposure.)`. `scripts/score-change.py score` printed `cannot measure current vector
+(<urlopen error [Errno 111] Connection refused>); leaving pending baseline for next run`.
+
+**No money statement is possible this run and none is offered.** There is no live PnL, no exposure, no
+attribution and no `recent_orders` — the desk did not trade because the desk did not exist. Quoting the
+last-known figures as if they were this window's would be authoring numbers (invariant 7); the honest
+reading is that the window is **unmeasured**, not flat.
+
+**Cause is 100% the change, 0% market** — the inverse of the last five windows. Nothing about the
+market can stop a Flyway resolver.
+
+### Item #1 — the aim never crosses its band, so the desk cannot build: ⚠️ STILL-BROKEN (unmeasurable — its fix never ran)
+
+ADR-0140's mechanism is untouched and unjudged: the code shipped, but the process it shipped into never
+reached a first cycle, so `insideBuffer`, `fusion_aim` and every `|aim|/|target|` reading are unavailable.
+The item keeps its rank and its VERIFY-BY unchanged. It is **not** re-diagnosed on no evidence.
+
+### Item #0 (NEW, and ranked above everything) — a migration version collision is a silent, whole-app kill: 🔧 **FIXED THIS CYCLE**
+
+Ranked #0 because its cost dominates any signal question: a booked defect in the *desk* loses some money,
+a defect that stops the JVM loses **every** cycle — no trading, no telemetry, no scoring, and the loop
+grades blind. It also very nearly cost a false verdict: had the scorer reached a stale process it would
+have attributed a dead app's vector to ADR-0140's mechanism.
+
+**Fix.** `V48__fusion_aim.sql` → `V51__fusion_aim.sql` (V50 is the repo's highest; V43 is absent, so V51
+is the next free number, chosen not invented). The `fusion_aim` schema, `JdbcAimStore`, the ADR-0080
+derived window and every ADR-0140 code path are **byte-identical** — only the filename changes, so this
+repairs the pending change rather than replacing it, and ADR-0140's own VERIFY-BY survives intact.
+
+**Guard, so this class of defect cannot recur silently.** `ModuleBoundariesTest.migrationVersionsAreUnique
+AcrossModules` resolves `classpath*:db/migration/V*.sql` — exactly the merged view Flyway sees — and fails
+the build on any repeated version. Nothing caught this before: each module's migrations are internally
+consistent and the collision exists *only* after assembly merges the classpaths, which is why a green
+`-Pci test` passed a boot-breaking commit. The test carries a non-vacuity assertion so it cannot silently
+pass on an empty scan. It was **proven against the live defect before the fix** — run on the broken tree
+it failed naming both `V48__fusion_aim.sql` and `V48__sector_breadth_equities.sql`; after the rename the
+full `-Pci test` is green.
+
+**VERIFY-BY next run:** the app answers at all — `ops_jvm` returns a JSON body with an `uptimeSeconds`
+instead of `Connection refused`, `logs/jethro-app.log` contains no `FlywayException`, and
+`flyway_schema_history` shows a `51` row. If those hold, item #0 is VERIFIED and closes, and item #1's
+own VERIFY-BY becomes gradeable for the first time.
+
+---
+
 ## Verification block — 2026-08-05 19:30Z (**CHANGE SHIPPED — ADR-0140.** The ADR-0116 freeze lifted: `scripts/score-change.py score` prints `no pending change to score`, `reports/.pending-baseline.json` is gone, and `e956dcf46` took a **❌ BAD** row. Its auto-revert conflicted again and is **deliberately not completed by hand** — reverting it reinstates ADR-0139, itself ❌ BAD (Rule 372). Item #1 keeps its rank and is **addressed this cycle**, with its mechanism corrected once more: last cycle's re-specification blamed the band's `1/|f|` inverse-forecast shape, but the same reading that motivated that also refutes it, because the *only* names that ever opened are exactly the low-`1/|f|` tail — the threshold is doing what it was designed to do, and what is broken is that the aim never gets to cross it. Items #1 and #3 turn out to be **two resets on one piece of state**, each masking the other; they are merged and fixed together.)
 
 ### Step 0 — `e956dcf46` (the completed ADR-0139 revert): SCORED ❌ BAD, closed

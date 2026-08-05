@@ -13,7 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Postgres-backed {@link AimStore} over {@code fusion_aim} (V48, ADR-0140).
+ * Postgres-backed {@link AimStore} over {@code fusion_aim} (V51, ADR-0140).
  *
  * <p>Scoped to the current {@link Provenance#mode() feed mode} (ADR-0029 / invariant 8): a sim→live
  * switch restores nothing from the other mode's stream. Quantities move as {@code BigDecimal} against

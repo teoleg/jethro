@@ -75,7 +75,7 @@ whose lifetime is shorter than that memory.** It is not a flaw in the rate, the 
    introduced (invariant 7 / ADR-0016). A degenerate rate (`a ≤ 0`, a path that cannot advance) keeps
    the previous drop-at-once semantics.
 
-2. **The aim survives a restart.** It is written through each cycle to a new `fusion_aim` table (V48)
+2. **The aim survives a restart.** It is written through each cycle to a new `fusion_aim` table (V51)
    and restored once on the first cycle of a process. `NUMERIC(20,6)` against `BigDecimal` — exact
    decimal at the boundary, no float on a quantity (invariant 1) — scoped by `feed_mode` so a
    sim↔live switch starts a fresh intent (ADR-0029 / invariant 8). Derived data only (ADR-0014):

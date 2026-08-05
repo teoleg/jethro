@@ -659,7 +659,7 @@ class PositionBufferTest {
     //     −1 / ln(1 − a) = −1 / (−30/3600) = 120 cycles = 3600 s / 30 s = one evidence horizon.
     // ---------------------------------------------------------------------------------------------
 
-    /** An in-memory {@link AimStore}, standing in for the V48 table. */
+    /** An in-memory {@link AimStore}, standing in for the V51 table. */
     private static final class FakeAimStore implements AimStore {
         private java.util.Map<String, BigDecimal> rows = java.util.Map.of();
 

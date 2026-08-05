@@ -4801,3 +4801,42 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   derived data only) and restores once per process. No band, rate, floor, gate or cap touched — capping the
   band was ADR-0133, scored ❌ BAD, and is not re-attempted. A restored aim is still clamped by ADR-0102
   into `[flat, target]`, so it can never exceed or oppose the current view. `-Pci test` green.
+
+## 2026-08-05 20:00Z — ADR-0140 did not fail, it never RAN: a duplicate migration version killed the boot
+
+- **Step 0 — `3cc91bc46` (ADR-0140): 🔴 REGRESSED, boot-breaking.** The app has been dead since
+  **19:44:54Z**. `logs/jethro-app.log` and the report both end at
+  `org.flywaydb.core.api.FlywayException: Found more than one migration with version 48` →
+  `PersistenceConfig.flyway(PersistenceConfig.java:41)` → `flyway` → `refDataRepository` →
+  `instrumentRefSource` → `universeController` → context abort. Its `V48__fusion_aim.sql` collided with
+  the pre-existing `V48__sector_breadth_equities.sql` (ADR-0125, `modules/reference-data`).
+- **Attribution — 100% change, 0% market, and the whole window is UNMEASURED.** Every endpoint reads
+  `URLError: <urlopen error [Errno 111] Connection refused>`; SITUATION reads `(risk endpoint
+  unavailable)`; the scorer printed `cannot measure current vector … leaving pending baseline for next
+  run`. No PnL, exposure, attribution or `recent_orders` exists for this window.
+- **Rule 376 — a Flyway migration version is a GLOBAL identifier across modules, not a per-module one.**
+  `PersistenceConfig.flyway()` runs ONE Flyway over `classpath:db/migration`, merging all four module
+  trees into a single line. Versions are scattered — V48 in `reference-data`, V50 in `order`, V47 in
+  `app`, V43 absent entirely — so the next free number is **never** "my module's max + 1".
+  **Rule: before adding a migration, enumerate `find . -path '*/db/migration/V*.sql'` across the WHOLE
+  repo and take the global max + 1. Reading only your own module's directory is how you ship a boot kill.**
+- **Rule 377 — green tests are not proof a change boots, when the defect is created by ASSEMBLY.** The
+  broken commit passed `-Pci test` cleanly, because each module's migrations are internally consistent
+  and the collision only exists once the classpaths merge at runtime. **Rule: for a defect class that
+  lives in the merged/assembled view rather than in any single module, the guard must be a test that
+  RESOLVES that merged view.** Implemented as `ModuleBoundariesTest.migrationVersionsAreUniqueAcross
+  Modules` over `classpath*:db/migration/V*.sql` — the same view Flyway sees — with a non-vacuity
+  assertion so an empty scan cannot pass it silently.
+- **Rule 378 — prove a regression guard against the live defect BEFORE fixing it.** The new test was run
+  on the broken tree first and failed naming both colliding files; only then was the rename applied and
+  the suite re-run green. A guard written after the fix is a guard nobody has ever seen catch anything.
+- **Rule 379 — a dead JVM can produce a CONFIDENT WRONG VERDICT, which is worse than a missing one.**
+  ADR-0140's baseline was captured at 19:44:13Z from the *previous* still-running process, 41 s before the
+  new build died. Had the scorer reached any stale process it would have graded ADR-0140's *mechanism* on
+  a vector its *filename* produced. **Rule: when every endpoint is refused, the window is UNMEASURED, not
+  flat — say so and quote no figure, rather than carrying the last-known numbers forward as if current.**
+- **Fix shipped — rename only, deliberately.** `V48__fusion_aim.sql` → `V51__fusion_aim.sql` (global max
+  V50 + 1). Schema, `JdbcAimStore`, the ADR-0080-derived ageing window and every ADR-0140 path are
+  byte-identical, so this REPAIRS the pending change instead of replacing it and ADR-0140's own VERIFY-BY
+  stays gradeable. No dial, band, rate, gate, cap or floor touched. **The ADR-0116 freeze correctly did
+  not bind: a pending change that never executed has no evidence to protect.** `-Pci test` green.
