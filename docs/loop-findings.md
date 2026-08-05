@@ -4427,3 +4427,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   claims the window; it is baseline. ADR-0139 mechanism ✅ again: **17** corroborations in **1377 s** vs
   **18 in 64,010 s** pre-fix. Rule 337 re-confirmed a third time — `social` **8.855736 → 4.837178 →
   7.810160** bps on five more resolved observations (373 → 378); the owner ask stays NOT-YET-SUPPORTED.
+
+## 2026-08-05 15:30Z — the deadlock claim survives, one row of it does not: record the exception, don't smooth it
+
+- **Rule 343 — when your mechanism predicts N rows and the telemetry shows N−1, the exception is the most
+  informative reading on the page; carry it into the fix as a test, not into the prose as a rounding.**
+  Last cycle asserted the buffer deadlock was absolute (`insideBuffer` **22 of 22**, "identically zero,
+  forever"). This cycle: `insideBuffer` **21 of 22**, NQ `deltaQty` **0.001584** at `targetQty`
+  **0.136033**, `currentQty` **0**, `combinedForecast` **3.146893** — which the band arithmetic
+  (`band ≥ |target| × TARGET_ABS/|forecast| × 0.5`, aim clamped to `|aim| ≤ |target|` by `withinTarget`)
+  says must be inside. The money conclusion is unchanged (`orders_day.total` **0**), so the temptation is
+  to call it noise. It is not noise: it is the one place the running code disagrees with the model of it.
+  **Rule: before repairing a mechanism, make the repair's test reproduce the row the mechanism gets wrong.**
+- **Rule 344 — a confidence adverb is a claim, and it gets graded like one.** "Identically zero, forever"
+  and "unconditionally" were doing work that the evidence (one snapshot, 22 rows) could not support; a
+  single extra snapshot falsified the quantifier while leaving the finding intact. The cost of the
+  overstatement was a cycle spent re-deriving instead of building. **Rule: state the mechanism and the
+  population it was observed over; let the next snapshot widen the quantifier, never the prose.**
+- **Rule 345 — a VERIFY-BY that reads "not reproduced" for two cycles may be waiting on the right log line,
+  not on a broken fix.** ADR-0139's second check (`≥1 tracked name at channels ≥ 2`) read "not reproduced"
+  twice because `signals[]` is point-in-time. This cycle the app's own WARN stream answered it directly:
+  `1 corroborated social subject(s) — advisory context only (ADR-0050), no order`. Corroboration reaches a
+  named subject; the ADR-0050 advisory gate is what stops it sizing — a separate deliberate policy, not a
+  defect in the fix. **Rule: when an endpoint's shape can't answer a VERIFY-BY, look for the event stream
+  that can before grading the fix down.**
+- **Rule 337 re-confirmed a fourth time — a statistic that round-trips is not a statistic that stabilised.**
+  `social` **8.855736 → 4.837178 → 7.810160 → 8.351863** bps on seven more resolved observations (373 →
+  380), cohorts 37 → 38. It has come back near its first reading, which reads like confirmation and is not:
+  a mean that moves 45% of its own value on seven prints is carried by a few large returns either way. The
+  owner ask on `jethro.fusion.social.per-channel` stays open and **NOT-YET-SUPPORTED**.
+- **Trigger/attribution.** No code change: scorer prints `d51f179a2 still accumulating evidence (4/6
+  cycles)`, `.pending-baseline.json` still names `d51f179a2`, ledger newest still `629dbbdf8` — ADR-0116
+  freeze held a fourth cycle. PnL **-$603.08** flat to the cent over four heartbeats, gross **$0.00**,
+  newest order **2026-08-04 21:00:47Z**, `orders_day.total` **0**. Empty book, so neither market nor change
+  claims the window; it is baseline. Sensors warm this boot (`streamVolMeasuredNames`/`volBudgetNames`/
+  `covarianceCoveredNames` all **20**, 22 targets planned) and still zero orders — the warm-up item stays
+  demoted, the buffer stays #1.
