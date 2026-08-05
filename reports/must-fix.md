@@ -15,6 +15,112 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-05 18:30Z (**NO CHANGE — ADR-0116 measurement freeze, cycle 4 of 6.** `scripts/score-change.py score` prints `e956dcf46 still accumulating evidence (4/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `e956dcf46`, and the ledger's newest row is still `d51f179a2`. Step 0 re-graded the revert ✅ VERIFIED on a **fourth, independent boot**. The cycle's product **overturns last cycle's Rule 363 conclusion and RE-RANKS the register**: the aim's warm-up clock is *not* persisted — `aims` is a plain in-memory `HashMap` (`PositionBuffer.java:105`) that reseeds from `held` at every boot — so the buffer's release time must be paid inside ONE ~1400 s process lifetime, and for two of the six visible names the requirement **exceeds every process lifetime this loop has ever observed**. That is a freeze no fix to item #1 can touch, it is the bigger money, and it has a *safe* fix that changes no band and no rate. **The buffer item is promoted to #1; the degenerate-zero-forecast item moves to #2.**)
+
+### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED (4th boot)
+
+Deployment confirmed on a **fourth, fresh** JVM: `traffic.timestampMillis` **1785954602128** −
+`ops_jvm.uptimeSeconds` **1387** = boot **18:06:55.128Z**, after the revert's **16:38:20Z** commit — a
+different process from the 17:37:38.570Z boot graded last cycle, so the readings are independent.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| uncurated authors do not pass on a single credential | of the 12 `recent` posts, all tier `STANDARD`, **11** read `credible: false`; the one `credible: true` is `stocktwits:Estimize` | ✅ — and see the note below |
+| corroboration rate off its loosened level (Rule 334 — grade the RATE, the counter resets at boot) | `counters.corroborated` **8** in **1387 s**, against **11/1344 s** post-revert and **17/1427 s**, **15/1439 s**, **17/1362 s** on the ADR-0139 boots | ✅ holds on a fourth boot, at the lowest rate yet |
+| pump tell unaffected | `manipulationSuspected` **39** on `ingested` **3390** / `kept` **794** | ✅ still firing |
+
+**On the first `credible: true` since the revert — this is the rule working, not a regression.** The live
+code is the conjunction: `SocialChannels.java:54-55` reads
+`p.verified() && p.followers() >= credibleFollowerFloor && p.accountAgeDays() >= credibleAgeDaysFloor`
+against the live `credibleFollowerFloor` **5000** / `credibleAgeDaysFloor` **180**. An author clearing all
+three is *supposed* to pass; ADR-0139's defect was passing on any ONE. `Estimize` is a verified, long-lived,
+high-follower publisher, so it is the expected shape of a legitimate pass. Caveat recorded honestly: the
+telemetry does not expose the author's three fields, so the conjunction is proven from the source line and
+the rate, not from this row. **VERIFY-BY tightened for next run:** the `credible: true` count stays a small
+minority of `recent`, and the corroboration rate stays below the ADR-0139 band.
+
+The scorer owns the vector verdict; that is 4 of 6 cycles in and is not mine to pre-judge.
+
+### Window attribution — market only, third consecutive zero-order window
+
+`recent_orders` shows **no new order**: the newest row is still the ADR-0019 auto-hedge ES `SELL 0.003243`
+at **17:00:28Z**, already covered by the 17:30Z block. `risk.total` reads `totalPnl` **-631.26343754**,
+`grossExposure` **5255.10763750**, `netExposure` **514.81236250**; `breaker.halted` **false**; `regime`
+`trend` **CHOP**, `volRatio` **0.92**. Every dollar of the move is a mark on an untouched position —
+**100% market, 0% change-attribution** (Rule 357).
+
+### Item #1 — **PROMOTED**: the aim's warm-up clock is in-memory, so the buffer's release time exceeds the process lifetime: ⚠️ OPEN
+
+`insideBuffer` reads **20 of 20** and every visible target reads `deltaQty` **0.0** — including flat names
+carrying large plans (KO `targetQty` **1584.259488**, WMT **431.975458**, NVDA **-159.668881**, NEE
+**-404.251600**, BAC **-512.748000**). The desk holds one alpha position, GOOG **8.000000**, against its own
+plan of **135.389483**.
+
+**The mechanism, and why it is not the band.** `Forecast.TARGET_ABS` is **10.0** and
+`jethro.fusion.position-buffer.fraction` is **0.10**, so their product is exactly **1.0** and the shipped
+release condition reduces to Rule 358's `|aim|/|target| ≥ 1/|forecast|`. With `edgeGate` null the ADR-0080
+rate is the base horizon, so from a flat seed the aim walks `target·(1 − e^(−t/3600))` and release lands at
+**t ≥ 3600·ln(|f|/(|f|−1))** seconds. Against **this** cycle's own forecasts:
+
+| name | `combinedForecast` | release time | `aims` | `|aim|/|target|` |
+| --- | --- | --- | --- | --- |
+| KO | 6.282787 | ~624 s | 26.388661 | 0.0167 |
+| GOOG | 5.025005 | ~799 s | 12.615532 | 0.0932 |
+| WMT | 3.820728 | ~1092 s | 6.443268 | 0.0149 |
+| NVDA | -3.642848 | ~1155 s | -4.969085 | 0.0311 |
+| NEE | -2.165900 | ~2230 s | -28.737583 | 0.0711 |
+| BAC | -1.946400 | ~2597 s | -37.328277 | 0.0728 |
+
+**The new, confound-free finding.** `PositionBuffer.java:105` is
+`private final Map<String, BigDecimal> aims = new HashMap<>();` — plain in-memory, no LMDB, no warm
+restart. At boot the map is empty, so `nextAim` takes `previous == null ? held` (`:263`) and every name on a
+flat book **reseeds at zero**. The release time above must therefore be paid inside a *single process
+lifetime*, and this loop's observed lifetimes are **1387 s** (this boot), **1344 s**, **1362 s**, **1427 s**,
+**1439 s**. **NEE (~2230 s) and BAC (~2597 s) exceed every one of them** — those names cannot open in this
+harness no matter what else is fixed, and no reset needs to be invoked to explain it. This is why the item
+is promoted: it needs no assumption about target stability, and it is the largest live cost on the register
+— the desk is at **0.4%** of the firm gross cap with **$1,494,745** of headroom, which the mission calls a
+failure to attack.
+
+**Correcting last cycle's Rule 363.** It concluded item #1's `target == 0` snap "supplies the reset" that
+starves the buffer, making one `if` fix both. That is now too strong: NEE and BAC fail on the horizon alone.
+Reading the whole of `apply` also shows **five** seed/reset paths, not the two Rule 363 weighed —
+`nextAim:259` (flat target snaps to zero), `withinTarget:311` (sign flip zeroes), `apply:138`
+(`aims.clear()` on an empty plan), `apply:178` (`retainAll` — a name absent from this cycle's plan loses its
+intent entirely), and `apply:163` (`aim = held.add(delta)` re-seed when `mayIncrease` is false). And the
+shortfall-vs-uptime arithmetic **cannot** by itself prove a reset, because an aim chasing a *rising* target
+shows the same low ratio. Guessing among five is worse than guessing among two — but the horizon finding
+means the fix no longer has to guess.
+
+**The fix this points to (next cycle, once the freeze lifts).** Persist the aim across restart rather than
+touching any band or rate. Aims are derived state, which is exactly what ADR-0014 puts in LMDB
+("derived data only"), and a restored aim changes no width, no rate, no cap and nothing on the
+deterministic floor. It needs a staleness bound so a long outage cannot resume an ancient intent — that is
+the design question the ADR must answer, so this ships with an ADR in the same commit.
+
+**VERIFY-BY (next run):** after a fresh boot, at least one name's `|aim|/|targetQty|` exceeds the
+`1 − e^(−uptime/3600)` an in-memory reseed could have produced; `insideBuffer` is strictly less than
+`instruments`; and a name whose release time exceeds the process lifetime (NEE, BAC at these forecasts)
+shows a non-zero `deltaQty`.
+
+### Item #2 — (was #1) a degenerate 1-source zero forecast bypasses the no-trade buffer and full-liquidates: ⚠️ OPEN
+
+Unchanged and un-refuted; demoted only because item #1 now carries the larger, provable cost. The evidence
+stands: NVDA 16:59:27 `fusion exit — target decayed to flat [forecast=-0.0, sources=1]`, and the
+2026-08-04 20:10–20:17Z seven-name sweep. **No new instance fired this window, because no order fired at
+all.** `nextAim` (`PositionBuffer.java:259`) opens `if (target.signum() == 0) return ZERO`, which is correct
+for an *ordered* exit and wrong for a target that read zero because its sources collapsed to one.
+
+**VERIFY-BY (unchanged):** no order carries `fusion exit — target decayed to flat` with `sources=1` in
+`recent_orders`; a name whose source count collapses within a cycle shows a non-full `deltaQty`; and the fix
+ships a unit test reproducing the one-source-zero plan.
+
+### Item #3 — (unchanged) the edge gate refuses to size a source with measured expectancy: ⚠️ OPEN
+
+Carried forward unchanged; not examined this cycle.
+
+---
+
 ## Verification block — 2026-08-05 18:00Z (**NO CHANGE — ADR-0116 measurement freeze, cycle 3 of 6.** `scripts/score-change.py score` prints `e956dcf46 still accumulating evidence (3/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `e956dcf46`, and the ledger's newest row is still `d51f179a2`. Step 0 re-graded the revert ✅ VERIFIED on a **third, independent boot**. The cycle's product is that **item #2's freeze is no longer just a closed-form inequality, it is a quantified RACE the aim loses by 4.3×–11.3×** — and that the race's *reset* side is driven by the very `target == 0` branch that item #1 names, so the two items are causally linked, not merely adjacent. **Ranking is unchanged: #1 stays #1, and gains a second, larger reason to be first.**)
 
 ### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED (3rd boot)

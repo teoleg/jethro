@@ -4671,3 +4671,44 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   unchanged, `unrealizedPnl` **-14.60000000 → -11.12000000**; HEDGE ES **-0.006099**. **Rule: a zero-order
   window is 100% market and 0% change — bank the clean split and read nothing about the thesis into it
   (this is the second consecutive such window; see Rule 357).**
+
+## 2026-08-05 18:30Z — the frozen desk is a state-persistence bug, not a band bug: the aim map is in-memory and the release time exceeds the process lifetime
+
+- **Rule 364 — the buffer's warm-up clock is NOT persisted, and that alone explains part of the freeze.**
+  `PositionBuffer.java:105` is `private final Map<String, BigDecimal> aims = new HashMap<>()` — no LMDB, no
+  warm restart — so at every boot the map is empty and `nextAim` takes `previous == null ? held` (`:263`),
+  reseeding every name on a flat book at zero. `Forecast.TARGET_ABS` **10.0** × `position-buffer.fraction`
+  **0.10** = **1.0**, so Rule 358's release condition is exact and the requirement is
+  **t ≥ 3600·ln(|f|/(|f|−1))**. This cycle: KO ~**624 s**, GOOG ~**799 s**, WMT ~**1092 s**, NVDA ~**1155 s**,
+  NEE ~**2230 s**, BAC ~**2597 s** — against observed process lifetimes of **1387/1344/1362/1427/1439 s**.
+  **NEE and BAC need more time than the process ever gets.** **Rule: before blaming a slow control for a
+  frozen book, check whether its state survives a restart — an in-memory accumulator in an ephemerally
+  rebooted harness has an effective horizon capped by the process lifetime, not by its own time constant.**
+- **Rule 365 — Rule 363 was over-claimed; retract the "one `if` fixes both" conclusion.** Last cycle I said
+  item #1's `target == 0` snap supplies the reset that starves item #2, making them one fix. NEE and BAC fail
+  on the horizon alone, so that is false for them. `apply` also has **five** seed/reset paths, not two
+  (`nextAim:259` flat-target snap, `withinTarget:311` sign-flip zero, `apply:138` `aims.clear()`, `apply:178`
+  `retainAll` dropping absent names, `apply:163` the `mayIncrease`-false re-seed to `held`). **Rule: an
+  aim/target shortfall CANNOT prove a reset — an aim chasing a rising target shows the identical low ratio.
+  Read every write to the state before inferring a cause from a ratio.**
+- **Rule 366 — rank by provable cost, and re-rank when the evidence moves.** The buffer item is promoted to
+  #1 over the degenerate-zero-forecast liquidation: `insideBuffer` **20 of 20** with the desk holding GOOG
+  **8.000000** against a plan of **135.389483** at **0.4%** of the firm gross cap is a bigger, provable cost
+  than an occasional bad liquidation — and while the desk is frozen, item #2 barely has anything to liquidate.
+  Its fix is also the *safer* one: persist the aim as ADR-0014 derived state, changing no band, rate or cap.
+  **Rule: prefer the fix that removes a structural blocker without touching a sizing dial; a promotion is
+  justified by cost plus safety, not by novelty.**
+- **Step 0 — `e956dcf46` ✅ VERIFIED on a fourth, independent boot.** `traffic.timestampMillis`
+  **1785954602128** − `uptimeSeconds` **1387** = boot **18:06:55.128Z**, after the **16:38:20Z** commit.
+  `counters.corroborated` **8** in **1387 s** — lowest rate yet, against **11/1344 s** post-revert and
+  **17/1427 s**, **15/1439 s**, **17/1362 s** on the ADR-0139 boots; `manipulationSuspected` **39** on
+  `ingested` **3390** / `kept` **794**. Scorer: `4/6 cycles`, held — no change this cycle.
+- **Rule 367 — a single `credible: true` is not a regression of a conjunction gate.** The first one since the
+  revert (`stocktwits:Estimize`) is the strict rule working: `SocialChannels.java:54-55` needs verified AND
+  followers ≥ **5000** AND age ≥ **180**, and a verified long-lived publisher is exactly who should pass;
+  ADR-0139's defect was passing on any ONE. **Rule: grade a conjunction gate on the RATE and the source line,
+  never on the presence of a single pass — and say plainly when the telemetry lacks the fields to prove it.**
+- **Trigger/attribution — market, cleanly, for the third window running.** **No new order** since the
+  17:00:28Z auto-hedge; GOOG **8.000000** and HEDGE ES **-0.006099** unchanged; `totalPnl` **-631.26343754**.
+  **Rule: bank the clean 100%-market split and read nothing about the thesis into it (third consecutive; see
+  Rules 357 and 360).**
