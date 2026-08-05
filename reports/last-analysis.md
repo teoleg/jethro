@@ -1,81 +1,113 @@
-Shipped the fix for the restart liquidation: the sensor seed's read window is no longer a guess made before the walk — it extends until the walk is satisfied, and every short seed now names why it stopped.
+The desk's only source with cost-beating measured expectancy was gagged by a boolean the platform never sets — the author credibility floors are now what decides, so social can reach the corroboration gate at all.
 
-*(Every figure below is read from `/api/risk`, `/api/fusion/targets`, `reports/run-status.json`, the
-scored ledger or the boot log. None is authored here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/fusion/targets`, `/api/signals/telemetry`, `/api/social`,
+`/api/tca`, `/api/discovery`, the app's own boot log, the scored ledger or a live read of the same
+StockTwits endpoint the app polls. None is authored here — invariant 7 / ADR-0016.)*
 
 ## Step 0 — verify last run's change first
 
-**`120b22b41` (ADR-0137) has been SCORED: ⚠️ INCONCLUSIVE** — risk-adjusted return **-0.000284**/cycle
-over 7 cycles, **t = -1.39** against the 1.5 hurdle. Kept, not reverted, per ADR-0116. Its primary
-VERIFY-BY held to the end: planned gross **$500,000.000044975** against the **$500,000**
-`jethro.risk.max-gross-exposure` cap — **1.00000000008995×** — where before the change the planner was
-targeting a book it was forbidden to hold. So the mechanism it claimed is verified; the PnL effect is
-not distinguishable from noise, which is the honest verdict for a planning-side identity.
+**`629dbbdf8` (ADR-0138) SCORED ⚠️ INCONCLUSIVE, and its mechanism is ✅ VERIFIED.** The scorer's row:
+risk-adjusted return **+0.001718**/cycle over 37 cycles, **t = +1.00** against the 1.5 hurdle → kept, not
+reverted (ADR-0116).
 
-**`reports/.pending-baseline.json` is gone.** The measurement window closed, so ADR-0116's freeze is
-lifted and this cycle makes a change — the first in six.
+The defect-level verification is unambiguous, and for once it is graded from the app's own log rather than
+a replication script — which is what ADR-0138 shipped the terminator line for:
 
-`026cda49d`'s flagged auto-revert stays **deliberately not completed** (Rule 303): it is itself the
-revert of the graded-BAD ADR-0136, so completing it would re-apply a rejected mechanism.
+| VERIFY-BY | reading at the **2026-08-04T19:43:11Z** boot | verdict |
+| --- | --- | --- |
+| zero `sensor still cold` WARNs for a name with stored marks | the twelve equities cold at **every** prior boot (JPM 137/193, BAC 192/193, NEE 171/193, JNJ, CAT, GOOG, MCD, HD, PFE, CVX, KO, PG) are **absent** from this boot's cold list | ✅ |
+| any remaining short seed names its terminator + span | every one does: rates names `FULL` at **241 of 241** / **193 of 193**; AMD `HISTORY_EXHAUSTED` at **15 of 193** covering **19880s** at a **586000ms** step; NFLX **10 of 193**, PLTR **20**, META **41**, GOOGL **24**, AUDUSD `NO_HISTORY` — every survivor is a genuinely thin series, not a short window | ✅ |
+| no `sources ≤ 1` exit within five minutes of JVM start | boot **19:43:11Z**; first post-boot order **20:10:10Z** — **27 minutes** later. Against five prior boots each followed ~40 s later by a liquidation | ✅ |
+
+Item #1 has carried the register for six cycles and it closes. `026cda49d`'s flagged auto-revert stays
+**deliberately not completed** (Rule 303): it is itself the revert of the graded-BAD ADR-0136.
 
 ## Situation — the live money, in plain numbers
 
-1. **Money.** Total PnL **-$628.48**; **-$17.73** on the run and **-$25.84** over the last three. The
-   book is bleeding, slowly and steadily. The heartbeat reports growth **0.49%** against the **1.0%**
-   owner target: `on_track=False`, `stale=True`, `underwater=True`.
-2. **Risk.** Gross **$26,441.20** — **1.8%** of the $1,500,000 firm cap, **$1,473,559** of headroom;
-   net **-$20,310.31**, **2.0%** of the $1,000,000 net cap. Nowhere near a cap and nowhere near the
-   breaker. This is a **DORMANT** book, which under ADR-0132 is a failure to attack, not safety.
-3. **Cause.** Not the market and not last cycle's change: gross fell **-$24,572** on the run while the
-   planner's target book sat at the full **$500,000** cap. The desk is not choosing to hold $26k — it
-   is being emptied and refilled. Fees are **64.73%** of the entire deficit.
-4. **Danger.** No DANGER state: bleeding, but with 98% of the gross cap unused. The correct response is
-   the opposite of de-risking — remove what keeps liquidating the book.
+1. **Money.** Total PnL **-$603.08**, unchanged on the run and over the last three (**+0.00**) — the US
+   session was closed for every heartbeat since, so the tape was frozen. Growth **0.0%** against the
+   **1.0%** target: `on_track=False`, `underwater=True`. Fees are **$398.00** of the **$603.08** deficit.
+2. **Risk.** Gross **$0.00** — **0.0%** of the $1,500,000 firm cap, **$1,500,000** of headroom; net
+   **$0.00**. **DORMANT**, which under ADR-0132 is a failure to attack, not safety.
+3. **Cause.** Not last cycle's change. The window's gross move **$52,192.44 → $0.00** is the cash-close
+   collapse: at **20:10:10Z** — **600 s** after the 20:00Z equity close, exactly the
+   `jethro.fusion.freshness-seconds=600` window — eight names exited within 200 ms of each other on
+   `fusion exit — target decayed to flat [forecast=±0.0, sources=1]`, then GOOG, AAPL, NVDA, AMZN and
+   MSFT as each name's last print aged out. That is the ADR-0135 breadth collapse, whose fix was graded
+   ❌ BAD and is not re-tried.
+4. **Danger.** None. Bleeding, but with 100% of the gross cap unused — the opposite of the DANGER state.
+5. **Order-level post-mortem.** Every FILLED order in the window carries a `sources ≤ 1` exit reason; the
+   rest are HEDGE ES orders REJECTED on `market session is closed — only risk-reducing orders allowed
+   (ADR-0115)`. No trigger opened a position this window; the desk only closed.
+6. **Change vs. market.** Cleanly separable and it is **all baseline behaviour**: the JVM ran **64,010 s**
+   without restart, no code changed since `629dbbdf8`, and the PnL move over the last three heartbeats is
+   **+0.00** with a frozen tape. Nothing here is credited or blamed on code.
 
-## Diagnosis — the mechanism, now measured end to end
+## Diagnosis — where the money actually is
 
-The register has carried one item at #1 for five cycles and last cycle priced it. Fills whose
-originating trigger carries `sources ≤ 1` are **63** fills, **$388,348.12** of notional and **$39.19**
-of fee — **10.04%** of the firm's entire LIVE fee bill — with **69%** of them landing inside ten minutes
-of a restart. The tightest instance is one JPM round trip: bought on a three-source view at
-**18:38:08.400753Z**, the JVM's own `trend sensor still cold for JPM after seeding 137 of 193` WARN
-**1.19 s** later, sold back at **18:38:35.165972Z** on `sources=1`. Held 26.8 seconds, cost **-$2.54**,
-learned nothing — the view was never contradicted; the sensor just went blind.
+With item #1 closed I re-ranked the register against the standing priority (2026-07-28: work on EDGE, and
+if a source's measured expectancy is positive and significant net of cost, the work is to **let it size**).
 
-The blindness traces to one line. `SensorWarmup` sizes its history read as `2 × samples × step`, where
-`step` is the **median** inter-print gap. The median is the wrong statistic for that job, and the class's
-own documentation says why: print gaps are heavy-tailed. The median describes the *typical* gap; the
-window has to cover the *sum* of `samples` gaps, which the tail dominates. So the window is
-systematically short by an amount that varies with whatever the tail did on that particular boot — which
-is exactly the signature the loop measured and could not explain with any per-name rule (BAC seeding
-**193 → 192**, NEE **193 → 181 → 171** across three boots). The walk then runs off the oldest point it
-*read* while the stored series continues below it — retention is 12h against seeds spanning tens of
-minutes — and returns short as though the history had ended.
+**Measured cost, from the app's own fills:** `$39.187210` of fee on `$388,348.116512140580` of notional =
+**1.009 bps** per side, plus **~0.75 bps** of slippage per fill on the liquid names (`/api/tca`: GOOG
+`0.744`, NEE `0.753` avg bps) — call it **~3.5 bps** round trip.
 
-## The change (ADR-0138)
+**Measured expectancy, `/api/signals/telemetry`, cohort-clustered t at the 3600 s horizon:**
 
-The read window stops being a guess made ahead of the walk and becomes a consequence of it: when the walk
-exhausts what it read while still short, the window doubles and the walk repeats — until the seed fills,
-a genuine hole truncates it, or the series demonstrably ends. The shallowest filling window wins, so the
-replayed horizon stays as close to live consumption as the store permits. "The series ends here" is read
-off the request itself (stopping more than one gap tolerance above the `since` asked for proves nothing
-was stored below it), so it costs no extra scan and needs no new store API. The step is monotone across
-extensions, so a deeper, more coarsely downsampled read can never turn normal print gaps into fabricated
-outages. And every seed now reports its terminator, span, step and read count, so the next cycle grades
-this from the app's own log rather than from a replication script.
+| source | mean bps | cohorts | t | in the live plan? |
+| --- | --- | --- | --- | --- |
+| social | **+8.856** | 37 | **+2.01** | **no — 0 of 9 names** |
+| momentum | +6.549 | 7 | +0.63 | no |
+| trend | +1.540 | 98 | +0.83 | yes |
+| reversion | -0.286 | 86 | -0.13 | yes |
+| xsreversion | **-5.006** | 44 | -1.16 | yes |
 
-This is **not** ADR-0135's routing rule, which is graded ❌ BAD and is not re-tried: the defect is a blind
-sensor, and the fix belongs where the blindness is. No money, risk or exposure number is introduced — the
-class replays prices into a sensor that publishes a conviction, with fusion, the edge gate, the conviction
-floor and the pre-trade guardrail all still standing between it and a fill.
+`social` is the only source positive at **all three** horizons (+8.856 / +1.950 / +0.508 bps) with a hit
+rate that rises with horizon (0.619 / 0.588 / 0.509) — the shape of a slow news signal, not noise. It also
+already carries the **highest** fusion weight, **1.5768**. And it contributes to **none** of the nine
+planned names, while the three sources that *are* sizing the book are exactly the three that do not beat
+their own trading cost. That is the whole problem in one line.
 
-## Attribution — change vs market
+**Why social cannot speak — traced to a single boolean.** `/api/social` counters: **153,207** ingested,
+**5,289** kept, **18** ever corroborated. The ADR-0050 §3 gate promotes only on ≥ **2 distinct credible**
+channels, and neither wired source can supply one:
 
-Nothing is claimed for the change yet; it has not run. This window's **-$17.73** is the running desk's
-own liquidate-and-rebuild cycle plus market — **baseline behaviour**, not attributable to code, since no
-change was live during it. The scorer owns the verdict from here.
+- `SocialChannels.isCredible` required `verified() && followers ≥ 5,000 && ageDays ≥ 180`, and the
+  StockTwits adapter populates `verified` from `user.official` — which marks StockTwits' **own** corporate
+  accounts. A live read of the same endpoint the app polls (`streams/symbol/AAPL.json`, 30 messages)
+  returns `official: false` for **all 30** authors, while `followers` spans **-2 … 5,978** with one author
+  **above** the 5,000 floor and join dates back to **2018** well past the 180-day floor. The conjunction
+  short-circuits before either floor is read: **no organic post has ever been credible.** The class's own
+  javadoc promises the opposite — "unknown accounts are judged by the author FLOORS below".
+- News can supply only one: of six wired outlets, only Yahoo resolves single-name tickers — all 24
+  discovery candidates, over two days and up to 206 mentions, carry `sources: [news:yahoo]` and nothing
+  else.
 
-**VERIFY-BY next run:** zero `sensor still cold` WARNs at boot for any name with stored marks; no
-`fusion exit — target decayed to flat [… sources ≤ 1]` order within five minutes of JVM start; the
-`sources ≤ 1` share of `totalFees` down materially from **10.04%**; and any seed still short naming its
-terminator and span in the log.
+One credible channel against a threshold of two is unreachable. The gate was not filtering noise; it was
+switched off.
+
+## The change — ADR-0139
+
+Platform verification and the two measured author floors become **alternative** credentials for a STANDARD
+channel rather than a conjunction: `verified || (followers ≥ floor && ageDays ≥ floor)`. Both floors keep
+their configured values, `k = 2` is unchanged, the `manipulationSuspected` pump tell is unchanged, and the
+change is strictly one-way — nothing credible today becomes non-credible. No money, risk or exposure
+number is introduced or altered; this decides only whose mention counts as independent evidence. The
+deterministic floor — edge gate, conviction floor, pre-trade guardrail, drawdown breaker, ADR-0086 cut —
+is untouched, and ADR-0049 still forbids a social subject from originating an order.
+
+**What I deliberately did not do.** Lower `corroboration-channels` to 1 (that *is* the adversarial
+control, and at k=1 one account promotes a subject). Re-try ADR-0135's "hold through a breadth collapse"
+(graded ❌ BAD). Widen deployment on trend/reversion/xsreversion to fill the dormant book — they measure
+below cost, and forcing trades that lose money is not a fix for dormancy.
+
+**The honest caveat, stated up front.** Social's edge rests on few *independent* episodes: 18 corroborations
+in the source's life, re-emitted each cycle, which is why 373 resolved calls sit in only 37 cohorts. A
+`t = +2.01` on that base is suggestive, not established, and broader coverage may dilute it. That is the
+reason to ship it: the ADR-0049 telemetry and the ADR-0064 edge gate will now measure social on a real
+sample and shrink its weight if the edge was an artifact — the same "earn your weight before you size"
+path any source takes.
+
+**VERIFY-BY next run:** `/api/social` `counters.corroborated` above **18**; at least one `signals[]` row on
+a **tracked** name with `channels ≥ 2`; and `social` present in the `contributions[]` of at least one
+`/api/fusion/targets` row — none of which has happened to date.

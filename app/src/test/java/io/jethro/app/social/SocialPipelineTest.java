@@ -112,6 +112,32 @@ class SocialPipelineTest {
         assertEquals("untracked", s.sector());
     }
 
+    /**
+     * ADR-0139: an organic author with no platform verification is judged by the two measured floors,
+     * and a credible outlet plus one such author is the news⋈social cross-corroboration
+     * {@code NewsSocialFeed} was built for — which the old conjunction made unreachable.
+     */
+    @Test
+    void anUnverifiedAuthorClearingBothFloorsCorroboratesWithACredibleOutlet() {
+        SocialPost organic = new SocialPost("st-1", "stocktwits", "stocktwits:seasoned", "seasoned",
+                5_978, false, 2_600, 0L, "$AAPL rally, going long"); // official=false, the live shape
+        SocialChannels ch = new SocialChannels(Map.of(
+                "yahoo", SocialChannels.Tier.STANDARD,
+                "stocktwits:seasoned", SocialChannels.Tier.STANDARD),
+                SocialChannels.Tier.STANDARD, 5_000, 180);
+        assertTrue(ch.isCredible(organic), "unverified, above both floors → credible");
+
+        SocialPost outlet = new SocialPost("news-1", "news", "yahoo", "yahoo",
+                5_000_000, true, 3_650, 0L, "Apple breakout on record quarter $AAPL");
+        var signals = CorroborationGate.evaluate(List.of(organic, outlet), UNIVERSE, SECTOR, ch, 2, 4);
+
+        assertEquals(1, signals.size());
+        var s = signals.get(0);
+        assertEquals("AAPL", s.instrumentId());
+        assertEquals(2, s.corroboratingChannels(), "outlet + organic author are two distinct channels");
+        assertFalse(s.manipulationSuspected(), "corroborated — not a pump");
+    }
+
     @Test
     void aLowCredibilityBurstIsFlaggedAsManipulationNotPromoted() {
         List<SocialPost> kept = new ArrayList<>();

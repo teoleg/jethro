@@ -14,6 +14,74 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-05 13:30Z (**Item #1 CLOSES — ADR-0138 ✅ VERIFIED from the app's own log.** `629dbbdf8` scored ⚠️ INCONCLUSIVE (risk-adj **+0.001718**/cycle over 37, **t = +1.00** vs the 1.5 hurdle) and is kept; but its *mechanism* verified on every check, and for the first time the grading needed no replication script — the terminator line ADR-0138 shipped answered it directly. With #1 closed the register is re-ranked against the standing priority (work on EDGE; if a source's measured expectancy is positive and significant net of cost, **let it size**), and the new #1 is the one that priority names: **the desk's only cost-beating source is structurally gagged.** `/api/signals/telemetry` cohort-clustered at the 3600 s horizon — `social` **+8.856** bps, 37 cohorts, **t = +2.01**, hit **0.619**, positive at all three horizons and carrying the **highest** fusion weight **1.5768** — against measured cost of **1.009** bps/side of fee (the app's own fills: `$39.187210` on `$388,348.116512140580`) plus **~0.75** bps of slippage per fill. And it contributes to **0 of 9** planned names, while the three sources that *do* size the book — trend **+1.540** (t=+0.83), reversion **-0.286**, xsreversion **-5.006** (t=-1.16) — are exactly the three that do not beat their own trading cost. Traced to one boolean and fixed: ADR-0139.)
+
+### Step 0 — `629dbbdf8` (ADR-0138): SCORED ⚠️ INCONCLUSIVE, mechanism ✅ VERIFIED on every check
+
+Boot **2026-08-04T19:43:11Z** (`traffic.timestampMillis` − `ops_jvm.uptimeSeconds` **64010**); the JVM has
+run since without restart, so this is a clean single-boot read.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| zero `sensor still cold` WARNs for a name with stored marks | the twelve equities cold at **every** prior boot (JPM 137/193, BAC 192/193, NEE 171/193, JNJ, CAT, GOOG, MCD, HD, PFE, CVX, KO, PG) are **absent** from this boot's cold list | ✅ |
+| any short seed names its terminator + span | every survivor does, and every one is a genuinely thin series: rates `FULL` at **241/241** and **193/193**; AMD `HISTORY_EXHAUSTED` **15 of 193** covering **19880s** at a **586000ms** step; NFLX **10**, PLTR **20**, META **41**, GOOGL **24**, AUDUSD `NO_HISTORY` | ✅ |
+| no `sources ≤ 1` exit within 5 min of JVM start | boot **19:43:11Z**, first post-boot order **20:10:10Z** — **27 min**. Five prior boots were each followed ~40 s later by a liquidation | ✅ |
+
+**Struck and moved below the line.** `026cda49d`'s flagged auto-revert stays **deliberately not completed**
+(Rule 303): it is itself the revert of the graded-BAD ADR-0136.
+
+### Item #1 (NEW) — the desk's only cost-beating source cannot reach the corroboration gate: ⚠️ OPEN, **fix now shipped (ADR-0139)**
+
+| check | reading | verdict |
+| --- | --- | --- |
+| `social` in `/api/fusion/targets` `contributions[]` | **0 of 9** planned names (the nine carry trend / reversion / xsreversion only) | ⚠️ |
+| `/api/social` funnel | **153,207** ingested → **5,289** kept → **18** ever corroborated, against `corroborationChannels = 2` | ⚠️ |
+| can StockTwits supply a credible channel? | `isCredible` required `verified && followers ≥ 5,000 && ageDays ≥ 180`; the adapter maps `verified` from `user.official`, which marks StockTwits' OWN accounts. A live read of the same endpoint (`streams/symbol/AAPL.json`, 30 messages) returns `official: false` for **30 of 30**, while `followers` spans **-2 … 5,978** — one author **above** the floor — and join dates reach **2018**. The conjunction short-circuits before either floor is read | ✅ root cause closed |
+| can news supply the second? | only Yahoo resolves single-name tickers: all **24** discovery candidates, over 2 days and up to **206** mentions, carry `sources: [news:yahoo]` and nothing else | ⚠️ one channel, threshold two |
+| fix deployed | ADR-0139 — verification and the two measured floors become **alternatives**, not a conjunction; `k`, both floor values, the pump tell and the whole deterministic floor unchanged; strictly one-way. `-Pci test` green, four new tests | ✅ shipped |
+
+Deliberately **not** lowering `corroboration-channels` to 1 (that *is* the ADR-0050 §3 adversarial
+control), **not** re-trying ADR-0135's hold-through-breadth-collapse (graded ❌ BAD), and **not** widening
+deployment on trend/reversion/xsreversion to fill the dormant book — they measure below cost, and forcing
+trades that lose money is not a fix for dormancy.
+
+**VERIFY-BY next run:** `/api/social` `counters.corroborated` above **18**; ≥1 `signals[]` row on a
+**tracked** name with `channels ≥ 2`; and `social` present in `contributions[]` of ≥1
+`/api/fusion/targets` row. None has ever happened.
+
+### Item #2 — the cash close liquidates the whole book on a freshness artifact: ⚠️ OPEN, no fix attempted
+
+Reproduced exactly this window and now timed to the second: the equity cash close is **20:00Z**; the first
+liquidation order is **20:10:10Z** — **600 s** later, which is `jethro.fusion.freshness-seconds=600` to
+the second. Eight names (MCD, NEE, CAT, JPM, PG, WMT, XOM, CVX) exit within **200 ms** of each other on
+`fusion exit — target decayed to flat [forecast=±0.0, sources=1]`, then GOOG **20:11:41**, AAPL
+**20:14:13**, NVDA **20:16:15**, AMZN **20:17:46**, MSFT **21:00:47** as each name's last print ages out.
+Gross **$52,192.44 → $0.00**.
+
+Ranked **#2, and deliberately parked**: the two obvious repairs are both closed. Holding through the
+collapse is ADR-0135, graded ❌ BAD. Decaying the inventory at the ADR-0080 rate — the third option
+ADR-0135's own postmortem invited — does **not** help on the fusion clock: `a = 1 − exp(−30/3600) =
+0.0083`/cycle, so across a ~17.5 h close (≈2,100 cycles) the position decays to flat anyway, having traded
+the same notional in more fills, and `PositionBuffer`'s own doc records that this desk's cost is
+proportional to **quantity** traded, not order count — so it saves nothing. A print-clock decay leaves the
+overnight case identical to the reverted ADR-0135. This needs a genuinely new mechanism, not another
+variant; it does not get a cycle until one exists.
+
+### Item #3 — the aim is in-memory only: ⚠️ OPEN, and its diagnosis was incomplete
+
+Live `/api/fusion/targets` `insideBuffer` **8 of 9** with `currentQty 0` on every name. The register has
+blamed restarts, but the JVM ran **64,010 s** without one and the aims were still near zero — they are
+zeroed by **item #2's** close liquidation (a flat target snaps the aim to zero), not by a restart. The
+buffer arithmetic then reproduces the dormancy exactly: `band = |target| · TARGET_ABS/|forecast| ·
+bufferFraction` is **independent of the forecast** while the target is proportional to it, so from flat a
+name cannot be entered until its aim clears a band sized for a typical-strength conviction — and ADR-0102
+clamps the aim inside the target. Live proof, the app's own numbers: NVDA `forecast +1.202`,
+`targetQty +36.142847`, `aim +36.142847` (clamped), `deltaQty +6.0818` — the desk may hold at most **16.8%**
+of its own target. GOOG (fc +1.269, aim 23.065231 vs target 44.66), AAPL (fc -1.682), UNH (fc -1.444) and
+AMZN (fc +4.972, aim 20.777309 vs target 151.61) are all inside the band and hold **nothing**. Ranked #3
+because #2 gates it and because widening deployment onto below-cost sources is the wrong answer regardless.
+
+---
 ## Verification block — 2026-08-04 19:30Z (**Item #1 FIXED and shipped — ADR-0138.** `120b22b41` has been SCORED ⚠️ INCONCLUSIVE, `reports/.pending-baseline.json` is gone, and the ADR-0116 freeze is lifted — so this cycle makes the first code change in six, and it goes to item #1. The diagnosis finally closed on a single line rather than another reproduction: `SensorWarmup` sized its history read as `2 × samples × step` with `step` the **median** inter-print gap, and the median is the wrong statistic to bound a **sum** of `samples` gaps when the distribution is heavy-tailed — which the class's own documentation states. That makes the window short by a boot-dependent amount, which is precisely the signature Rule 322 could not attribute to any per-name rule (BAC **193 → 192**, NEE **193 → 181 → 171**). The walk then ran off the oldest point it *read* while the stored series continued below it — 12h retention against seeds spanning tens of minutes — and reported short as though the history had ended. The fix makes the window a consequence of the walk: it doubles and the walk repeats until the seed fills, a genuine hole truncates it, or the series demonstrably ends, with the shallowest filling window used. "The series ends here" is inferred from the `since` already passed to the store — no new API, no extra scan. Every seed now names its terminator, span, step and read count, so the next cycle grades this from the app's own log rather than from a replication script.)
 
 ### Step 0 — `120b22b41` (ADR-0137): SCORED ⚠️ INCONCLUSIVE, mechanism ✅ VERIFIED to the end

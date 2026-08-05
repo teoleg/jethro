@@ -4264,3 +4264,53 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   the desk's own liquidate-and-rebuild plus market, **baseline behaviour**, claimed by nothing. Book is
   DORMANT at **$26,441.20** gross — **1.8%** of the firm cap, **$1,473,559** of headroom — while bleeding,
   so the answer is to stop the liquidation, not to de-risk.
+
+## 2026-08-05 13:30Z — the desk's only cost-beating source was gagged by a boolean the platform never sets (ADR-0139 shipped; `629dbbdf8` scored ⚠️ INCONCLUSIVE, mechanism ✅ VERIFIED)
+
+- **Rule 327 — when a gate ANDs a platform CREDENTIAL with a MEASURED floor, check the platform actually
+  issues that credential; if it does not, the floor is dead code and the gate is OFF, not strict.**
+  `SocialChannels.isCredible` required `verified && followers ≥ 5,000 && ageDays ≥ 180`, and the adapter
+  populates `verified` from StockTwits' `user.official` — which marks StockTwits' OWN corporate accounts.
+  A live read of the same endpoint the app polls returned `official: false` for **30 of 30** authors while
+  `followers` spanned **-2 … 5,978** (one above the floor) and join dates reached **2018**. So the
+  conjunction short-circuited before either configured floor was ever evaluated, and no organic post has
+  ever been credible. **Rule: a conjunction of a categorical badge and a measured threshold silently
+  becomes "never" on any platform without the badge — verify the field is populated in the live payload,
+  not just present in the schema.**
+- **Rule 328 — the class's own javadoc is a testable claim; when it contradicts the code, the code is the
+  bug.** The `defaultTier` javadoc promises "unknown accounts are judged by the author FLOORS below — a
+  pump throwaway still fails and cannot corroborate". The code made *every* account fail. This is the
+  second cycle running where the defect was written down in the class that contained it (Rule 323:
+  `SensorWarmup`'s doc said gaps are heavy-tailed while the code used the median). **Rule: when a class
+  documents an intent, read the code as an assertion about that intent and check it.**
+- **Rule 329 — a dormant book is not a licence to deploy into sources measured below their own cost.**
+  The book is DORMANT at **$0.00** gross with **$1,500,000** of headroom, and the obvious move was to
+  widen deployment. But at the 3600 s horizon the three sources actually sizing the book measure
+  **+1.540** bps (trend, t=+0.83), **-0.286** (reversion) and **-5.006** (xsreversion, t=-1.16) against a
+  measured **~3.5** bps round trip (**1.009** bps/side of fee from the app's own fills, **~0.75** bps of
+  slippage per fill from `/api/tca`). Deploying harder into those is a forecastably losing trade.
+  **Rule: ADR-0132's deploy mandate says fix an idle book — it does not say fill it with negative
+  expectancy. Find the source that beats cost first, then remove what stops it sizing.**
+- **Rule 330 — before spending a cycle on a mechanism, check whether every repair of it is already
+  closed.** The cash close still liquidates the whole book (**20:00Z** close, first exit **20:10:10Z** —
+  exactly the **600 s** `jethro.fusion.freshness-seconds`; gross **$52,192.44 → $0.00**). Holding through
+  it is ADR-0135, graded ❌ BAD. Decaying at the ADR-0080 rate — the third option ADR-0135's own postmortem
+  invited — saves nothing: `a = 1 − exp(−30/3600) = 0.0083`/cycle decays to flat across a 17.5 h close
+  anyway, and `PositionBuffer`'s own doc records that this desk's cost is proportional to **quantity**
+  traded, not order count. **Rule: an "unexplored option" named in a postmortem still has to survive the
+  arithmetic before it earns a cycle — park the item honestly rather than shipping a variant of a
+  reverted idea.**
+- **Rule 331 — the dormancy has an exact arithmetic cause, and it is not restarts.** `insideBuffer` **8 of
+  9** with `currentQty 0` everywhere, after **64,010 s** of uptime with no restart: the aims were zeroed
+  by the close liquidation, not by a reboot. `band = |target| · TARGET_ABS/|forecast| · bufferFraction` is
+  **independent of the forecast** while the target is proportional to it, and ADR-0102 clamps the aim
+  inside the target — so a name may hold at most `target · (1 − TARGET_ABS·bufferFraction/|forecast|)`.
+  Live: NVDA `forecast +1.202`, `targetQty +36.142847`, `aim +36.142847`, `deltaQty +6.0818` = **16.8%**
+  of its own target; AMZN, GOOG, AAPL and UNH hold **nothing**. **Rule: on a desk whose convictions run
+  well below TARGET_ABS, a buffer sized on the AVERAGE position quantises the book to zero — that is not
+  turnover control, and any future fix here must be stated in those terms.**
+- **Trigger/attribution.** `629dbbdf8` scored **⚠️ INCONCLUSIVE** (risk-adj **+0.001718**/cycle over 37,
+  **t = +1.00** vs the 1.5 hurdle) — kept, and its mechanism VERIFIED on all three VERIFY-BY checks from
+  the app's own boot log rather than a replication script, which is exactly what ADR-0138's terminator
+  line was shipped for. The window's PnL move is **+0.00** over three heartbeats with the US session
+  closed, no restart and no code change: **baseline behaviour, claimed by nothing.**
