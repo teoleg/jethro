@@ -4314,3 +4314,36 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   the app's own boot log rather than a replication script, which is exactly what ADR-0138's terminator
   line was shipped for. The window's PnL move is **+0.00** over three heartbeats with the US session
   closed, no restart and no code change: **baseline behaviour, claimed by nothing.**
+
+## 2026-08-05 14:00Z — ADR-0139's mechanism verified; the second gate on social is an owner decision, not a bug
+
+- **Rule 332 — a gate you fixed may not be the only gate; look for the SECOND one before claiming the
+  outcome.** ADR-0139 opened the credibility conjunction and it demonstrably worked: **4** organic
+  StockTwits authors now read `credible: true` (`cubie`, `dojidad`, `Etrading`, `peloswing`) where the
+  pre-fix live read returned `official: false` for **30 of 30**, and **AAPL** hit `channels: 2`, `BULLISH`,
+  `manipulationSuspected: false` — the first tracked name ever to clear corroboration. But social is still
+  in **0 of 21** `/api/fusion/targets` `contributions[]`, because `jethro.fusion.social.per-channel=0`
+  makes `fromSocial` return exactly `0.0` and `hasView()` false. **Rule: when a fix verifies at the
+  mechanism but not at the outcome, the remaining distance is another gate — find it before you either
+  claim success or ship a second fix.**
+- **Rule 333 — an owner-set dial with cited provenance is a decision to ESCALATE, never a defect to
+  repair.** The config says verbatim: *"ADVISORY-ONLY ENFORCEMENT (Oleg, 2026-07-27) … RESTORES ADR-0049
+  ('a social subject can NEVER originate an order') … Restore to 4.0 ONLY to deliberately let corroborated
+  social size again."* Raising it would be the loop re-litigating an accepted ADR and re-authoring a
+  money-gating number — both forbidden. Item #1 therefore closes **as a defect** and converts to a
+  one-concept decision request for Oleg. **Rule: read a money dial's provenance comment BEFORE ranking it
+  as a must-fix; "the number is zero and that blocks me" is not evidence the number is wrong.**
+- **Rule 334 — a counter that resets at boot must be compared as a RATE, never as an absolute.** The
+  VERIFY-BY written last cycle asked for `counters.corroborated` above **18**; it read **16** and looked
+  like a failure. `corroborated` is an `AtomicLong` field on `SocialLifecycle` (`:49`), reset every boot,
+  and the JVM had been up ~900 s: **16 in ~900 s** versus **18 in 64,010 s** is a large improvement, not a
+  shortfall. **Rule: when authoring a VERIFY-BY against a counter, state its reset semantics in the same
+  line, or the next cycle grades the fix backwards.**
+- **Trigger/attribution.** No code change this cycle: `reports/.pending-baseline.json` still holds
+  `d51f179a2` and the ledger's newest row is `629dbbdf8`, so the contract forbids stacking. PnL **+0.00**
+  over three heartbeats, gross **0.00000000**, and the newest `/api/orders` row is **2026-08-04T21:00:47Z**
+  — **no order in ~17 h across a restart**. Neither market nor change claims any of this window; it is
+  baseline. The dormancy stays ranked BELOW the edge problem (Rule 329): with social owner-gated out,
+  `trend` **+1.2373** bps, `reversion` **-0.5929** and `xsreversion` **-3.6159** at 3600 s are all below
+  the **1.009** bps/side fee plus **~0.75** bps slippage, so filling the book with them is a forecastably
+  losing trade.

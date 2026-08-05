@@ -14,6 +14,77 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-05 14:00Z (**NO CODE CHANGE — `d51f179a2` (ADR-0139) is under measurement**; `reports/.pending-baseline.json` exists and the ledger's newest row is still `629dbbdf8`, so per the contract a new change would destroy the evidence. Step 0 still ran: **ADR-0139's mechanism ✅ VERIFIED on the two checks it controls, and the third VERIFY-BY is RETIRED as mis-specified** — it asked for an outcome an explicit owner decision forbids. Item #1 therefore closes **as a defect** and converts to a **decision request for Oleg**, not something the loop may take itself.)
+
+### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ VERIFIED (2 of 3 checks; 3rd retired), PnL verdict pending
+
+Boot **2026-08-05T13:50:39Z** (`traffic.timestampMillis` **1785938401645** − `ops_jvm.uptimeSeconds`
+**562**) — i.e. immediately after last cycle's commit, so the running JVM *is* the ADR-0139 build. All
+readings below are from a single coherent `/api/social` + `/api/fusion/targets` pair.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| `counters.corroborated` above **18** | **16** at ~15 min of uptime. But the counter is an `AtomicLong` field on `SocialLifecycle` (`:49`) — **reset at boot**, so the absolute is not comparable across boots and the honest metric is the RATE: **16 in ~900 s** now vs **18 in 64,010 s** at the previous boot | ✅ (on rate; the stated absolute threshold was itself boot-naive) |
+| ≥1 `signals[]` row on a **tracked** name with `channels ≥ 2` | **AAPL — `tracked: true`, `channels: 2`, `direction: BULLISH`, `manipulationSuspected: false`.** This has never happened before. Its enabling cause is visible in the same payload: **4 organic StockTwits authors now read `credible: true`** (`cubie`, `dojidad`, `Etrading`, `peloswing`), where the pre-fix live read returned `official: false` for **30 of 30** and no StockTwits author could ever be credible | ✅ |
+| `social` present in `contributions[]` of ≥1 `/api/fusion/targets` row | **0 of 21** rows | ⚠️ **but RETIRED — see below** |
+
+### Why the third check was mis-specified — and must NOT be "fixed"
+
+`jethro.fusion.social.per-channel=0`, and the config comment states its provenance verbatim:
+**"ADVISORY-ONLY ENFORCEMENT (Oleg, 2026-07-27) … This RESTORES ADR-0049 ('a social subject can NEVER
+originate an order') / the ADR-0050 'advisory only' intent … Restore to 4.0 ONLY to deliberately let
+corroborated social size again."** `SourceForecasts.fromSocial` computes
+`strength = max(1, channels) × perChannel`, so with `perChannel = 0` every social forecast is exactly
+`0.0`, `Forecast.hasView()` is false, and `ForecastRegistry.byInstrument` excludes it **by construction**.
+
+So there were always **two** gates in series, and last cycle's register saw only the first. ADR-0139
+opened the one that was a genuine defect (the credibility conjunction). The second is an **owner-set
+money dial with explicit provenance and an ADR behind it** — raising it is re-litigating an accepted
+decision, which the loop does not do (CLAUDE.md: accepted ADRs are settled; no invented risk numbers).
+Note the measured edge is unaffected either way: `signalTelemetry.record("social", …)` runs independently
+of `per-channel`, so social's telemetry stays honest while it is sized at zero.
+
+**Item #1 → CLOSED as a defect. Converted to a decision request for Oleg (one concept only):**
+*may a corroborated social signal contribute a sizing forecast — i.e. restore
+`jethro.fusion.social.per-channel` from 0 to 4.0, still behind the ADR-0049 OOS edge gate?* The evidence
+for the ask, read from `/api/signals/telemetry` this run (3600 s horizon): `social` `avgReturnBps`
+**8.855736**, `resolved` **373**, `hitRate` **0.619**, `cohorts` **37**, `stdCohortMeanBps` **26.863**;
+positive at all three horizons; highest fusion weight **1.5850**. The loop takes **no** action on it.
+
+### Item #1 (NEW) — nothing the desk is *allowed* to size beats its own trading cost: ⚠️ OPEN
+
+With social owner-gated to advisory-only, every source that can actually size the book measures below
+cost. From this run's `/api/signals/telemetry` at 3600 s: `trend` **+1.2373** bps (`cohorts` 97,
+`stdCohortMeanBps` 17.554), `reversion` **-0.5929**, `xsreversion` **-3.6159**, `momentum` **+6.5493**
+(but only `cohorts` 7, `stdCohortMeanBps` 27.451 — far too thin to act on) — against the measured round
+trip already on file (**1.009** bps/side of fee plus **~0.75** bps of slippage per fill). This is exactly
+what the standing priority names: **re-weighting sources with no edge cannot create edge; build and
+validate a NEW predictor through the OOS backtest gate (ADR-0049).** That is next cycle's one change,
+once `d51f179a2` is scored.
+
+**VERIFY-BY next run:** a new source name present in `/api/signals/telemetry` with its own `resolved` /
+`cohorts` / `avgReturnBps` row, having passed the ADR-0049 OOS gate — not a re-tune of trend, reversion,
+xsreversion or the fusion weights.
+
+### Item #2 — the desk is DORMANT and has placed no order in ~17 h: ⚠️ OPEN
+
+`/api/risk` `.total`: `grossExposure` **0.00000000**, `netExposure` **0.00000000**, `totalPnl`
+**-603.08012889**. The newest row in `/api/orders` is `createdAtMillis` **1785877247147**
+(**2026-08-04T21:00:47Z**) — the MSFT leg of the cash-close liquidation. Nothing since, across a restart.
+Meanwhile `/api/fusion/targets` is live and willing: `routing: true`, **21** instruments, non-zero targets
+(WMT **1275.12**, NEE **832.06**, CVX **452.92**) against `currentQty` **0** on every one. Rule 331's
+buffer-quantisation arithmetic is the standing explanation. Ranked below #1 because deploying harder into
+sources measured below cost is a forecastably losing trade (Rule 329) — the edge has to exist first.
+
+**VERIFY-BY next run:** a `/api/orders` row with `createdAtMillis` after the current boot, and `/api/risk`
+`.total.grossExposure` above **0.00000000**.
+
+### Item #3 — the cash close liquidates the whole book on a freshness artifact: ⚠️ OPEN, parked
+
+Unchanged and still reproduced by the order log above. Parked per Rule 330: holding through it is
+ADR-0135 (graded ❌ BAD) and the ADR-0080-rate decay alternative does not survive its own arithmetic.
+
+---
 ## Verification block — 2026-08-05 13:30Z (**Item #1 CLOSES — ADR-0138 ✅ VERIFIED from the app's own log.** `629dbbdf8` scored ⚠️ INCONCLUSIVE (risk-adj **+0.001718**/cycle over 37, **t = +1.00** vs the 1.5 hurdle) and is kept; but its *mechanism* verified on every check, and for the first time the grading needed no replication script — the terminator line ADR-0138 shipped answered it directly. With #1 closed the register is re-ranked against the standing priority (work on EDGE; if a source's measured expectancy is positive and significant net of cost, **let it size**), and the new #1 is the one that priority names: **the desk's only cost-beating source is structurally gagged.** `/api/signals/telemetry` cohort-clustered at the 3600 s horizon — `social` **+8.856** bps, 37 cohorts, **t = +2.01**, hit **0.619**, positive at all three horizons and carrying the **highest** fusion weight **1.5768** — against measured cost of **1.009** bps/side of fee (the app's own fills: `$39.187210` on `$388,348.116512140580`) plus **~0.75** bps of slippage per fill. And it contributes to **0 of 9** planned names, while the three sources that *do* size the book — trend **+1.540** (t=+0.83), reversion **-0.286**, xsreversion **-5.006** (t=-1.16) — are exactly the three that do not beat their own trading cost. Traced to one boolean and fixed: ADR-0139.)
 
 ### Step 0 — `629dbbdf8` (ADR-0138): SCORED ⚠️ INCONCLUSIVE, mechanism ✅ VERIFIED on every check
