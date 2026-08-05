@@ -4596,3 +4596,44 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   seven-share NVDA round trip and its fees: noise, and evidence about neither the market nor a change. The
   Rule 354/355 finding rests on the order reasons and the plan, not on this PnL. Gross **$4,004.439** is
   **0.3%** of the firm cap — under-deployment under ADR-0132, not cap pressure.
+
+## 2026-08-05 17:30Z — the buffer's freeze has a closed form, and it is the same `if` as the liquidation
+
+- **Rule 358 — the no-trade buffer's release condition, stated exactly.** `PositionBuffer.band`
+  (`PositionBuffer.java:338`) is `|target| × TARGET_ABS / |forecast| × width`; with the shipped
+  `jethro.fusion.position-buffer.fraction=0.10` and `Forecast.TARGET_ABS = 10.0`, the test
+  `|aim − held| ≤ band` reduces from a flat holding to **|aim|/|target| ≤ 1/|forecast|**. It reproduces
+  the live plan on every visible name — `insideBuffer` **26 of 26**, all `deltaQty` **0.0** — AMZN
+  **0.0735** vs **0.2045** (target **217.187537**, forecast **4.89099753538535**, 4 sources), CVX **0.0142**
+  vs **0.2373**, MSFT **0.0297** vs **0.2550**, AAPL **0.1667** vs **0.3272**, JPM **0.0083** vs **0.3510**,
+  NEE **0.0861** vs **0.5554**. **Rule: stop describing the band qualitatively — it has a one-line closed
+  form, so any proposed fix must be checked against `|aim|/|target|` vs `1/|forecast|` on the live `aims`
+  map BEFORE it ships, not argued about in prose.**
+- **Rule 359 — the threshold runs the wrong way, and the aim that must cross it is boot-local.** Because
+  the release point is `1/|forecast|`, a WEAKER view must have its aim carried FURTHER: NEE at forecast
+  **1.8005** needs the aim past **55%** of target while AMZN at **4.891** needs **20%**. And the aim is an
+  EWMA held in an in-memory map (`PositionBuffer.java:105`), seeded from the holding on every JVM boot and
+  reset to flat by `withinTarget` on every forecast sign flip, against a JVM `uptimeSeconds` of **1388**.
+  **Rule: whether a name can be opened is currently a function of process uptime and sign-flip luck, not of
+  evidence strength — treat any "the desk is dormant" reading as a question about the aim's seed and reset,
+  not about the sensors.**
+- **Rule 360 — items #1 and #2 are the two branches of one `if`, and the javadoc already names the bug.**
+  `bufferedDelta` (`PositionBuffer.java:468`) returns the FULL unbuffered gap when `target.signum() == 0`
+  and the buffered near-edge otherwise. ADR-0107's own text in that method says "an EXIT is what a control
+  ORDERED, not what the arithmetic happens to read" — but scopes the remedy to the `aim == 0` case, so a
+  `target == 0` produced by SOURCE COLLAPSE still reads as an ordered exit and liquidates in full. That is
+  the NVDA `[forecast=-0.0, sources=1]` row, 30 s before the same name replanned at `combinedForecast`
+  **-3.2603756638089805** on **3** sources, `agreement` **0.872320186445232**. **Rule: when two must-fix
+  items turn out to be branches of the same conditional, fix the conditional — do not ship two changes
+  that each patch one arm and interact.**
+- **Step 0 — `e956dcf46` ✅ VERIFIED on a second, independent boot.** `traffic.timestampMillis`
+  **1785951001992** − `ops_jvm.uptimeSeconds` **1388** = boot **17:06:53.992Z**, after the **16:38:20Z**
+  commit. **All 12** `recent` STANDARD posts read `credible: false` (was 11 of 12);
+  `counters.corroborated` **7** in **1388 s** against **17/1427 s** on the ADR-0139 boots;
+  `manipulationSuspected` **39** on `ingested` **3390** / `kept` **800**.
+- **Trigger/attribution — market, and cleanly separable for once.** The window's only order was the
+  ADR-0019 auto-hedge ES `SELL 0.003243`; no alpha order routed. `ALPHA.unrealizedPnl` moved
+  **+1.48000000 → -14.60000000** on the same unchanged GOOG **8** shares, opened two cycles earlier at
+  `fusion entry — target increase [forecast=6.3413095741475525, sources=3]`. **Rule: a window in which no
+  alpha order routed is the one window where the market/change split is unambiguous — record it as market
+  and resist reading anything about the thesis into it.**

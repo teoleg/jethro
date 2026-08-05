@@ -15,6 +15,74 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-05 17:30Z (**NO CHANGE — ADR-0116 measurement freeze, cycle 2 of 6.** `reports/.pending-baseline.json` names `e956dcf46` and the scorer's own `window_since` reports **2/6** cycles accrued; the ledger's newest row is still `d51f179a2`. Step 0 re-graded the revert ✅ VERIFIED on a **second, independent boot**. The cycle's real product is that **item #2 now has a closed form that predicts the live plan exactly** — `insideBuffer` **26 of 26**, and the release condition `|aim|/|target| ≤ 1/|forecast|` reproduces every one of the six visible frozen names — and that **items #1 and #2 are the two branches of a single `if` in `bufferedDelta`**. Ranking is unchanged: #1 still fires first and moves whole positions. But the fix is now specified against one conditional rather than two separate patches.)
+
+### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED (2nd boot)
+
+Deployment confirmed on a **fresh** JVM, so this is not a re-read of last cycle's process:
+`traffic.timestampMillis` **1785951001992** − `ops_jvm.uptimeSeconds` **1388** = boot **17:06:53.992Z**,
+after the revert's **16:38:20Z** commit.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| uncurated authors do not pass on a single credential | of the 12 `recent` posts, all tier `STANDARD`, **all 12** read `credible: false` (was 11 of 12) | ✅ strict conjunction is live |
+| corroboration rate off its loosened level (Rule 334 — grade the RATE, the counter resets at boot) | `counters.corroborated` **7** in **1388 s**, against **17/1427 s**, **15/1439 s**, **17/1362 s** on the ADR-0139 boots | ✅ holds on a second boot |
+| pump tell unaffected | `manipulationSuspected` **39** on `ingested` **3390** / `kept` **800** | ✅ still firing |
+
+The scorer owns the vector verdict; that is 2 of 6 cycles in and is not mine to pre-judge.
+
+### Item #1 — a degenerate 1-source zero forecast BYPASSES the no-trade buffer and full-liquidates: ⚠️ OPEN, stays #1, now localised to one line
+
+Unchanged in rank and evidence (the NVDA 16:59:27 row and the 2026-08-04 20:10–20:17Z seven-name sweep),
+and now pinned to the exact conditional. `bufferedDelta` (`PositionBuffer.java:468`) returns the **full,
+unbuffered** gap when `target.signum() == 0`. A plan whose sources collapsed to **1** and whose forecast
+reads **-0.0** produces exactly that, so source collapse is executed as if a risk control had ordered an
+exit. The method's own ADR-0107 javadoc states the correct rule — *"an EXIT is what a control ORDERED, not
+what the arithmetic happens to read"* — but scopes its remedy to the `aim == 0` case, leaving `target == 0`
+unguarded. The refutation stands 30 s later: `combinedForecast` **-3.2603756638089805**, `sources` **3**,
+`agreement` **0.872320186445232**.
+
+**VERIFY-BY (next run):** no order carries `fusion exit — target decayed to flat` with `sources=1` in
+`recent_orders`; and a name whose source count collapses within a cycle shows a non-full `deltaQty`. The
+change ships a unit test reproducing the 16:59:27 row **before** it alters behaviour (Rule 353).
+
+### Item #2 — the no-trade band admits only outlier forecasts: ⚠️ OPEN, mechanism now CLOSED-FORM
+
+Promoted in precision, not in rank. `insideBuffer` **26 of 26**, every `deltaQty` **0.0**, against real
+intent: AMZN `targetQty` **217.187537** at `combinedForecast` **4.89099753538535** on **4** sources with
+`currentQty` **0**; CVX **365.706789**; MSFT **121.722257**; AAPL **-191.708027**; JPM **191.617345**;
+NEE **333.937475**.
+
+`PositionBuffer.band` (`PositionBuffer.java:338`) is `|target| × TARGET_ABS / |forecast| × width`. With the
+shipped `jethro.fusion.position-buffer.fraction=0.10` and `Forecast.TARGET_ABS = 10.0`, the no-trade test
+`|aim − held| ≤ band` reduces, from a flat holding, to **|aim| / |target| ≤ 1 / |forecast|**:
+
+| name | sources | `|aim|/|targetQty|` | `1/|combinedForecast|` | inside? | live `deltaQty` |
+| --- | --- | --- | --- | --- | --- |
+| AMZN | 4 | 0.0735 | 0.2045 | yes | 0.0 |
+| CVX | 2 | 0.0142 | 0.2373 | yes | 0.0 |
+| MSFT | 3 | 0.0297 | 0.2550 | yes | 0.0 |
+| AAPL | 3 | 0.1667 | 0.3272 | yes | 0.0 |
+| JPM | 3 | 0.0083 | 0.3510 | yes | 0.0 |
+| NEE | 3 | 0.0861 | 0.5554 | yes | 0.0 |
+
+Six of six. Two properties of that threshold are the actual defect: it is **1/|forecast|**, so a *weaker*
+view must carry its aim *further* (NEE needs **55%** of target, AMZN **20%**); and the aim is an EWMA held
+in an in-memory map (`PositionBuffer.java:105`), re-seeded from the holding on every JVM boot and reset to
+flat by `withinTarget` on every forecast sign flip, against `uptimeSeconds` **1388**. So openability is a
+function of process uptime and sign-flip luck rather than evidence strength.
+
+**VERIFY-BY (when it becomes #1):** `insideBuffer` strictly below the instrument count with at least one
+non-zero `deltaQty` on a multi-source name, and the ratio table above recomputed on the live `aims` map —
+prose about the band is no longer acceptable evidence either way.
+
+### Item #3 — (unchanged) the edge gate refuses to size a source with measured expectancy: ⚠️ OPEN
+
+Carried. `edgeGate` reads `null` in this plan, so the gate is not what is holding the book — items #1/#2
+are. Re-rank only once the buffer conditional is fixed and the book can actually build.
+
+---
+
 ## Verification block — 2026-08-05 17:00Z (**NO CHANGE — ADR-0116 measurement freeze.** `scripts/score-change.py score` reports `e956dcf46 still accumulating evidence (1/6 cycles)` and `reports/.pending-baseline.json` names that commit, so last cycle's revert is under measurement and a new change would destroy its evidence. Step 0 graded the revert ✅ VERIFIED. The window also produced the register's most important reading yet: **the no-trade buffer is BYPASSED by a degenerate single-source zero forecast**, which full-liquidated NVDA seconds before the same three sources came back agreeing on the same side. That is promoted to **item #1**; the old #1 becomes #2 as the second half of the same asymmetry.)
 
 ### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED
