@@ -4387,3 +4387,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   stays ranked below the edge problem (Rule 329 reaffirmed): `trend` **+1.192832**, `reversion`
   **+0.384366**, `xsreversion` **-2.213774** at 3600 s are all under the **1.009** bps/side fee plus
   **~0.75** bps slippage, so filling the book from them is still a forecastably losing trade.
+
+## 2026-08-05 15:00Z — the dormancy is the no-trade band, not the warm-up: the band is wider than the target
+
+- **Rule 339 — a no-trade band scaled off a quantity the position is NOT allowed to reach can swallow the
+  whole reachable interval, and then the delta is identically zero forever.** `PositionBuffer.band` =
+  `|target| × Forecast.TARGET_ABS / |forecast| × width`, with `TARGET_ABS` **10.0** (`Forecast.java:20`) and
+  `width = max(bufferFraction, min(1.0, 2C/μ)) ≥ 0.5` (`widthFor`, `application.properties:313`). So
+  `band ≥ |target| × 5.0 / |forecast|`, i.e. **band ≥ |target| whenever |forecast| ≤ 5.0**. ADR-0102's
+  `withinTarget` clamps the aim into `[0, target]` and every holding is 0, so `|gap| ≤ |target| ≤ band` —
+  the no-trade region contains everything the aim may occupy. Live: strongest planned forecast PG
+  **4.270153**, then **4.102602**, **3.481492**; `insideBuffer` **22 of 22**; every `deltaQty` **0.0**;
+  `orders_day.total` **0**. **Rule: when a buffer's base and the position's bound come from different
+  quantities, check whether the band can exceed the bound — that is a deadlock, not a slow path.**
+- **Rule 340 — confirming a hypothesis is not the same as confirming it is the CAUSE; the confirmation can
+  disprove the ranking.** Rule 335 (warm-up cannot cross the overnight close) was confirmed by a two-boot
+  dose-response: boot **14:09:10Z** (2350 s after the 13:30Z open) seeded **2011–2046 s**; boot
+  **14:37:04Z** (4024 s after open) seeded **3970–3999 s** — the ceiling moved with the open, one-for-one,
+  while rates names with no session hole hit **241 of 241** (11583 s). But it self-heals within the session:
+  `streamVolMeasuredNames` **3 → 20**, seeds **207–233 of 241**, 22 targets planned — **and still zero
+  orders**. Fixing it would have put no risk on. Demoted #1 → #3. **Rule: after confirming a mechanism, ask
+  whether the symptom persists once the mechanism relaxes; if it does, you confirmed a real defect and the
+  wrong cause.**
+- **Rule 341 — when a formula's BASE changes, the owner's dial silently changes meaning, and re-dialling it
+  is the wrong repair.** `buffer-fraction = 0.5` is **OLEG-SET 2026-07-21** under the ADR-0055 band
+  `|target| × fraction` — "half the target", which can never swallow the target. ADR-0094 swapped the base
+  to Carver's average-position-at-typical-forecast without re-deriving the owner's number, so the same 0.5
+  became "half the average position" and, at forecasts running ~40% of typical strength, exceeds the whole
+  target. **Rule: the loop must not re-set an owner's number to compensate for a base change the owner
+  never saw — fix the code so the dial means what he set it to mean, and say so in the ADR.**
+- **Rule 342 — the best controlled experiment is the one the system already ran for you.** No replication
+  script was needed for either finding: the rates-vs-equities split inside one boot isolated the session
+  hole (Rule 336 reused), and the warm-sensors-still-flat state isolated the buffer. **Rule: before writing
+  a repro, look for the population or the moment where your suspected cause is already absent.**
+- **Trigger/attribution.** No code change: scorer prints `d51f179a2 still accumulating evidence (3/6
+  cycles)`, `.pending-baseline.json` still names `d51f179a2`, ledger newest still `629dbbdf8` — ADR-0116
+  freeze held a third cycle. PnL **-$603.08** flat to the cent over three heartbeats, gross **$0.00**,
+  newest order **2026-08-04 21:00:47Z**, `orders_day.total` **0**. Empty book, so neither market nor change
+  claims the window; it is baseline. ADR-0139 mechanism ✅ again: **17** corroborations in **1377 s** vs
+  **18 in 64,010 s** pre-fix. Rule 337 re-confirmed a third time — `social` **8.855736 → 4.837178 →
+  7.810160** bps on five more resolved observations (373 → 378); the owner ask stays NOT-YET-SUPPORTED.

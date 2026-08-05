@@ -14,6 +14,128 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-05 15:00Z (**NO CODE CHANGE — `d51f179a2` (ADR-0139) is at 3/6 cycles**; the scorer prints `still accumulating evidence (3/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `d51f179a2`, and the ledger's newest row is still `629dbbdf8`. The ADR-0116 freeze holds for a **third** cycle. Step 0 ran anyway and this cycle **found the cause of the dormancy in code** — it is not the warm-up. (1) ADR-0139's mechanism ✅ holds on a third independent boot. (2) Social's expectancy swung a **third** time, re-confirming Rule 337; the owner ask stays NOT-YET-SUPPORTED. (3) **Last cycle's #1 — the warm-up seed cannot cross the overnight close — is ✅ CONFIRMED at the mechanism by a clean two-boot dose-response, but is DEMOTED to #3**, because it self-heals *within* a session and this run proves it is not what holds the book flat. (4) **The new #1 is a code-verified structural deadlock in the no-trade buffer:** with sensors now warm and 22 targets planned, `insideBuffer` is **22 of 22** and every `deltaQty` is **0.0** — because the buffer band is scaled off the *average position at a typical forecast*, which makes the band **wider than the target itself** whenever the combined forecast is at or below half of typical strength. The aim is clamped into `[0, target]`, so the entire reachable interval lies inside the no-trade region and the delta is **identically zero, forever**.)
+
+### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ VERIFIED on a third boot; PnL verdict still pending (3/6)
+
+Boot **2026-08-05T14:37:04Z** (`traffic.timestampMillis` **1785942001502** − `ops_jvm.uptimeSeconds`
+**1377**); report snapshot **15:00:01Z**. Third independent boot; running JVM is still the ADR-0139 build.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| `counters.corroborated` rate sustained (Rule 334 — counter resets at boot, so grade the RATE) | **17** in **1377 s**, versus **17 in 1252 s** and **16 in ~900 s** on the two prior boots, and **18 in 64,010 s** pre-fix | ✅ rate holds on a third independent boot |
+| ≥1 tracked name at `channels ≥ 2` | `signals[]` is **empty** this snapshot; StockTwits was polling `[BRK.B, CAT, CVX]` | ⚠️ not reproduced — `signals[]` is point-in-time, not cumulative (see 14:30Z note); no reading contradicts the fix |
+
+### Social's expectancy swung a third time — Rule 337 re-confirmed, the owner ask stays NOT-YET-SUPPORTED
+
+Same endpoint, same 3600 s horizon, three consecutive cycles:
+
+| field | 14:00Z | 14:30Z | 15:00Z |
+| --- | --- | --- | --- |
+| `avgReturnBps` | **8.855736** | **4.837178** | **7.810160** |
+| `resolved` | **373** | **374** | **378** |
+| `hitRate` | **0.619** | **0.615789** | **0.626943** |
+| `cohorts` | **37** | **37** | **38** |
+| `stdCohortMeanBps` | **26.863** | **35.424588** | **25.820255** |
+
+The mean has now traversed **8.86 → 4.84 → 7.81** bps on **five** additional resolved observations. An
+estimate that moves that far on that little data is carried by a few large prints, not by a stable edge.
+The decision request to Oleg (restore `jethro.fusion.social.per-channel` from 0 to 4.0, still behind the
+ADR-0049 OOS gate) **remains open and remains explicitly NOT-YET-SUPPORTED**. The dial is the owner's; the
+loop does not touch it and will not re-offer it until the sign *and* magnitude hold across several cycles.
+
+### Item #1 (NEW) — the no-trade band is wider than the target, so the book can never be built: ⚠️ OPEN
+
+**This is the dormancy, and it is not the warm-up.** The controlled comparison is inside this one boot:
+the sensors are warm enough to plan a full book — `streamVolMeasuredNames` **20** (it was **3** last
+cycle), `volBudgetNames` **20**, `/api/fusion/targets` `routing: true` with **22** instruments and real
+target quantities (PG **423.028615**, WMT **500.316417**, NVDA **208.639712**) — and the desk *still*
+placed nothing: `insideBuffer` **22 of 22**, every shown `deltaQty` **0.0**, `orders_day.total` **0**,
+newest order in the book still **2026-08-04 21:00:47Z**. Warm sensors, real targets, zero orders. The
+constraint is downstream of the sensors.
+
+**The mechanism, read from the code, not inferred.** `PositionBuffer.band` computes
+
+```
+band  = |target| × Forecast.TARGET_ABS / |forecast| × width
+```
+
+with `Forecast.TARGET_ABS = 10.0` (`Forecast.java:20`) and
+`width = max(bufferFraction, min(1.0, 2C/μ))` (`PositionBuffer.widthFor`), so `width ≥ bufferFraction`,
+and `jethro.fusion.buffer-fraction = 0.5` (`application.properties:313`). Therefore
+
+```
+band ≥ |target| × 10.0 / |forecast| × 0.5 = |target| × 5.0 / |forecast|
+band ≥ |target|   ⟺   |forecast| ≤ 5.0
+```
+
+Meanwhile `PositionBuffer.withinTarget` (ADR-0102) clamps the aim into the closed interval between flat
+and this cycle's target, and the held position is **0** on every name. So `|gap| = |aim| ≤ |target| ≤ band`
+— the no-trade region **contains the entire interval the aim is allowed to occupy**, and
+`bufferedDelta` returns zero unconditionally. Not slowly, not until the aim climbs: *identically*, on
+every cycle, for as long as the forecast stays at or below half of typical strength.
+
+The live forecasts are all in that region: the strongest planned row this snapshot is PG
+**4.270153**, then NVDA **4.102602**, WMT **3.481492**, and the weakest shown **-2.647928** — every one
+inside `|forecast| ≤ 5.0`. That is exactly why `insideBuffer` reads **22 of 22** and not a smaller number.
+
+**How the dial came to mean something else.** `buffer-fraction = 0.5` is **OLEG-SET 2026-07-21**
+(`application.properties:293`), set when the ADR-0055 band was `|target| × bufferFraction` — under *that*
+formula 0.5 means "half the target", which can never swallow the target. ADR-0094 replaced the base of the
+fraction with Carver's *average position at a typical forecast* (`|target| × TARGET_ABS / |forecast|`)
+without re-deriving the owner's number against the new base. Under the new base the same 0.5 means "half
+the average position", and since the desk's forecasts currently run at roughly 40% of typical strength,
+half the average position exceeds the whole target. **The owner's number was silently re-interpreted into
+a different quantity** — a provenance failure of exactly the kind `CLAUDE.md` names, not a bad dial.
+
+**Therefore the fix is code, not a re-dial** — the loop must not quietly re-set an owner's number to
+compensate for a base change the owner never saw. The direction for next cycle: bound the band by the
+interval the aim can actually reach, so the no-trade region can never contain the whole reachable set,
+leaving the owner's 0.5 meaning what he set it to mean. That is architecturally significant (it changes
+when the desk trades at all) and ships with its own ADR, `**Status:** Implemented`, in the same commit.
+
+**VERIFY-BY (next run):** on `/api/fusion/targets`, `insideBuffer` **< `instruments`** and at least one
+planned row with `deltaQty ≠ 0` while the strongest `combinedForecast` is still `≤ 5.0`; and
+`orders_day.total` **> 0** with a `recent_orders` row created after this cycle. If `insideBuffer` still
+equals `instruments`, the fix is ⚠️ STILL-BROKEN regardless of PnL.
+
+### Item #2 — nothing the desk is *allowed* to size beats its own trading cost: ⚠️ OPEN (was #2)
+
+Unchanged in substance and still the standing-priority item, but it cannot be tested while #1 forces
+every delta to zero — a source's edge is unobservable if the desk never takes the position. At 3600 s:
+`trend` **+1.201659** (97 cohorts), `reversion` **+0.160001** (86), `xsreversion` negative — all below the
+**1.009** bps/side fee plus **~0.75** bps slippage. #1 now ranks above this because #1 is also what starves
+this item of the observations it needs.
+
+### Item #3 — an equity sensor's warm-up seed cannot cross the overnight session close: ✅ mechanism CONFIRMED, **DEMOTED** from #1
+
+The hypothesis raised last cycle is now confirmed by a **two-boot dose-response**, and the confirmation is
+also the reason to demote it. Coverage tracks time-since-session-open one-for-one:
+
+| boot | seconds after the 13:30Z open | equity seed coverage | rates seed coverage |
+| --- | --- | --- | --- |
+| 14:09:10Z | **2350 s** | **2011 – 2046 s** | FULL, 11331 s |
+| 14:37:04Z | **4024 s** | **3970 – 3999 s** (17 names clustered) | FULL, **11583 s** (reversion) / **9146 s** (trend) |
+
+The equity ceiling moved **+~1960 s** when the boot moved **+1674 s** later — the seed is bounded by the
+session open, exactly as Rule 335 predicted, while the rates names (marked off a continuously-refreshed
+curve with no session hole) reach **241 of 241** and keep growing. Mechanism: settled.
+
+**But it is not this run's binding constraint, and that is the new information.** It self-heals as the
+session runs — the same names that seeded 113/241 and 115/241 last cycle now seed **207 – 233 of 241**
+(HD 207, JNJ 215, CAT 218, UNH 233; risk-cut σ BAC **120 of 121**, KO **120 of 121**), and
+`streamVolMeasuredNames` rose **3 → 20**. The desk became able to see, planned 22 targets, and *still*
+traded nothing. Fixing the warm-up would therefore not have put a single dollar of risk on. It stays open
+— every restart still costs the desk its first minutes of sight, and thins the `signal_observations` the
+edge gate needs — but it ranks below #1 and #2.
+**VERIFY-BY:** an equity seed reporting `FULL` (or a terminator other than the session hole) with coverage
+**> 4024 s** on a boot less than 4024 s after the session open.
+
+### Item #4 — the cash close liquidates the whole book on a freshness artifact: ⚠️ OPEN, parked
+
+Unchanged; parked behind #1. Untestable while the book is flat.
+
+---
 ## Verification block — 2026-08-05 14:30Z (**NO CODE CHANGE — `d51f179a2` (ADR-0139) is STILL under measurement**; `reports/.pending-baseline.json` still names `d51f179a2` and the ledger's newest row is still `629dbbdf8`, so the ADR-0116 freeze holds for a second cycle. Step 0 ran anyway and produced two results that change the ranking. (1) **ADR-0139's mechanism holds** on its rate metric across a fresh boot. (2) **The evidence behind last cycle's decision request to Oleg has decayed and the ask is DOWNGRADED, not withdrawn** — `social`'s cohort-clustered expectancy moved **+8.855736 → +4.837178** bps at an *unchanged* **37** cohorts while `stdCohortMeanBps` rose **26.863 → 35.424588**, on **one** additional resolved observation (373 → 374). A statistic a single print moves by that much is not a basis for asking the owner to unlock a money dial. (3) A new, code-verified structural defect takes **#1**: **an equity sensor's warm-up seed cannot cross the overnight session close**, so every restart inside a session leaves the desk blind — which is both this run's dormancy *and* a direct drag on the OOS evidence the edge gate needs.)
 
 ### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ still VERIFIED on a second boot, PnL verdict still pending
