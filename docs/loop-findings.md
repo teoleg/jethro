@@ -4502,3 +4502,50 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   **398.004411 → 398.212047**) — but no change of mine landed this window, so the credit belongs to neither
   market nor change: it is 7 shares marked over ~14 minutes, and it is noise. ADR-0139 mechanism ✅ on a fifth
   boot: **15** corroborations in **1439 s** vs **18 in 64,010 s** pre-fix.
+
+## 2026-08-05 16:30Z — a verified mechanism can still be a BAD change; and the band's entry threshold got bracketed
+
+- **Rule 349 — a graded-BAD commit whose auto-revert conflicted is STILL LIVE, and completing that revert
+  outranks every open must-fix item.** The scorer's row carried `⚠️ REVERT FAILED (git conflict): the BAD
+  commit is STILL LIVE and needs a manual revert`, and `git merge-base --is-ancestor d51f179a2 HEAD`
+  returned true. Five earlier BAD rows carry the identical note, so this is a recurring failure of the
+  loop's own safeguard, not a one-off. **Rule: read the newest ledger row's NOTE, not just its verdict;
+  if it says the revert failed, verify against the tree and complete it before anything else — measuring
+  a new change on top of a live rejected one is worthless.** The established resolution is the one used
+  for ADR-0135/0136: running code out, annotated ADR and loop memory kept, resolve the report-file
+  conflicts to HEAD.
+- **Rule 350 — "the fix verified" and "the change was BAD" are not a contradiction; the gap between them
+  is the finding.** ADR-0139's defect-level VERIFY-BY passed on a **sixth** consecutive boot
+  (`counters.corroborated` **17** in **1427 s** versus **18 in 64,010 s** pre-fix, graded as a rate per
+  Rule 334; `manipulationSuspected` **32** on `ingested` **3540** / `kept` **919**, so the pump tell was
+  not disabled). And `social` reached the `contributions[]` of **zero** planned names all window. The
+  corroborations it unlocked never became SIZE. **Rule: when a mechanism verifies and the objective still
+  worsens, the defect you fixed was not on the path to the money — look one layer downstream for what
+  refuses to act on the thing you just unblocked.** Here that layer is the gate, not the credibility test;
+  re-loosening credibility is not to be re-attempted.
+- **Rule 351 — the band's entry threshold is now BRACKETED by a natural experiment, not inferred.** In one
+  plan: **PG** `combinedForecast` **6.117949**, `targetQty` **656.223137**, `currentQty` **0**, `deltaQty`
+  **0.0** — no trade; **GOOG** entered `BUY 8` on `forecast=6.3413095741475525`. A gap of **0.22** in
+  forecast separates "656 shares wanted, none traded" from "full entry". **Rule: when the system supplies
+  a same-cycle pair straddling a threshold, that pair IS the measurement — record the bracket and stop
+  re-deriving the threshold from the arithmetic.**
+- **Rule 352 — the trap is now confirmed on both traded names, and it is symmetric.** GOOG entered long at
+  **+6.3413** and ~7 min later plans `combinedForecast` **-2.0970**, `targetQty` **-57.134569** against
+  `currentQty` **+8.0**, releasing `deltaQty` **-0.06639**; NVDA entered short at **-9.6085** and now
+  plans **+176.077255** against **-7.0**, releasing **+0.058091**. Entry demands an outlier, the retreat
+  from a reversed view is throttled at the same width, so the band admits the most extreme views and
+  preferentially retains the ones that were wrong. **Rule: an entry band and an unwind band are different
+  policies — a move that reduces a SIGN INVERSION against the current forecast is not a discretionary
+  rebalance and must not be buffered like one.**
+- **Rule 353 — three instances of an unexplained arithmetic is a blocking precondition, not a footnote.**
+  The tiny-non-zero `deltaQty` rows are now NQ **0.001584**, NVDA **+0.058091**, GOOG **-0.06639**, and
+  the published `bufferedDelta` path still hand-derives to `edge = 0` for all three at any `width ≥ 0.5`,
+  `rate ≤ 1`. **Rule: do not tune a mechanism you cannot reproduce — the band fix ships a unit test that
+  reproduces these three rows BEFORE it changes the band.**
+- **Trigger/attribution — honest split, and it is neither.** No change of mine landed in this window
+  (ADR-0139 was under measurement; this cycle's revert commits after the snapshot). The book was flat at
+  the window's start, so there are **no untouched positions** for the market to have moved: the whole
+  **-$4.52** is the mark on two equity fills held for minutes plus the fee on a HEDGE ES round trip that
+  ended at FUTURE gross **0.00000000**. Fifteen shares over minutes is noise, and it is evidence about
+  neither the market nor the change. Gross **$4,452.86** is **0.3%** of the firm cap — deployment under
+  ADR-0132, not cap pressure.

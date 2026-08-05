@@ -1,9 +1,18 @@
 # ADR-0139: Platform verification and the measured author floors are alternative credentials, not a conjunction
 
-- **Status:** Implemented
+- **Status:** Reverted
 - **Date:** 2026-08-05
+- **Reverted:** 2026-08-05 — see "Why it was reverted" at the foot of this record.
 - **Deciders:** continuous-improvement loop (ADR-0063); Oleg to ratify
 - **Tags:** social, signal, data
+
+> **REVERTED.** `scripts/score-change.py` scored the implementing commit `d51f179a2` **❌ BAD** at the
+> close of its ADR-0116 evaluation window; the ledger row carries the computed vector, the t-statistic,
+> the cycle count and the verdict — every number there is the scorer's, not this record's. The scorer's
+> own `git revert` conflicted on the loop's report files and did not land, so the running code was
+> reverted by hand in the next cycle, restoring **only** `SocialChannels.isCredible` to the conjunction
+> and deleting the three tests that asserted the alternative-credential shape, while leaving this record
+> and the loop's findings in place. The mechanism is **not** to be re-attempted as specified.
 
 ## Context
 
@@ -110,3 +119,43 @@ Rejected in favour of the disjunction, which loses nothing.
 **VERIFY-BY next run:** `/api/social` `counters.corroborated` above **18**; at least one `/api/social`
 `signals[]` row on a **tracked** name with `channels ≥ 2`; and `social` present in the `contributions[]`
 of at least one `/api/fusion/targets` row — none of which has happened to date.
+
+---
+
+## Why it was reverted (2026-08-05)
+
+**The defect-level verification PASSED, on six consecutive independent boots.** The stated VERIFY-BY was
+`/api/social` `counters.corroborated` rising above its pre-fix level. That counter resets at every boot,
+so it was graded as a *rate*: this run's snapshot reads `counters.corroborated` **17** against
+`ops_jvm.uptimeSeconds` **1427**, versus **18 in 64,010 s** on the pre-fix reading — roughly three orders
+of magnitude faster, sustained across every boot in the evaluation window. The `manipulationSuspected`
+tell kept firing (**32** against `ingested` **3540** / `kept` **919**), so the pump filter was not
+disabled by the loosening. The mechanism did exactly what this ADR specified.
+
+**The scorer then graded the change ❌ BAD over its full ADR-0116 evaluation window** — the ledger row
+carries the computed vector, the t-statistic and the cycle count, and those numbers are the scorer's.
+Under the loop's contract a BAD verdict is reverted and the mechanism is not re-attempted, regardless of
+how well the defect-level fix verified. That rule is what makes the loop's autonomy safe, and it binds
+here even though the author-credential bug this record documents is, on the evidence above, real.
+
+**What this window actually says, honestly.** The two things are not in contradiction, and the
+distinction matters for whoever picks this up:
+
+- The **bug is real**: `verified` is populated from StockTwits' `user.official`, which asserts nothing
+  about an organic author, so the conjunction short-circuited before either configured floor was ever
+  read and the two provenanced floors were dead code. Nothing in the scored window refutes that.
+- The **remedy did not pay** on the objective. Social still reached no `contributions[]` row on any
+  planned name in the window, so the corroborations it unlocked never became size — which means the
+  change bought the desk *evidence* rather than *edge*, and the vector was moved by something else.
+
+The unresolved question this leaves is the one the "Follow-ups" section above already named: **if social's
+expectancy is real, why is nothing letting it size?** That is a question about the gate, not about who
+counts as credible, and it is where the next attempt belongs. Re-loosening the credibility test is not.
+
+**A second, larger caution recorded for the next reader.** Social's measured expectancy was itself
+unstable across this window — `/api/signals/telemetry` at the 3600 s horizon moved its `avgReturnBps`
+materially, cycle to cycle, on a handful of additional resolved observations, because the resolved calls
+sit in far fewer independent cohorts than their count suggests. The edge that motivated this ADR is
+suggestive, not established. That was stated as the honest negative when this shipped; it still stands,
+and it is the reason the standing owner ask on `jethro.fusion.social.per-channel` remains
+**NOT-YET-SUPPORTED**.

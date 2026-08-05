@@ -14,6 +14,84 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+
+## Verification block — 2026-08-05 16:30Z (**CHANGE: completed the failed auto-revert of the graded-BAD `d51f179a2` / ADR-0139**. The ADR-0116 freeze lifted — `reports/.pending-baseline.json` is gone and the ledger's newest row is `d51f179a2` ❌ BAD — and that row carries `⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert`. `git merge-base --is-ancestor d51f179a2 HEAD` confirmed it: a rejected change was still in the running code. That outranks item #1 by the loop's own contract, so it is this cycle's one change. Resolved the established way — running code out (`SocialChannels.isCredible` back to the conjunction, its three tests deleted), the annotated ADR and the loop's memory kept. **Item #1 is unchanged at #1 and gains its THIRD instance plus a bracketed threshold**, and it takes the next cycle.)
+
+### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ VERIFIED on a sixth boot; vector graded ❌ BAD by the scorer; now REVERTED
+
+Boot at `traffic.timestampMillis` **1785947402056** − `ops_jvm.uptimeSeconds` **1427** — a sixth
+independent boot instant.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| `counters.corroborated` rate sustained (Rule 334 — the counter resets at boot, so grade the RATE) | **17** in **1427 s**, versus **15/1439 s**, **17/1362 s**, **17/1377 s**, **17/1252 s**, **16/~900 s** on the five prior boots, and **18 in 64,010 s** pre-fix | ✅ ~3 orders of magnitude above the pre-fix rate on a sixth consecutive boot |
+| pump tell not disabled by the loosening | `manipulationSuspected` **32** against `ingested` **3540** / `kept` **919** | ✅ still firing |
+| `social` present in `contributions[]` of ≥1 planned name | **zero** planned names carry a `social` contribution | ❌ never happened in the whole window |
+
+**The two readings are not in contradiction and the third explains the gap.** The fix did what it claimed
+at the defect level — organic authors can now reach the corroboration gate — and the corroborations it
+unlocked **never became size**, so the change bought the desk evidence rather than edge. The scorer owns
+the money verdict; it said BAD; the contract says revert and do not re-attempt. Done. The open question
+it leaves is about the **gate that refuses to size a measured source**, not about who counts as credible,
+and it is filed as item #3 below.
+
+### Item #1 — the no-trade band admits only outlier forecasts, then throttles the retreat from a reversed view: ⚠️ OPEN, THIRD instance, threshold now BRACKETED
+
+Still #1, and this window supplied the sharpest evidence the register has held. Two alpha entries filled:
+
+| name | entry | `forecast` at entry | `combinedForecast` ~7 min later | `targetQty` now | `currentQty` | `deltaQty` released |
+| --- | --- | --- | --- | --- | --- | --- |
+| NVDA | `SELL 7` (prior window) | **-9.608504615051698** | **+3.722563** | **+176.077255** | **-7.0** | **+0.058091** |
+| GOOG | `BUY 8` @ 16:21:36 | **+6.3413095741475525** | **-2.0969536295842746** | **-57.134569** | **+8.0** | **-0.06639** |
+
+And the control, from the same plan:
+
+| name | `combinedForecast` | `targetQty` | `currentQty` | `deltaQty` |
+| --- | --- | --- | --- | --- |
+| PG | **6.117949458685485** | **656.223137** | **0** | **0.0** |
+
+**The entry threshold is therefore bracketed to (6.1179, 6.3413).** PG wants 656 shares and gets none;
+GOOG at a forecast **0.22 higher** got a full entry. That is an ordinal confirmation, not an inference.
+
+**Both entries then inverted sign within minutes and are now trapped.** The desk is short NVDA against a
+long target and long GOOG against a short target, and in each case the band releases well under a tenth
+of a share per cycle *toward its own current view*. Entry demands an outlier; the retreat is throttled at
+the same width. The band admits the most extreme views and preferentially retains the ones that were
+wrong — an adverse-selection ratchet on top of the build-blocking already recorded.
+
+**VERIFY-BY next run:** in `/api/fusion/targets`, no row may sit with `sign(currentQty) != sign(targetQty)`
+and `|deltaQty| < 1% of |currentQty|` — a position opposite its own forecast must be released at a rate
+that closes it, not at a rebalance rate. Separately, a name at `|combinedForecast|` in the 6.1–6.3 range
+with a large `targetQty` and `currentQty` 0 must show a non-zero `deltaQty`.
+
+**Blocking precondition on the fix (carried from Rule 348, now at three instances).** The tiny-non-zero
+`deltaQty` rows — NQ **0.001584**, NVDA **+0.058091**, GOOG **-0.06639** — still cannot be hand-derived
+from the published `bufferedDelta` path, which gives `edge = 0` for all three at any `width ≥ 0.5`,
+`rate ≤ 1`. Three instances of the same unexplained shape means the model is wrong, not the data. The
+band fix MUST ship a unit test that reproduces these rows **before** it changes the band.
+
+### Item #2 — the ADR-0019 structural hedge round-tripped to flat inside one window: ⚠️ OPEN (new, logged not acted on)
+
+`recent_orders` shows HEDGE ES `BUY 0.006928` (15:46:02) → `SELL 0.007365` (16:21:50) → `BUY 0.000437`
+(16:22:50), all FILLED, ending at `byAssetClass` FUTURE `grossExposure` **0.00000000** — the hedge paid
+fees to arrive back where it started. The `SELL` leg's own reason shows the ADR-0098 churn-shrink firing
+(`|-338.92| − 1.89 σ-step`) and passing the order anyway, while the next leg shrank to zero
+(`|-339.69| − 743.92 σ-step → 0.00`) — the σ-step swung by two orders of magnitude between adjacent
+cycles. **VERIFY-BY:** count of HEDGE ES orders per window whose signed quantities sum to ~0 must be 0.
+Parked behind item #1: at this book size the hedge fee is small, and item #1 is what stops the book
+being built at all.
+
+### Item #3 — a source with measured positive expectancy reaches no planned name: ⚠️ OPEN (inherited from ADR-0139's follow-ups)
+
+`social` carries the largest fusion weight (`weights.social` **1.7180889859219977**, above `trend`
+**1.4030606798878253**) and appears in the `contributions[]` of **zero** planned names, while the three
+sources that do size the book are the three that do not beat their measured trading cost. ADR-0139
+attacked the *credibility* half of this and was graded BAD; the remaining half is the **gate**.
+**VERIFY-BY:** `social` present in `contributions[]` of ≥1 `/api/fusion/targets` row. Parked behind
+item #1 — and note the standing caution: social's `avgReturnBps` has swung materially cycle-to-cycle on a
+handful of additional resolved observations, so its edge is suggestive, not established, and the owner ask
+on `jethro.fusion.social.per-channel` stays **NOT-YET-SUPPORTED**.
+
 ## Verification block — 2026-08-05 16:00Z (**NO CODE CHANGE — `d51f179a2` (ADR-0139) is at 5/6 cycles**; the scorer prints `still accumulating evidence (5/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `d51f179a2`, and the ledger's newest row is still `629dbbdf8`. The ADR-0116 freeze holds for a **fifth** cycle — and lifts next cycle. Step 0 ran anyway, and **the dormancy broke during this window**, which is the most informative event the register has recorded on item #1. (1) The desk placed its first orders in ~19 h: `orders_day.total` **2** — ALPHA NVDA `SELL 7` on `fusion entry — target increase [forecast=-9.608504615051698, sources=3]`, and the ADR-0019 auto-hedge ES `BUY 0.006928` that followed it. Gross **$0.00 → $4224.88**. (2) **That escape CONFIRMS item #1's mechanism ordinally rather than refuting it**: the one name that traded is the one whose combined forecast was far the largest, and every name in the current plan at `|combinedForecast| ≤ 3.722563` is still at `deltaQty` **0.0**. (3) **Item #1 stays #1 and its severity is UPGRADED — it is not only a build-blocker, it is a wrong-side trap.** NVDA is now held **-7** against a current `targetQty` of **+176.077255** at `combinedForecast` **+3.722563** — the view flipped sign within ~7 minutes of the fill — and the band releases `deltaQty` **+0.058091** per cycle against it. The desk is positioned opposite its own forecast and cannot get back. (4) The tiny-non-zero-delta anomaly Rule 343 flagged on NQ last cycle now has a **second instance** (NVDA) and is still unexplained by the source arithmetic; it is carried as a required unit test for the fix, not smoothed away. (5) ADR-0139's mechanism ✅ holds on a **fifth** independent boot; social's expectancy swung a **fifth** time, so the owner ask stays NOT-YET-SUPPORTED.)
 
 ### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ VERIFIED on a fifth boot; PnL verdict still pending (5/6)

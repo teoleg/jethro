@@ -43,29 +43,16 @@ public final class SocialChannels {
 
     /**
      * A post is CREDIBLE (may contribute to corroboration) when its channel is TRUSTED, or — for a
-     * STANDARD channel — the author carries a credential: either the PLATFORM asserts the identity
-     * ({@code verified}), or the account clears BOTH measured floors (enough followers, not a
-     * brand-new throwaway). An UNTRUSTED channel, or an anonymous new account, is the pump-and-dump
-     * profile and is never credible; such posts can flag manipulation but never promote a signal.
-     *
-     * <p><b>Why the two credentials are ALTERNATIVES, not a conjunction (ADR-0139).</b> Requiring both
-     * makes the floors unreachable on any platform that issues no verification, which is every organic
-     * feed wired here: the StockTwits adapter populates {@code verified} from {@code user.official},
-     * which marks StockTwits' OWN corporate accounts and is false for every organic author — so
-     * {@code verified && …} short-circuited before either floor was evaluated and NO StockTwits post
-     * could corroborate anything. That is the opposite of what the {@code defaultTier} javadoc above
-     * promises ("unknown accounts are judged by the author FLOORS below"), and it silently gagged the
-     * desk's only source with positive measured expectancy at every horizon. Both floors keep their
-     * configured values and the ADR-0050 §3 threshold {@code k} is unchanged, so a throwaway (few
-     * followers, brand-new) still fails exactly as before; the change is one-way — nothing credible
-     * before this is non-credible after it.
+     * STANDARD channel — the author clears the floors (verified, enough followers, not a brand-new
+     * throwaway). An UNTRUSTED channel, or an anonymous new account, is the pump-and-dump profile and
+     * is never credible; such posts can flag manipulation but never promote a signal.
      */
     public boolean isCredible(SocialPost p) {
         return switch (tierOf(p.channel())) {
             case TRUSTED -> true;
             case UNTRUSTED -> false;
-            case STANDARD -> p.verified()
-                    || (p.followers() >= credibleFollowerFloor && p.accountAgeDays() >= credibleAgeDaysFloor);
+            case STANDARD -> p.verified() && p.followers() >= credibleFollowerFloor
+                    && p.accountAgeDays() >= credibleAgeDaysFloor;
         };
     }
 }
