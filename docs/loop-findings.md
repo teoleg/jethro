@@ -4347,3 +4347,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `trend` **+1.2373** bps, `reversion` **-0.5929** and `xsreversion` **-3.6159** at 3600 s are all below
   the **1.009** bps/side fee plus **~0.75** bps slippage, so filling the book with them is a forecastably
   losing trade.
+
+## 2026-08-05 14:30Z — the warm-up seed cannot cross the overnight close; and social's edge estimate halved on one print
+
+- **Rule 335 — a scheduled session close is not a data outage, and code that cannot tell them apart goes
+  blind every morning.** `SensorWarmup.walk` (`SensorWarmup.java:224-257`) breaks the backward walk on any
+  gap wider than `step * GAP_TOLERANCE_SAMPLES` — *"a hole in the series: warm from the contiguous tail,
+  never across it"*. The US overnight close is ~16.5 h wide, so the contiguous tail an equity sensor can
+  ever seed from is bounded by **today's open**. Boot **14:09:10Z**, session open **13:30Z** (**2350 s**
+  earlier), and every equity seed terminated at **2011 s – 2046 s** of coverage: `trend` JNJ **173 of 193**,
+  `trend` MCD **160 of 193**, `reversion` HD **113 of 241**, `reversion` CAT **115 of 241**, risk-cut σ PG
+  **53 of 121**. **Rule: when a warm-up is short after a restart, check the calendar before the code — the
+  hole may be the market being closed, which is normal continuity every standard estimator spans.**
+- **Rule 336 — find the controlled comparison inside the same boot; it beats another reproduction.** Same
+  JVM, same code, same store: the rates names (`USD_IRS_10Y`, `USD.SOFR.{1Y,2Y,5Y,10Y,30Y}`,
+  `USD.TSY.{5Y,10Y}`), marked off a continuously-refreshed curve with **no session hole**, are the *only*
+  seeds to reach **FULL** — **241 of 241**, covering **11331 s**. That single contrast rules out store depth
+  and read sizing (ADR-0138's territory) without a replication script. **Rule: before blaming a mechanism,
+  look for a population in the same snapshot that the mechanism should NOT affect — if it behaves
+  differently, you have isolated the cause; if it behaves the same, your hypothesis is wrong.**
+- **Rule 337 — an expectancy that moves on one observation is not an edge, and must not be escalated as
+  one.** Last cycle offered Oleg a decision request backed by `social` **+8.855736** bps at **37** cohorts.
+  This cycle, same endpoint, same horizon, **same 37 cohorts**: **+4.837178** bps, with `stdCohortMeanBps`
+  up **26.863 → 35.424588**, on **one** more resolved observation (**373 → 374**). The ask is downgraded to
+  NOT-YET-SUPPORTED, not withdrawn — the dial stays the owner's. **Rule: before escalating a measured edge
+  to the owner, confirm it holds across independent cycles; a single-print sensitivity means the estimate is
+  carried by a few observations, which is the overfitting failure mode, not evidence.**
+- **Rule 338 — rank the blindness above the dormancy, and say why.** `insideBuffer` **21 of 21**,
+  `streamVolMeasuredNames` **3 of 21**, every planned row at `deltaQty: 0` against large `targetQty` (HD
+  **318.360826**, PG **589.883741**, WMT **-731.08859**). Tempting to attack the buffer; wrong target. A
+  silent sensor publishes no forecast and therefore writes **no `signal_observations`** — so on a ~30-minute
+  restart cadence the loop has been grading every source on an evidence base its own restarts thinned.
+  Fixing the blindness is an **edge** fix under the standing priority, not a plumbing fix. **Rule: when
+  dormancy and a measurement gap share a cause, fix the cause and count it against the edge priority.**
+- **Trigger/attribution.** No code change: `reports/.pending-baseline.json` still holds `d51f179a2` and the
+  ledger's newest row is still `629dbbdf8`, so the ADR-0116 freeze held a second cycle. PnL **+0.00** over
+  three heartbeats, gross **0.00000000**, newest order **2026-08-04 21:00:47Z** — no order across two
+  restarts and a full session open. Neither market nor change claims this window; it is baseline. Dormancy
+  stays ranked below the edge problem (Rule 329 reaffirmed): `trend` **+1.192832**, `reversion`
+  **+0.384366**, `xsreversion` **-2.213774** at 3600 s are all under the **1.009** bps/side fee plus
+  **~0.75** bps slippage, so filling the book from them is still a forecastably losing trade.

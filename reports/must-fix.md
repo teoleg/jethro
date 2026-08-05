@@ -14,6 +14,132 @@ and worked — so the same problem can't bleed money run after run.
   owns the PnL verdict; this register owns "did the specific defect get fixed".
 
 ---
+## Verification block — 2026-08-05 14:30Z (**NO CODE CHANGE — `d51f179a2` (ADR-0139) is STILL under measurement**; `reports/.pending-baseline.json` still names `d51f179a2` and the ledger's newest row is still `629dbbdf8`, so the ADR-0116 freeze holds for a second cycle. Step 0 ran anyway and produced two results that change the ranking. (1) **ADR-0139's mechanism holds** on its rate metric across a fresh boot. (2) **The evidence behind last cycle's decision request to Oleg has decayed and the ask is DOWNGRADED, not withdrawn** — `social`'s cohort-clustered expectancy moved **+8.855736 → +4.837178** bps at an *unchanged* **37** cohorts while `stdCohortMeanBps` rose **26.863 → 35.424588**, on **one** additional resolved observation (373 → 374). A statistic a single print moves by that much is not a basis for asking the owner to unlock a money dial. (3) A new, code-verified structural defect takes **#1**: **an equity sensor's warm-up seed cannot cross the overnight session close**, so every restart inside a session leaves the desk blind — which is both this run's dormancy *and* a direct drag on the OOS evidence the edge gate needs.)
+
+### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ still VERIFIED on a second boot, PnL verdict still pending
+
+Boot **2026-08-05T14:09:10Z** (`traffic.timestampMillis` **1785940202267** − `ops_jvm.uptimeSeconds`
+**1252**); report snapshot **14:30:02Z**. Running JVM is still the ADR-0139 build — no code commit since
+`d51f179a2` other than reports/docs.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| `counters.corroborated` rate sustained (Rule 334 — the counter resets at boot, so grade the RATE) | **17** in **1252 s** of uptime, versus **16 in ~900 s** on the previous boot and **18 in 64,010 s** pre-fix | ✅ rate holds across an independent boot |
+| ≥1 tracked name at `channels ≥ 2` | **not present in this snapshot** — `signals[]` carries only **TSLA**, `channels: 0`, `manipulationSuspected: true`. Last boot's **AAPL `channels: 2`** is gone | ⚠️ not reproduced this snapshot — see note |
+| `social` in `/api/fusion/targets` `contributions[]` | **0 of 7** planned rows | ⚠️ **RETIRED last cycle as mis-specified** — `jethro.fusion.social.per-channel=0` is an owner-set dial (Rule 333), not a defect |
+
+**Note on the second row — do not read it as a regression.** `signals[]` is a *point-in-time* view of
+currently-active subjects, not a cumulative record, and StockTwits was polling `[SAP, TSLA, UNH]` at the
+snapshot — AAPL was not in the poll set. The cumulative counter is the honest metric and it is the one
+that holds. Recorded as **not reproduced**, not as 🔴 REGRESSED, because no reading contradicts the fix.
+
+### The decision request to Oleg — DOWNGRADED, and why (this is the cycle's main product)
+
+Last cycle escalated one concept to the owner: *may a corroborated social signal contribute a sizing
+forecast — restore `jethro.fusion.social.per-channel` from 0 to 4.0, still behind the ADR-0049 OOS edge
+gate?* The evidence offered was `/api/signals/telemetry` at the 3600 s horizon. One cycle later, the
+**same endpoint, same horizon, same cohort count**:
+
+| field | 2026-08-05 14:00Z | 2026-08-05 14:30Z |
+| --- | --- | --- |
+| `avgReturnBps` | **8.855736** | **4.837178** |
+| `resolved` | **373** | **374** |
+| `hitRate` | **0.619** | **0.615789** |
+| `cohorts` | **37** | **37** |
+| `stdCohortMeanBps` | **26.863** | **35.424588** |
+
+**One** additional resolved observation cut the mean expectancy roughly in half and raised the
+cohort-mean dispersion by a third, at an unchanged cohort count. That is the signature of an estimate
+dominated by a few large observations, not a stable edge — and it is exactly the "statistics of backtest
+overfitting" failure the mission warns about. **The ask stands open but is explicitly marked
+NOT-YET-SUPPORTED**: the loop is not asking Oleg to unlock a money dial on a number that halves between
+two consecutive reads. It should be re-offered only once social's expectancy holds its sign and magnitude
+across several independent cycles. No action is taken either way — the dial is the owner's.
+
+### Item #1 (NEW) — an equity sensor's warm-up seed cannot cross the overnight session close: ⚠️ OPEN
+
+**The defect, traced in code.** `SensorWarmup.walk` (`app/src/main/java/io/jethro/app/fusion/SensorWarmup.java:224-257`)
+walks the stored mark series backwards and breaks on any gap wider than `step * GAP_TOLERANCE_SAMPLES`:
+`brokeAtHole = true; break; // a hole in the series: warm from the contiguous tail, never across it`.
+A **scheduled US session close** is ~16.5 h wide and is therefore treated as a data outage. So the
+contiguous tail available to an equity sensor is bounded by *today's session open* — no matter how much
+durable history LMDB holds (`jethro.ui.history-hours=12`).
+
+**The live evidence, from this boot's own WARN stream.** Boot **14:09:10Z**; today's US session opened
+**13:30Z**, i.e. **2350 s** earlier. Every equity seed terminated at a coverage span in the band
+**2011 s – 2046 s** — matching that elapsed session time, and short of what the sensors need:
+
+| sensor | example | seeded | terminator | coverage |
+| --- | --- | --- | --- | --- |
+| trend | JNJ | **173 of 193** | HISTORY_EXHAUSTED | **2038 s** |
+| trend | MCD | **160 of 193** | GAP_BREAK | **2043 s** |
+| reversion | HD | **113 of 241** | HISTORY_EXHAUSTED | **2041 s** |
+| reversion | CAT | **115 of 241** | GAP_BREAK | **2038 s** |
+| risk-cut σ | PG | **53 of 121** | HISTORY_EXHAUSTED | **2027 s** |
+
+**The controlled comparison that isolates the cause.** In the *same boot, same code, same store*, the
+rates names — whose marks come off a continuously-refreshed curve and therefore have **no session hole** —
+are the only ones to reach a **FULL** seed: `USD_IRS_10Y`, `USD.SOFR.{1Y,2Y,5Y,10Y,30Y}`, `USD.TSY.{5Y,10Y}`
+each seeded **241 of 241**, terminator **FULL**, covering **11331 s**. Same walk, same tolerance — the only
+difference is session continuity. That rules out store depth and read sizing (the ADR-0138 territory) and
+points at the overnight hole.
+
+**Why this outranks the dormancy and the cost problem rather than duplicating them.** It is the *cause* of
+both readings this run: `/api/fusion/targets` shows `insideBuffer` **21 of 21**, `streamVolMeasuredNames`
+**3 of 21**, and every planned row at `currentQty: 0`, `deltaQty: 0` while `targetQty` is large (HD
+**318.360826** @ **352.3**, PG **589.883741** @ **146.375**, WMT **-731.08859** @ **112.5**) — a full plan
+that routes nothing. And crucially it is an **edge** item under the standing priority, not merely a
+trading item: a sensor that is silent for the first ~40 min of every session after a restart *publishes no
+forecast*, so it logs **no `signal_observations`** in that window. The loop is measuring every source on an
+evidence base systematically thinned by its own restart cadence (~30 min). Fixing the blindness improves
+the measurement the edge gate depends on, which is the thing the mission says to spend the change on.
+
+**Open question the fix must answer, stated honestly.** Bridging the session hole is necessary but may not
+be sufficient: `trend` needs **193** samples at a 5000 ms step (**965 s** of span) yet seeded only **173**
+inside **2038 s** of coverage, so *print density* also binds for some names. The fix must be evaluated on
+whether sensors actually reach `warm()`, not merely on whether the seed count rises. Related but distinct:
+the rates names seeded **241 of 241** / **FULL** and are *still* reported cold, so the warmth predicate
+depends on more than sample count — that is a separate thread, not this item.
+
+**VERIFY-BY (next cycle, after `d51f179a2` scores and the freeze lifts).** On the first boot inside an open
+US session: (a) equity seed coverage spans exceed the elapsed-since-open figure — i.e. at least one
+`trend`/`reversion` seed reports a coverage span **> 3600 s**; (b) the count of `still cold` WARNs for
+equity names falls below this run's level; (c) `/api/fusion/targets` `streamVolMeasuredNames` rises above
+**3** of 21. All three read from live telemetry; none authored. *(Counter-semantics note per Rule 334: none
+of these is a boot-resetting counter — they are per-boot seed readings, so they compare directly.)*
+
+### Item #2 — nothing the desk is *allowed* to size beats its own trading cost: ⚠️ OPEN (was #1)
+
+Unchanged in substance, and this run's readings make it slightly worse. `/api/signals/telemetry` at
+3600 s: `trend` **+1.192832** (cohorts **98**, `stdCohortMeanBps` **17.775674**), `reversion`
+**+0.384366** (86, **20.405338**), `xsreversion` **-2.213774** (44, **27.982221**), `momentum`
+**+6.549253** but on only **7** cohorts with `stdCohortMeanBps` **27.450798** — far too thin to act on.
+Against measured round-trip cost of **1.009** bps/side of fee plus **~0.75** bps of slippage per fill,
+none of the three sources that are *permitted* to size the book clears its own cost. Demoted to #2 only
+because item #1 is a prerequisite: a blind sensor cannot generate the observations that would either
+establish or refute an edge here. Regime context: `trend` **CHOP**, `regime` **CALM**, `volRatio` **0.92**.
+
+**VERIFY-BY.** At least one source that can size (trend / reversion / xsreversion / momentum) shows
+`avgReturnBps` above the **1.009** bps/side + **~0.75** bps slippage round trip at a cohort count
+comparable to `trend`'s current **98**.
+
+### Item #3 — the desk is DORMANT and has placed no order in ~17.5 h: ⚠️ OPEN, downstream of #1
+
+`/api/risk` `.total`: `grossExposure` **0.00000000**, `netExposure` **0.00000000**, `totalPnl`
+**-603.08012889**. Newest `recent_orders` row is **2026-08-04 21:00:47Z** — no order placed across two
+restarts and a full session open. Held at #3 deliberately (Rule 329, reaffirmed): with item #2 open,
+filling the book from sources that measure below cost is a forecastably losing trade, so the buffer
+holding the book flat is currently *saving* money, not costing it. This item closes as a consequence of
+#1 and #2, never by relaxing the buffer on its own.
+
+**VERIFY-BY.** A FILLED `fusion entry` order appears in `recent_orders` with `sources ≥ 2` **and** the
+source mix behind it clears item #2's cost hurdle.
+
+### Item #4 — the cash close liquidates the whole book on a freshness artifact: ⚠️ OPEN, parked
+
+Carried forward unchanged from the 14:00Z block; parked behind #1–#3.
+
+---
 ## Verification block — 2026-08-05 14:00Z (**NO CODE CHANGE — `d51f179a2` (ADR-0139) is under measurement**; `reports/.pending-baseline.json` exists and the ledger's newest row is still `629dbbdf8`, so per the contract a new change would destroy the evidence. Step 0 still ran: **ADR-0139's mechanism ✅ VERIFIED on the two checks it controls, and the third VERIFY-BY is RETIRED as mis-specified** — it asked for an outcome an explicit owner decision forbids. Item #1 therefore closes **as a defect** and converts to a **decision request for Oleg**, not something the loop may take itself.)
 
 ### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ VERIFIED (2 of 3 checks; 3rd retired), PnL verdict pending
