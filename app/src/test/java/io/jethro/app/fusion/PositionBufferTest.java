@@ -650,4 +650,117 @@ class PositionBufferTest {
         // With a zero buffer the policy degenerates to "trade to the aim", i.e. exactly ADR-0080.
         assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-4.436294"));
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0140 — the aim is durable derived state.
+    //
+    // Worked example (the shipped configuration): cycle 30 s, evidence horizon 3600 s gives the
+    // ADR-0080 rate a = 1 − e^(−30/3600) = 0.008298…, and the retention window inverts it exactly:
+    //     −1 / ln(1 − a) = −1 / (−30/3600) = 120 cycles = 3600 s / 30 s = one evidence horizon.
+    // ---------------------------------------------------------------------------------------------
+
+    /** An in-memory {@link AimStore}, standing in for the V48 table. */
+    private static final class FakeAimStore implements AimStore {
+        private java.util.Map<String, BigDecimal> rows = java.util.Map.of();
+
+        @Override
+        public java.util.Map<String, BigDecimal> load() {
+            return rows;
+        }
+
+        @Override
+        public void save(java.util.Map<String, BigDecimal> aims) {
+            rows = java.util.Map.copyOf(aims);
+        }
+    }
+
+    @Test
+    void theRetentionWindowIsOneEvidenceHorizonInCycles() {
+        // The ADR-0080 identity inverted: a = 1 − e^(−c/h) ⇒ −1/ln(1−a) = h/c, exactly.
+        assertThat(PositionBuffer.retentionCycles(TargetPlanner.adjustmentRateFor(30, 3600))).isEqualTo(120);
+        assertThat(PositionBuffer.retentionCycles(TargetPlanner.adjustmentRateFor(30, 900))).isEqualTo(30);
+        // Degenerate rates keep the pre-ADR-0140 semantics rather than inventing a window.
+        assertThat(PositionBuffer.retentionCycles(0.0)).isZero();   // path never advances ⇒ drop at once
+        assertThat(PositionBuffer.retentionCycles(1.0)).isEqualTo(1); // horizon == cycle
+    }
+
+    @Test
+    void aNameAbsentForOneCycleResumesItsAimInsteadOfRestartingFromTheHeldQuantity() {
+        var wmt = target("WMT", -4.710957, "-846.588220", "0");
+        var other = target("KO", -2.107082, "-599.105696", "0");
+
+        // Continuous: two planning cycles in a row.
+        PositionBuffer continuous = new PositionBuffer(0.10);
+        continuous.apply(List.of(wmt), null, RATE);
+        BigDecimal afterTwoSteps = continuous.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        // Churned: planned, absent for one cycle (the selector rotated), planned again. The absent
+        // cycle does not advance the aim — but it must not erase it either, so the name resumes at
+        // exactly the same place two planning cycles reach.
+        PositionBuffer churned = new PositionBuffer(0.10);
+        churned.apply(List.of(wmt), null, RATE);
+        churned.apply(List.of(other), null, RATE);
+        BigDecimal afterChurn = churned.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        assertThat(afterChurn).isEqualByComparingTo(afterTwoSteps);
+        // And it is strictly further along than a fresh seed from the held quantity would be.
+        assertThat(afterChurn.abs())
+                .isGreaterThan(new PositionBuffer(0.10).apply(List.of(wmt), null, RATE).aims().get("WMT").abs());
+    }
+
+    @Test
+    void anIntentUnplannableForAWholeHorizonIsDropped() {
+        var wmt = target("WMT", -4.710957, "-846.588220", "0");
+        var other = target("KO", -2.107082, "-599.105696", "0");
+        int window = PositionBuffer.retentionCycles(RATE); // 30 cycles at the test rate
+
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        buffer.apply(List.of(wmt), null, RATE);
+        for (int i = 0; i < window; i++) {
+            buffer.apply(List.of(other), null, RATE); // still inside the window
+        }
+        BigDecimal retained = buffer.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        PositionBuffer expired = new PositionBuffer(0.10);
+        expired.apply(List.of(wmt), null, RATE);
+        for (int i = 0; i <= window; i++) {
+            expired.apply(List.of(other), null, RATE); // one cycle past the window
+        }
+        BigDecimal reseeded = expired.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        // The expired name restarts from the held quantity — one step's worth, not two.
+        assertThat(reseeded).isEqualByComparingTo(
+                new PositionBuffer(0.10).apply(List.of(wmt), null, RATE).aims().get("WMT"));
+        assertThat(retained.abs()).isGreaterThan(reseeded.abs());
+    }
+
+    @Test
+    void theAimSurvivesARestartAndIsStillClampedByTheCurrentTarget() {
+        var wmt = target("WMT", -4.710957, "-846.588220", "0");
+        FakeAimStore store = new FakeAimStore();
+
+        PositionBuffer beforeRestart = new PositionBuffer(0.10, store);
+        beforeRestart.apply(List.of(wmt), null, RATE);
+        BigDecimal afterTwoSteps = beforeRestart.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        // A fresh process, same store: the aim resumes rather than reseeding at the held quantity.
+        PositionBuffer afterRestart = new PositionBuffer(0.10, store);
+        BigDecimal resumed = afterRestart.apply(List.of(wmt), null, RATE).aims().get("WMT");
+        assertThat(resumed.abs()).isGreaterThan(afterTwoSteps.abs());
+
+        // ADR-0102 still binds a restored aim: a target that has flipped side clamps it to flat, so a
+        // restored value can never be acted on against the desk's current view.
+        PositionBuffer flipped = new PositionBuffer(0.10, store);
+        assertThat(flipped.apply(List.of(target("WMT", 4.710957, "846.588220", "0")), null, RATE)
+                .aims().get("WMT")).isEqualByComparingTo("0.000000");
+    }
+
+    @Test
+    void noStoreLeavesTheAimPathByteIdentical() {
+        var plan = List.of(target("AAPL", -9.64, "-142.319300", "-7"));
+        PositionBuffer withoutStore = new PositionBuffer(0.10);
+        PositionBuffer nullStore = new PositionBuffer(0.10, null);
+        assertThat(nullStore.apply(plan, null, RATE).aims().get("AAPL"))
+                .isEqualByComparingTo(withoutStore.apply(plan, null, RATE).aims().get("AAPL"));
+    }
 }

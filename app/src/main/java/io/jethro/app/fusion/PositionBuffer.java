@@ -104,8 +104,30 @@ public final class PositionBuffer {
      */
     private final Map<String, BigDecimal> aims = new HashMap<>();
 
+    /**
+     * ADR-0140 — instrument → consecutive cycles this name has been ABSENT from the target list. A
+     * name planned this cycle sits at zero; one that stops being plannable ages out after a full
+     * measurement horizon (see {@link #retentionCycles}). Touched only from the fusion tick thread.
+     */
+    private final Map<String, Integer> absentCycles = new HashMap<>();
+
+    /** ADR-0140 — durable home for {@link #aims}; null means in-memory only (the pre-ADR-0140 path). */
+    private final AimStore aimStore;
+
+    /** ADR-0140 — the restore is attempted once, on the first cycle, not on every one. */
+    private boolean restored;
+
     public PositionBuffer(double bufferFraction) {
+        this(bufferFraction, null);
+    }
+
+    /**
+     * ADR-0140 — as above, with a durable home for the aim. {@code aimStore} null leaves every path
+     * byte-identical to the in-memory buffer.
+     */
+    public PositionBuffer(double bufferFraction, AimStore aimStore) {
         this.bufferFraction = Math.max(0.0, bufferFraction);
+        this.aimStore = aimStore;
     }
 
     /** The buffered book plus the aims it was traded against — the aims are operator-visible telemetry. */
@@ -134,8 +156,12 @@ public final class PositionBuffer {
      */
     public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
                         java.util.function.Predicate<String> stopArmed) {
+        ensureRestored();
         if (targets == null || targets.isEmpty()) {
-            aims.clear();
+            // ADR-0140: an empty plan is a cycle in which every name was absent, not proof that the
+            // desk has abandoned its intent. Age the map on the same clock as any other absence.
+            ageAndRetain(java.util.Set.of(), Math.max(0.0, Math.min(1.0, adjustmentRate)));
+            persist();
             return new Result(List.of(), Map.of(), 0, 0);
         }
         double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
@@ -175,8 +201,101 @@ public final class PositionBuffer {
                             t.diversificationMultiplier(), t.agreement(), t.price(), t.targetQty(), t.currentQty(),
                             delta, t.contributions()));
         }
-        aims.keySet().retainAll(snapshot.keySet()); // a name that left the book leaves no intent behind
+        ageAndRetain(snapshot.keySet(), rate); // ADR-0140: absence ages the intent, it does not erase it
+        persist();
         return new Result(out, Collections.unmodifiableMap(snapshot), inside, traded);
+    }
+
+    /**
+     * ADR-0140 — restore the aim path from its durable home, once, on the first cycle of the process.
+     *
+     * <p>A restored aim is not acted on directly: it enters {@link #nextAim} as the previous aim, is
+     * stepped toward THIS cycle's target at THIS cycle's rate, and is then clamped by ADR-0102's
+     * {@link #withinTarget} into the closed interval between flat and the current target. So a restored
+     * value can never exceed the current target, never oppose it, and never survive a change of view —
+     * it can only spare the desk from re-paying a transient it has already served.
+     */
+    private void ensureRestored() {
+        if (restored) {
+            return;
+        }
+        restored = true;
+        if (aimStore == null) {
+            return;
+        }
+        Map<String, BigDecimal> stored = aimStore.load();
+        if (stored != null) {
+            stored.forEach((instrument, aim) -> {
+                if (instrument != null && aim != null) {
+                    aims.put(instrument, aim.setScale(QTY_SCALE, RoundingMode.HALF_EVEN));
+                }
+            });
+        }
+    }
+
+    /** ADR-0140 — write the aim path through to its durable home. Best-effort by contract. */
+    private void persist() {
+        if (aimStore != null) {
+            aimStore.save(Map.copyOf(aims));
+        }
+    }
+
+    /**
+     * ADR-0140 — the aim of a name absent from this cycle's plan is AGED, not deleted.
+     *
+     * <h3>The defect this replaces</h3>
+     * The map was pruned with {@code retainAll(planned)}, so a name that fell out of the target list
+     * for a single cycle — because a sensor went quiet, a print went stale, or the selector rotated —
+     * lost its whole intent and restarted from the held quantity. Combined with the same reset at every
+     * process start (the map was in-memory), the ADR-0080 path could never complete its transient: with
+     * the aim rising as {@code 1 − (1−a)^n} toward the target and the ADR-0094 buffer only releasing an
+     * order once {@code |aim|} exceeds a band scaled by the name's average position, a repeatedly-reset
+     * aim never reaches the release fraction and the delta reads exactly zero, cycle after cycle.
+     *
+     * <h3>The retention window is derived, not dialled</h3>
+     * The ADR-0080 identity is {@code a = 1 − e^(−c/h)} for cycle length {@code c} and evidence horizon
+     * {@code h}, so {@code −1 / ln(1−a) = h/c} — the number of cycles in exactly one measurement
+     * horizon, read straight off the rate the caller already passed in. That is the natural life of an
+     * intent: an aim whose name has been unplannable for a full horizon describes a view the desk no
+     * longer has evidence for, and is dropped. No number is introduced (invariant 7 / ADR-0016).
+     *
+     * <p>A degenerate rate keeps the old semantics: {@code rate ≤ 0} means the path never moves, so
+     * there is no transient to protect and an absent name is dropped at once.
+     */
+    private void ageAndRetain(java.util.Set<String> planned, double rate) {
+        int window = retentionCycles(rate);
+        aims.keySet().removeIf(instrument -> {
+            if (planned.contains(instrument)) {
+                absentCycles.remove(instrument);
+                return false;
+            }
+            int absent = absentCycles.merge(instrument, 1, Integer::sum);
+            if (absent > window) {
+                absentCycles.remove(instrument);
+                return true;
+            }
+            return false;
+        });
+        absentCycles.keySet().retainAll(aims.keySet());
+    }
+
+    /**
+     * Cycles of absence an intent survives: {@code −1 / ln(1 − rate)}, which is the ADR-0080 identity's
+     * {@code h/c} — one full evidence horizon expressed in planner cycles. Zero for a rate that cannot
+     * move the path at all, and at least one wherever the horizon is a single cycle.
+     */
+    static int retentionCycles(double rate) {
+        if (!(rate > 0.0)) {
+            return 0; // a path that never advances has no transient worth protecting
+        }
+        if (rate >= 1.0) {
+            return 1; // horizon == cycle: the aim reaches target in one step
+        }
+        double cycles = -1.0 / Math.log1p(-rate);
+        if (!Double.isFinite(cycles) || cycles < 1.0) {
+            return 1;
+        }
+        return (int) Math.min(Integer.MAX_VALUE, Math.round(cycles));
     }
 
     /**

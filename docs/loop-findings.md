@@ -4761,3 +4761,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   its band at the 18:59:43Z snapshot, yet `recent_orders` carries no fusion order in the window — a second
   instance of the Rule 343 tiny-delta anomaly. **Rule: carry an unexplained reading as a required test for
   the fix, never as a rounding detail.**
+
+## 2026-08-05 19:30Z — the freeze is TWO resets, not one; the aim becomes durable state (ADR-0140)
+
+- **Step 0 — `e956dcf46` scored ❌ BAD; the freeze lifted, so a change was due.** `scripts/score-change.py
+  score` printed `no pending change to score` and `reports/.pending-baseline.json` is gone. Its
+  auto-revert hit a git conflict again. **Deliberately NOT re-reverted:** reverting it reinstates
+  ADR-0139, itself scored ❌ BAD. **Rule 372: when the auto-revert of a REVERT fails, do not complete it
+  by hand — the thing it would restore is the mechanism the ledger already rejected. A failed revert of a
+  revert is a no-op to record, not a job to finish.**
+- **Trigger/attribution — market, cleanly, for the FIFTH window running.** No order since the 17:00:28Z
+  auto-hedge; `risk.total` `totalPnl` **-637.53116254**, `grossExposure` **5246.09536250** at **0.3%** of
+  the firm cap; `attribution` ALPHA **-600.08172505** / MACRO **-56.79950536** / HEDGE **+19.35006787**.
+  100% market, 0% change-attribution (Rules 357, 360).
+- **Rule 373 — the release condition is `|aim|/|target| > 1/|f|`, and the ONLY names that ever opened were
+  the ones with the smallest `1/|f|`.** `recent_orders` carries exactly two `fusion entry` rows in the
+  window: GOOG at `forecast=6.3413095741475525` and NVDA at `forecast=-9.608504615051698` — thresholds
+  **0.158** and **0.104**. Every currently-planned name sits at `|f|` between **2.107082** and
+  **4.710957** (thresholds **0.212**–**0.474**) and not one opens; `insideBuffer` **19** of **20**.
+  **Rule: when a gate has a closed-form threshold, sort the names that PASSED by it — if the passers are
+  exactly the low-threshold tail, the threshold is the binding constraint and no other story is needed.**
+- **Rule 374 — last cycle's refutation of the aim-persistence fix was HALF right, and the missing half was
+  a second reset in the same map.** It showed four of six frozen names had requirements inside one process
+  lifetime and still routed nothing, killing *persistence alone*. But it tested only the **per-process**
+  reset; `aims.keySet().retainAll(planned)` was ALSO deleting the whole intent of any name absent from a
+  **single** cycle's plan, and membership churns (consecutive snapshots read `instruments` **21** then
+  **20**). **Rule: when a mechanism is refuted by its own predicted metric, check whether a SECOND
+  instance of the same mechanism is masking the first — two resets on one piece of state each look like
+  proof the other is innocent.**
+- **Rule 375 — a 12.7× ratio spread under one shared clock is a measurement that the clock was RESTARTED,
+  not that the input moved.** AAPL **0.017274** … CVX **0.219300** across six names sharing one derived
+  rate, one band and one seed (`currentQty` **0** for each). Last cycle read this as a moving target
+  (Rule 369); the simpler explanation that also fits is that each name's accumulation began at a
+  different time. **Rule: prefer the explanation that needs no unobserved input — a restarted clock is
+  visible in the code, a moving target was inferred.**
+- **Change shipped — ADR-0140, closing BOTH resets in one coherent change.** Absence ages an intent over a
+  window derived by inverting the ADR-0080 identity (`−1/ln(1−a) = h/c` = **120** cycles = one evidence
+  horizon, no number introduced); the map persists to `fusion_aim` (V48, `NUMERIC(20,6)`, `feed_mode`-scoped,
+  derived data only) and restores once per process. No band, rate, floor, gate or cap touched — capping the
+  band was ADR-0133, scored ❌ BAD, and is not re-attempted. A restored aim is still clamped by ADR-0102
+  into `[flat, target]`, so it can never exceed or oppose the current view. `-Pci test` green.

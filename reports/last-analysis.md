@@ -1,69 +1,68 @@
-Persisting the aim would NOT unfreeze the desk — four of six frozen names had enough process lifetime this boot and still routed nothing, so the freeze is the aim losing a race to a moving target, not a cold-start clock; no change, the revert is 5 of 6 cycles into measurement.
+The desk cannot OPEN a position because its intent is erased faster than it accumulates — the aim is now durable derived state, closing BOTH resets (the per-cycle `retainAll` and the per-process one), which is why last cycle's "persistence would not help" was half right (ADR-0140).
 
-*(Every figure below is read from `/api/risk`, `/api/fusion/targets`, `/api/social`, `ops_jvm`, the report's
-`recent_orders` and the scorer, or derived by script from those plus the shipped constants. None is authored
-here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`, `ops_jvm`, the
+report's `recent_orders` and the scorer. None is authored here — invariant 7 / ADR-0016.)*
+
+# Last analysis — 2026-08-05 19:30Z
 
 ## Situation
 
-1. **Money.** `risk.total` reads `totalPnl` **-640.57492504**, **-11.63** since the last run and **-3.31**
-   over the last three. Underwater and drifting — but by **marks, not by trading**.
-2. **Risk.** `grossExposure` **5242.89912500** is **0.3%** of the $1,500,000 firm cap (headroom
-   **$1,494,757**); `netExposure` **505.50087500** is **0.1%** of the $1,000,000 net cap. `breaker.halted`
-   **false**; `regime` **CHOP**/**CALM** at `volRatio` **0.95**; `var95` **75.35** on `coveredExposure`
-   **5242.90**. Nowhere near danger — the live problem is the inverse, a desk holding almost nothing while
-   the budget goes unused.
-3. **Cause.** Nothing this cycle. The pending change is `e956dcf46`, the completed revert of the graded-BAD
-   ADR-0139; `scripts/score-change.py score` prints `still accumulating evidence (5/6 cycles) — held, not
-   scored this run`, so it has no verdict yet and it is not mine to pre-judge.
-4. **Danger.** None — not near a cap, breaker clear. The `DANGER` condition (bleeding *near* the cap) does
-   not hold; the flag that does hold is UNDERWATER.
-5. **Orders / attribution.** `recent_orders` shows **no new order** since the 17:00:28Z auto-hedge — the
-   **fourth consecutive zero-order window**. `attribution` splits the firm total into ALPHA
-   **-603.20172505**, MACRO **-56.79950536**, HEDGE **+19.42630537**. Every dollar of the move is a mark on
-   a position no code of mine touched: **100% market, 0% change-attribution** (Rule 357).
+1. **Money.** Total PnL **$-637.53**. **+3.62** since last run; **-22.54** over the last three. The
+   heartbeat reads PnL growth **-0.61%** against the **+1.0%** target — `on_track=False`, `stale=True`,
+   `underwater=True`. Not bleeding fast, but off target and underwater.
+2. **Risk.** Gross **$5,246.10** — **0.3%** of the firm cap, headroom **$1,494,754**. Net **$508.54**,
+   **0.1%** of the net cap. `breaker.halted` **false**. This is a **DORMANT** book: the problem is
+   undeployed capital, not exposure.
+3. **Cause.** The previous change (`e956dcf46`, the completed ADR-0139 revert) scored **❌ BAD** and its
+   auto-revert hit a git conflict again. It is deliberately **not** re-reverted: reverting it would
+   reinstate ADR-0139, which was itself scored ❌ BAD. The loop does not re-attempt a rejected mechanism.
+4. **Danger.** None of the danger kind — no breaker, no cap proximity. `regime.trend` **CHOP**,
+   `volRatio` **1.03**.
+5. **Order post-mortem.** **Fifth consecutive zero-order window**; the newest row is still the 17:00:28Z
+   ADR-0019 auto-hedge. Attribution is **100% market, 0% change**: ALPHA **-600.08**, MACRO **-56.80**,
+   HEDGE **+19.35** — all marks on untouched positions.
 
-## Step 0 — `e956dcf46` (the ADR-0139 revert): ✅ VERIFIED, fifth independent boot
+## Diagnosis
 
-`traffic.timestampMillis` **1785956401616** − `ops_jvm.uptimeSeconds` **1364** puts boot at
-**18:37:17.616Z**, after the revert's **16:38:20Z** commit and in a different process from the
-18:06:55.128Z boot graded last cycle. `counters.corroborated` reads **7** in **1364 s** — the lowest rate
-yet, against **8/1387 s** and **11/1344 s** post-revert and **17/1427 s**, **15/1439 s**, **17/1362 s** on
-the ADR-0139 boots. `manipulationSuspected` **38** on `ingested` **3390** / `kept` **809**.
+The desk is not choosing to be flat, it is **structurally unable to open**. `insideBuffer` reads **19** of
+**20** planned names with `currentQty` **0** for most, while the planner produces real targets throughout
+(WMT `targetQty` **-846.588220**, KO **-599.105696**, JPM **139.136530**) and routes against none of them.
 
-**Last cycle's VERIFY-BY was the wrong metric and is retired.** It said the `credible: true` count should
-stay a small minority of `recent`; this cycle **5** of the 12 shown read `credible: true` and that is *not*
-a regression, because all five are `channel: yahoo` — the news-RSS path. `NewsSocialFeed.java:54-55`
-constructs every wire item with `SYNTHETIC_FOLLOWERS` **5_000_000**, `verified` **true**,
-`SYNTHETIC_AGE_DAYS` **3650**, so a curated outlet is credible by construction and always has been,
-untouched by ADR-0139 or its revert. The metric that actually discriminates: **all seven `stocktwits:`
-rows read `credible: false`** — no uncurated author passed. That, plus the falling corroboration rate, is
-the conjunction at `SocialChannels.java:54-55` doing its job.
+Three individually-sound controls compose into a freeze. ADR-0080 gives the aim a time constant of one
+whole evidence horizon (`a = 1 − e^(−c/h)` = **0.008298…**), so it reaches only `1 − e^(−t/h)` of its
+target after `t`. Against a flat book ADR-0094's band reduces the release condition to exactly
+**`|aim|/|target| > 1/|forecast|`** at the live `bufferFraction` **0.10** and `TARGET_ABS` **10.0**, so
+time-to-first-order is `t > −h·ln(1 − 1/|f|)` — between roughly **900 s** and **2400 s** at the live
+forecasts. And the aim was reset far more often than that, by **two** independent mechanisms:
+`aims.keySet().retainAll(planned)` deleted the entire intent of any name absent from a **single** cycle's
+plan (membership churns — consecutive snapshots read `instruments` **21** then **20**), and the map was
+in-memory against observed process lifetimes of **1344–1439 s**.
 
-## Item #1 — ⚠️ STILL-BROKEN, and its diagnosis is now partly WRONG
+Two readings make this diagnostic rather than a story. Six names sharing one rate, one band and one seed
+(`currentQty` **0** for each) show `|aim|/|target|` spanning **12.7×** (AAPL **0.017274** … CVX
+**0.219300**) — a common clock forces *identical* ratios, so those clocks had been restarted at different
+times. And the only two names that opened at all in this window were `fusion entry` on GOOG at
+`forecast=6.341` and NVDA at `forecast=-9.609` — the two **lowest** `1/|f|` thresholds seen. Every
+currently-planned name sits between **2.1** and **4.7**, and not one of them opens.
 
-Last cycle's VERIFY-BY was: after a fresh boot, at least one name's `|aim|/|targetQty|` should exceed the
-`1 − e^(−uptime/3600)` an in-memory reseed could produce. At **1364 s** that cap is **0.315378**, and
-**every** visible name is under it — BAC **0.063338**, CVX **0.219300**, AMZN **0.065118**, XOM
-**0.059964**, MSFT **0.052135**, AAPL **0.017274**. Unfixed, as expected: nothing shipped.
+**Why last cycle's refutation was half right.** It showed that four of six frozen names had release
+requirements inside a single process lifetime and still routed nothing, and concluded persistence would
+not help. That correctly kills *persistence alone* — but it tested only the **per-process** reset while
+the **per-cycle** `retainAll` was also firing, which is what the 12.7× spread was measuring. Closing
+either one alone leaves the freeze; this change closes both.
 
-But the same table **refutes the fix I had ranked #1**. The release condition off `PositionBuffer.band()`
-is `|aim|/|target| > TARGET_ABS × fraction / |f|`, i.e. `1/|f|` at the live **10.0** and **0.10**. Four of
-the six — BAC (needs **0.128355**), AAPL (**0.161675**), AMZN (**0.235171**), XOM (**0.291657**) — have
-requirements *below* the **0.315378** this boot's lifetime allows. They had the time and still routed
-nothing. **So persisting the aim across restarts would not have unfrozen them**, and Rule 366's "safe
-structural fix" does not fix the thing it was promoted for.
+## Change
 
-What the table does show is a **12.7× spread** in `|aim|/|target|` across six names that share one derived
-`adjustment-rate`, one band, and one seed (`currentQty` **0** for all six). Under a stationary target that
-spread is arithmetically impossible — every name would read the identical ratio. The aim is therefore not
-a warm-up clock ticking toward a fixed target; it is **chasing a target that moves within the boot**, in a
-`CHOP` regime, through a band that is *inversely* proportional to forecast strength. A weak view is
-penalised twice: the planner already shrank its target, and then the band demands a *larger* fraction of
-that smaller target.
+**ADR-0140 — the aim is durable derived state.** Absence now **ages** an intent over a window derived by
+inverting the ADR-0080 identity (`−1/ln(1−a) = h/c` = **120** cycles = exactly one evidence horizon — no
+number introduced), and the map is written through each cycle to `fusion_aim` (V48, `NUMERIC(20,6)`,
+`feed_mode`-scoped, derived data only) and restored once per process. No band, width, rate, conviction
+floor, edge gate or cap is altered, and the deterministic floor is untouched. A restored aim is never
+acted on directly: it is stepped at this cycle's rate and clamped by ADR-0102 into `[flat, current
+target]`, so it can never exceed or oppose the current view. Capping the band was ADR-0133 — scored ❌ BAD
+— and is **not** re-attempted. `-Pci test` green, five new tests.
 
-**No change this cycle** — the ADR-0116 freeze binds at 5/6, and I would rather ship the right fix next
-cycle than the one this cycle's own numbers just refuted. One reading is left open and not smoothed away:
-`insideBuffer` **20** against `instruments` **21** says one name was outside its band at the 18:59:43Z
-snapshot, yet no fusion order appears in `recent_orders` — a second instance of the Rule 343 tiny-delta
-anomaly, and the fix's test must answer it.
+**VERIFY-BY next run:** at least one name's `|aim|/|targetQty|` above the `1 − e^(−uptime/3600)` an
+in-memory reseed could produce; `insideBuffer` strictly below `instruments` **and** a matching `fusion
+entry`/`fusion exit` row in `recent_orders` in the same window; and the `|aim|/|target|` spread across
+names collapsing toward a common value.

@@ -15,6 +15,87 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-05 19:30Z (**CHANGE SHIPPED — ADR-0140.** The ADR-0116 freeze lifted: `scripts/score-change.py score` prints `no pending change to score`, `reports/.pending-baseline.json` is gone, and `e956dcf46` took a **❌ BAD** row. Its auto-revert conflicted again and is **deliberately not completed by hand** — reverting it reinstates ADR-0139, itself ❌ BAD (Rule 372). Item #1 keeps its rank and is **addressed this cycle**, with its mechanism corrected once more: last cycle's re-specification blamed the band's `1/|f|` inverse-forecast shape, but the same reading that motivated that also refutes it, because the *only* names that ever opened are exactly the low-`1/|f|` tail — the threshold is doing what it was designed to do, and what is broken is that the aim never gets to cross it. Items #1 and #3 turn out to be **two resets on one piece of state**, each masking the other; they are merged and fixed together.)
+
+### Step 0 — `e956dcf46` (the completed ADR-0139 revert): SCORED ❌ BAD, closed
+
+Verified ✅ on five independent boots at the defect level, then scored ❌ BAD on the vector at the close of
+its window. Both are true and not in conflict: the revert did exactly what it claimed to the credibility
+gate, and the objective still did not improve — which says the mechanism was never the money. Closed; not
+re-reverted (Rule 372). Its VERIFY-BY retires with it.
+
+### Window attribution — market only, FIFTH consecutive zero-order window
+
+`recent_orders` shows no new order since the 17:00:28Z ADR-0019 auto-hedge. `risk.total` reads `totalPnl`
+**-637.53116254**, `grossExposure` **5246.09536250** (**0.3%** of the firm cap, headroom **$1,494,754**),
+`netExposure` **508.54463750**; `breaker.halted` **false**; `regime.trend` **CHOP**, `volRatio` **1.03**.
+`attribution` splits the firm total into ALPHA **-600.08172505**, MACRO **-56.79950536**, HEDGE
+**+19.35006787**. **100% market, 0% change-attribution** (Rule 357).
+
+### Item #1 — the aim never crosses its band, so the desk cannot build: ⚠️ STILL-BROKEN → **ADDRESSED THIS CYCLE (ADR-0140)**; item #3 MERGED INTO IT
+
+Still broken on entry, as expected under the freeze: `insideBuffer` **19** of **20**, `currentQty` **0**
+for most planned names, and the planner producing real targets throughout (WMT `targetQty`
+**-846.588220**, KO **-599.105696**, JPM **139.136530**) against which nothing routed.
+
+**Mechanism, corrected and now settled.** The release condition is closed-form:
+`|aim|/|target| > bufferFraction × TARGET_ABS / |f|` = **`1/|f|`** at the live `0.10` / `10.0`. Two live
+readings pin it:
+
+| reading | value | what it establishes |
+| --- | --- | --- |
+| the only `fusion entry` rows in the window | GOOG `forecast=6.3413095741475525`, NVDA `forecast=-9.608504615051698` | thresholds **0.158** / **0.104** — the passers are exactly the low-`1/|f|` tail (Rule 373) |
+| `|f|` across every currently-planned name | **2.107082** … **4.710957** | thresholds **0.212**–**0.474**; none opens |
+| `|aim|/|target|` across six names on one rate, one band, one seed | AAPL **0.017274** … CVX **0.219300** | a **12.7×** spread under a shared clock ⇒ the clocks were RESTARTED (Rule 375) |
+
+So the band is not misshapen — the aim never reaches it. With ADR-0080's `a = 1 − e^(−c/h)` the aim rises
+as `1 − e^(−t/h)`, giving time-to-first-order `t > −h·ln(1 − 1/|f|)` ≈ **900–2400 s** at the live
+forecasts. And the aim was reset by **two** mechanisms, not one: `aims.keySet().retainAll(planned)` erased
+the whole intent of any name absent from a **single** cycle's plan (membership churns — consecutive
+snapshots read `instruments` **21** then **20**), and the map was in-memory against process lifetimes of
+**1344–1439 s**. Last cycle's refutation tested only the second and correctly killed *persistence alone*;
+it could not see the first (Rule 374). **Item #3 is therefore not a separate defect — it is the other half
+of this one, and is merged here.**
+
+**Fix shipped (ADR-0140):** absence AGES an intent over a window derived by inverting the ADR-0080
+identity (`−1/ln(1−a) = h/c` = **120** cycles = one evidence horizon; no number introduced), and the map
+is written through each cycle to `fusion_aim` (V48, `NUMERIC(20,6)`, `feed_mode`-scoped, derived data
+only) and restored once per process. No band, width, rate, conviction floor, edge gate or cap altered;
+deterministic floor untouched; a restored aim is still stepped at this cycle's rate and clamped by
+ADR-0102 into `[flat, target]`. Capping the band was ADR-0133, scored ❌ BAD, and is **not** re-attempted.
+`-Pci test` green.
+
+**VERIFY-BY (next run):** at least one name's `|aim|/|targetQty|` exceeds the `1 − e^(−uptime/3600)` an
+in-memory reseed could have produced; `insideBuffer` is strictly less than `instruments` **and** a matching
+`fusion entry`/`fusion exit` row appears in `recent_orders` in the same window; and the `|aim|/|target|`
+spread across names collapses toward a common value.
+
+### Item #2 — a degenerate 1-source zero forecast bypasses the no-trade buffer and full-liquidates: ⚠️ OPEN, now **#2 → next in line**
+
+Unchanged and un-refuted; not re-examined this cycle. The standing evidence holds, and this window adds a
+**live instance from the order tape**: NVDA `BUY 7.000000` at 16:59:27.901128Z, reason `fusion exit —
+target decayed to flat [forecast=-0.0, sources=1]` — a full liquidation of the position opened 74 minutes
+earlier at `forecast=-9.608504615051698, sources=3`. `nextAim` (`PositionBuffer.java`) opens
+`if (target.signum() == 0) return ZERO`, correct for an *ordered* exit and wrong for a target that read
+zero because its sources collapsed to one.
+
+**VERIFY-BY (unchanged):** no order carries `fusion exit — target decayed to flat` with `sources=1` in
+`recent_orders`; a name whose source count collapses within a cycle shows a non-full `deltaQty`; and the
+fix ships a unit test reproducing the one-source-zero plan.
+
+### Item #3 — ~~the aim map is in-memory, so no warm-up survives a restart~~: **MERGED into #1 and fixed by ADR-0140**
+
+Not a separate defect. It was one of the two resets on the same map; fixing it alone would have left the
+per-cycle `retainAll` reset in place, which is exactly why its earlier promotion failed its own test.
+
+### Item #4 — (unchanged) the edge gate refuses to size a source with measured expectancy: ⚠️ OPEN, now #3
+
+Carried forward unchanged; not examined this cycle. Live `edgeGate` reads **null** in `fusion_targets`,
+and `signals_telemetry` still shows `social` as the only source with positive measured expectancy
+(`avgReturnBps` **6.033649120551656**, `hitRate` **0.6146341463414634**, **41** cohorts).
+
+---
+
 ## Verification block — 2026-08-05 19:00Z (**NO CHANGE — ADR-0116 measurement freeze, cycle 5 of 6.** `scripts/score-change.py score` prints `e956dcf46 still accumulating evidence (5/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `e956dcf46`, and the ledger's newest row is still `d51f179a2`. Step 0 re-graded the revert ✅ VERIFIED on a **fifth, independent boot**, and **retired its VERIFY-BY as the wrong metric** (see below). The cycle's product **refutes the fix this register ranked #1 last cycle**: persisting the aim would NOT unfreeze the desk. Four of the six visible frozen names have release requirements *below* what an in-memory reseed could produce in this boot's lifetime — they had the time and still routed nothing. Item #1 keeps its rank (it is still the biggest, provable cost) but its **mechanism and its prescribed fix are re-specified**: the freeze is the aim losing a race to a moving target through a band that is inversely proportional to forecast strength, not a cold-start clock.)
 
 ### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED (5th boot)
