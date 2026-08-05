@@ -15,6 +15,97 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-05 18:00Z (**NO CHANGE — ADR-0116 measurement freeze, cycle 3 of 6.** `scripts/score-change.py score` prints `e956dcf46 still accumulating evidence (3/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `e956dcf46`, and the ledger's newest row is still `d51f179a2`. Step 0 re-graded the revert ✅ VERIFIED on a **third, independent boot**. The cycle's product is that **item #2's freeze is no longer just a closed-form inequality, it is a quantified RACE the aim loses by 4.3×–11.3×** — and that the race's *reset* side is driven by the very `target == 0` branch that item #1 names, so the two items are causally linked, not merely adjacent. **Ranking is unchanged: #1 stays #1, and gains a second, larger reason to be first.**)
+
+### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED (3rd boot)
+
+Deployment confirmed on a **third, fresh** JVM: `traffic.timestampMillis` **1785952802570** −
+`ops_jvm.uptimeSeconds` **1344** = boot **17:37:38.570Z**, after the revert's **16:38:20Z** commit. This is
+a different process from the 17:06:53.992Z boot graded last cycle, so the readings are independent.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| uncurated authors do not pass on a single credential | of the 12 `recent` posts, all tier `STANDARD`, **all 12** read `credible: false` | ✅ strict conjunction is live |
+| corroboration rate off its loosened level (Rule 334 — grade the RATE, the counter resets at boot) | `counters.corroborated` **11** in **1344 s**, against **17/1427 s**, **15/1439 s**, **17/1362 s** on the ADR-0139 boots | ✅ holds on a third boot |
+| pump tell unaffected | `manipulationSuspected` **35** on `ingested` **3240** / `kept` **790** | ✅ still firing |
+
+The scorer owns the vector verdict; that is 3 of 6 cycles in and is not mine to pre-judge.
+
+### Window attribution — market only, and unambiguously so
+
+`recent_orders` shows **no order at all** since the previous report (the newest row is the ADR-0019
+auto-hedge ES `SELL 0.003243` at **17:00:28Z**, which the 17:30Z block already covered). The book is the
+same two positions: ALPHA **GOOG 8.000000** (`unrealizedPnl` **-11.12000000**, was **-14.60000000**) and
+HEDGE **ES -0.006099** (**-1.10195332**). `risk.total` reads `totalPnl` **-633.35472504**, `grossExposure`
+**5252.55892500**, `netExposure` **512.72107500**; `breaker.halted` **false**. Every dollar of the window's
+move is a mark on an untouched position — **market, zero change-attribution** (Rule 357).
+
+### Item #1 — a degenerate 1-source zero forecast BYPASSES the no-trade buffer, full-liquidates, AND resets the aim: ⚠️ OPEN, stays #1, severity UPGRADED
+
+The liquidation evidence is unchanged (the NVDA 16:59:27 row `fusion exit — target decayed to flat
+[forecast=-0.0, sources=1]`, and the 2026-08-04 20:10–20:17Z seven-name sweep); no *new* instance fired
+this window, because no order fired at all. What is new is the **second** consequence of the same
+`target.signum() == 0`, and it is the larger one:
+
+`nextAim` (`PositionBuffer.java:259`) opens with `if (target.signum() == 0) return ZERO` — a flat target
+**snaps the aim to zero** rather than decaying it. That is correct for an *ordered* exit and wrong for a
+target that read zero because its sources collapsed. So a degenerate plan does not merely liquidate the
+position: it **destroys the accumulated aim**, which is the exact state item #2 needs to accumulate for
+minutes on end. Item #1's branch is therefore a *supply* of the resets that item #2's arithmetic (below)
+shows the desk cannot afford. Fixing the one conditional addresses both, which is why #1 keeps the rank
+even in a window where it did not fire.
+
+**VERIFY-BY (next run):** no order carries `fusion exit — target decayed to flat` with `sources=1` in
+`recent_orders`; a name whose source count collapses within a cycle shows a non-full `deltaQty`; and its
+`aims` entry does **not** return to `0.0` on that cycle. The change ships a unit test reproducing the
+16:59:27 row **before** it alters behaviour (Rule 353).
+
+### Item #2 — the no-trade band's release is a RACE the aim loses by 4.3×–11.3×: ⚠️ OPEN, mechanism now QUANTIFIED
+
+Re-confirmed on the third boot with an **entirely different name set** from last cycle's (KO/NVDA/MSFT/
+PFE/WMT/JNJ vs AMZN/CVX/MSFT/AAPL/JPM/NEE), so the mechanism is neither name- nor boot-specific:
+`insideBuffer` **22**, `targets` `… 6 of 23 elements shown, 17 elided`, every visible `deltaQty` **0.0**,
+every `currentQty` **0**.
+
+Last cycle established the release condition from a flat holding, `|aim|/|target| ≤ 1/|forecast|`
+(Rule 358). This cycle closes the other half — **how fast the aim can reach it**. `edgeGate` is **null**,
+so `withHoldingPeriod` (`FusionLifecycle.java:244`, fallback at `:248`) falls back to the shipped base horizon
+`jethro.signals.horizon-seconds=3600` and `adjustmentRateFor(30, 3600)` derives
+**a = 0.008298707361124036**. `nextAim` is the ADR-0080 e-fold `aim + a·(target − aim)` seeded at the held
+quantity, so from flat the aim is `target · (1 − e^(−t/3600))` and release needs
+**t ≥ 3600 · ln(|f| / (|f| − 1))** seconds of uninterrupted, sign-stable, target-stable accumulation.
+Inverting each live ratio gives the aim's *effective* age:
+
+| name | `|combinedForecast|` | live `|aim|/|targetQty|` | release `1/|f|` | implied aim age | seconds needed | short by |
+| --- | --- | --- | --- | --- | --- | --- |
+| KO | 5.1383 | 0.0442 | 0.1946 | 163 s | 779 s | 4.8× |
+| NVDA | 4.9233 | 0.0199 | 0.2031 | 72 s | 817 s | 11.3× |
+| MSFT | 3.9334 | 0.0665 | 0.2542 | 248 s | 1056 s | 4.3× |
+| PFE | 2.5648 | 0.0920 | 0.3899 | 347 s | 1779 s | 5.1× |
+| WMT | 2.5396 | 0.0682 | 0.3938 | 254 s | 1802 s | 7.1× |
+| JNJ | 2.0448 | 0.0901 | 0.4890 | 340 s | 2417 s | 7.1× |
+
+The decisive comparison is against the process itself: had **any** of these accumulated uninterrupted
+since the **1344 s** boot, the ratio would read **0.3116** — which clears KO (0.1946), NVDA (0.2031) and
+MSFT (0.2542) outright. It reads 0.0199–0.0920 instead. **So the band is not merely slow; the aim is being
+reset roughly every 72–347 s while it needs 779–2417 s, and the desk therefore cannot open a position at
+all except on the outlier forecast that shortens the requirement enough to win one race** (the 15:45:50Z
+NVDA fill at `combinedForecast` **-9.608504615051698**, whose requirement collapses to **396 s**).
+
+Two known reset sources feed this — `nextAim`'s flat-target snap (item #1's branch) and `withinTarget`
+(`PositionBuffer.java:311`) zeroing the aim on any forecast sign flip. **This snapshot cannot separate
+their contributions**, and the age inversion assumes the target was stable since the aim's last reset; a
+target that grew would make the implied age an over-estimate, i.e. the shortfall worse, not better. The
+fix must instrument which reset fires before choosing between them.
+
+**VERIFY-BY (next run):** `insideBuffer` is strictly below the target count, at least one name with
+`currentQty` **0** shows a non-zero `deltaQty`, and its `|aim|/|targetQty|` exceeds `1/|combinedForecast|`
+— all three read from the same `fusion_targets` snapshot.
+
+*(Every figure above is read from this run's `logs/report.md` or derived by script from it and the shipped
+constants `interval-seconds=30`, `horizon-seconds=3600`, `Forecast.TARGET_ABS=10`,
+`position-buffer.fraction=0.10`. Nothing here sets or proposes a dial — invariant 7 / ADR-0016.)*
+
 ## Verification block — 2026-08-05 17:30Z (**NO CHANGE — ADR-0116 measurement freeze, cycle 2 of 6.** `reports/.pending-baseline.json` names `e956dcf46` and the scorer's own `window_since` reports **2/6** cycles accrued; the ledger's newest row is still `d51f179a2`. Step 0 re-graded the revert ✅ VERIFIED on a **second, independent boot**. The cycle's real product is that **item #2 now has a closed form that predicts the live plan exactly** — `insideBuffer` **26 of 26**, and the release condition `|aim|/|target| ≤ 1/|forecast|` reproduces every one of the six visible frozen names — and that **items #1 and #2 are the two branches of a single `if` in `bufferedDelta`**. Ranking is unchanged: #1 still fires first and moves whole positions. But the fix is now specified against one conditional rather than two separate patches.)
 
 ### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED (2nd boot)

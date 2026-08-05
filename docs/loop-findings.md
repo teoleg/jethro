@@ -4637,3 +4637,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   `fusion entry — target increase [forecast=6.3413095741475525, sources=3]`. **Rule: a window in which no
   alpha order routed is the one window where the market/change split is unambiguous — record it as market
   and resist reading anything about the thesis into it.**
+
+## 2026-08-05 18:00Z — the buffer freeze is a race the aim loses by 4.3×–11.3×, and item #1's branch is what keeps resetting it
+
+- **Rule 361 — the aim's time-to-release is a closed form, and it is minutes.** With `edgeGate` **null**
+  the ADR-0080 rate falls back to the shipped base horizon: `adjustmentRateFor(30, 3600)` =
+  **0.008298707361124036**, so from a flat holding `nextAim` walks the aim as `target·(1 − e^(−t/3600))`
+  and Rule 358's release point `|aim|/|target| ≥ 1/|forecast|` becomes
+  **t ≥ 3600·ln(|f|/(|f|−1))** seconds. Live: KO **779 s**, NVDA **817 s**, MSFT **1056 s**, PFE
+  **1779 s**, WMT **1802 s**, JNJ **2417 s**. **Rule: state the buffer's cost in SECONDS OF UNINTERRUPTED
+  ACCUMULATION, not as a ratio — the ratio hides that a weak forecast needs tens of minutes of a stable
+  sign to open anything at all.**
+- **Rule 362 — the aim is being reset ~5× faster than it can arrive, so the freeze is a race, not a
+  delay.** Inverting the six live `|aim|/|targetQty|` ratios gives effective aim ages of **163/72/248/347/
+  254/340 s** against the requirements above — short by **4.8×/11.3×/4.3×/5.1×/7.1×/7.1×**. The decisive
+  check is the process: uninterrupted since the **1344 s** boot the ratio would read **0.3116**, clearing
+  KO, NVDA and MSFT outright; it reads **0.0199–0.0920**. **Rule: do not propose widening or narrowing the
+  band — the band is not what is binding. Instrument the RESET first; a fix that shortens the requirement
+  without stopping the reset just moves a number the race still beats.**
+- **Rule 363 — items #1 and #2 are causally linked, not just adjacent.** `nextAim`
+  (`PositionBuffer.java:259`) opens `if (target.signum() == 0) return ZERO` — a flat target SNAPS the aim
+  to zero. So item #1's degenerate `[forecast=-0.0, sources=1]` plan does not only liquidate the position,
+  it **supplies the reset** that starves item #2. Two reset sources exist (that snap, and `withinTarget`
+  at `:311` zeroing on a sign flip) and this snapshot **cannot separate them**. **Rule: when a freeze is
+  reset-driven, the first change is the one that records WHICH reset fired — guessing between two
+  candidates is how a cycle gets spent on the wrong arm of the same `if`.**
+- **Step 0 — `e956dcf46` ✅ VERIFIED on a third, independent boot.** `traffic.timestampMillis`
+  **1785952802570** − `uptimeSeconds` **1344** = boot **17:37:38.570Z**, after the **16:38:20Z** commit.
+  **All 12** `recent` STANDARD posts `credible: false`; `counters.corroborated` **11** in **1344 s**
+  against **17/1427 s**, **15/1439 s**, **17/1362 s** on the ADR-0139 boots; `manipulationSuspected` **35**
+  on `ingested` **3240** / `kept` **790**. Scorer: `3/6 cycles`, held — no change this cycle.
+- **Trigger/attribution — market, cleanly.** **No order at all** routed this window. GOOG **8** shares
+  unchanged, `unrealizedPnl` **-14.60000000 → -11.12000000**; HEDGE ES **-0.006099**. **Rule: a zero-order
+  window is 100% market and 0% change — bank the clean split and read nothing about the thesis into it
+  (this is the second consecutive such window; see Rule 357).**
