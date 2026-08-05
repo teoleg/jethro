@@ -4712,3 +4712,52 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   17:00:28Z auto-hedge; GOOG **8.000000** and HEDGE ES **-0.006099** unchanged; `totalPnl` **-631.26343754**.
   **Rule: bank the clean 100%-market split and read nothing about the thesis into it (third consecutive; see
   Rules 357 and 360).**
+
+## 2026-08-05 19:00Z — persisting the aim would NOT unfreeze the desk: four of six frozen names had the lifetime and still routed nothing
+
+- **Rule 368 — a hypothesis that survives one snapshot can die on the next; grade it and retract.** Last
+  cycle's Rule 364/366 said the freeze was a cold-start clock (`aims` is an in-memory `HashMap`,
+  `PositionBuffer.java:105`) and promoted "persist the aim" to item #1 as the *safe* fix. This cycle's
+  numbers refute it. Release needs `|aim|/|target| > TARGET_ABS·fraction/|f|` = `1/|f|` at the live
+  **10.0** / **0.10**; an in-memory reseed at `uptime` **1364 s** caps the ratio at `1−e^(−t/3600)` =
+  **0.315378**. **BAC** (needs **0.128355**), **AAPL** (**0.161675**), **AMZN** (**0.235171**) and **XOM**
+  (**0.291657**) all sit *under* that cap — they had the process lifetime and still show `deltaQty` **0.0**.
+  **Rule: before ranking a fix #1, check it against the names it is supposed to free — a mechanism that
+  explains two of six names is not the mechanism.**
+- **Rule 369 — a ratio spread across names under one shared rate proves the TARGET is moving.** Observed
+  `|aim|/|target|`: AAPL **0.017274**, MSFT **0.052135**, XOM **0.059964**, BAC **0.063338**, AMZN
+  **0.065118**, CVX **0.219300** — a **12.7×** spread across six names sharing one derived
+  `adjustment-rate`, one band, one seed (`currentQty` **0** for every one). Under a stationary target every
+  name would read the *identical* ratio. So the aim is not warming up toward a fixed point; it is losing a
+  race to a target that moves within the boot, in `regime.trend` **CHOP** at `volRatio` **0.95**.
+  **Rule: identical-mechanism names showing different ratios is a measurement that the input is moving —
+  read the spread, not just the level.**
+- **Rule 370 — the band punishes a weak view twice, and that is the freeze's real shape.** `band()` scales
+  by `|target|·TARGET_ABS/|f|`, so the *required* fraction of the target is `1/|f|`: MSFT at
+  `combinedForecast` **-2.5139146286285365** must travel **0.397786** of the way, BAC at **-7.79088727**
+  only **0.128355**. The planner has *already* shrunk the weak name's target by the same forecast — the
+  band then demands a larger share of that smaller number. **Rule: when a control divides by a quantity the
+  upstream stage already multiplied by, it is applying that quantity twice; look for the double count
+  before tuning either stage.**
+- **Step 0 — `e956dcf46` ✅ VERIFIED on a fifth, independent boot.** `traffic.timestampMillis`
+  **1785956401616** − `uptimeSeconds` **1364** = boot **18:37:17.616Z**, after the **16:38:20Z** commit.
+  `counters.corroborated` **7** in **1364 s** — lowest rate yet (vs **8/1387 s**, **11/1344 s** post-revert;
+  **17/1427 s**, **15/1439 s**, **17/1362 s** pre-revert); `manipulationSuspected` **38** on `ingested`
+  **3390** / `kept` **809**. Scorer: `5/6 cycles`, held — no change this cycle.
+- **Rule 371 — grade a gate on the population it gates, not on a global count.** Last cycle's VERIFY-BY
+  ("`credible: true` stays a small minority of `recent`") is retired as *wrong*: **5** of 12 rows read
+  `credible: true` this cycle and none is a regression — all five are `channel: yahoo`, the news-RSS path,
+  and `NewsSocialFeed.java:54-55` builds every wire item with `SYNTHETIC_FOLLOWERS` **5_000_000**,
+  `verified` **true**, `SYNTHETIC_AGE_DAYS` **3650**. A curated outlet is credible by construction and
+  always was. The discriminating metric is the **`stocktwits:` rows only** — all **7** read
+  `credible: false`. **Rule: a mixed-population counter cannot verify a gate that only applies to one
+  sub-population; scope the VERIFY-BY to the rows the rule can actually reject.**
+- **Trigger/attribution — market, cleanly, for the fourth window running.** **No new order** since the
+  17:00:28Z auto-hedge; `risk.total` `totalPnl` **-640.57492504**, `grossExposure` **5242.89912500** at
+  **0.3%** of the firm cap; `attribution` ALPHA **-603.20172505** / MACRO **-56.79950536** / HEDGE
+  **+19.42630537**. **Rule: bank the clean 100%-market split and read nothing about the thesis into it
+  (fourth consecutive; see Rules 357, 360).**
+- **Open, not smoothed away.** `insideBuffer` **20** against `instruments` **21** says one name was outside
+  its band at the 18:59:43Z snapshot, yet `recent_orders` carries no fusion order in the window — a second
+  instance of the Rule 343 tiny-delta anomaly. **Rule: carry an unexplained reading as a required test for
+  the fix, never as a rounding detail.**

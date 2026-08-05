@@ -15,6 +15,114 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-05 19:00Z (**NO CHANGE — ADR-0116 measurement freeze, cycle 5 of 6.** `scripts/score-change.py score` prints `e956dcf46 still accumulating evidence (5/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `e956dcf46`, and the ledger's newest row is still `d51f179a2`. Step 0 re-graded the revert ✅ VERIFIED on a **fifth, independent boot**, and **retired its VERIFY-BY as the wrong metric** (see below). The cycle's product **refutes the fix this register ranked #1 last cycle**: persisting the aim would NOT unfreeze the desk. Four of the six visible frozen names have release requirements *below* what an in-memory reseed could produce in this boot's lifetime — they had the time and still routed nothing. Item #1 keeps its rank (it is still the biggest, provable cost) but its **mechanism and its prescribed fix are re-specified**: the freeze is the aim losing a race to a moving target through a band that is inversely proportional to forecast strength, not a cold-start clock.)
+
+### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED (5th boot)
+
+Deployment confirmed on a **fifth, fresh** JVM: `traffic.timestampMillis` **1785956401616** −
+`ops_jvm.uptimeSeconds` **1364** = boot **18:37:17.616Z**, after the revert's **16:38:20Z** commit — a
+different process from the 18:06:55.128Z boot graded last cycle, so the readings are independent.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| no *uncurated* author passes the credibility conjunction (metric corrected — see below) | all **7** `stocktwits:` rows in `recent` read `credible: false` | ✅ |
+| corroboration rate off its loosened level (Rule 334 — grade the RATE, the counter resets at boot) | `counters.corroborated` **7** in **1364 s**, against **8/1387 s** and **11/1344 s** post-revert and **17/1427 s**, **15/1439 s**, **17/1362 s** on the ADR-0139 boots | ✅ holds on a fifth boot, at the lowest rate yet |
+| pump tell unaffected | `manipulationSuspected` **38** on `ingested` **3390** / `kept` **809** | ✅ still firing |
+
+**Last cycle's VERIFY-BY was the wrong metric and is RETIRED (Rule 371).** It asked that the
+`credible: true` count stay a small minority of `recent`. This cycle **5** of the 12 shown read
+`credible: true` — and **none is a regression**, because all five are `channel: yahoo`, the news-RSS path.
+`NewsSocialFeed.java:54-55` constructs every wire item with `SYNTHETIC_FOLLOWERS` **5_000_000**, `verified`
+**true**, `SYNTHETIC_AGE_DAYS` **3650**, so a curated outlet clears the conjunction *by construction* and
+always has, untouched by ADR-0139 or its revert. A counter mixing curated outlets with uncurated authors
+cannot verify a gate that only bites the latter. **Replacement VERIFY-BY (in force above):** every
+`stocktwits:`-channel row in `recent` reads `credible: false`, and the corroboration rate stays below the
+ADR-0139 band.
+
+The scorer owns the vector verdict; that is 5 of 6 cycles in and is not mine to pre-judge. It lifts next
+cycle.
+
+### Window attribution — market only, fourth consecutive zero-order window
+
+`recent_orders` shows **no new order**: the newest row is still the ADR-0019 auto-hedge ES `SELL 0.003243`
+at **17:00:28Z**. `risk.total` reads `totalPnl` **-640.57492504**, `grossExposure` **5242.89912500**,
+`netExposure` **505.50087500**; `var95` **75.35** on `coveredExposure` **5242.90**; `breaker.halted`
+**false**; `regime` `trend` **CHOP**, `volRatio` **0.95**. `attribution` splits the firm total into ALPHA
+**-603.20172505**, MACRO **-56.79950536**, HEDGE **+19.42630537**. Every dollar of the move is a mark on an
+untouched position — **100% market, 0% change-attribution** (Rule 357).
+
+### Item #1 — the aim never crosses its band, so the desk cannot build: ⚠️ STILL-BROKEN, stays #1, **mechanism and prescribed fix RE-SPECIFIED**
+
+Last cycle's VERIFY-BY: *after a fresh boot, at least one name's `|aim|/|targetQty|` exceeds the
+`1 − e^(−uptime/3600)` an in-memory reseed could have produced.* At `uptime` **1364 s** that cap is
+**0.315378**, and **no** name exceeds it. Unfixed, as expected — nothing shipped under the freeze.
+
+**But the same table refutes the fix this register promoted to #1 last cycle.** The release condition read
+off `PositionBuffer.band()` is `|aim|/|target| > TARGET_ABS × fraction / |f|`, which at the live
+`Forecast.TARGET_ABS` **10.0** and `jethro.fusion.position-buffer.fraction` **0.10** is exactly `1/|f|`:
+
+| name | `combinedForecast` | `\|aim\|/\|target\|` | required `1/\|f\|` | released? | under the **0.315378** reseed cap? |
+| --- | --- | --- | --- | --- | --- |
+| BAC | -7.79088727371532 | 0.063338 | 0.128355 | no | yes |
+| AAPL | -6.185233809515913 | 0.017274 | 0.161675 | no | yes |
+| AMZN | -4.252230984616215 | 0.065118 | 0.235171 | no | yes |
+| XOM | 3.4286861670748205 | 0.059964 | 0.291657 | no | yes |
+| CVX | 2.7867811339450084 | 0.219300 | 0.358837 | no | yes |
+| MSFT | -2.5139146286285365 | 0.052135 | 0.397786 | no | yes |
+
+BAC, AAPL, AMZN and XOM all require **less** than the **0.315378** this boot's lifetime allows. They had
+the time and still show `deltaQty` **0.0**. **Persisting the aim across restarts therefore does not free
+them, and Rule 366's "safe structural fix" does not fix what it was promoted for.** Rule 364 stands as an
+aggravating factor for NEE/BAC-class long horizons; it is not the binding constraint.
+
+**The mechanism, re-specified (Rules 369, 370).** The six names share one derived `adjustment-rate`, one
+band, and one seed (`currentQty` **0** for every one), yet their ratios span **12.7×**. Under a stationary
+target that is arithmetically impossible — every name would read the identical ratio. So the aim is not a
+clock warming toward a fixed point; it is **losing a race to a target that moves within the boot**, in
+`regime.trend` **CHOP**. And the band it must cross is *inversely* proportional to forecast strength: MSFT
+at `|f|` **2.51** must travel **0.397786** of the way to its target, BAC at **7.79** only **0.128355** —
+while the planner has **already** scaled that target down by the same forecast. The weak view is charged
+for its weakness twice.
+
+**VERIFY-BY (next run, re-specified):** at least one name whose `1/|f|` requirement sits under the boot's
+`1 − e^(−uptime/3600)` cap shows a non-zero `deltaQty`; `insideBuffer` is strictly less than `instruments`
+**and** a matching `fusion entry`/`fusion exit` order appears in `recent_orders` in the same window; and
+the ratio spread across names collapses toward a common value once the aim is no longer racing.
+
+**Open, carried as a required test, not smoothed away.** `insideBuffer` **20** against `instruments` **21**
+says one name was outside its band at the 18:59:43Z snapshot, yet `recent_orders` has no fusion order in
+the window — a second instance of the Rule 343 tiny-delta anomaly. The fix's test must reproduce and answer
+it.
+
+### Item #2 — a degenerate 1-source zero forecast bypasses the no-trade buffer and full-liquidates: ⚠️ OPEN
+
+Unchanged and un-refuted; not re-examined this cycle. The evidence stands: NVDA 16:59:27 `fusion exit —
+target decayed to flat [forecast=-0.0, sources=1]`, and the 2026-08-04 20:10–20:17Z seven-name sweep. **No
+new instance fired this window, because no order fired at all.** `nextAim` (`PositionBuffer.java:259`) opens
+`if (target.signum() == 0) return ZERO`, which is correct for an *ordered* exit and wrong for a target that
+read zero because its sources collapsed to one.
+
+**VERIFY-BY (unchanged):** no order carries `fusion exit — target decayed to flat` with `sources=1` in
+`recent_orders`; a name whose source count collapses within a cycle shows a non-full `deltaQty`; and the fix
+ships a unit test reproducing the one-source-zero plan.
+
+### Item #3 — the aim map is in-memory, so no warm-up survives a restart: ⚠️ OPEN, **DEMOTED from #1**
+
+Rule 364's reading is still correct and still a real defect — `aims` is a plain `HashMap`
+(`PositionBuffer.java:105`), reseeded from `held` at every boot, in a harness whose observed process
+lifetimes are **1364/1387/1344/1362/1427/1439 s** — but it is demoted because this cycle proved it is **not
+what is freezing the desk**: four of six names fit inside one lifetime and still routed nothing. It remains
+worth fixing as ADR-0014 derived state (it changes no band, no rate, no cap), just not first.
+
+**VERIFY-BY:** after a restart, a name's `aim` resumes near its pre-restart value instead of at
+`currentQty`.
+
+### Item #4 — (unchanged) the edge gate refuses to size a source with measured expectancy: ⚠️ OPEN
+
+Carried forward unchanged; not examined this cycle.
+
+---
+
 ## Verification block — 2026-08-05 18:30Z (**NO CHANGE — ADR-0116 measurement freeze, cycle 4 of 6.** `scripts/score-change.py score` prints `e956dcf46 still accumulating evidence (4/6 cycles) — held, not scored this run`, `reports/.pending-baseline.json` still names `e956dcf46`, and the ledger's newest row is still `d51f179a2`. Step 0 re-graded the revert ✅ VERIFIED on a **fourth, independent boot**. The cycle's product **overturns last cycle's Rule 363 conclusion and RE-RANKS the register**: the aim's warm-up clock is *not* persisted — `aims` is a plain in-memory `HashMap` (`PositionBuffer.java:105`) that reseeds from `held` at every boot — so the buffer's release time must be paid inside ONE ~1400 s process lifetime, and for two of the six visible names the requirement **exceeds every process lifetime this loop has ever observed**. That is a freeze no fix to item #1 can touch, it is the bigger money, and it has a *safe* fix that changes no band and no rate. **The buffer item is promoted to #1; the degenerate-zero-forecast item moves to #2.**)
 
 ### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED (4th boot)
