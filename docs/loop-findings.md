@@ -4549,3 +4549,50 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   ended at FUTURE gross **0.00000000**. Fifteen shares over minutes is noise, and it is evidence about
   neither the market nor the change. Gross **$4,452.86** is **0.3%** of the firm cap — deployment under
   ADR-0132, not cap pressure.
+
+## 2026-08-05 17:00Z — no change (ADR-0116 freeze, 1/6). The buffer waves through noise and blocks signal.
+
+- **Rule 354 — a degenerate one-source plan gets UNBUFFERED, FULL-SIZE execution while a confirmed
+  three-source plan gets nothing.** NVDA was entered `SELL 7.000000` at 15:45:50.040557Z on
+  `forecast=-9.608504615051698, sources=3`, then **full-liquidated** `BUY 7.000000` at 16:59:27.901128Z on
+  `fusion exit — target decayed to flat [forecast=-0.0, sources=1]`. **Thirty seconds later** the plan
+  (`fusion_targets.atMillis` **1785949197948**) reads `combinedForecast` **-3.2603756638089805**, `sources`
+  **3**, `agreement` **0.872320186445232**, `targetQty` **-200.400971**, `currentQty` **0**, `deltaQty`
+  **0.0**. `FusionLifecycle.originOf` (`FusionLifecycle.java:428`) derives that label from
+  `t.targetQty().signum() == 0`, so the target really was exactly flat off a single surviving source.
+  **Rule: "the target decayed to zero" and "the sources went away" are different events and must not share
+  a code path — a plan computed from fewer sources than usual is a REASON TO HOLD, never a reason to route
+  the full position to flat.**
+- **Rule 355 — this is the book-scale flattening pattern, not one row.** 2026-08-04 20:10–20:17Z fired the
+  identical reason string across **seven** names in seven minutes — XOM `SELL 16`, CVX `SELL 28`, GOOG
+  `BUY 9`, AAPL `BUY 12`, NVDA `BUY 19`, AMZN `SELL 9`, MSFT `BUY 8`, all
+  `[forecast=0.0/-0.0, sources=1]`. That is the shape behind the ledger rows `gross 52,192→0`,
+  `gross 54,093→0`, `gross 93,878→26,441`. **Rule: when the ledger keeps showing gross land on EXACTLY
+  0.00, stop treating it as the book failing to build and go read the exit REASONS — a book does not
+  arrive at exactly zero by drifting.**
+- **Rule 356 — I had the causal direction of the band backwards, and the correction re-ranks the register.**
+  I had modelled the no-trade band as the reason the desk cannot BUILD (`insideBuffer` **22** of
+  `instruments` **23** this plan, still true). It is equally the reason the desk stays flat AFTER being
+  thrown there by a dropout. The dropout half moves seven shares at once; the band half moves ~0.06/cycle.
+  **Rule: when two defects form a loop, the one that fires FIRST and moves the most SIZE is #1 — fixing
+  re-entry while a dropout can still liquidate the book at will fixes the back half of a live loop.**
+  Promoted to must-fix #1; the entry band drops to #2. Rule 353's precondition carries over: the fix ships
+  a unit test reproducing the NVDA 16:59:27 row before it changes behaviour.
+- **Rule 357 — the churn this creates is now most of the loss.** `attribution.totalFees` **398.739093**
+  against firm total **-619.47984806**, on turnover of NVDA **236** fills / **$201,069.31**, MSFT **200** /
+  **$214,385.43**, GOOG **176** / **$188,284.68**. **Rule: quote fees against the firm total before
+  proposing any signal work — when costs approach the size of the loss, the defect is in the trading, not
+  in the forecasting.**
+- **Step 0 — `e956dcf46` (the completed ADR-0139 revert) ✅ VERIFIED.** Deployment confirmed first: commit
+  authored **16:38:20Z**, JVM booted at `traffic.timestampMillis` **1785949202383** −
+  `ops_jvm.uptimeSeconds` **1260** = **16:39:02.383Z**. `SocialChannels.isCredible` is back to the strict
+  conjunction and the running app applies it — **11** of **12** `recent` STANDARD posts read
+  `credible: false`; `counters.corroborated` **7** in **1260 s** against **17/1427 s** on the ADR-0139 boot;
+  `manipulationSuspected` **39** on `ingested` **3090** / `kept` **792**, so the pump tell is untouched.
+- **Trigger/attribution — honest split, and it is neither.** No change of mine was live in this window (the
+  revert committed at its start and is 1/6 cycles into measurement). One alpha position survives — GOOG
+  **8.000000** at `avgCost` **361.72000000** vs `mark` **361.90500000**, `unrealizedPnl` **+1.48000000** —
+  plus HEDGE ES **-0.002856** (`unrealizedPnl` **+0.14773466**). The **+3.37** is the mark on those plus a
+  seven-share NVDA round trip and its fees: noise, and evidence about neither the market nor a change. The
+  Rule 354/355 finding rests on the order reasons and the plan, not on this PnL. Gross **$4,004.439** is
+  **0.3%** of the firm cap — under-deployment under ADR-0132, not cap pressure.

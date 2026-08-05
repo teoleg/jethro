@@ -15,6 +15,94 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-05 17:00Z (**NO CHANGE — ADR-0116 measurement freeze.** `scripts/score-change.py score` reports `e956dcf46 still accumulating evidence (1/6 cycles)` and `reports/.pending-baseline.json` names that commit, so last cycle's revert is under measurement and a new change would destroy its evidence. Step 0 graded the revert ✅ VERIFIED. The window also produced the register's most important reading yet: **the no-trade buffer is BYPASSED by a degenerate single-source zero forecast**, which full-liquidated NVDA seconds before the same three sources came back agreeing on the same side. That is promoted to **item #1**; the old #1 becomes #2 as the second half of the same asymmetry.)
+
+### Step 0 — `e956dcf46` (the completed ADR-0139 revert): ✅ VERIFIED
+
+Deployment confirmed first, so this grades a change the app actually ran: the revert commit is authored
+**16:38:20Z**, and the running JVM booted at `traffic.timestampMillis` **1785949202383** −
+`ops_jvm.uptimeSeconds` **1260** = **16:39:02.383Z** — 42 s after the commit. The build under test contains it.
+
+| VERIFY-BY | reading | verdict |
+| --- | --- | --- |
+| `SocialChannels.isCredible` back to the strict conjunction in the tree | `p.verified() && p.followers() >= credibleFollowerFloor && p.accountAgeDays() >= credibleAgeDaysFloor` for `STANDARD` | ✅ the rejected alternative-credential shape is gone |
+| uncurated authors no longer pass on a single credential | of the 12 `recent` posts, all tier `STANDARD`, **11** read `credible: false` and **1** `credible: true` | ✅ the strict gate is what the running app is applying |
+| corroboration back off its loosened rate (Rule 334 — grade the RATE, the counter resets at boot) | `counters.corroborated` **7** in **1260 s**, against **17/1427 s**, **15/1439 s**, **17/1362 s** on the ADR-0139 boots | ✅ roughly halved, consistent with the tightening |
+| pump tell unaffected | `manipulationSuspected` **39** on `ingested` **3090** / `kept` **792** | ✅ still firing |
+
+The rejected mechanism is out of the running code. The scorer now owns whether the revert helped the
+vector; that is 1 of 6 cycles in and is not mine to pre-judge.
+
+### Item #1 — **NEW, promoted**: a degenerate 1-source zero forecast BYPASSES the no-trade buffer and full-liquidates the position: ⚠️ OPEN
+
+This is the mechanism that keeps taking gross to **exactly $0.00**, and this window caught it in the act
+with 30 seconds of separation between the liquidation and its own refutation:
+
+| time | event | reading |
+| --- | --- | --- |
+| 15:45:50.040557Z | NVDA entered | `SELL 7.000000` FILLED — `fusion entry — target increase [forecast=-9.608504615051698, sources=3]` |
+| 16:59:27.901128Z | NVDA **full-liquidated** | `BUY 7.000000` FILLED — `fusion exit — target decayed to flat [forecast=-0.0, sources=1]` |
+| 16:59:57.948Z (`fusion_targets.atMillis` **1785949197948**) | the same name, 30 s later | `combinedForecast` **-3.2603756638089805**, `sources` **3**, `agreement` **0.872320186445232**, `targetQty` **-200.400971**, `currentQty` **0**, `deltaQty` **0.0** |
+
+**The asymmetry, stated exactly.** `FusionLifecycle.originOf` (`FusionLifecycle.java:428`) labels the exit
+from `t.targetQty().signum() == 0`, so the planner's target for NVDA really was **exactly flat** on a
+**single** surviving source reading **-0.0**. The full 7 shares routed. In the very next plan the same name
+reports `insideBuffer` and releases `deltaQty` **0.0** on a **3-source** forecast with `agreement`
+**0.872320186445232**. So: a *degraded, degenerate* plan gets **unbuffered, full-size execution**, while a
+*restored, agreeing* plan gets **nothing**. The buffer throttles signal and waves through noise.
+
+**It is not a one-off — it is the book-scale flattening pattern.** The 2026-08-04 20:10–20:17Z window shows
+the same reason string firing across **seven** names in seven minutes — XOM `SELL 16`, CVX `SELL 28`, GOOG
+`BUY 9`, AAPL `BUY 12`, NVDA `BUY 19`, AMZN `SELL 9`, MSFT `BUY 8`, every one
+`fusion exit — target decayed to flat [forecast=0.0/-0.0, sources=1]`. That is the same simultaneous
+source-dropout, and it is the shape behind the ledger rows that read `gross 52,192→0`, `gross 54,093→0`
+and `gross 93,878→26,441`. Turnover confirms the cost is not theoretical: NVDA **236** fills / **$201,069.31**
+turnover, GOOG **176** / **$188,284.68**, MSFT **200** / **$214,385.43**, against `attribution.totalFees`
+**398.739093** on a book whose firm total is **-619.47984806**.
+
+**Why this outranks the band.** The band explains why the desk cannot *re-enter*; this explains why it keeps
+being *thrown flat* in the first place, and it is the half that actually moves size (7 shares at once versus
+the band's ~0.06/cycle). Fixing re-entry while a dropout can still liquidate the book at will would be
+fixing the second half of a loop whose first half still fires.
+
+**VERIFY-BY (next run):** no order carries reason `fusion exit — target decayed to flat` with `sources=1`
+while that name's *preceding or following* plan shows `sources ≥ 2`; and a name whose sources drop below the
+plan's usual count is HELD rather than routed to flat. Read from `recent_orders` + `fusion_targets`.
+
+**Precondition on the fix (carried from Rule 353, still binding):** a target of exactly zero must be
+distinguishable in code from "the sources went away", and the change ships a unit test that reproduces the
+NVDA 16:59:27 row — `sources=1`, `combinedForecast=-0.0`, full-size route — **before** the behaviour changes.
+
+### Item #2 — (was #1) the no-trade band admits only outlier forecasts, then throttles the retreat from a reversed view: ⚠️ OPEN, still confirmed
+
+Re-ranked, not weakened — this window re-confirmed it on the surviving name and added the plan-wide count:
+
+- `fusion_targets` reports **`insideBuffer` 22** of **`instruments` 23**. Twenty-two of twenty-three names
+  are inside the no-trade band; the plan's `deltaQty` is **0.0** for every name shown.
+- **GOOG** is the sign-inversion case, still trapped: `currentQty` **8.000000** (entered `BUY 8` at
+  16:21:36.733526Z on `forecast=6.3413095741475525, sources=3`) against an `aims` entry of **-0.057125** —
+  the desk is long a name its own aim wants slightly short, and nothing routes.
+- **NVDA** is the blocked-entry case: `targetQty` **-200.400971**, `aims` **-1.663069**, `currentQty` **0**,
+  `deltaQty` **0.0**, on `agreement` **0.872320186445232**.
+- The entry bracket recorded last cycle stands: PG at `combinedForecast` **6.117949458685485** wanted
+  **656.223137** shares and traded none; GOOG at **6.3413095741475525** got a full entry.
+
+**VERIFY-BY (unchanged):** `insideBuffer` falls below the plan's `instruments` count, and a name holding a
+position against an opposite-signed `aims` entry shows a non-zero `deltaQty` that reduces the inversion.
+
+### Item #3 — (unchanged) the edge gate refuses to size a source with measured expectancy: ⚠️ OPEN
+
+Carried from last cycle's ADR-0139 postmortem. `fusion_targets.edgeGate` reads **null** and `social` appears
+in the `contributions[]` of **zero** planned names, while `signal_observations` has `social` LIVE at horizon
+**3600** with `n` **432** / `resolved` **422** / `hit_rate` **0.606** and horizon **900** at `n` **857** /
+`hit_rate` **0.554** — the highest live hit rates in the table, against `trend` LIVE 3600 **0.519** and
+`reversion` LIVE 3600 **0.473**. A source measuring above every other one contributes to nothing.
+
+**VERIFY-BY:** `social` appears in `contributions[]` of ≥1 planned name, or `edgeGate` reports a non-null
+reason naming what is holding it back.
+
+---
+
 ## Verification block — 2026-08-05 16:30Z (**CHANGE: completed the failed auto-revert of the graded-BAD `d51f179a2` / ADR-0139**. The ADR-0116 freeze lifted — `reports/.pending-baseline.json` is gone and the ledger's newest row is `d51f179a2` ❌ BAD — and that row carries `⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert`. `git merge-base --is-ancestor d51f179a2 HEAD` confirmed it: a rejected change was still in the running code. That outranks item #1 by the loop's own contract, so it is this cycle's one change. Resolved the established way — running code out (`SocialChannels.isCredible` back to the conjunction, its three tests deleted), the annotated ADR and the loop's memory kept. **Item #1 is unchanged at #1 and gains its THIRD instance plus a bracketed threshold**, and it takes the next cycle.)
 
 ### Step 0 — `d51f179a2` (ADR-0139): mechanism ✅ VERIFIED on a sixth boot; vector graded ❌ BAD by the scorer; now REVERTED

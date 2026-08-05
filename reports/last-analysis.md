@@ -1,83 +1,90 @@
-Completed the failed auto-revert of the graded-BAD ADR-0139 — the rejected credibility mechanism is out of the running code, keeping the annotated record and the loop's memory.
+The desk liquidated a whole position on a one-source zero forecast, then thirty seconds later three agreeing sources wanted the same trade back — the no-trade buffer waves through noise and blocks signal.
 
-*(Every figure below is read from `/api/risk`, `/api/social`, `/api/fusion/targets`, the report's
-`recent_orders` and the scored ledger. None is authored here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/fusion/targets`, `/api/social`,
+`signal_observations`, the report's `recent_orders` and the scorer. None is authored here — invariant 7 / ADR-0016.)*
 
-# Loop analysis — 2026-08-05 16:30Z
+# Loop analysis — 2026-08-05 17:00Z
 
 ## Situation — the four questions, answered first
 
-**1. Money.** Total PnL is **$-609.71** (realized **$-609.14**, unrealized **$-0.57**). Since last run
-**-$4.52**; over the last three runs **-$6.63**. The book is underwater and drifting down in small
-increments, not bleeding hard. The deficit is overwhelmingly historical: `ALPHA` carries **$-572.27**,
-`MACRO` **$-56.80**, and `HEDGE` is the only book in profit at **$+19.36**.
+**1. Money.** Total PnL **$-619.47984806** (`realizedPnl` **-621.10758272**, `unrealizedPnl` **+1.62773466**).
+Since the last run **+3.37**; over the last three runs **-16.40**. Still UNDERWATER and still off the
+**1.0%**/3-iteration growth target. The deficit remains historical, not fresh: `ALPHA` **-582.16172505**,
+`MACRO` **-56.79950536**, and `HEDGE` is the only book in profit at **+19.48138235**.
 
-**2. Risk.** Gross **$4,452.86** — **0.3%** of the $1,500,000 firm cap, headroom **$1,495,547**. Net
-**$1,355.22**, **0.1%** of the $1,000,000 net cap. Gross rose **+$224.29** this window. This is nowhere
-near the cap or the breaker; the flag is `UNDERWATER`, not `NEAR FIRM CAP` and not `DANGER`. Per ADR-0132
-this exposure is deployment, not a risk to cut — the book is still ~99.7% undeployed, which remains the
-standing opportunity.
+**2. Risk.** Gross **$4,004.439**, net **$1,786.041** — **0.3%** of the **$1,500,000** firm gross cap with
+**$1,495,996** of headroom, and **0.2%** of the **$1,000,000** net cap. `riskCuts` is empty,
+`riskCutStoppedNames` **0**, `bookVolBrake` **1.0**. The flag is `UNDERWATER`, not `NEAR FIRM CAP` and not
+`DANGER`. Per ADR-0132 a book at 0.3% of its allowance is under-deployed, not over-exposed; nothing here
+argues for de-risking.
 
-**3. Cause.** The scorer graded `d51f179a2` (ADR-0139) **❌ BAD** at the close of its evaluation window and
-its `git revert` **conflicted and did not land** — so a rejected change was still in the running code when
-this cycle began (`git merge-base --is-ancestor` confirms it). That is the cause I could act on, and it
-outranks everything else: the loop's self-correction is its safeguard, and it had silently failed again —
-the same `REVERT FAILED (git conflict)` note sits on five earlier BAD rows.
+**3. Cause.** Last cycle's change was the completed revert of the graded-BAD ADR-0139. It ✅ **VERIFIED** —
+see Step 0 below — and the scorer is 1 of 6 cycles into judging its vector, so its money verdict is not
+mine to anticipate. The window's actual event was an NVDA round trip, and it was **not** caused by any
+change of mine.
 
-**4. Danger.** No. Bleeding *near* the cap would be danger; bleeding at 0.3% of it is not. Nothing here
-justifies de-risking, and I did not.
+**4. Danger.** No. Bleeding near the cap would be danger; sitting at 0.3% of it is not.
 
-## Step 0 — grading ADR-0139: the mechanism verified, the vector did not
+## Step 0 — the revert deployed and did what it claimed ✅ VERIFIED
 
-Boot at `traffic.timestampMillis` **1785947402056** − `ops_jvm.uptimeSeconds` **1427** — a sixth
-independent boot. `/api/social` reads `counters.corroborated` **17** in **1427 s** against the pre-fix
-**18 in 64,010 s**: graded as a *rate* (the counter resets at boot, Rule 334), still ~3 orders of
-magnitude above pre-fix, on the sixth consecutive boot. `manipulationSuspected` **32** against `ingested`
-**3540** / `kept` **919** — the pump tell kept firing, so the loosening did not disable the filter.
-**✅ the defect-level fix did exactly what it claimed.**
+Deployment first, so this grades code the app actually ran: the revert is authored **16:38:20Z** and the
+running JVM booted at `traffic.timestampMillis` **1785949202383** − `ops_jvm.uptimeSeconds` **1260** =
+**16:39:02.383Z**, 42 s later. `SocialChannels.isCredible` is back to the strict conjunction in the tree,
+and the running app is applying it: of the 12 `recent` posts, all tier `STANDARD`, **11** read
+`credible: false`. `counters.corroborated` is **7** in **1260 s** against **17/1427 s** on the ADR-0139
+boot — roughly halved, which is the direction a tightening should move it. `manipulationSuspected` **39**
+on `ingested` **3090** / `kept` **792**, so the pump tell is untouched.
 
-And the scorer still graded it BAD. Both are true, and the honest reading is the gap between them:
-**social reached the `contributions[]` of no planned name in the window**, so the corroborations it
-unlocked never became size. The change bought evidence, not edge. Under the loop's contract a BAD verdict
-is reverted and the mechanism is not re-attempted regardless of how well it verified — that rule is what
-makes the autonomy safe, so the code is out and ADR-0139 is annotated `Reverted` with the full reasoning.
-The question it leaves is the one its own follow-ups named: *if social's expectancy is real, why does
-nothing let it size?* That is a question about the **gate**, not about who counts as credible.
+## The finding this window bought — the buffer is bypassed by exactly the plans it should ignore
 
-## Order-level post-mortem — and the third instance of MUST-FIX #1
+Three readings, thirty seconds apart, that only make sense together:
 
-Five orders this window, all FILLED. Two alpha entries, three hedge legs:
+- **16:59:27.901128Z** — ALPHA NVDA `BUY 7.000000` FILLED, reason
+  `fusion exit — target decayed to flat [forecast=-0.0, sources=1]`. A full liquidation of the position
+  entered at **15:45:50.040557Z** on `forecast=-9.608504615051698, sources=3`.
+- **16:59:57.948Z** (`fusion_targets.atMillis` **1785949197948**) — the same name: `combinedForecast`
+  **-3.2603756638089805**, `sources` **3**, `agreement` **0.872320186445232**, `targetQty` **-200.400971**,
+  `currentQty` **0**, `deltaQty` **0.0**.
+- The plan as a whole: **`insideBuffer` 22** of **`instruments` 23**.
 
-- ALPHA **NVDA `SELL 7`** on `fusion entry — target increase [forecast=-9.608504615051698, sources=3]`
-- ALPHA **GOOG `BUY 8`** on `fusion entry — target increase [forecast=6.3413095741475525, sources=3]`
-- HEDGE ES `BUY 0.006928` → `SELL 0.007365` → `BUY 0.000437`, all ADR-0019 structural β-hedge, ending the
-  window at `FUTURE` gross **$0.00** — a full round trip back to flat that paid fees to arrive where it
-  started. Logged, not acted on this cycle.
+`FusionLifecycle.originOf` (`FusionLifecycle.java:428`) derives that label from
+`t.targetQty().signum() == 0`, so the planner's NVDA target genuinely was **exactly flat**, computed from a
+**single** surviving source reading **-0.0** — a degenerate plan, not a view. It routed the full seven
+shares, unbuffered. Thirty seconds later a three-source plan with **0.872** agreement, wanting the desk
+**short** the same name, released **nothing**. The buffer gives full-size execution to a dropout and zero to
+a confirmed signal. That is backwards, and it is the mechanism I had been missing: I had modelled the band
+as the reason the desk cannot build, when it is equally the reason the desk keeps being thrown flat.
 
-**The two alpha entries reproduce MUST-FIX #1 exactly, and now bracket its threshold.** GOOG entered long
-at `+6.3413` and, in the plan **~7 minutes later**, its `combinedForecast` is **-2.0970** with `targetQty`
-**-57.134569** against `currentQty` **+8.0** — the desk is long a name its own view now wants short, and
-the band releases `deltaQty` **-0.06639** per cycle to fix it. NVDA did the same thing last window.
-Against that, **PG** sits at `combinedForecast` **6.117949** with `targetQty` **656.223137**, `currentQty`
-**0** and `deltaQty` **0.0** — it never traded. So the entry gate lies **between 6.1179 and 6.3413**: an
-outlier forecast is required to open, and the retreat from a *reversed* view is throttled at that same
-width. The band preferentially admits the most extreme views and then preferentially retains the ones
-that turned out wrong.
+It is not an isolated row. The 2026-08-04 20:10–20:17Z window carries the identical reason string across
+**seven** names in seven minutes — XOM, CVX, GOOG, AAPL, NVDA, AMZN, MSFT, every one
+`[forecast=0.0/-0.0, sources=1]`. That is a simultaneous source dropout flattening the whole book, and it is
+the shape behind the ledger rows reading `gross 52,192→0`, `gross 54,093→0` and `gross 93,878→26,441`. The
+churn is paid for: NVDA **236** fills on **$201,069.31** turnover, MSFT **200** on **$214,385.43**, GOOG
+**176** on **$188,284.68**, with `attribution.totalFees` at **398.739093** against a firm total of
+**-619.47984806** — the fees are approaching two-thirds of the entire loss.
+
+So I have promoted this to **must-fix #1** and demoted the entry band to #2. They are two halves of one
+asymmetry, but the dropout half is the one that moves size (seven shares at once versus the band's
+~0.06/cycle) and the one that fires first; fixing re-entry while a dropout can still liquidate the book at
+will would be fixing the back half of a loop whose front half still runs.
 
 ## Change vs market — the honest split
 
-**Neither, and I will not claim otherwise.** No change of mine landed in this window; ADR-0139 was under
-measurement and this cycle's revert commits after the snapshot. The book was flat at the start, so there
-are **no untouched positions** for the market to have moved — the entire **-$4.52** is the mark on two
-equity fills held for minutes plus the fee on the hedge round trip. That is noise on 15 shares, and it is
-not evidence about ADR-0139, about the band, or about the market. Attributing it either way would be
-overfitting a single window, which is what Rule 346 was written to stop.
+**Neither, and I will not dress it up.** No change of mine was live in this window: ADR-0139's revert
+committed at the very start of it and is under measurement, so the code that traded is code I did not
+author this cycle. Only one alpha position survives — GOOG `8.000000` at `avgCost` **361.72000000** against
+`mark` **361.90500000**, `unrealizedPnl` **+1.48000000** — plus the HEDGE ES leg at **-0.002856**
+(`unrealizedPnl` **+0.14773466**). The **+3.37** window move is the mark on those, plus the realized result
+of a seven-share NVDA round trip and the fees on it. Seven shares over an hour is noise. It is evidence
+about **neither** the market nor any change, and the dropout finding above stands on the order reasons and
+the plan, not on this PnL.
 
-## Next
+## Decision — no code change this cycle
 
-MUST-FIX #1 stays the band — now with three instances and a bracketed threshold — and it gets the next
-cycle's one change. The revert had to come first: measuring a band fix on top of a live rejected
-mechanism would have been worthless. The band fix must also reproduce the still-unexplained
-tiny-non-zero-delta rows (NQ, NVDA, and now GOOG's `-0.06639`) as a unit test **before** the band is
-touched. Three instances of an arithmetic I cannot hand-derive from the published `bufferedDelta` path
-means my model of `PositionBuffer` is wrong, and I will not tune a mechanism I cannot yet reproduce.
+`scripts/score-change.py score` reports `e956dcf46 still accumulating evidence (1/6 cycles)` and
+`reports/.pending-baseline.json` names that commit. Under ADR-0116 a change now would destroy the evidence
+for the revert being measured, so the register, the findings and this analysis are the whole of this
+cycle's output. Next cycle, once that row is scored, the one change targets must-fix #1: teach the planner
+to tell "the target decayed to zero" apart from "the sources went away", and hold rather than liquidate on
+the latter. Per Rule 353 that change ships a unit test reproducing the NVDA 16:59:27 row — `sources=1`,
+`combinedForecast=-0.0`, full-size route — **before** it changes any behaviour.
