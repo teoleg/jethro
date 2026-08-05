@@ -1,0 +1,20 @@
+{
+  "commit": "d51f179a2cb4ca2176d28bc227f3f99478a33971",
+  "fees": "398.004411",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "24.97694052",
+    "netExposure": "0.00000000",
+    "realizedPnl": "-603.08012889",
+    "strategyAlpha": "-628.05706941",
+    "totalFees": "398.004411",
+    "totalPnl": "-603.08012889",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "platform verification and the measured author floors become alternative credentials for an uncurated social channel, so an organic author can reach the corroboration gate the desk's only cost-beating source needs (ADR-0139)",
+  "total_pnl": "-603.08012889",
+  "ts": "2026-08-05T13:49:59Z"
+}
