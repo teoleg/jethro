@@ -1,0 +1,20 @@
+{
+  "commit": "a21177cea89e5cd7120e1d4e418d23713127681d",
+  "fees": "399.099763",
+  "gross_exposure": "0E-8",
+  "net_exposure": "0E-8",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "0.00000000",
+    "hedgePnl": "24.35397774",
+    "netExposure": "0.00000000",
+    "realizedPnl": "-628.06833967",
+    "strategyAlpha": "-652.42231741",
+    "totalFees": "399.099763",
+    "totalPnl": "-628.06833967",
+    "unrealizedPnl": "0.00000000"
+  },
+  "summary": "the no-trade band's average position is priced at the forecast the combiner actually produces rather than the constant sources are normalised to, so a name whose whole target sat inside its own buffer \u2014 a release condition its own ADR-0102 clamp made unsatisfiable \u2014 can finally open (ADR-0141)",
+  "total_pnl": "-628.06833967",
+  "ts": "2026-08-06T13:44:10Z"
+}
