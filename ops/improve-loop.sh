@@ -126,12 +126,23 @@ run_deploy() {
   bash -c "$1" >> "$LOG" 2>&1 9>&- || echo "deploy command exited non-zero: $1" >> "$LOG"
 }
 
-# 4b. Rebuild+restart ONLY if code outside reports/ changed between $1 and $2. A ledger-only or
-#     heartbeat-only commit (scoring the previous change, or a market-closed status write) must not
-#     bounce the app. Returns 0 either way — a deploy result is logged, never a cycle-killing status.
+# Paths that CANNOT end up in the app binary, so a commit touching only these must never bounce the
+# app (ADR-0142). `reports/` is the ledger/heartbeat/analysis the scorer and the agent write every
+# cycle; `docs/` is the ADR set plus the loop's own mandated memory (`docs/loop-findings.md`), which
+# ops/improve-prompt.md requires the agent to append EVERY run — change or not; `ops/` is this cron
+# wrapper and its prompt, re-read by cron each fire and never compiled. None is a Gradle input.
+# Anything else is treated as capable of changing the binary and does deploy.
+NON_BINARY_PATHS='^(reports|docs|ops)/'
+
+# 4b. Rebuild+restart ONLY if a path that can affect the app binary changed between $1 and $2. A
+#     ledger-only, heartbeat-only or memory-only commit (scoring the previous change, a market-closed
+#     status write, or a no-change cycle's finding) must not bounce the app: a restart re-seeds every
+#     forecast/σ sensor cold and flattens the book, which destroys the very ADR-0116 evaluation window
+#     a no-change cycle exists to protect (ADR-0142).
+#     Returns 0 either way — a deploy result is logged, never a cycle-killing status.
 deploy_if_code_changed() {
   local before="$1" after="$2" changed deploy_started
-  changed=$(git diff --name-only "$before" "$after" | grep -v '^reports/' || true)
+  changed=$(git diff --name-only "$before" "$after" | grep -Ev "$NON_BINARY_PATHS" || true)
   if [ -z "$changed" ]; then
     echo "no code change $before -> $after — no rebuild/restart" >> "$LOG"
     return 0

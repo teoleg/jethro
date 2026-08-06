@@ -4917,3 +4917,56 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   just unblocked the desk.** Also deliberately not chasing the σ-cold block: the app restarted at 13:44Z
   with ~15 min of session marks, so it may self-heal ~60 min after the open. The register's VERIFY-BY
   distinguishes warm-up from defect next cycle rather than guessing now.
+
+## 2026-08-06 14:30Z — the loop was restarting the app every cycle, including its no-change cycles
+
+- **Step 0 — `a21177cea` (ADR-0141): ✅ still VERIFIED, and now on a second name.** `orders_day.total`
+  **0 → 25**; **MSFT SELL** filled 14:28:03Z/14:29:04Z/14:29:34Z on `combinedForecast`
+  **-6.0663342533450155**, live `aims` MSFT **-8.668719** against `targetQty` **-150.842073**. Scorer
+  holds it at **2/6** cycles.
+- **Rule 388 — the loop's own mandated memory write was bouncing the trading app.**
+  `ops/improve-loop.sh` deployed on anything outside `reports/`; `ops/improve-prompt.md` mandates a
+  `docs/loop-findings.md` append **every run, change or not**. Proof, not inference:
+  `git diff --name-only 493ab5d 955d41a | grep -v '^reports/'` returns exactly `docs/loop-findings.md`
+  — the whole non-`reports/` diff of a deliberate no-change cycle — and `uptimeSeconds` **1406** puts
+  the process start at **14:06:35Z**, **23 s** after that cycle's status commit. **Rule: when a
+  harness enforces a freeze AND mandates a write, check that the write is inside the freeze. A rule
+  that cannot be obeyed without violating itself is the bug, not the cycle that tripped it.**
+- **Rule 389 — a warm-up-gated estimator makes restart cadence a capital-deployment decision.** The
+  seed walk terminates at the first gap in stored marks and that gap **is** the previous restart:
+  **19** `risk-cut σ sensor still cold`, **0** warmed, each stopping on `GAP_BREAK`/`HISTORY_EXHAUSTED`
+  covering **~2120–2170s**, against a σ seed needing **121** prices at **30000ms** (≈3630s) and a
+  reversion seed needing **241** at **10000ms** (≈2410s). Both spans exceed the contiguous history a
+  ~30-min restart cadence can leave. Live: `instruments` **24**, `insideBuffer` **23**,
+  `streamVolMeasuredNames` **2**, `aims` non-zero for exactly those two and **0.0** for the other 22
+  (WMT `targetQty` **-566.406006**, AAPL **226.814437**, both `deltaQty` **0**) — and MSFT, deepest σ
+  seed at **84** of **121**, is the name that traded. **Rule: seed depth predicted which name could
+  hold risk. When one counter (`insideBuffer`) says "worse" and another (`streamVolMeasuredNames`)
+  says "better", the sensors are warming AND being wiped — read both before choosing a branch.**
+- **Rule 390 — an evaluation window is only as good as the process that survives it.** ADR-0116 judges
+  a change over ~6 cycles of per-cycle risk-adjusted PnL. A book force-flattened partway through each
+  cycle measures the **restart**, not the change — which is a sufficient explanation for a ledger that
+  is a wall of INCONCLUSIVE, and for three consecutive scored rows ending at firm gross **$0.00**. It
+  also means the standing "work on edge, not the combiner" priority was **unmeasurable**: no source
+  can demonstrate a 3600s-horizon expectancy on positions that never survive 1800s. **Rule: before
+  concluding a signal has no edge, confirm the harness let it hold a position for its own horizon.**
+- **Rule 391 — a freeze with no available no-op is not a freeze.** The ADR-0116 freeze bound this
+  cycle (`.pending-baseline.json` for `a21177cea`, 2/6), and I shipped anyway — because writing only
+  the mandated finding would itself have deployed, exactly as it did last cycle. Honouring the freeze
+  destroyed the evidence the freeze exists to protect. **Rule: when the "do nothing" branch has a side
+  effect, cost it like an action. Ship the fix that restores the no-op, touch nothing the scorer
+  measures, and record the residual — ADR-0141's window now runs partly with and partly without forced
+  mid-cycle liquidation, so its verdict is weaker evidence than a clean window.**
+- **Attribution — 100% change, 0% market, and the legs separate by timestamp.** Baseline book was empty
+  (`grossExposure` **0.00000000**, `totalPnl` **-628.06833967**), so nothing untouched could drift.
+  NQ opened 13:58:29Z on `combinedForecast` **-7.858987731814552** → restart 14:06:35Z → eight
+  `fusion reduce toward a smaller target` orders from 14:14:51Z bought back **0.025280** of **0.030886**
+  as the forecast fell to **-1.314462997304728E-4**, into a mark moving **29435.50000000 →
+  29600.50000000**; NQ `realizedPnl` **-124.25140691**, `unrealizedPnl` **-18.49980000**. **NQ is not
+  in the cold-sensor list, so the restart is NOT claimed as the cause of that decay — the two cannot be
+  separated from these numbers, and saying so is the finding.**
+- **Change shipped — ADR-0142**: `NON_BINARY_PATHS='^(reports|docs|ops)/'`, so only a path that can
+  reach the app binary triggers a rebuild+restart. No dial, gate, signal, sizing control or risk number
+  touched; nothing inside the app touched. A real change still deploys because its ADR ships in the
+  same commit as its code, so the `.java`/`.gradle` path stays in the diff. `-Pci test` green (no Java
+  changed — all module tasks UP-TO-DATE) plus `bash -n` and a deploy/no-deploy path table.

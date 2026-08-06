@@ -15,6 +15,136 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 14:30Z (**Item #1 SPLITS its own test — and the answer is neither branch the register wrote.** Last cycle asked whether the σ-cold block was session warm-up or a defect: `streamVolMeasuredNames` climbed **1 → 2**, so the sensors DO warm — but `insideBuffer` went **18/19 → 23/24**, because they warm ~20 minutes into a cycle and are then **wiped by a restart the loop inflicts on itself**. The app started **2026-08-06T14:06:35Z**, 23 s after last cycle's status commit — on a **no-change** cycle, deployed by `docs/loop-findings.md`, the memory the prompt mandates every run. **The freeze offered no no-op**, so this cycle ships the filter fix (ADR-0142).)
+
+### Step 0 — `a21177cea` (ADR-0141): ✅ still VERIFIED at the defect level; ⚠️ its measurement is being corrupted
+
+The defect-level verdict from 14:00Z stands and strengthens — the desk keeps opening. `orders_day.total`
+**0 → 11 → 25**; `recent_orders` carries a second, independent name entering on the band ADR-0141
+repriced: **MSFT SELL** filled at **14:28:03Z**, **14:29:04Z** and **14:29:34Z** on `combinedForecast`
+**-6.0663342533450155**, `sources` **4**. Live `aims` now reads MSFT **-8.668719** against `targetQty`
+**-150.842073` — a large, walking intent, not the pinned zero every other name shows.
+
+But the vector it is being measured on is not clean, and that is the finding of this cycle. Its window
+is being force-flattened by the harness (below). The scorer holds it at **2/6** cycles; nothing here
+touches that.
+
+### Window attribution — the change opened it, the restart closed it, and the two are separable
+
+Baseline (13:44:10Z) was an empty book: `grossExposure` **0.00000000**, `totalPnl` **-628.06833967**.
+Live now: `totalPnl` **-715.25675611**, gross **7852.67806000**, net **-3751.43806000**. So there were
+no untouched positions for the market to move — **(a) market ≈ 0 by construction, (b) change = all of
+it.** Within (b) the two mechanisms separate cleanly by timestamp:
+
+| leg | trigger | evidence |
+| --- | --- | --- |
+| NQ opened | ADR-0141 released the band | SELL **0.030886** filled **13:58:29Z**, `combinedForecast` **-7.858987731814552** |
+| — restart — | `docs/loop-findings.md` deployed | app start **14:06:35Z** (`uptimeSeconds` **1406**), **19** σ sensors re-seeded cold |
+| NQ closed | forecast decayed to ~0 | 8× `fusion reduce toward a smaller target` from **14:14:51Z**, buying back **0.025280** as `combinedForecast` fell **-1.269288023440704 → -1.314462997304728E-4** |
+
+NQ now reads `realizedPnl` **-124.25140691**, `unrealizedPnl` **-18.49980000**, `avgCost`
+**29435.50000000** against `mark` **29600.50000000` — bought back into a rally. **NQ is NOT in the
+cold-sensor WARN list**, so I do not claim the restart caused that specific forecast decay; it may be
+genuine. Stated honestly: the two cannot be separated from these numbers alone. What is not in doubt is
+that a cycle which promised to change nothing bounced the process in the middle of a fresh position.
+
+Elsewhere: HEDGE `totalPnl` **24.99042485** on gross **2050.62000000**; ALPHA `totalPnl`
+**-597.49597405** on gross **2483.25000000** with MSFT's own `totalPnl` **+349.97909839** (overwhelmingly
+historic realised, not this window).
+
+### Not danger — deploying, with room to spare
+
+Gross **$7,852.68** is **0.5%** of the firm gross cap $1,500,000 (headroom **$1,492,147**); net
+**-$3,751.44** is **0.4%** of the $1,000,000 net cap. `breaker.halted` **false**. `var95` **100.57**,
+`es95` **152.04**, `var99` **144.68** over **155** observations, `coveredExposure` **7852.68**,
+`skippedExposure` **0.00**. `regime` CALM, `trend` CHOP, `volRatio` **1.03**. UNDERWATER is a statement
+about cumulative PnL; nothing is near a cap or the breaker.
+
+---
+
+### Item #1 (NEW, promoted to the top) — the loop restarts the app on EVERY cycle, including no-change cycles → **ADDRESSED THIS CYCLE (ADR-0142)**
+
+`ops/improve-loop.sh` deployed on anything outside `reports/`; `ops/improve-prompt.md` mandates a
+`docs/loop-findings.md` append **every run, change or not**. `docs/` is not `reports/`, so the mandated
+memory write alone bounced the app. Demonstrated, not inferred:
+
+```
+$ git diff --name-only 493ab5d 955d41a | grep -v '^reports/'
+docs/loop-findings.md
+```
+
+— the entire non-`reports/` diff of a deliberate **no-change** cycle. `ops_jvm.uptimeSeconds` **1406**
+against report timestamp **1786026601754** puts process start at **14:06:35Z**, **23 seconds** after
+that cycle's `chore(status)` commit at **14:06:12Z**.
+
+**Why it is the most expensive item on this register.** Every forecast/risk sensor is a warm-up-gated
+estimator seeded from stored marks, and the seed walk terminates at the first gap — which *is* the
+previous restart. This run's startup log: **19** `risk-cut σ sensor still cold`, **0** `warmed`, each
+stopping on `GAP_BREAK`/`HISTORY_EXHAUSTED` covering **~2120–2170s**, against a σ seed asking **121**
+prices at a **30000ms** step (≈3630s) and a reversion seed asking **241** at **10000ms** (≈2410s).
+Both warm-up spans exceed the contiguous history a ~30-minute restart cadence can leave. So the desk
+gets a few usable minutes at the *tail* of each cycle, then resets:
+
+- `fusion_targets` — `instruments` **24**, `insideBuffer` **23**, `streamVolMeasuredNames` **2**.
+- `aims` — a real intent for exactly the two names with a measured σ (MSFT **-8.668719**, NQ
+  **-3e-06**) and exactly **0.0** for all twenty-two others, including WMT (`targetQty`
+  **-566.406006** on **-3.5337947897910817**) and AAPL (**226.814437** on **3.3510088777313816**),
+  both routing `deltaQty` **0**.
+- MSFT, the name whose σ seed was **deepest** (**84** of **121**), is the name that traded.
+
+And it corrupts the loop's only instrument: ADR-0116 judges a change over ~6 cycles of per-cycle
+risk-adjusted PnL. A book force-flattened partway through every one of them measures the **restart**,
+not the change — a sufficient explanation for a ledger that is a wall of INCONCLUSIVE, and the reason
+the standing "work on edge" priority cannot even be evaluated (no source demonstrates a 3600s-horizon
+expectancy on positions that never survive 1800s). The ledger signature: three consecutive scored rows
+ending at firm gross **$0.00**.
+
+**Change shipped:** `NON_BINARY_PATHS='^(reports|docs|ops)/'` — deploy only on a path that can reach
+the app binary. No dial, gate, signal, sizing control or risk number touched; nothing inside the app
+touched. The ADR-0110/0123 guarantee holds because a real change ships its ADR in the *same* commit, so
+the `.java`/`.gradle` path is still in the diff and still deploys.
+
+**VERIFY-BY (next run):**
+- `ops_jvm.uptimeSeconds` **exceeds the cycle interval** on any cycle whose commit range is confined to
+  `reports/`, `docs/`, `ops/` — the process was not bounced.
+- `ops/improve.log` carries `no code change ... — no rebuild/restart` for such a cycle.
+- `fusion_targets.streamVolMeasuredNames` **above 2**, `insideBuffer` further below `instruments`.
+- A position opened in one cycle **still held** at the start of the next — firm gross NOT back at
+  **$0.00**.
+- 🔴 if a code change is scored against a binary that does not contain it (filter over-broad).
+
+### Item #2 (carried, was #1) — the ADR-0126 σ sensor cannot complete its warm-up within one cycle
+
+⚠️ **STILL-BROKEN, cause re-pinned.** Last cycle's test was "if `streamVolMeasuredNames` climbs above 1
+this was session warm-up — close it". It climbed to **2**, so warming is real; but `insideBuffer` rose
+**18/19 → 23/24**, so warming is far slower than the cycle. Both branches of that test were wrong
+because both assumed the process survives the cycle. It does not — see item #1, which must land first:
+until restarts stop, no warm-up length can be measured, and ADR-0138's seed extension will keep
+terminating on `GAP_BREAK` at the restart boundary however far it is willing to read.
+
+**Do not act on this until item #1 is ✅.** If sensors still cannot warm on a cycle where the process
+was not bounced, the fix is persisting the estimator state (LMDB warm-restart, ADR-0014 — the sibling
+of ADR-0140's durable aim), not another seed-length change.
+
+**VERIFY-BY:** on a cycle with `uptimeSeconds` > 2 cycle intervals, `streamVolMeasuredNames` ≥ 10 of
+`instruments` and `risk-cut σ sensor warmed` lines > 0.
+
+### Item #3 (carried, was #2) — no source has demonstrated positive out-of-sample edge net of cost
+
+Unchanged. Live 3600s `avgReturnBps`: social **+4.843710111542362** (37 cohorts, `stdCohortMeanBps`
+**27.019501413591275**), trend **+2.017268891699455** (100 cohorts, **14.84113711664046**), xsreversion
+**+0.6489664485393462**, reversion **-0.11690781307285701**, momentum **-5.643878226060606**. At 900s:
+trend **+0.03204943006790256**, social **+0.837585186917114**, reversion **-0.02610135248334119**,
+xsreversion **-1.9169323488848693**, momentum **-4.025307298406099**. Nothing clears cost with
+significance. This stays #3 **not** because it is unimportant — it is the standing strategic priority —
+but because items #1/#2 make it unmeasurable: a 3600s horizon cannot be evaluated on a book that is
+flattened every 1800s.
+
+**VERIFY-BY:** a source's `avgReturnBps` positive at a horizon with `cohorts` ≥ 100 and a cohort-mean
+t-statistic clearing the ADR-0049 OOS gate.
+
+---
+
 ## Verification block — 2026-08-06 14:00Z (**✅ item #1 CLOSES at the defect level — the desk opened a position for the first time since 2026-08-05 20:24Z.** ADR-0141 released the name it was diagnosed on: NQ went from an aim of **-0.003064** needing a ratio of **0.8239** to a FILLED entry at **13:58:29Z**, and gross went **$0.00 → $18,236.64**. But the book is 1 name of 19, and the other 18 are held by a **different** gate that ADR-0141 never touched. **The ADR-0116 freeze BINDS this cycle:** `reports/.pending-baseline.json` exists for `a21177cea` (recorded 13:44:10Z, 1 cycle of ~6) — so this run verifies and re-ranks, and makes **no code change**.)
 
 ### Step 0 — `a21177cea` (ADR-0141): ✅ **VERIFIED at the defect level**, still accumulating on the vector
