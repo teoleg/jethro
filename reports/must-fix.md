@@ -15,6 +15,156 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 19:30Z (**NO CHANGE — the ADR-0116 freeze holds at `27564bb15` 4/6.** Two results. First, **the exit trigger is now measured**: censusing every FILLED LIVE order since boot by trigger × source count, `fusion exit — target decayed to flat` fired **6 of 6 at `sources=1`** while `fusion entry` fired **0 of 25** there. Exit reads source *availability*; entry reads source *content*. That asymmetry is the concrete, fixable mechanism that PRODUCES last cycle's horizon mismatch, so it becomes **#1** and the horizon item folds into it as the consequence. Second, **I have to strike my own VERIFY-BY**: the since-boot holding period read **1,141.3 → 1,610.5 s** (**×1.411**) in a window with no change and no restart, while uptime went **4664 → 6463 s** (**×1.386**) — the estimator grades the clock. Rule 433 again, numerator side. Replaced with a fixed-width trailing-window form. Venue asymmetry holds at **#2**; the `scripts/` omission is NOT EXERCISED a third cycle at **#3**.)
+
+### Step 0 — `27564bb15` (ADR-0143): ✅ **deployed**, ⚠️ **still not gradable (4/6)**, ✅ **no restart for a fourth window**
+
+`scripts/score-change.py score` prints `27564bb15 still accumulating evidence (4/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` is present. No ❌ BAD verdict has occurred, so
+ADR-0143's VERIFY-BY ("the next BAD row carries `reverted (…)` instead of `⚠️ REVERT FAILED`") remains
+untestable. Not a stall — the design of ADR-0116.
+
+**Fourth consecutive clean window.** `ops_jvm.uptimeSeconds` **6463** against `traffic.timestampMillis`
+**1786044601386** places boot at **2026-08-06 17:42:18.386Z**, matching last cycle's **17:42:18.047Z** to
+within read jitter. `git diff --name-only c2344ec..HEAD` reaches only `docs/loop-findings.md` and
+`reports/` — all inside `NON_BINARY_PATHS`.
+
+### Not danger — but the book gave back last window's deployment
+
+Gross **$12,107.12** is **0.8%** of the firm gross cap $1,500,000 (headroom **$1,487,893**); net
+**$2,360.69** is **0.2%** of the $1,000,000 net cap. `breaker.halted` **false**, `regime` **CALM**
+(`trend` **CHOP**, `volRatio` **1.00**), `var95` **104.16** / `es95` **152.39** on `coveredExposure`
+**12,107.12** with `skippedExposure` **0.00**. `hedging.covarianceReady` still **false** — the EQUITY axis
+is **ON-TARGET** on assigned betas (held **-0.01167** → target **-0.011847**, inside the **1146.42**
+no-trade band). Total PnL **-$886.54**; since last run **-13.08**, over three runs **-35.14**. Gross fell
+**-10,711.12** from last cycle's **$25,062.42** — not a de-risking decision, the same churn item #1 names.
+
+### Window attribution — 100% market and desk-autonomous, fourth window running
+
+No committed path can reach the app and the process never bounced, so the entire **-13.08** PnL move and
+**-10,711.12** gross move belong to the market and to unmodified desk logic. My changes earn neither
+credit nor blame.
+
+---
+
+## Item #1 (NEW, promoted — the mechanism BEHIND last cycle's #1, which folds in as its consequence) — **the exit gate is not corroboration-symmetric with the entry gate: 6 of 6 full exits fired at `sources=1`, 0 of 25 entries did.**
+
+**The census.** Every FILLED LIVE order since boot (2026-08-06 17:42:18Z), by origination trigger and the
+`sources=` count carried in `origin_reason` (ADR-0134):
+
+| trigger | sources=1 | sources=2 | sources=3 | sources=4 |
+|---|---|---|---|---|
+| `fusion entry — target increase` | **0** | 5 | 15 | 5 |
+| `fusion reduce toward a smaller target` | **0** | 1 | 56 | 7 |
+| `fusion exit — target decayed to flat` | **6** | 0 | 0 | 0 |
+
+Not one full exit was triggered by the intact ensemble reversing. Every one was triggered by the ensemble
+*collapsing to a single surviving source*. Entry requires corroboration; exit requires only that
+corroboration go away.
+
+**The instance, priced.** BAC opened **19:08:52Z** — `fusion entry — target increase
+[forecast=-5.9863021173751845, sources=3]` — and flattened **19:10:12Z** — `fusion exit — target decayed
+to flat [forecast=-0.0, sources=1]`. Lifetime **79 s**; cash **-3.03**, fee **1.0321**, net **-$4.0621**.
+It is the shortest and the most expensive of the six completed round trips since boot.
+
+**Why this is the same item as last cycle's horizon mismatch, one level deeper.** The term structure
+reproduced on a fresh sample — weighting `/api/signals/telemetry` by the live `fusion_targets.weights`
+(sum **5.0**): **225 s -0.2473 bps**, **900 s -0.4562 bps**, **3600 s +1.0442 bps**, same monotone shape,
+same crossing between 900 s and 3600 s. And the realized trades now say it independently. The six
+open→flat episodes, cash and fee straight from `fills`:
+
+| lifetime | name | cash | fee | net |
+|---|---|---|---|---|
+| 3955 s | NVDA | +5.45 | 1.3625 | **+4.0875** |
+| 1978 s | MSFT | +1.74 | 0.2979 | **+1.4421** |
+| 1493 s | BAC | -0.22 | 0.1259 | **-0.3459** |
+| 754 s | AAPL | -1.74 | 0.8738 | **-2.6138** |
+| 538 s | MSFT | -0.79 | 0.0994 | **-0.8894** |
+| 79 s | BAC | -3.03 | 1.0321 | **-4.0621** |
+
+Spearman **ρ = +0.943** (n=6; two-tailed 5% critical **0.886**). Six trades proves nothing alone; a
+trade-level measurement agreeing with an independent signal-level one is worth considerably more.
+
+**Significance, restated correctly.** Computing t on the **cohort means** (`stdCohortMeanBps`/√`cohorts`)
+rather than raw observations, the largest |t| across all 15 source×horizon cells is `xsreversion` at 900 s,
+**-2.52**, against the Bonferroni hurdle **2.94** (Rule 407). The naive per-observation t for that same
+cell reads **-3.30** and would have falsely cleared. Nothing here is significant — including the +1.0442.
+So the item is not "go hold for an hour"; it is "**the desk pays a certain cost to flatten positions for a
+reason unrelated to what its signals say**", which is actionable regardless.
+
+**Before building anything: check ADR-0140 is reached.** ADR-0140 ("the fusion aim is durable derived
+state — absence ages an intent over one derived evidence horizon instead of erasing it", **Implemented**,
+scored ⚠️ INCONCLUSIVE and kept) is aimed at exactly this collapse. Six sources=1 flattenings say either
+the aging is not reached on this path, or it is reached and its horizon is too short. Those need opposite
+changes — establish which **first** (Rule 440). `FusionLifecycle.originOf` at
+`app/src/main/java/io/jethro/app/fusion/FusionLifecycle.java:419` is pure telemetry, so the target-to-flat
+decision is upstream in the planner, not there.
+
+**VERIFY-BY:** the same trigger × source-count census, recomputed over the next window — the share of
+`fusion exit — target decayed to flat` fills carrying `sources=1` must **fall below 1.0**, i.e. exits must
+start firing on forecast content with the ensemble intact. Paired with the **stationary** holding period
+(below), which must rise **without** gross falling. Do **not** grade on the since-boot holding period, the
+turnover multiple, or the fee share — all three are struck as non-stationary.
+
+**Stationary holding-period estimator (replaces the struck one).** 2 × time-average |inventory| ÷ one-way
+turnover rate, over fixed 30-minute trailing windows, ALPHA/LIVE: **18:00–18:30 → 1,745.2 s**,
+**18:30–19:00 → 1,332.8 s**, **19:00–19:30 → 2,313.2 s**. Real hold is ~22–39 min, straddling the 900 s and
+3600 s rows — but the window-to-window swing is **±35%**, so it needs several windows before it can grade
+anything (Rule 412).
+
+---
+
+## ~~Item (was #1) — "the realized holding period is 1,141.3 s"~~ — **conclusion stands, VERIFY-BY STRUCK as non-stationary.**
+
+Recomputed the same way this cycle: time-weighted ALPHA LIVE inventory **$87,244,670.86** USD·s ÷ half
+one-way notional (**$108,347.01** / 2) = **1,610.5 s**, up **×1.411** from **1,141.3 s** — in a window
+where nothing changed and the process never restarted. Uptime over the same interval went **4664 → 6463**
+s, **×1.386**. The integral accrues against a growing clock while turnover accrues linearly, and
+never-retraded names accrue time-to-now: MCD reads **12,338.1 s** on 4 fills, WMT **10,829.4 s** on 1.
+The VERIFY-BY would have scored doing nothing as a 41% win. Same failure as Rule 433 one cycle earlier —
+that was a growing denominator, this is a growing numerator. Replaced by the fixed-width trailing-window
+form under item #1; the *conclusion* (the desk exits inside its own signal horizon) is unaffected and is
+now carried by item #1 with a stronger mechanism behind it.
+
+---
+
+## Item #2 (carried, rank unchanged) — **82.70% of turnover runs through the venue that charges 5× the round trip.**
+
+`turnover_cost_by_name` over LIVE this cycle: cumulative turnover **$5,014,071.33**, of which futures
+(ES + NQ, **0.20** bps per side) are **$867,374.16** = **17.30%** and equities (**1.00** bps per side) are
+**$4,146,697.17** = **82.70%**. Round trips are **2.00** vs **0.40** bps. The 3600 s weighted expectancy
+**+1.0442** bps clears the futures round trip and fails the equity one. Where a view is expressed is a
+cost decision the router does not weigh. `attribution.totalFees` **432.017216** is **48.73%** of
+`firmTotal` **-886.53719294** — unchanged from **48.73%** last cycle, a stable share across two windows.
+
+**VERIFY-BY:** the futures share of cumulative LIVE turnover must rise, and `totalFees` as a share of
+`|firmTotal|` must fall, **without** gross falling. (The turnover *multiple* — **414.1×** this cycle
+against **198.9×** last — remains struck; it moved only because gross fell **$25,062.42 → $12,107.12**.)
+
+---
+
+## Item #3 (carried, DEMOTED — NOT EXERCISED for a third cycle) — **the restart gate's exemption list omits `scripts/`, so the loop's own tooling bounces the trading JVM.**
+
+`ops/improve-loop.sh:135` reads `NON_BINARY_PATHS='^(reports|docs|ops)/'`; `:145` rebuilds and restarts on
+anything outside it. `scripts/` holds `score-change.py`, `test-score-change.py`, `build-prompt.py`,
+`system-report.py` — run by the cron wrapper, never by the app. No `scripts/` path was committed this
+cycle either, so the defect could not fire; what was confirmed again is the complement — a fourth
+consecutive docs/reports window with no restart. Recorded as "not exercised" rather than VERIFIED (Rule 429).
+
+**VERIFY-BY (unchanged):** after a commit touching only `scripts/**`, `ops_jvm.uptimeSeconds` measured
+against `traffic.timestampMillis` must still place the boot instant *before* that commit.
+
+---
+
+## Item #4 (carried, unchanged, still NO ACTION) — **entry is structurally frozen for names early on their aim path.**
+
+The mission's dormancy rule would read a **0.8%**-of-cap book as the top opportunity. It is not, and item
+#1 sharpens why: deploying scales whatever sign the desk is given, and at the horizon it actually holds
+(**1,332.8–2,313.2 s**) the fused expectancy is negative-to-marginal **gross**, before fees. Deployment
+becomes urgent the moment item #1's horizon-matched expectancy turns non-negative, and not before.
+
+---
+
 ## Verification block — 2026-08-06 19:00Z (**NO CHANGE — the ADR-0116 freeze holds at `27564bb15` 3/6.** The clean window buys the measurement that reframes the whole register. Five cycles have graded the desk on a **3600 s** expectancy. This cycle measured how long the desk actually *holds*: time-weighted ALPHA inventory since boot divided by half its one-way traded notional gives **1,141.3 s** — and at the horizon that brackets it, the fusion-weighted expectancy is **-0.3990 bps GROSS**, negative before a single basis point of fee. The problem is not that a positive edge fails to clear a 2.00 bps hurdle; it is that **the only horizon with positive gross expectancy (3600 s, +1.1265 bps) is one the desk never holds to.** That is the new **#1**, and it subsumes the fee item as its consequence — cumulative turnover *rose* to **$4,984,532.84** while the "turnover multiple" *fell* **545× → 198.9×** purely because gross rose, so that VERIFY-BY is struck as unstable (Rule 412 again). The fee schedule's venue asymmetry survives as a separate **#2**. The `scripts/` restart-gate omission drops to **#3** — NOT EXERCISED for a second cycle.)
 
 ### Step 0 — `27564bb15` (ADR-0143): ✅ **deployed**, ⚠️ **still not gradable (3/6)**, ✅ **no restart for a third window**

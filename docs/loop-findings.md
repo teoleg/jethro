@@ -5347,3 +5347,44 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **No change:** `27564bb15` is at **3/6** under ADR-0116. Window was **100% market** — commits reached
   only `docs/` and `reports/`, boot instant **17:42:18.047Z** unchanged, **zero** `sources=0` orders — so
   PnL **-7.73** and gross **+8,902.44** carry neither credit nor blame.
+
+## 2026-08-06 19:30Z — every exit fires at sources=1; every entry needs sources≥2
+
+- **Rule 436 — the exit gate is not corroboration-symmetric with the entry gate, and that is what sets the
+  holding period.** Censusing FILLED LIVE orders since boot by origination trigger × source count:
+  `fusion entry` **0/25** at `sources=1` (5 at 2, 15 at 3, 5 at 4); `fusion reduce` **0/64** at `sources=1`;
+  `fusion exit — target decayed to flat` **6/6 at `sources=1`**. Every full exit was triggered by source
+  *dropout*, none by the intact ensemble reversing. BAC is the instance: opened **19:08:52Z** at
+  `forecast=-5.9863021173751845, sources=3`, flattened **19:10:12Z** at `forecast=-0.0, sources=1` — **79 s**,
+  net **-$4.0621** of which **$1.0321** is fee. **Rule: when diagnosing a holding period, census the exit
+  trigger by source count — an exit rule that reads source AVAILABILITY rather than source CONTENT will
+  liquidate inside the signal's own horizon no matter how the entry is tuned.**
+- **Rule 437 — a since-boot integral is not a stationary statistic; it grades the clock.** Item #1's
+  VERIFY-BY from last cycle (time-weighted inventory ÷ half one-way notional, since boot) recomputed
+  **1,141.3 → 1,610.5 s**, **×1.411**, in a window with no change and no restart; uptime went
+  **4664 → 6463 s**, **×1.386**. Nearly all the "improvement" was elapsed time — never-retraded names
+  accrue time-to-now (MCD **12,338.1 s** on 4 fills, WMT **10,829.4 s** on 1). Rule 433 in a new disguise:
+  last time a growing *denominator*, this time a growing *numerator*. **Rule: a VERIFY-BY must be computed
+  over a FIXED-WIDTH trailing window, never anchored on boot.** Stationary form (2 × time-avg |inventory| ÷
+  one-way turnover rate): **18:00–18:30 = 1,745.2 s**, **18:30–19:00 = 1,332.8 s**, **19:00–19:30 = 2,313.2 s**
+  — real hold ~22–39 min, but swinging **±35%** window to window, so it still needs several windows (Rule 412).
+- **Rule 438 — two independent measurements beat one, and the realized trades now corroborate the term
+  structure.** Weighted expectancy reproduced on a fresh sample: **225 s -0.2473**, **900 s -0.4562**,
+  **3600 s +1.0442** bps — same monotone shape, same zero-crossing between 900 s and 3600 s. Independently,
+  the six completed open→flat episodes rank almost perfectly by lifetime: 3955 s **+4.0875**, 1978 s
+  **+1.4421**, 1493 s **-0.3459**, 754 s **-2.6138**, 538 s **-0.8894**, 79 s **-4.0621**; Spearman
+  **ρ = +0.943** (n=6, crit **0.886**). **Rule: n=6 proves nothing alone — but a trade-level measurement
+  agreeing with a signal-level one is worth more than either, and this pair says the money is in the long
+  tail of the holding-period distribution and the losses are in the short one.**
+- **Rule 439 — compute t on the COHORT means, not the raw observations.** Clustered t
+  (`stdCohortMeanBps`/√`cohorts`) puts the largest |t| across all 15 source×horizon cells at `xsreversion`
+  900 s **-2.52** vs the Bonferroni hurdle **2.94**. The naive per-observation t for the same cell reads
+  **-3.30** and would have cleared a 2.94 hurdle. **Rule: overlapping forecast observations are clustered;
+  the raw-n t-stat manufactures significance the cohort structure does not support.**
+- **Rule 440 — check whether the mechanism you are about to build already shipped.** ADR-0140 ("absence ages
+  an intent over one derived evidence horizon instead of erasing it", INCONCLUSIVE, kept) is aimed at exactly
+  the sources=1 collapse Rule 436 measures. **Rule: before proposing a fix, establish whether the existing
+  rule is reached on that code path — an unreached rule and a wrong rule need opposite changes.**
+- **No change:** `27564bb15` is at **4/6** under ADR-0116. Window was **100% market** — commits reached only
+  `docs/` and `reports/`, boot instant **17:42:18.386Z** unchanged — so PnL **-13.08** and gross
+  **-10,711.12** carry neither credit nor blame.
