@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-08-06T17:30:08Z",
+    "fees": "418.663760",
+    "gross": "9055.83200000",
+    "net": "-5102.00800000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "9055.83200000",
+      "hedgePnl": "17.74918347",
+      "netExposure": "-5102.00800000",
+      "realizedPnl": "-812.82150687",
+      "strategyAlpha": "-839.69931842",
+      "totalFees": "418.663760",
+      "totalPnl": "-821.95013495",
+      "unrealizedPnl": "-9.12862808"
+    },
+    "total_pnl": "-821.95013495"
+  },
+  "before": {
+    "at": "2026-08-06T14:40:49Z",
+    "gross": "11424.82120000",
+    "net": "-2451.80520000",
+    "total_pnl": "-719.05540503"
+  },
+  "commit": "39451ce7135083d2701a6629942eb917dbaffb6a",
+  "delta": {
+    "gross": "-2368.98920000",
+    "net": "-2650.20280000",
+    "total_pnl": "-102.89472992"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.001329 over 7 cycles, t=-1.84 (hurdle 1.5); gross 11,425\u21929,056 \u2014 \u26a0\ufe0f REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert",
+  "revert": true,
+  "revertApplied": false,
+  "scoredAt": "2026-08-06T17:30:08Z",
+  "summary": "the loop rebuilds and restarts the trading app only when a path that can reach the app binary changed, so the mandated per-run findings write no longer bounces the process mid-cycle \u2014 which was re-seeding every warm-up-gated sensor cold, flattening the book, and measuring the restart instead of the change inside every ADR-0116 evaluation window (ADR-0142)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 9055.832,
+    "gross_start": 11424.8212,
+    "mean_ret_per_cycle": -0.00132856,
+    "n": 7,
+    "scale": 11064.04,
+    "t": -1.844
+  }
+}
