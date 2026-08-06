@@ -15,6 +15,104 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 14:00Z (**✅ item #1 CLOSES at the defect level — the desk opened a position for the first time since 2026-08-05 20:24Z.** ADR-0141 released the name it was diagnosed on: NQ went from an aim of **-0.003064** needing a ratio of **0.8239** to a FILLED entry at **13:58:29Z**, and gross went **$0.00 → $18,236.64**. But the book is 1 name of 19, and the other 18 are held by a **different** gate that ADR-0141 never touched. **The ADR-0116 freeze BINDS this cycle:** `reports/.pending-baseline.json` exists for `a21177cea` (recorded 13:44:10Z, 1 cycle of ~6) — so this run verifies and re-ranks, and makes **no code change**.)
+
+### Step 0 — `a21177cea` (ADR-0141): ✅ **VERIFIED at the defect level**, still accumulating on the vector
+
+Last cycle's VERIFY-BY was "a name whose whole target sat inside its own buffer can finally open". It is
+met, on the one name whose arithmetic the register predicted would clear. Rule 380 said NQ needed
+`|aim|/|target| > 0.8239` — reachable only at 82% of target on a whole-horizon time constant — and NVDA
+needed **3.1807**, above ADR-0102's bound of 1, so unreachable at any length. After ADR-0141 repriced the
+average position at `min(TARGET_ABS, E|f|)`:
+
+| reading | before (13:30Z) | now (14:00Z) |
+| --- | --- | --- |
+| NQ aim | -0.003064 | **-0.047464** |
+| gross exposure | $0.00 | **$18,236.64** |
+| filled fusion entries | none since 2026-08-05 20:24:38Z | **NQ SELL 0.030886 @ 13:58:29Z** |
+| `orders_day.total` | 0 | **11** |
+
+The aim walked, crossed, and routed. That is ADR-0141's mechanism and nothing else — the band is the only
+thing that changed between those two states for NQ.
+
+### Window attribution — 100% change, 0% market, and the change is one hour old
+
+The split is unusually clean because the book was empty at the baseline, so there were no untouched
+positions for the market to move. Total PnL **-628.06833967 → -682.17363767**, Δ **-54.11**:
+
+- **Δ unrealized -53.74164000** — entirely the new NQ short: quantity **-0.030886**, `avgCost`
+  **29435.50000000**, `mark` **29522.50000000**. The index rose 87 points against the entry.
+- **Δ realized -0.36365800** — the NQ entry's costs (`turnover_cost_by_name` NQ: 7 fills, **0.20** fee bps).
+- **EQUITY** realized **-595.62281205**, unrealized **0.00000000**, gross **$0.00** — unchanged, contributed nothing.
+- **HEDGE** **+24.35397774**, gross **$0.00** — unchanged, contributed nothing.
+
+So **100% of the window's move is the direct impact of the change**, and none of it is market drift on
+positions I did not touch. That is not a verdict on the change: it is one position, ~5 minutes after
+entry, one draw from the distribution. The scorer owns the judgement and has ~5 cycles left. **Do not
+read -$53.74 of mark-to-market on a single fresh short as evidence the fix was wrong** — that is exactly
+the single-window overfit the ledger's evaluation window exists to prevent.
+
+### Not danger — this is the book coming off DORMANT with room to spare
+
+Gross **$18,236.64** is **1.2%** of the firm gross cap $1,500,000 (headroom **$1,481,763**); net
+**-$18,236.64** is **1.8%** of the $1,000,000 net cap. `breaker.halted` **false**. `var95` **385.49**,
+`es95` **538.54**, `var99` **617.38** over **155** observations, `coveredExposure` **18236.64**,
+`skippedExposure` **0.00**. Nothing is near a cap or the drawdown breaker, so the UNDERWATER flag is a
+statement about cumulative PnL, not a live danger state. Per the mission, exposure rising off a flat book
+under the budget is the goal, not a concern.
+
+---
+
+### Item #1 (NEW, promoted) — 18 of 19 planned names cannot open because their ADR-0126 σ sensor is cold
+
+This is now the binding constraint on deploying capital, and it is **not** the band ADR-0141 fixed.
+`edgeGate` is **null** (the gate is off under ADR-0122), so `PositionBuffer.mayIncrease` reduces to the
+ADR-0126 σ-cold veto alone — `stopArmed == null || streamVol.sigmaPerSample(instrument).isPresent()`.
+When that is false the code clamps the delta reduce-only and **re-seeds the aim to the held position**,
+which for a flat name is exactly zero. That is precisely what the live map shows:
+
+- `aims` — NQ **-0.047464**; **all 18** equities exactly **0.0**, despite real targets (NVDA `targetQty`
+  **-412.353151** on `combinedForecast` **-16.444129523306067**; AMZN **-348.145901** on
+  **-16.321292681130473**; KO **-994.883770**; MSFT **-129.140626**).
+- `streamVolMeasuredNames` **1** — exactly one name has a measured σ, and exactly one name traded.
+- `insideBuffer` **18** of **19**; `logs/report.md` carries **15** `risk-cut σ sensor still cold` WARNs
+  and **0** `risk-cut σ sensor warmed`.
+
+The WARNs give the mechanism precisely: the seed asks for **121** stored prices at a **30000ms** step
+(≈3630s ≈ 60 min of continuous history) and gets **17–42**, terminating on `GAP_BREAK` or
+`HISTORY_EXHAUSTED` covering **~846–3749s**. The app restarted at 13:44Z to deploy ADR-0141; the session
+had only ~15 minutes of marks at that point, and the walk backward hits the overnight hole. So a target
+with a genuine view is unreachable not because the desk declined it but because the risk control that
+would protect it has not warmed.
+
+**Do not act on this yet — it may be warm-up, not a defect.** If the seed is merely short of session
+history, it self-heals ~60 minutes after the open with no code at all, and "fixing" it would be tuning a
+transient. That distinction is what the VERIFY-BY below is built to settle, and it is also why this cycle
+correctly ships nothing.
+
+**VERIFY-BY (next cycle, ~14:30Z):** read `fusion_targets.streamVolMeasuredNames` and the count of
+`risk-cut σ sensor warmed` lines.
+- If `streamVolMeasuredNames` has climbed above **1** and `insideBuffer` has fallen below **18**, this was
+  session warm-up — ✅ close it, take no action, and let the ADR-0141 measurement finish undisturbed.
+- If it is still **≤ 2** by the ~15:00Z cycle, with the session open >90 minutes and >121×30s of marks
+  accumulated, then ADR-0138's seed repair is ⚠️ **STILL-BROKEN** across the overnight boundary — the
+  walk terminates on `GAP_BREAK` at the session edge instead of spanning it — and *that* becomes the one
+  change, targeting `SensorWarmup.warm`'s gap handling, not the band and not any dial.
+
+### Item #2 (carried) — no source has demonstrated positive out-of-sample edge net of cost
+
+Unchanged and still the standing strategic problem behind every INCONCLUSIVE verdict. Live 900s
+`avgReturnBps`: trend **-0.09539655350574718** (323 cohorts), xsreversion **-1.8815179221159266** (152),
+momentum **-4.1695992274399405** (24), reversion **+0.2772856438709261** (285), social
+**+0.9634543857861314** (82). At 3600s social is **+4.843710111542362** (37 cohorts) and trend
+**+2.4016353883661217** (100). Nothing clears cost with significance. This stays #2 only because item #1
+is a hard mechanical block on deploying *any* view; it returns to #1 once the desk can actually hold risk.
+
+**VERIFY-BY:** a source's `avgReturnBps` positive at a horizon with `cohorts` ≥ 100 and a cohort-mean
+t-statistic clearing the ADR-0049 OOS gate.
+
+---
+
 ## Verification block — 2026-08-06 13:30Z (**✅ item #0 CLOSES — the app boots and every endpoint is live.** `ops_jvm` answers with `uptimeSeconds` **62475**, `logs/jethro-app.log` carries no `FlywayException`, and every reading that was `Connection refused` last run is back. Item #1 is therefore gradeable for the first time — and it is ⚠️ STILL-BROKEN, but its mechanism is now pinned to a different, provable cause than the aim's state handling, which ADR-0140 fixed correctly. **The ADR-0116 freeze does not bind:** `3cc91bc46` was scored ⚠️ INCONCLUSIVE and `reports/.pending-baseline.json` is gone.)
 
 ### Step 0 — `3cc91bc46` + the V51 repair: ✅ **VERIFIED at the defect level**, scored ⚠️ INCONCLUSIVE on the vector

@@ -4883,3 +4883,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   cross-sectional mean over names planned a view (`n ≥ 2`). Cross-sectional, so no estimator, warm-up or
   persistence — restart-proof, unlike ADR-0138/0140's repairs. Capped, so one-way: the band is never
   wider than before. No dial, width, rate, gate, cap or floor touched. `-Pci test` green.
+
+## 2026-08-06 14:00Z — ADR-0141 verified: the desk opened, and the next gate is a different one
+
+- **Step 0 — `a21177cea` (ADR-0141): ✅ VERIFIED at the defect level.** The band no longer bans opening.
+  NQ's aim walked **-0.003064 → -0.047464**, crossed, and **FILLED** a SELL of **0.030886** at
+  **13:58:29Z**; gross **$0.00 → $18,236.64**, `orders_day.total` **0 → 11**. Rule 380 predicted NQ at
+  **0.8239** was the reachable one and NVDA at **3.1807** was not — the prediction held exactly.
+- **Attribution — 100% change, 0% market, and that is not a verdict.** The baseline book was empty, so
+  there were no untouched positions for the market to move. All of the **-54.11** is the new NQ short:
+  Δ unrealized **-53.74164000** (`avgCost` **29435.50000000** vs `mark` **29522.50000000**) plus
+  Δ realized **-0.36365800** of cost. EQUITY (**-595.62281205**, gross $0) and HEDGE (**+24.35397774**,
+  gross $0) were unchanged. **Rule 384: when the baseline book is empty, attribution is unambiguous but
+  the sample is one — a fresh position marked minutes after entry is a draw, not evidence. Record the
+  clean split and let the evaluation window run; do not grade a change on its first hour of tape.**
+- **Rule 385 — a counter that merges two causes will re-diagnose the wrong one.** `insideBuffer` counts
+  every name with `delta == 0`, whether the no-trade band held it or `mayIncrease` clamped it
+  reduce-only. It read **8/8** before and **18/19** now, and the *cause* changed completely underneath a
+  number that looks like it only got worse. What separated them was `aims`: NQ **-0.047464** (a walking
+  intent) versus **all 18** equities at exactly **0.0** — the fingerprint of `mayIncrease` re-seeding the
+  aim to the held position, which no band can produce. **Rule: when a blocked-count barely moves after a
+  fix, read the per-name state that distinguishes the blockers before concluding the fix failed.**
+- **Rule 386 — with the edge gate off, the σ sensor IS the gate.** `edgeGate` is **null** under ADR-0122,
+  so `mayIncrease` collapses to the ADR-0126 σ-cold veto alone: `streamVolMeasuredNames` **1**, **15**
+  `risk-cut σ sensor still cold` WARNs, **0** warmed, and exactly one name able to hold risk. The seed
+  asks **121** prices at a **30000ms** step (~60 min) and gets **17–42** before `GAP_BREAK`. **Rule: a
+  risk control's warm-up is a position limit. When the veto that protects a name is cold, the desk is
+  flat in that name for the whole warm-up — so a sensor's warm-up span is a capital-deployment decision,
+  not an implementation detail.**
+- **No change shipped — the ADR-0116 freeze binds.** `reports/.pending-baseline.json` exists for
+  `a21177cea` (~1 of 6 cycles). **Rule 387: the cycle after a change that finally worked is the most
+  tempting one to spend, and the worst one to spend — the freeze protects the evidence for the fix that
+  just unblocked the desk.** Also deliberately not chasing the σ-cold block: the app restarted at 13:44Z
+  with ~15 min of session marks, so it may self-heal ~60 min after the open. The register's VERIFY-BY
+  distinguishes warm-up from defect next cycle rather than guessing now.

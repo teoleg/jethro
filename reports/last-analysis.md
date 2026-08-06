@@ -1,73 +1,51 @@
-The no-trade band was priced at a forecast the combiner never produces, so a name's whole target could sit inside its own buffer and never open — the average position is now priced at the forecast the desk actually generates (ADR-0141).
+ADR-0141 worked — the desk opened its first position in two days (gross $0 → $18,236.64) — so this cycle verifies and holds: that change is still under measurement and must not be disturbed.
 
 *(Every figure below is read from `logs/report.md`, `reports/run-status.json` and the scorer's own
 output. None is authored here — invariant 7 / ADR-0016.)*
 
 ## Situation — the live money, first
 
-**Money.** Total PnL reads **-628.06833967**, unchanged **+0.00** since the last run and **+0.00**
-across the last three. `pnl_growth_pct` **0.0** against a target of **1.0** — `on_track` **false**,
-`underwater` **true**. Not bleeding; **stuck**.
+1. **Money.** Total PnL **-628.06833967 → -682.17363767**, Δ **-54.11** since last run and over the last
+   3 runs. Underwater on cumulative PnL and off the +1%/3-iteration target (`on_track=False`,
+   `stale=True`).
+2. **Risk.** Gross **$18,236.64** = **1.2%** of the firm cap $1,500,000, headroom **$1,481,763**; net
+   **-$18,236.64** = **1.8%** of the $1,000,000 net cap. `breaker.halted` **false**; `var95` **385.49**,
+   `es95` **538.54** over **155** observations with `skippedExposure` **0.00**. The book has just come off
+   DORMANT with enormous room — under the mission that is the goal, not a concern.
+3. **Cause.** Last cycle's change (`a21177cea`, ADR-0141) is ✅ **VERIFIED at the defect level**. It
+   repriced the no-trade band's average position at `min(TARGET_ABS, E|f|)`, and NQ — which Rule 380
+   showed needed an unreachable `|aim|/|target|` of **0.8239** — walked its aim from **-0.003064** to
+   **-0.047464**, crossed, and **FILLED** a SELL of **0.030886** at **13:58:29Z**. `orders_day.total`
+   went **0 → 11**. The band no longer bans opening.
+4. **Danger.** None. Nothing is near a cap or the drawdown breaker. UNDERWATER is a statement about
+   cumulative PnL, not a live danger state.
 
-**Risk.** Gross exposure **$0.00** — **0.0%** of the firm cap $1,500,000, with **$1,500,000** of
-headroom; net **$0.00** of a $1,000,000 net cap. `breaker.halted` **false**, `var95` **0.00** with the
-note `no positions`. This is the **DORMANT** flag, not DANGER: nothing is anywhere near a cap, so under
-ADR-0132 the correct response is to deploy, not de-risk.
+## Attribution — 100% change, 0% market
 
-**Cause.** Last cycle's change (`3cc91bc46`, ADR-0140, the durable fusion aim) scored ⚠️ INCONCLUSIVE —
-risk-adjusted return/cycle +0.000060 over 36 cycles, t=+1.23 against a 1.5 hurdle. The V51 migration
-rename shipped alongside it **worked**: `ops_jvm` answers with `uptimeSeconds` **62475**, there is no
-`FlywayException` in the log, and every endpoint that read `Connection refused` last run is live.
-Must-fix item #0 closes ✅.
+The split is unusually clean because the book was empty at the baseline, so there were no untouched
+positions for the market to move. Of the **-54.11**: **Δ unrealized -53.74164000** is entirely the new NQ
+short (quantity **-0.030886**, `avgCost` **29435.50000000**, `mark` **29522.50000000** — the index rose
+87 points against the entry) and **Δ realized -0.36365800** is that entry's cost. EQUITY
+(**-595.62281205** realized, gross **$0.00**) and HEDGE (**+24.35397774**, gross **$0.00**) were both
+unchanged. So the entire move is the direct impact of the change — and it is one position, minutes after
+entry. One draw is not a verdict; the scorer owns that and has ~5 cycles left.
 
-**Attribution — market vs change.** `recent_orders` shows no order since **2026-08-05 20:24:38Z** and
-`orders_day.total` is **0**; the US session was closed for the whole window. The window is therefore
-**100% market, 0% change** — with a flat book and a frozen tape there was nothing for either to move.
-No credit or blame is claimed in either direction.
+## Decision — verify and hold, no code change
 
-## What I found
+`reports/.pending-baseline.json` exists for `a21177cea` (recorded 13:44:10Z, ~1 of 6 cycles), so per
+ADR-0116 I make **no code change**: stacking a second change on top would destroy the evidence for the
+one that just demonstrably unblocked the desk.
 
-ADR-0140's mechanism **did** work: the live `aims` map carries **-0.003064** for NQ, a real
-partially-adjusted intent that survived a restart, which is exactly what it promised. The desk still
-routed nothing — so the aim reaching the band was never the whole story. The arithmetic says why.
-
-ADR-0094's band is `width × |target| × TARGET_ABS / |f|`, and ADR-0102 confines the aim to the interval
-between flat and the target. A name opens only when `|aim|/|target| > width × TARGET_ABS/|f|`, and the
-left side is bounded above by **1** — by ADR-0102, not by any dial. The condition is therefore
-**unsatisfiable for every name whose combined forecast is weaker than `width × TARGET_ABS`**. Of the two
-names carrying a view this cycle, NQ (`f` **-1.2137982837547245**) needs **0.8239** and NVDA (`f`
-**-0.31439455218834894**) needs **3.1807** — greater than one, so no aim path of any length could ever
-have opened it. `insideBuffer` reads **8** of **8**, and gross is zero.
-
-The root is a units error. `TARGET_ABS` is what each **source** is normalised to — live `meanAbsClaim`
-**8.933184091982607** reversion, **6.672769378384960** trend, **9.238246464313300** xsreversion, all
-near it as designed — but the band is applied to the **combined** forecast, which the ADR-0076
-multiplier and the ADR-0124 agreement scalar have already attenuated (NQ's **+18.529717715250550** and
-**-20.0** average to -5.427; agreement **0.1954775485324326** takes it to -1.214). Both scalars were
-specified as reductions in **size**. Feeding a shrunken forecast into a threshold calibrated for an
-unshrunken one does not shrink the position — it deletes it. An 80% haircut to conviction became a 100%
-haircut to the position, permanently, in a place neither ADR intended a tradability gate.
-
-## The change
-
-ADR-0141 prices the average position at the forecast strength the combiner actually produces: the mean
-`|combined forecast|` over the names planned a view this cycle, capped at `TARGET_ABS`. No number is
-introduced — it is the mean of forecasts the planner already computed. It is cross-sectional, so it
-needs no estimator, no warm-up and no persistence and survives a restart intact, which is the failure
-ADR-0138 and ADR-0140 were both spent repairing. The cap makes it strictly one-way: the band is never
-*wider* than before, so this can release a trade the desk's own arithmetic already wanted but never
-freeze one. The aim path, the target, the ADR-0102 clamp and the ADR-0101 width are untouched, and every
-deterministic floor — edge gate, σ-cold veto, vol budget, gross cap, pre-trade guardrail, drawdown
-breaker — still has the last word on anything released.
-
-I deliberately did **not** touch ADR-0124's agreement scalar, though it is what zeroes the other six
-planned names. Those six are single-source and their only source is **xsreversion**, whose measured
-expectancy is negative at all three horizons (`avgReturnBps` **-1.6172582662041586** at 900 s over 152
-cohorts, **-1.9673663434138422** at 3600 s, **-0.16422896669296588** at 225 s). Unlocking them would
-deploy capital into the desk's worst-measured source. They are flat for the right reason, and the honest
-read of the telemetry is still that **no source measures a significant positive edge** — nothing clears
-its cohort hurdle. This change does not manufacture edge; it stops the desk being unable to act on
-whatever edge it does form.
-
-`-Pci test` green, five new tests including the dead-zone proof (NVDA's nominal band exceeds its entire
-target) and the live frozen-NQ example.
+The next constraint is already identified and ranked #1 in `reports/must-fix.md`, and it is **not** the
+band. `edgeGate` is **null**, so `PositionBuffer.mayIncrease` reduces to the ADR-0126 σ-cold veto, which
+clamps the delta reduce-only and re-seeds the aim to the held position — exactly zero for a flat name.
+Live: `aims` shows **all 18** equities at exactly **0.0** against real targets (NVDA `targetQty`
+**-412.353151** on `combinedForecast` **-16.444129523306067**), `streamVolMeasuredNames` is **1**,
+`insideBuffer` is **18** of **19**, and the log carries **15** `risk-cut σ sensor still cold` WARNs and
+**0** warmed — the seed asking for **121** prices at a **30000ms** step but getting **17–42** before a
+`GAP_BREAK`. I am deliberately **not** acting on it: the app restarted at 13:44Z with only ~15 minutes of
+session marks, so this may simply be warm-up that self-heals ~60 minutes after the open, and "fixing" a
+transient would be the classic overfit. The VERIFY-BY in the register settles it next cycle — if
+`streamVolMeasuredNames` has climbed, it was warm-up and there is nothing to fix; if it is still ≤2 by
+~15:00Z with >90 minutes of session, ADR-0138's seed repair is still broken across the overnight
+boundary and that becomes the one change.
