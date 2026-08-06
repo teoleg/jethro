@@ -5192,3 +5192,49 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   Commit confined to `reports/` + `docs/`. ADR-0142 ✅ verified a fifth time (boot instant **1786027281280**
   vs **…905** / **…760** / **…702** / **…035**). Window was **0% change / 100% market** for the fifth cycle
   running — PnL **-24.77**, gross **-2828.57** earn my changes neither credit nor blame.
+
+## 2026-08-06 17:30Z — the loop's self-correction arm has been dead for nine consecutive BAD verdicts
+
+- **Rule 415 — when a mechanism reports the SAME failure more than twice, stop working around it and go
+  read why it fails.** The ledger carried `⚠️ REVERT FAILED (git conflict)` on nine BAD verdicts and the
+  loop's response every time was either to burn a whole later cycle hand-completing the revert (5 times,
+  those cycles themselves graded ❌ BAD or ⚠️ INCONCLUSIVE) or to silently leave it live (4 times). One
+  `git revert --no-commit` costing thirty seconds showed the conflicts land on `docs/loop-findings.md`,
+  `reports/last-analysis.md` and `reports/must-fix.md` — the loop's OWN mandated notes — and on nothing
+  else. **Rule: a recurring "known issue" in a tool you depend on is a defect you have not diagnosed, not
+  a cost of doing business. The workaround being available is what hides it.**
+- **Rule 416 — replay a historical failure at ITS OWN point in history, not at today's HEAD.** Testing the
+  scoped revert against HEAD showed 4 of 9 still conflicting, which looked like a partial fix. Those four
+  conflicted only because a later hand-completion had *already* reverted them. Replaying each at the parent
+  of its own `chore(ledger)` commit gave **CONFLICT 9/9 unscoped, CLEAN 9/9 scoped** — unambiguous. **Rule:
+  a git-archaeology result measured at HEAD is confounded by every commit since; check out the tree as it
+  was or the answer is about today, not about the failure.**
+- **Rule 417 — two of your own rules can be individually right and jointly fatal.** Nothing was wrong with
+  "append a finding every cycle" (compounding memory) or "hold a change ~6 cycles before grading it"
+  (ADR-0116, honest statistics). Together they guaranteed that by scoring time the mandated notes had drifted
+  ~6 commits, so an all-or-nothing `git revert` conflicted with certainty and aborted the CODE revert too.
+  **ADR-0116 improved the loop's judgment and destroyed its enforcement in the same stroke** — and it got
+  *more* certain as the window got *more* rigorous. **Rule: when adding a rule about cadence or duration,
+  ask what else in the system that duration now outlives.**
+- **Rule 418 — an unenforceable verdict is worse than no verdict, because it reads as enforced.** The real
+  cost was never one bad change: the book has been trading under ADR-0133 + ADR-0135 + ADR-0136 + ADR-0139 +
+  ADR-0142, all graded ❌ BAD and none pulled, so every evaluation window measured a new change against the
+  residue of every previously-rejected one instead of a stable base. That is a sufficient explanation for a
+  ledger that reads INCONCLUSIVE, and it means no composition or sizing finding could have been trusted
+  anyway. **Rule: before ranking a money defect #1, confirm the machinery that grades money defects works.**
+- **Rule 419 — do not hand-execute a verdict you have just argued is confounded.** ADR-0142's BAD verdict was
+  left un-reverted on purpose, with the reason written into ADR-0143 rather than assumed: the restart it
+  removed had been flattening the book to **$0.00** gross (three consecutive scored rows read `→ $0.00`), so
+  the measured loss is largely the book finally being allowed to HOLD long enough to lose money on a
+  negative-expectancy aim. Hand-reverting restores restart-induced dormancy, which CLAUDE.md calls a failure
+  state, not safety. **Rule: fixing the enforcement mechanism and choosing what to enforce are separate
+  decisions — do not let repairing the first quietly execute the second.**
+- **Rule 420 — the composition shares moved a THIRD time; the aggregate did not.** Mean-reverting pair
+  **46.85%** this window vs **61.90%** and **51.0%** before, weights unchanged. Aim-weighted 3600s expectancy
+  **+0.0536 gross / -1.9464 net** of the 2.00 bps round trip, vs **-1.7898** and **-1.60** — same sign, three
+  windows. `xsreversion` holds the only |t| > 2 of 15 rows for a fourth consecutive window (900s **-2.44**,
+  still short of Bonferroni **2.94**, stated per Rule 407). **Rule 412 confirmed a second time: grade on the
+  aggregate, never on a share.**
+- **Change:** ADR-0143 — the BAD-verdict revert is scoped to code paths and never rewinds the loop's record.
+  Window was **0% change / 100% market** for the sixth cycle running (PnL **-8.19**, gross **+1449.71**), so
+  my changes earn neither credit nor blame for it. `-Pci test` green; `scripts/test-score-change.py` green.

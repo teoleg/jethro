@@ -15,6 +15,119 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 17:30Z (**CHANGE MADE — the ADR-0116 freeze ended: `39451ce71` scored ❌ BAD.** And the scoring exposed something that outranks every item previously on this register: **the scorer's auto-revert has never once worked.** Replaying all nine BAD verdicts at their exact scoring point, the whole-commit `git revert` conflicted **9 of 9** times — every one on the same three files, `docs/loop-findings.md` + `reports/last-analysis.md` + `reports/must-fix.md`, and nothing else — while the same revert scoped to code paths applies **CLEAN 9 of 9**. The loop's only self-correction arm has been dead, silently, and every change the scorer condemned is still executing. That is the new **#1** and this cycle fixes it (ADR-0143). The composition item is re-ranked **#2** — unchanged in conclusion, and its shares swung for a third time.)
+
+### Step 0 — `39451ce71` (ADR-0142): ✅ **its own claim VERIFIED a sixth time — but the scorer graded it ❌ BAD and the revert FAILED**
+
+`ops_jvm.uptimeSeconds` **10120** against `traffic.timestampMillis` **1786037401687** implies a boot instant
+of **1786027281687**, versus **…281280**, **…281905**, **…281760**, **…281702** and **…281035** on the five
+prior cycles (sub-second sampling skew between the two endpoints). Same 14:41:21Z process, six cycles on. The
+mechanism ADR-0142 claimed — a docs/reports-only commit no longer bounces the JVM — is doing exactly what it
+said.
+
+The **vector** verdict is a different question and the scorer owns it: **❌ BAD**, risk-adjusted return/cycle
+**-0.001329** over **7** cycles, **t=-1.84** against the **1.5** hurdle. `git merge-base --is-ancestor
+39451ce71 HEAD` confirms **it is still live** — the auto-revert did not apply.
+
+**Not hand-reverted, deliberately, and the reason is on the record (ADR-0143 "Not done here").** ADR-0142's
+verdict is confounded: the restart it removed had been flattening the book to **$0.00** gross at the end of
+cycle after cycle (three consecutive scored rows read `→ $0.00`), so the loss its window measured is largely
+the book finally being allowed to HOLD a position long enough to lose money on an aim whose measured
+expectancy is negative (item #2 below). Rewinding it restores restart-induced dormancy, which CLAUDE.md names
+a failure state rather than safety. Now that #1 is fixed, rewinding it is a decision the machine can take on
+its own evidence — it is not a side effect of repairing the mechanism.
+
+### Window attribution — 0% change, 100% market, sixth cycle running
+
+`git diff --name-only 39451ce..HEAD` is confined to `docs/loop-findings.md` and `reports/`. PnL **-8.19**
+(total **$-821.79** live) and gross **+1449.71** (to **$9,055.68**) are the market plus code already live; my
+changes earn neither credit nor blame. Over the last 3 runs: PnL **-28.68**, gross **+2024.76**.
+
+### Not danger — still dormant
+
+Gross **$9,055.68** is **0.6%** of the firm gross cap $1,500,000 (headroom **$1,490,944**); net **$-5,101.84**
+is **0.5%** of the $1,000,000 net cap. `breaker.halted` **false**, `regime` **CALM** (`trend` **CHOP**),
+`riskCuts` **[]**, `bookVolBrake` **1.0**, `var95` **83.04** / `es95` **139.33** on **154** observations with
+`skippedExposure` **0.00**. UNDERWATER is cumulative, not a live danger state.
+
+---
+
+## Item #1 (NEW, top-ranked, **FIXED THIS CYCLE** — ADR-0143) — **the scorer's BAD-verdict auto-revert has never worked; every change graded ❌ BAD is still in the running code.**
+
+Replaying each failed revert at its *true* scoring point (the parent of its own `chore(ledger)` commit, not
+today's HEAD — the naive replay is confounded by the later hand-completions):
+
+| graded-BAD commit | whole-commit `git revert` | conflicted on | scoped to code paths |
+| --- | --- | --- | --- |
+| `efccc6502` `e61c7f5aa` `74a47adee` `c20fb0b70` `e3b33679d` `026cda49d` `d51f179a2` `e956dcf46` `39451ce71` | CONFLICT — **9 of 9** | `docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md` — **the same three, every time, and nothing else** | **CLEAN — 9 of 9** |
+
+**Mechanism — a collision between two of the loop's own rules.** `ops/improve-prompt.md` MANDATES rewriting
+those three files every cycle, change or not. ADR-0116 then holds a change `MIN_CYCLES` (**6**) cycles before
+grading it. So at scoring time they have been rewritten ~6 times on top of the commit; `git revert` tries to
+rewind them, conflicts with certainty, and — being all-or-nothing — **aborts the whole revert including the
+code**. ADR-0116 made the loop's judgment better and its enforcement impossible in the same stroke, and the
+failure became *more* certain as the window became more rigorous.
+
+**Why it outranks everything else on this register.** It is not one bad change: the book is trading under the
+accumulated code of ADR-0133, ADR-0135, ADR-0136, ADR-0139 and ADR-0142 — all graded BAD, none pulled by the
+machine. Every evaluation window since has measured a new change against the residue of every previously-
+condemned one rather than a stable base, which is a sufficient explanation for a ledger that reads
+INCONCLUSIVE. Five were eventually removed by the agent burning an entire *subsequent* cycle hand-completing
+the revert (cycles that produced no new idea and were themselves graded ❌ BAD or ⚠️ INCONCLUSIVE); the other
+four never were. **No composition or sizing fix can be trusted while a verdict cannot be enforced.**
+
+**VERIFY-BY next run:** the ledger's next **❌ BAD** row carries a `reverted (...)` note instead of
+`⚠️ REVERT FAILED`, and a `Revert "..."` commit appears on `claude/auto-improve` with **no agent action**.
+**FALSIFIED IF** a BAD verdict still reports `REVERT FAILED` naming a record path, or a revert commit rewinds
+`docs/loop-findings.md`. (Honest caveat: this only grades on the *next* BAD verdict, which may be several
+cycles out — until then the standing evidence is the 9-of-9 replay and `scripts/test-score-change.py`.)
+
+---
+
+## Item #2 (was #1 — carried, conclusion CONFIRMED on a third independent window, composition swung AGAIN) — **the aim does not clear its own round-trip cost.**
+
+| source | share now | last | prior | 3600s bps | t3600 | t900 | t225 | hit3600 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| trend | **50.12%** | 38.09% | 42.6% | +1.652 | +1.14 | -0.12 | +0.05 | 0.531 |
+| reversion | **32.79%** | 52.19% | 27.9% | -0.327 | -0.19 | +0.04 | -0.04 | 0.470 |
+| xsreversion | **14.06%** | 9.71% | 23.1% | **-3.415** | -1.01 | **-2.44** | -0.34 | 0.466 |
+| momentum | 3.03% | 0.00% | 6.5% | -6.178 | -0.86 | -1.10 | -0.40 | 0.540 |
+| **social** | **0.00%** | 0.00% | 0.0% | **+3.430** | +0.75 | +0.71 | -0.49 | **0.593** |
+
+**(a) Rule 412 holds, emphatically.** The mean-reverting pair is **46.85%** this window against **61.90%**
+last and **51.0%** before — three windows, three different answers, weights unchanged. Any VERIFY-BY built on
+a share statistic would be graded by noise. **The aggregate is what is stable:** aim-weighted 3600s
+expectancy **+0.0536 bps gross → -1.9464 net** of the **2.00 bps** round trip (`fee_bps` **1.00** per side on
+every equity), against **+0.2102/-1.7898** and **+0.400/-1.60** on the two prior windows. Same sign, same
+order of magnitude, three times. **The desk pays 2 bps to trade a view worth ~0.**
+
+**(b) `xsreversion` carries the only |t| > 2 in the table for a FOURTH consecutive window** — 900s
+**t = -2.44** (**152** cohorts, **2749** resolved), negative at all three horizons again
+(**-3.415**/**-2.209**/**-0.113**). It still does **not** clear Bonferroni at 15 tests (**|t| > 2.94**) —
+stated in the same breath, per Rule 407. The evidence is sign-consistency across four independent windows,
+not any single p-value.
+
+**(c) `social` remains the only source clearing cost** (**+3.430** gross → **+1.430** net, hit **0.593**) and
+is **0.0%** of every aim. ADR-0139 already tried loosening that gate and was graded ❌ BAD — **do not
+re-attempt** (Rule 408).
+
+**VERIFY-BY (unchanged, aggregate-only):** aim-weighted 3600s expectancy Σ(share × `avgReturnBps`@3600) must
+**exceed +2.00 bps**. It reads **+0.0536** now. Do **not** grade on any single source's share.
+
+---
+
+## Item #3 (was #2, carried) — **entry is structurally frozen for names early on their aim path.**
+
+`PositionBuffer.band` (`PositionBuffer.java:481-493`) prices the band off `targetQty` while the gap it gates
+is `aim − held`. Live: `insideBuffer` **13** of **22** planned, with **19** of **22** names carrying a
+nonzero aim. Still ranked **below** item #2 on purpose — unfreezing entry into an aim measured at **-1.9464
+bps net of cost** deploys capital into a known loser. Sequence over urgency. **VERIFY-BY (when its turn
+comes):** names with a nonzero `aims` entry and `deltaQty` **0.0000** against a flat `currentQty` falls to
+zero; `insideBuffer` falls below **13** of **22**; gross rises off **0.6%** of cap *without* item #2's
+aggregate still being negative.
+
+---
+
 ## Verification block — 2026-08-06 17:00Z (**NO CHANGE — the ADR-0116 freeze holds at `39451ce71` 5/6.** Fifth consecutive **0%-change / 100%-market** window. This cycle spends it settling the open question item #4 raised rather than reasoning further on top of it — and the source read **invalidates three cycles of arithmetic**: `targetQty` is not the routed quantity, `aims` is. It also re-measures item #1 on a genuinely independent window, which **confirms the conclusion and refutes the culprit**: the aim is still majority mean-reverting and still fails to clear cost, but `xsreversion`'s share moved **23.1% → 9.71%** with its weight unchanged at **0.25**, so last cycle's proposed VERIFY-BY was a statistic that swings more than any change would. A new #2 is promoted from the settled ambiguity: **entry is structurally frozen for names early on the aim path.**)
 
 ### Step 0 — `39451ce71` (ADR-0142): ✅ **VERIFIED (fifth independent confirmation)**
