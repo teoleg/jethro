@@ -15,6 +15,146 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 17:00Z (**NO CHANGE — the ADR-0116 freeze holds at `39451ce71` 5/6.** Fifth consecutive **0%-change / 100%-market** window. This cycle spends it settling the open question item #4 raised rather than reasoning further on top of it — and the source read **invalidates three cycles of arithmetic**: `targetQty` is not the routed quantity, `aims` is. It also re-measures item #1 on a genuinely independent window, which **confirms the conclusion and refutes the culprit**: the aim is still majority mean-reverting and still fails to clear cost, but `xsreversion`'s share moved **23.1% → 9.71%** with its weight unchanged at **0.25**, so last cycle's proposed VERIFY-BY was a statistic that swings more than any change would. A new #2 is promoted from the settled ambiguity: **entry is structurally frozen for names early on the aim path.**)
+
+### Step 0 — `39451ce71` (ADR-0142): ✅ **VERIFIED (fifth independent confirmation)**
+
+`ops_jvm.uptimeSeconds` **8320** against `traffic.timestampMillis` **1786035601280** implies a boot instant
+of **1786027281280**, versus **1786027281905**, **…760**, **…702** and **…035** on the four prior cycles
+(sub-second sampling skew between the two endpoints). Same 14:41:21Z process, now five cycles and four
+reports-only commits later. `git diff --name-only 95b7b57..HEAD` lists **`reports/run-status.json`** and
+nothing else. Item remains struck; no further re-verification needed.
+
+### Window attribution — 0% change, 100% market, fifth cycle running
+
+Zero Java, zero dials, zero gates in the window's diff (`git diff --name-only 39451ce..HEAD` is confined to
+`docs/loop-findings.md`, `reports/`). PnL **-24.77** (total **$-820.28** live) and gross **-2828.57** (to
+**$7,874.70**) are the market plus code already live; my changes earn neither credit nor blame for either.
+Over the last 3 runs: PnL **-53.02**, gross **-11373.01**.
+
+### Not danger — but now genuinely DORMANT, which is its own failure
+
+Gross **$7,874.70** is **0.5%** of the firm gross cap $1,500,000 (headroom **$1,492,125**); net **$-282.06**
+is **0.0%** of the $1,000,000 net cap. `breaker.halted` **false**, `regime` **CALM** (`trend` **CHOP**,
+`volRatio` **0.93**), `riskCuts` **[]**, `bookVolBrake` **1.0**, `portfolioRiskMultiplier`
+**0.9213584408762284**. Not a danger state — but per CLAUDE.md a book at 0.5% of an owner-set budget is a
+**failure to attack**, and new item #2 below is the mechanism holding it there.
+
+---
+
+## ~~Item #4 (was open question) — `targetQty` and `aims` disagree by ~60× on the same name~~ ✅ **RESOLVED by source read — and it invalidates three cycles of arithmetic**
+
+Settled from `PositionBuffer.apply` (`app/src/main/java/io/jethro/app/fusion/PositionBuffer.java:185-214`),
+no code change required. The three fields are three different things:
+
+- **`targetQty`** — the planner's **end-state destination** after every risk scaler (ADR-0083 vol budget,
+  ADR-0079 normaliser, ADR-0137 gross cap). It is *not* a quantity the desk intends to reach this cycle.
+- **`aims`** — the **current-cycle waypoint**: `nextAim(instrument, target, held, rate)`, the previous aim
+  stepped toward `targetQty` at the ADR-0080 partial-adjustment `rate`, then clamped by ADR-0102's
+  `withinTarget` into the closed interval between flat and the target (line 188).
+- **`deltaQty`** — what actually routes, and it is computed as `bufferedDelta(aim, held, band, target, rate)`
+  (line 190). **The routed order is the gap from held to the AIM, not to `targetQty`.**
+
+**Consequence — say it plainly:** the last three cycles' time-to-target and convergence arithmetic treated
+`targetQty` as the routed destination. It is not. Those cycles **overstated the mismatch**, exactly as Rule
+410 suspected. BAC `targetQty` **1114.5210** against `currentQty` **0** with `deltaQty` **0.0000** is not a
+desk failing to reach 1114 — its aim for BAC is **23.387455**, and the delta is measured against that.
+Struck; the correct denominator for any future convergence claim is `aims`, not `targetQty`.
+
+---
+
+## Item #1 (carried, CONFIRMED on a second independent window — but its culprit and its VERIFY-BY are both replaced) — **the aim is majority mean-reverting and does not clear the round-trip cost; the one source that does clear it contributes nothing.**
+
+Re-decomposing this cycle's `fusion_targets.contributions` into `forecast × weight`, summed as
+|contribution| across the six reported names (20 of 26 elided by the report — stated, not hidden):
+
+| source | share this cycle | share last cycle | 3600s `avgReturnBps` | cohort t | hit rate | net of 2.00 bps |
+| --- | --- | --- | --- | --- | --- | --- |
+| **reversion** | **52.19%** | 27.9% | +0.033 | +0.02 | 0.473 | **-1.967** |
+| trend | 38.09% | 42.6% | +1.860 | +1.28 | 0.534 | **-0.140** |
+| **xsreversion** | **9.71%** | 23.1% | **-5.306** | -1.25 | 0.470 | **-7.306** |
+| momentum | 0.00% | 6.5% | -1.299 | -0.20 | 0.557 | -3.299 |
+| **social** | **0.00%** | 0.0% | **+3.296** | +0.72 | 0.592 | **+1.296** |
+
+**(a) The conclusion survives; the culprit does not.** Mean-reversion still carries the majority —
+`reversion` **52.19%** + `xsreversion` **9.71%** = **61.90%** against `trend` **38.09%** — so "the aim is
+majority mean-reverting" is now confirmed on two independent windows. But *which* mean-reverting source
+carries it flipped completely: `xsreversion` fell **23.1% → 9.71%** while `reversion` rose **27.9% →
+52.19%**, with **both weights unchanged** (`xsreversion` **0.25**, `reversion` **0.9370515192395911**). The
+swing is entirely in the forecasts. **Last cycle's proposed VERIFY-BY — "xsreversion's share below 23.1%" —
+would have graded a change against a statistic that moves 13pp on its own. Do not use it.**
+
+**(b) `reversion` is not a negative signal — it is *noise*, which is a different and worse problem.** Its
+measured expectancy is **+0.033** / **+0.060** / **+0.010** bps at 3600s / 900s / 225s, with |t| ≤ **0.10**
+at every horizon and hit rates **0.473** / **0.490** / **0.507**. It is indistinguishable from zero on
+**803** / **2657** / **5082** resolved observations. The desk routes **52.19%** of its aim into it and pays
+**2.00 bps** a round trip to do so. That is not a mispriced edge; it is a fee paid to trade a coin flip.
+
+**(c) `xsreversion` is negative at every horizon for a THIRD consecutive window.** **-0.215** / **-2.168** /
+**-5.306** bps, hit rate below a coin flip at all three (**0.492** / **0.487** / **0.470**). Prior windows
+read **-0.171**/**-2.080**/**-1.816** and **-0.205**/**-2.123**/**-4.363** — same sign, same shape, three
+times. Its 900s **t = -2.40** (152 cohorts, 2746 resolved) is again **the only |t| > 2 among the 15 rows**,
+the same horizon as both prior windows. **It still does not survive Bonferroni at 15 tests (|t| > 2.94) —
+stated in the same breath as the t-stat, per Rule 407.** The evidence carrying this is sign-consistency
+across three independent windows, not any single p-value.
+
+**(d) The whole aim, priced against its own cost, is negative.** Weighting each source's 3600s expectancy by
+its share of the aim gives **+0.2102 bps gross**, against a **2.00 bps** round trip (`turnover_cost_by_name`
+`fee_bps` **1.00** on every equity, **0.20** on ES/NQ) → **-1.7898 bps net**. Last cycle's composition priced
+the same way gives **+0.400 gross / -1.60 net**. The *shares* swing; the *sign of this aggregate* does not.
+
+**(e) The only source clearing cost contributes nothing.** `social` at 3600s is **+3.296** gross → **+1.296**
+net, hit rate **0.592**, and is **0.0%** of every aim. **ADR-0139 already tried loosening that corroboration
+gate and was graded ❌ BAD — do not re-attempt it** (Rule 408).
+
+**VERIFY-BY (replaces last cycle's unstable one):** the **aim-weighted 3600s expectancy**, computed as
+Σ(share_s × `avgReturnBps`_s@3600) over `fusion_targets.contributions` × `signals_telemetry`, must **exceed
++2.00 bps** (the measured round trip). It reads **+0.2102** now. Secondary: the mean-reverting pair's
+combined share falls below **50%** (now **61.90%**). Both are aggregates, so neither is hostage to the
+single-source instability that (a) documents.
+
+---
+
+## Item #2 (NEW, promoted out of the resolved item #4) — **entry is structurally frozen for any name early on its aim path: the no-trade band is priced off `targetQty` while the intent is `aims`, and the two differ by ~25–50×.**
+
+Now that item #4 is settled, the freeze has a precise mechanism. `PositionBuffer.band`
+(`PositionBuffer.java:481-493`) computes `band = width × |target| × E|f| / |f|` — scaled by **`targetQty`**
+— while the gap it gates is `aim − held`. The class javadoc states the release condition itself
+(`PositionBuffer.java:505`): a name opening from flat routes its first order only when
+`|aim|/|target| > width × E|f| / |f|`. Live, that ratio is tiny for most names:
+
+| name | `targetQty` | `aims` | `\|aim\|/\|target\|` | `currentQty` | `deltaQty` |
+| --- | --- | --- | --- | --- | --- |
+| BAC | 1114.5210 | 23.3875 | **0.020984** | 0 | **0.0000** |
+| NEE | 448.8503 | 16.0903 | **0.035848** | 0 | **0.0000** |
+| KO | 484.3413 | 18.9581 | **0.039142** | 1.0 | **0.0000** |
+| AMZN | 117.4335 | 4.5897 | 0.039084 | -1.0 | 0.008299 |
+| UNH | -95.2138 | -9.8118 | 0.103050 | 0 | -3.792098 |
+| GOOG | 123.7431 | 19.5582 | 0.158055 | 9.0 | 5.042261 |
+
+The pattern is monotone in `|aim|/|target|`: the two names that route meaningfully are the two highest
+(**0.158**, **0.103**); the three that route **exactly zero** are the three lowest. `insideBuffer` is **18**
+of **26**. BAC, NEE and KO each hold a **nonzero aim against a flat book and route nothing** — this is not a
+wrong-side holding, so ADR-0132's `onTargetSide` does not reach it, and ADR-0141's measured `E|f|` narrowed
+the dead zone without closing it (`band` still floors `width` at Carver's **0.10**, and caps `E|f|` at
+`Forecast.TARGET_ABS` rather than flooring it).
+
+**This is the mechanism behind the dormancy** — gross **$7,874.70**, **0.5%** of the $1,500,000 cap.
+
+**Ranked #2, deliberately, and the ordering is the point:** fixing deployment before composition would push
+more capital into an aim measured at **-1.7898 bps net of cost** (item #1d). Item #1 must land and be scored
+first. **VERIFY-BY (when its turn comes):** names with a nonzero `aims` entry and `deltaQty` **0.0000**
+against a flat `currentQty` falls to zero; `insideBuffer` falls below **18** of **26**; gross exposure rises
+off **0.5%** of cap **without** the aim-weighted expectancy of item #1 still being negative.
+
+---
+
+## ~~Item (was #2) — entry gated / exit ungated conviction asymmetry~~ — remains a **SYMPTOM**, not a target (Rule 409); superseded by item #1's composition finding and item #2's band finding, which jointly generate it.
+
+## ~~Item (was #3) — `social` corroborated on 12 of 1600 kept items~~ — folded into **item #1(e)**; not separately actionable while ADR-0139's ❌ BAD verdict stands.
+
+---
+
 ## Verification block — 2026-08-06 16:30Z (**NO CHANGE — the ADR-0116 freeze holds at `39451ce71` 4/6.** Fourth consecutive **0%-change / 100%-market** window. This cycle spends it on the one measurement the previous three never made: **not how long the desk holds, but WHAT it is holding an opinion about.** Decomposing `fusion_targets.contributions` into weighted contributions inverts item #1 again — and this time the new #1 subsumes the old one as its own mechanism. **The desk's aim is majority mean-reversion, and 23.1% of it comes from the single source the telemetry measures negative at every horizon — carrying the only |t| > 2 in the entire table.** The exit asymmetry (old #1) is what a majority-mean-reverting aim *looks like* from the order tape; it is a symptom, not the cause.)
 
 ### Step 0 — `39451ce71` (ADR-0142): ✅ **VERIFIED (fourth independent confirmation)**

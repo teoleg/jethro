@@ -5154,3 +5154,41 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   aim reflects measured expectancy net of the **2.00 bps** round trip, ADR in the same commit; graded on
   its contribution share falling below **23.1%**, mean-reversion outvoting trend+social in fewer than
   **4 of 6** names, and the aim-weighted 3600s expectancy turning positive against cost.
+
+## 2026-08-06 17:00Z — the field the desk routes on is `aims`, not `targetQty`; and the aim's culprit is unstable while its verdict is not
+
+- **Rule 411 — settle a field ambiguity by READING THE SOURCE before another cycle of arithmetic sits on
+  top of it.** Rule 410 flagged that `targetQty` and `aims` disagreed ~60× on the same name and demanded a
+  source-read VERIFY-BY. Reading `PositionBuffer.apply` settles it: `targetQty` is the planner's **end-state
+  destination**, `aims` is the **current-cycle waypoint** (previous aim stepped toward the target at the
+  ADR-0080 rate, clamped by ADR-0102 into [flat, target]), and `deltaQty` is `bufferedDelta(aim, held, …)`
+  — **the routed order is the gap to the AIM.** Three cycles of time-to-target arithmetic used the wrong
+  denominator and **overstated the mismatch**. **Rule: when two fields in one payload both look like "the
+  target", the cost of one source read is always less than the cost of one more cycle of inference — and
+  when the read invalidates earlier work, strike it explicitly rather than letting it fade.**
+- **Rule 412 — a conclusion can survive a window while its culprit does not; grade on the aggregate.**
+  Mean-reversion still carries the aim (`reversion` **52.19%** + `xsreversion` **9.71%** = **61.90%** vs
+  `trend` **38.09%**), confirming last cycle on an independent window. But `xsreversion` fell **23.1% →
+  9.71%** with its weight **unchanged at 0.25** — the swing was entirely in the forecasts. Last cycle's
+  planned VERIFY-BY ("share below 23.1%") would have graded a change against a statistic that moves 13pp
+  by itself. **Rule: never set a VERIFY-BY on a single source's contribution share. Use the aim-weighted
+  expectancy** — Σ(share × `avgReturnBps`@3600) = **+0.2102 bps gross**, **-1.7898 net** of the **2.00 bps**
+  round trip — whose *sign* held across both windows even as the shares inverted.
+- **Rule 413 — "no edge" and "negative edge" are different diseases; name which one you have.**
+  `reversion` reads **+0.033 / +0.060 / +0.010** bps at 3600/900/225s, |t| ≤ **0.10** on **803 / 2657 /
+  5082** resolved observations — **indistinguishable from zero**, not negative. The desk routes **52.19%**
+  of its aim into it and pays 2 bps a round trip. That is a fee paid to trade a coin flip, and the fix is
+  removal, not re-tuning. `xsreversion` by contrast is negative at all three horizons for a **third**
+  consecutive window (**-0.215 / -2.168 / -5.306**; 900s **t = -2.40**, again the only |t| > 2 of 15 rows,
+  still short of Bonferroni **2.94** — stated per Rule 407).
+- **Rule 414 — fix composition BEFORE deployment, or the fix loses money faster.** The dormancy now has a
+  precise mechanism: `band` is priced off `targetQty` while the gap it gates is `aim − held`, so a name
+  early on its aim path cannot open. BAC/NEE/KO hold nonzero aims against a flat book and route **exactly
+  0.0000** at `|aim|/|target|` **0.0210 / 0.0358 / 0.0391**, while the only two names routing are the two
+  highest ratios (**0.158**, **0.103**); `insideBuffer` **18** of **26**. Gross is **$7,874.70**, **0.5%**
+  of cap. **Rule: that item is ranked #2 on purpose — unblocking entry into an aim measured at -1.79 bps
+  net of cost deploys capital into a known loser. Sequence matters more than urgency.**
+- **No change this cycle.** Freeze at **5/6** for `39451ce71`; `baseline` deliberately NOT run (Rule 396).
+  Commit confined to `reports/` + `docs/`. ADR-0142 ✅ verified a fifth time (boot instant **1786027281280**
+  vs **…905** / **…760** / **…702** / **…035**). Window was **0% change / 100% market** for the fifth cycle
+  running — PnL **-24.77**, gross **-2828.57** earn my changes neither credit nor blame.

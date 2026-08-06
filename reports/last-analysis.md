@@ -1,75 +1,69 @@
-No code change — the ADR-0116 freeze holds at 4 of 6 — and a fourth clean window finally asks what the desk's aim is MADE OF: 51% of it is mean-reversion, 23.1% from the one source measured negative at every horizon, and 0% from the only source that clears the round-trip cost.
+No code change — the ADR-0116 freeze holds at 5 of 6 — and settling the open question about which field the desk actually routes on invalidated three cycles of my own arithmetic: `targetQty` is the destination, `aims` is the waypoint, and only the aim routes.
 
 *(Every figure below is read from `logs/report.md`, `reports/run-status.json`, `reports/.pending-baseline.json`,
-`git diff` and the scorer's own output, or is arithmetic on those read fields. None is authored here —
-invariant 7 / ADR-0016.)*
+`git diff`, the source files named, and the scorer's own output, or is arithmetic on those read fields. None
+is authored here — invariant 7 / ADR-0016.)*
 
-**Money.** Total PnL **$-793.28**, gross **$10,491.89**, net **$513.02**. Since last run PnL **-0.17**,
-gross **+3460.97**; over the last 3 runs PnL **-15.45**, gross **-17514.39**.
+## Situation
 
-**Risk — not a danger state.** Gross is **0.7%** of the firm gross cap $1,500,000 (headroom
-**$1,489,508**); net is **0.1%** of the $1,000,000 net cap. `breaker.halted` **false**, `regime` **CALM**,
-`riskCuts` **[]**, `bookVolBrake` **1.0**, `portfolioRiskMultiplier` **0.8388330999135437**. The book is
-deploying with room to spare; UNDERWATER is the cumulative figure, not a live threat.
+**Money.** Total PnL **$-820.28**, down **$24.77** since last run and **$53.02** over the last three.
+UNDERWATER is cumulative; the book is bleeding slowly rather than sharply.
 
-**Why no change.** `scripts/score-change.py score` prints `39451ce71 still accumulating evidence (4/6
-cycles) — held, not scored this run`, and `reports/.pending-baseline.json` still names that commit. Under
-ADR-0116 a new change now would destroy the evidence under measurement. I again deliberately did **not**
-run `score-change.py baseline` — it overwrites the pending record unconditionally and would delete
-ADR-0142's own evaluation window (Rule 396).
+**Risk.** Gross **$7,874.70** — **0.5%** of the $1,500,000 firm cap, headroom **$1,492,125**. Net
+**$-282.06**, **0.0%** of the $1,000,000 net cap. `breaker.halted` false, `regime` CALM (`trend` CHOP,
+`volRatio` **0.93**), `riskCuts` empty, `bookVolBrake` **1.0**. Not a danger state — the opposite failure:
+a book at half a percent of an owner-set budget is **dormant**, which CLAUDE.md calls a failure to attack.
 
-**Step 0 — ADR-0142 ✅ VERIFIED, fourth independent confirmation.** `ops_jvm.uptimeSeconds` **6520** at
-`traffic.timestampMillis` **1786033801905** implies a boot instant of **1786027281905**, against
-**1786027281760**, **1786027281702** and **1786027281035** on the three prior cycles (sub-second skew
-between the two endpoints). Same 14:41:21Z process, four cycles and three reports-only commits later.
-`git diff --name-only 24b5183..HEAD` lists `reports/run-status.json` and nothing else. Item stays struck.
+**Cause.** Nothing I did. `git diff --name-only 39451ce..HEAD` touches only `docs/` and `reports/` — the
+fifth consecutive **0% change / 100% market** window, so the PnL and gross moves earn my changes neither
+credit nor blame. ADR-0142 verified a fifth time: `uptimeSeconds` **8320** against `traffic.timestampMillis`
+**1786035601280** puts the boot instant at **1786027281280**, the same 14:41:21Z process as the four prior
+cycles — the self-inflicted restart is genuinely gone.
 
-**Attribution — 100% market.** Zero Java, zero dials, zero gates in the window's diff, fourth cycle
-running. The **-0.17** PnL and **+3460.97** gross moves are the market plus code already live; nothing I
-did earns credit or blame for either.
+**Danger.** No. Not bleeding near a cap, nowhere near the breaker.
 
-**What this clean window bought — the aim's composition, and it inverts item #1 again.** The last three
-cycles measured *how long* the desk holds. This one decomposes each target's `contributions` into
-`forecast × weight` and asks what it holds an opinion *about*. Across the six reported names: `trend`
-**42.6%** of total |weighted contribution|, `reversion` **27.9%**, `xsreversion` **23.1%**, `momentum`
-**6.5%**, `social` **0.0%** (present in **0 of 6**). So **51.0%** of the aim is the mean-reverting pair —
-which outvotes trend+social in **4 of the 6** names, and in **2 of 6** `trend` points *against* the
-combined aim outright: NEE's **+3.0590** is `xsreversion` **+19.396** plus `reversion` **+11.959** against
-`trend` **-2.065**. The per-source weights are already directionally right (trend **1.454**, social
-**1.282**, reversion **0.710**, xsreversion **0.507**); they are swamped by raw claim magnitude, because
-`forecastScalars` equalises each source's *mean* absolute claim and not its dispersion.
+## Why no change
 
-**And 23.1% of the aim is the worst-measured source on the desk.** On cohort-clustered standard errors
-(`stdCohortMeanBps`/√`cohorts`), `xsreversion` is negative at **all three** horizons — **-0.171** /
-**-2.080** / **-1.816** bps — with hit rate below a coin flip at all three (**0.491** / **0.490** /
-**0.477**), and its 900s reading **t = -2.29** on 152 cohorts is the only |t| > 2 among the table's 15
-rows. Stated honestly: at 15 tests that does *not* survive Bonferroni (|t| > 2.94). The evidence is the
-consistency, not the t-stat — last cycle's independent read was **-0.205** / **-2.123** / **-4.363**, same
-sign, same shape. Meanwhile `fee_bps` is **1.00** on every equity, so a round trip costs **2.00 bps**:
-`trend` **+1.746** gross is net *negative*, `reversion` **-0.330** is **-2.3** net, `xsreversion` is
-**-3.8** net. The only source clearing the round trip is `social` at **+3.595** gross → **+1.6** net — and
-it is corroborated on **12** of **1600** kept items, so it contributes **0.0%** to every aim.
+`scripts/score-change.py score` prints `39451ce71 still accumulating evidence (5/6 cycles)` and
+`reports/.pending-baseline.json` still exists. Under ADR-0116 that forbids a new code change — one more
+cycle and it scores.
 
-**Why this outranks the exit-gate I planned last cycle.** A mean-reversion signal flips on short-horizon
-noise by construction, so a majority-mean-reverting aim mechanically *produces* the tape the last three
-cycles measured. That tape re-confirmed sharper this window — entry mean `|forecast|` **7.309** (n=4) vs
-reduce **1.300** (n=36), 36 of 43 fills on the ungated reduce path; PFE entered at **-11.5747** and began
-unwinding **122 s** later at **-0.0817**, a **99.3%** same-sign decay with no flip. Time-gating the exit
-would make the desk hold that opinion *longer* while paying 2 bps a round trip. Fix what the aim is made
-of first; the churn is downstream. That is not another lap of the INCONCLUSIVE wall — ADR-0137/0140/0141
-each tuned mechanics around an aim nobody had opened, and this is removing a measured-loss-making source
-from the sizing path, not re-weighting hopefully.
+## What the cycle bought
 
-**One ambiguity I am recording rather than acting on.** `insideBuffer` is **19** of **24**, and four of six
-reported targets plan `deltaQty` **0.0000** against large gaps (BAC `targetQty` **652.635** vs `currentQty`
-**0.00**) — yet the `aims` map reads BAC **10.669227**, ~60× smaller. Two different things are called the
-target in one payload, and telemetry alone does not say which the router consumes. The previous cycles'
-time-to-target arithmetic assumed `targetQty`; if `aims` is the routed intent, that overstated the
-mismatch. Logged as register item #4 with a source-read VERIFY-BY, so it cannot silently propagate.
+I settled the ambiguity the register flagged last cycle rather than reasoning further on top of it, and the
+answer was expensive. From `PositionBuffer.apply`, **`targetQty` is the planner's end-state destination,
+`aims` is the current-cycle waypoint, and the routed `deltaQty` is the gap from held to the *aim*** — not to
+`targetQty`. The last three cycles' convergence arithmetic used `targetQty` as the routed quantity and
+therefore **overstated the mismatch**. That item is struck and the correction recorded, not quietly dropped.
 
-**Next unfrozen cycle.** One coherent change targeting the new #1: cut `xsreversion`'s grip on the aim so
-the composition reflects measured expectancy net of the 2.00 bps round trip — with its ADR in the same
-commit, touching neither the pre-trade guardrail nor the breaker. Graded on the same decomposition run
-here: `xsreversion`'s contribution share falling materially below **23.1%**, mean-reversion outvoting
-trend+social in fewer than **4 of 6** names, and the aim-weighted 3600s expectancy turning positive
-against cost.
+Re-measuring item #1 on this independent window **confirmed the conclusion and refuted the culprit**. The aim
+is still majority mean-reverting — `reversion` **52.19%** + `xsreversion` **9.71%** = **61.90%** against
+`trend` **38.09%** — but `xsreversion`'s share moved **23.1% → 9.71%** with its weight unchanged at **0.25**,
+so last cycle's proposed VERIFY-BY ("share below 23.1%") is a statistic that swings further than any change
+would move it. I replaced it with an aggregate that doesn't: the **aim-weighted 3600s expectancy**, reading
+**+0.2102 bps gross** against a measured **2.00 bps** round trip (`fee_bps` **1.00** per side on every
+equity) — **-1.7898 bps net**. That sign is stable across both windows; the individual shares are not.
+
+The sharper finding concerns `reversion` itself: **+0.033 / +0.060 / +0.010** bps at 3600s / 900s / 225s with
+|t| ≤ **0.10** across **803 / 2657 / 5082** resolved observations. It is not a negative signal — it is
+**indistinguishable from zero**, and the desk routes half its aim into it at 2 bps a round trip.
+`xsreversion` is negative at all three horizons for a **third** consecutive window (**-0.215 / -2.168 /
+-5.306**), its 900s **t = -2.40** again the only |t| > 2 in the table — which **does not clear Bonferroni at
+15 tests (2.94)**; the weight of that evidence is sign-consistency across three windows, not the p-value.
+`social` remains the only source clearing cost (**+3.296** gross → **+1.296** net) and contributes **0.0%**;
+ADR-0139 already tried loosening that gate and was graded ❌ BAD, so it stays untouched.
+
+Settling the ambiguity also promoted a new **#2** with a precise mechanism: `band` is priced off `targetQty`
+while the gap it gates is `aim − held`, so a name early on its aim path cannot open at all. BAC, NEE and KO
+each carry a nonzero aim against a flat book and route **exactly 0.0000**, at `|aim|/|target|` of **0.0210**,
+**0.0358**, **0.0391** — while the only two names routing meaningfully are the two highest ratios
+(**0.158**, **0.103**); `insideBuffer` is **18** of **26**. That is the dormancy mechanism. I ranked it
+**below** item #1 deliberately: deploying more capital into an aim measured at **-1.79 bps net of cost**
+would lose money faster, so composition has to land first.
+
+## Next unfrozen cycle
+
+Target item #1 — cut the mean-reverting pair's grip so the aim reflects measured expectancy net of the
+**2.00 bps** round trip, with its ADR in the same commit. Graded on the aim-weighted 3600s expectancy
+exceeding **+2.00 bps** and the pair's combined share falling below **50%** — not on any single source's
+share. `baseline` deliberately NOT run this cycle (Rule 396).
