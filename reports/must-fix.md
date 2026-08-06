@@ -15,6 +15,132 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 16:00Z (**NO CHANGE — the ADR-0116 freeze holds at `39451ce71` 3/6.** Third consecutive **0%-change / 100%-market** window, and the third consecutive cycle in which the app did not restart. That run of clean windows is what this cycle spends: item #1 stops being a horizon *comparison* and becomes a **measured timescale**, with the holding period, the convergence time and the entry/exit conviction asymmetry all read off the same uncontaminated tape. The mechanism inverts — the defect is not only that the desk holds too briefly, it is that **entry is gated and exit is not**.)
+
+### Step 0 — `39451ce71` (ADR-0142): ✅ **VERIFIED (third independent confirmation)**
+
+Struck last cycle; re-checked because the VERIFY-BY is cheap and a one-cycle pass is not a fix. The boot
+instant is unchanged for a third reading — `ops_jvm.uptimeSeconds` **4721** against report
+`timestampMillis` **1786032002760** implies boot at **1786027281760**, versus **1786027281702** and
+**1786027281035** the two prior cycles (sub-second read skew). Same 14:41:21Z process, three cycles and
+two reports-only commits later. `git diff --name-only d8a9437..HEAD` lists **`reports/run-status.json`**
+and nothing else. Item stays struck; no further re-verification needed.
+
+### Window attribution — 0% change, 100% market, third cycle running
+
+Zero Java, zero dials, zero gates in the window's diff. PnL **-22.13** (total **$-789.39** live) and gross
+**-9352.56** (to **$9,895.16**) are the market plus code already live; my changes earn neither credit nor
+blame. Over the last 3 runs: PnL **-70.25**, gross **-1529.75**.
+
+### Not danger — deploying, with room to spare
+
+Gross **$9,895.16** is **0.7%** of the firm gross cap $1,500,000 (headroom **$1,490,105**); net
+**-$1,266.10** is **0.1%** of the $1,000,000 net cap. `breaker.halted` **false**, `regime` **CALM**,
+`riskCuts` **[]**, `portfolioRiskMultiplier` **0.702264471357967**. UNDERWATER is cumulative PnL, not a
+live danger state.
+
+---
+
+## Item #1 — **entry is gated, exit is not. The desk needs ~1.1 h to build a position and ~7 min to dismantle it, while its only non-negative expectancy lives at 3600 s.**
+
+Same item, third specification. Cycle 15:00Z proposed it, 15:30Z measured the horizon side, and this
+cycle measures the *other* two sides on a clean tape — and they change the prescription.
+
+**(a) Expectancy is still monotonic in horizon, on larger samples.** `signals_telemetry` `avgReturnBps`,
+read verbatim (`resolved` / `cohorts` in parentheses at 3600 s):
+
+| source | 225s | 900s | 3600s |
+| --- | --- | --- | --- |
+| **trend** | **-0.016** | **+0.017** | **+1.829** (842 / 100) |
+| **social** | **-0.349** | **+0.700** | **+4.257** (361 / 37) |
+| reversion | -0.025 | +0.024 | +0.095 (803 / 91) |
+| momentum | -0.284 | -2.598 | +0.450 (72 / 11) |
+| xsreversion | -0.205 | -2.123 | -4.363 (813 / 43) |
+
+**At 225 s not one source is positive** — unchanged across three independent reads. Against `fee_bps`
+**1.00** per side and TCA `avgSlippageBps` **0.789** NEE / **0.779** GOOG / **0.712** AMZN / **0.691** PFE
+/ **0.618** MSFT, paid on both legs, only social@3600s clears its own round trip.
+
+**(b) The measured holding period — 425 s median, 61 s minimum.** Computed from the `recent_orders` tape
+(ALPHA, FILLED, 46 orders, 15:26:09→15:59:06) as the interval between consecutive opposite-side orders in
+the same name — arithmetic on read timestamps, nothing authored:
+
+| name | held | from | to |
+| --- | --- | --- | --- |
+| **MSFT** | **61 s** | SELL 10 @ fc **-5.047** (15:43:53) | BUY 4 @ fc **-0.014** (15:44:54) |
+| NEE | 365 s | BUY 34 @ fc **+9.975** (15:38:49) | SELL 2 @ fc **+0.007** (15:44:54) |
+| WMT | 425 s | SELL 12 @ fc **-2.741** (15:28:11) | BUY 1 @ fc **+2.932** (15:35:16) |
+| MSFT | 456 s | BUY 7 @ fc **+6.128** (15:29:12) | SELL 1 @ fc **-3.970** (15:36:48) |
+| XOM | 760 s | SELL 23 @ fc **-5.005** (15:32:44) | BUY 1 @ fc **+0.642** (15:45:25) |
+
+n=5, min **61 s**, median **425 s**, max **760 s**. The median sits *between* the 225 s bucket (negative
+for every source) and the 900 s bucket (≈zero for the best two). **The desk holds for the horizon at
+which it has measured no edge, and exits before the one where it has some.** MSFT is the extreme: a
+10-share short opened at forecast **-5.047** and 40% covered **61 seconds later** at **-0.014** — the
+forecast decayed ~99.7%, with no opposite conviction anywhere. Rule 399's decay-not-flip mechanism, now
+with a 61-second instance.
+
+**(c) The asymmetry is backwards — this is the new finding.** Grouping the same window's FILLED orders by
+the origin string that triggered them, mean and median `|forecast|`:
+
+| trigger | n | mean \|fc\| | median \|fc\| |
+| --- | --- | --- | --- |
+| `fusion entry — target increase` | 7 | **6.288** | 5.545 |
+| `fusion reduce toward a smaller target` | 39 | **2.062** | 1.662 |
+| `fusion exit — target decayed to flat` | 1 | **0.000** | 0.000 |
+
+Entering costs a conviction of ~6.3. Leaving costs ~2.1 — and 39 of the window's 47 triggered orders are
+that reduce path. **There is a conviction floor on the way in and none on the way out, and no minimum
+holding time on either.** So the position the sizing logic underwrites is the one thing the desk is
+structurally prevented from owning.
+
+**(d) The convergence side, quantified against the tape's own cadence.** `fusion_targets` (`atMillis`
+**1786031976904**), plans-to-target = |`targetQty`−`currentQty`| / |`deltaQty`|:
+
+| name | fc | targetQty | currentQty | deltaQty | plans→target |
+| --- | --- | --- | --- | --- | --- |
+| PG | -1.631 | -196.4894 | 0.00 | -7.4201 | **26** |
+| KO | -3.245 | -710.3655 | 0.00 | -15.6599 | **45** |
+| MCD | -2.149 | -148.6619 | 0.00 | -2.8431 | **52** |
+| UNH | +3.002 | 132.3556 | 0.00 | 1.0101 | **131** |
+| MSFT | +1.656 | 50.3101 | -4.00 | 0.0332 | **1636** |
+| WMT | -2.777 | -450.4242 | 2.00 | -0.0166 | **27259** |
+
+Median **131** plans. Fusion orders land ~**30.4 s** apart on this tape (15:26:09 / 15:26:39 / 15:27:10 /
+15:27:40 / 15:28:11), so median time-to-target ≈ **3931 s ≈ 1.1 h** — against a median observed reversal
+of **425 s**. **A ~9× mismatch: the target moves away roughly nine times before the desk could reach it.**
+WMT wants -450 while holding +2 at 0.0166/plan; MSFT wants +50 while holding -4 at 0.0332/plan. Those
+targets are not slow, they are unreachable, and every step toward them is a paid round trip that gets
+reversed.
+
+**(e) The receipt.** `attribution`: ALPHA `feesPaid` **395.873993** against ALPHA `realizedPnl`
+**-646.46581774** — fees are ~61% of the realized loss (arithmetic on two read fields). Firm
+`totalFees` **411.807217** against firm `totalPnl` **-789.38793096**, ~52%. `orders_by_status` FILLED
+**5551** / CANCELLED **2055** / REJECTED **206**; every CANCELLED is an ADR-0084 re-plan superseding a
+live order — the churn's own fingerprint. `turnover_cost_by_name`: MSFT **228** fills / **$251,134.50**
+turnover to hold **-4** shares; PFE **178** fills / **$248,285.99**; NVDA **236** fills / **$201,069.31**.
+
+**VERIFY-BY (next unfrozen cycle).** The change must make the *action* timescale meet the *measured*
+timescale, on the exit path first — it is the ungated one and it fires 39 times to entry's 7. Proving
+numbers, all already on this report:
+1. the same-name opposite-side flip median (computed from `recent_orders` as in (b)) rises materially
+   above **425 s**, and the sub-100 s flips disappear;
+2. the `reduce toward a smaller target` mean `|forecast|` (**2.062**) rises toward the entry trigger's
+   (**6.288**), or that path stops firing on decay alone;
+3. `orders_by_status` CANCELLED (**2055**) and `turnover_cost_by_name` `fills` (MSFT **228**, NVDA
+   **236**, PFE **178**) fall at equal-or-greater gross;
+4. ALPHA `feesPaid` grows more slowly than gross.
+
+**Note for whoever takes this.** The fix is an **exit gate with hysteresis in time**, above the
+deterministic floor — not a fusion weight, not a band width, and emphatically not the pre-trade
+guardrail or the breaker. Weight and band tuning is the INCONCLUSIVE wall (ADR-0137/0140/0141 all landed
+there); (c) says the reason is that none of them ever touched the ungated side. Convergence rate (d) is
+the same defect's other face and may need the same change, but if it cannot be done in one coherent
+edit, **do the exit gate** — it is where 39 of 47 orders fire. `xsreversion` at **-4.363** bps / 3600 s
+over **43** cohorts remains reliably negative and remains a **separate** change; do not bundle it.
+
+---
+
 ## Verification block — 2026-08-06 15:30Z (**NO CHANGE — the ADR-0116 freeze holds at `39451ce71` 2/6.** But this cycle is not empty: it is the cycle that **settled ADR-0142** — the app did **not** restart, for the first time, because last cycle's commit could not reach the app binary. And with a second consecutive **0%-change / 100%-market** window, the uncontaminated read finally puts a number on item #1: the desk's measured expectancy is **monotonic in horizon** and only non-negative at the horizon it never holds for.)
 
 ### Step 0 — `39451ce71` (ADR-0142): ✅ **VERIFIED**

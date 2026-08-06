@@ -5058,3 +5058,46 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **No change this cycle.** Freeze at **2/6** for `39451ce71`; `baseline` deliberately NOT run (Rule 396 —
   `cmd_baseline` overwrites `PENDING` unconditionally and would delete ADR-0142's own window). Commit
   confined to `reports/` + `docs/`, which is also ADR-0142's continued live test.
+
+## 2026-08-06 16:00Z — the desk's exit path has no gate at all; measured on a third clean window
+
+- **Rule 402 — the asymmetry is backwards: a conviction floor on the way IN and none on the way OUT.**
+  Grouping this window's FILLED orders by the origin string that triggered them: `fusion entry — target
+  increase` fires at mean `|forecast|` **6.288** (n=**7**, median 5.545); `fusion reduce toward a smaller
+  target` fires at **2.062** (n=**39**, median 1.662); `fusion exit — target decayed to flat` at
+  **0.000**. Thirty-nine of the window's forty-seven triggered orders are the *ungated* path. **Rule: when
+  a desk churns, measure entry conviction against exit conviction before touching any weight or band. If
+  exit is cheaper than entry and neither has a time floor, the position the sizing logic underwrites is
+  the one thing the desk is structurally prevented from owning — and no combiner tuning can reach that.
+  This is why ADR-0137/0140/0141 all landed on the INCONCLUSIVE wall: not one of them touched the exit.**
+- **Rule 403 — put a number on the holding period; do not infer it from anecdotes.** Computed from
+  `recent_orders` (ALPHA, FILLED, 46 orders, 15:26:09→15:59:06) as the interval between consecutive
+  opposite-side orders in the same name: n=**5**, min **61 s**, median **425 s**, max **760 s**. MSFT is
+  the extreme — SELL 10 @ fc **-5.047** (15:43:53), BUY 4 back @ fc **-0.014** (15:44:54), **61 seconds**,
+  the forecast decayed ~99.7% with no opposite conviction anywhere (Rule 399's decay-not-flip, now with a
+  one-minute instance). The median **425 s** sits between the 225 s bucket — negative for *every* source
+  — and the 900 s bucket, ≈zero for the best two. **Rule: the desk holds for the horizon where it has
+  measured no edge and exits before the one where it has some. State the holding period as a measured
+  distribution off the tape, and compare it to the telemetry horizons directly.**
+- **Rule 404 — convergence time is a ratio you can read, and it must be checked against the reversal
+  time.** `fusion_targets` plans-to-target = |`targetQty`−`currentQty`|/|`deltaQty`|: PG **26**, KO **45**,
+  MCD **52**, UNH **131**, MSFT **1636**, WMT **27259** — median **131**. Fusion orders land ~**30.4 s**
+  apart on this tape (15:26:09/15:26:39/15:27:10/15:27:40/15:28:11), so median time-to-target ≈ **3931 s
+  ≈ 1.1 h** against a median observed reversal of **425 s** — a **~9×** mismatch. WMT wants **-450.4242**
+  holding **+2.00** at **-0.0166**/plan; MSFT wants **+50.3101** holding **-4.00** at **0.0332**/plan.
+  **Rule: those targets are not slow, they are unreachable. Derive the plan cadence from the tape's own
+  timestamps rather than assuming it, and treat time-to-target > reversal-time as a disproof of the
+  sizing path, not a tuning opportunity.**
+- **Rule 405 — three consecutive report-only cycles are worth more than three contaminated ones.** Zero
+  Java in the window's diff for the third cycle running, so PnL **-22.13** / gross **-9352.56** is 100%
+  market and the behaviour above is the app's own. That run is exactly what made Rules 402–404 measurable
+  — each needs the tape to be the app's unaltered behaviour. **Rule: a freeze is not dead time. Spend it
+  on the measurements a contaminated window cannot produce, and say plainly that the change gets neither
+  credit nor blame for the move.** Corollary, from re-checking ADR-0142 a third time: boot instant
+  (`timestampMillis` − `uptimeSeconds`×1000) held at **1786027281760** vs **…702** / **…035** — a
+  one-cycle pass is not a fix, and re-verifying a struck item is cheap.
+- **No change this cycle.** Freeze at **3/6** for `39451ce71`; `baseline` deliberately NOT run (Rule 396).
+  Commit confined to `reports/` + `docs/`. **Next unfrozen cycle ships the exit gate with hysteresis in
+  TIME** on the reduce path — above the deterministic floor, not the guardrail, not the breaker, ADR in
+  the same commit; graded on the flip median rising above **425 s** and the reduce-path mean `|forecast|`
+  rising toward **6.288**.
