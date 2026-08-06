@@ -15,6 +15,134 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 18:30Z (**NO CHANGE — the ADR-0116 freeze holds at `27564bb15` 2/6.** Two things got settled. First, item #1's gate is **not broken, only under-enumerated**: this cycle's two commits (`d2b1c1b` in `docs/`, `c7e1290` in `reports/`) both fall inside `NON_BINARY_PATHS`, and the JVM **did not restart** — boot instant is still **17:42:18.034Z**, uptime **2864** s against `traffic.timestampMillis` **1786041002034**, matching last cycle's **17:42:18.442Z** to within the read jitter. ADR-0142 does exactly what it says for the prefixes it lists; the defect is the prefix it omits. Second, the cycle spends its clean window on the **other half of the composition item's inequality** — the cost side — and puts a number on it that no prior cycle measured: `attribution.totalFees` **424.560443** against `firmTotal` **-873.24062320** is **48.62%** of the entire loss, on cumulative LIVE turnover of **$4,912,776.38** against a gross book of **$10,169.58** — **545×**. That is promoted to **#2**, because unlike the edge side it has a lever that does not require discovering new edge. Composition drops to **#3**, conclusion confirmed on a **fifth** window.)
+
+### Step 0 — `27564bb15` (ADR-0143): ✅ **deployed**, ⚠️ **still not gradable (2/6)**, ✅ **and it cost no second restart**
+
+`scripts/score-change.py score` prints `27564bb15 still accumulating evidence (2/6 cycles)`, and
+`reports/.pending-baseline.json` is present — so the freeze stands and no BAD verdict has occurred against
+which ADR-0143's VERIFY-BY ("the next ❌ BAD row carries `reverted (…)` instead of `⚠️ REVERT FAILED`")
+could be read. Nothing this cycle is evidence for or against it. That is the design of ADR-0116, not a
+stall.
+
+**The restart it caused last cycle did not repeat.** `ops_jvm.uptimeSeconds` **2864** against
+`traffic.timestampMillis` **1786041002034** places the boot at **1786038138034** = **2026-08-06 17:42:18.034Z**
+— the same process last cycle's read put at **17:42:18.442Z**. Between the two reads the loop committed
+`d2b1c1b` (`docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md`) and `c7e1290`
+(`reports/run-status.json`), both wholly inside `^(reports|docs|ops)/`. The app survived both. This is the
+cleanest available confirmation that ADR-0142's gate is correct **as a mechanism**, and that item #1 is
+purely the incompleteness of its path list.
+
+### Not danger — underwater, but nowhere near any ceiling
+
+Gross **$10,169.58** is **0.7%** of the firm gross cap $1,500,000 (headroom **$1,489,830**); net
+**$3,381.56** is **0.3%** of the $1,000,000 net cap. `breaker.halted` **false**, `regime` **CALM**
+(`trend` **CHOP**, `volRatio` **1.06**), `riskCuts` **[]**. `hedging.covarianceReady` remains **false**, so
+the EQUITY axis still hedges on assigned betas rather than measured covariance. Total PnL **$-875.66**;
+since last run **-24.98**, over the last three runs **-62.78**. UNDERWATER, off the +1%/3-iter target, and
+not in a danger state.
+
+### Window attribution — 100% market and desk-autonomous, and this time the tape proves it
+
+`git diff --name-only ca61005..HEAD` reaches nothing the app compiles or loads, and the boot instant above
+confirms the process never bounced. So the entire **-24.98** PnL move and **-1,263.01** gross move belong to
+the market and to the desk's own unmodified logic — my changes earn neither credit nor blame.
+
+The tape corroborates it: **60** orders in the window, and the only two carrying `sources=0` are the
+**17:42:57Z** XOM/MCD REJECTED pair already attributed to last cycle's restart. **No new `sources=0` order
+has fired since** — Rule 422's contamination fingerprint is absent, so this window is clean. What did fire
+is a working desk: `fusion entry` on AMZN/MSFT/XOM/NVDA/BAC at `sources=3–4`, `fusion reduce` against
+decaying forecasts, and a continuous `auto-hedge EQUITY` (ADR-0019) walking ES from **+0.006469** to
+**-0.000213** through the ADR-0098 churn shrink. Three orders are worth naming as a pattern rather than a
+verdict — BAC **18:18:28Z**, WMT **18:01:14Z**, NEE **17:49:03Z**, all `fusion exit — target decayed to
+flat` at **`sources=1`**. An exit executed on one surviving source is not the restart defect, but it is the
+same shape: the desk dismantles a position on thinner evidence than it required to build it.
+
+---
+
+## Item #1 (carried, unchanged rank — the mechanism is now VERIFIED, the omission is not) — **the restart gate's exemption list omits `scripts/`, so the loop's own tooling bounces the trading JVM.**
+
+`ops/improve-loop.sh:135` reads `NON_BINARY_PATHS='^(reports|docs|ops)/'` and `:145` rebuilds and restarts
+whenever `git diff --name-only` leaves anything outside it. `scripts/` holds `score-change.py`,
+`test-score-change.py`, `build-prompt.py` and `system-report.py` — run by the cron wrapper, never by the
+app; `grep -rn "scripts/" --include=*.gradle --include=settings.gradle*` returns nothing.
+
+**Status this cycle: not exercised, and that is the honest reading.** No `scripts/` path was committed, so
+the defect could not fire. What *was* established is the complement: the gate correctly passed two
+docs/reports commits without a restart. The defect is live and unfixed; its expected cost is bounded by how
+often the loop commits its own tooling — which is precisely when an evaluation window is most valuable.
+
+**VERIFY-BY (unchanged):** after a commit touching only `scripts/**`, `ops_jvm.uptimeSeconds` measured
+against `traffic.timestampMillis` must still place the boot instant *before* that commit — i.e. the process
+survives. Ranked #1 because a spurious restart destroys the evidence every other item is graded on.
+
+---
+
+## Item #2 (NEW, promoted — the cost side of item #3's inequality, and the side with a tractable lever) — **fees are 48.62% of the entire loss; the desk turns over 545× its own gross book.**
+
+`attribution.totalFees` **424.560443** against `firmTotal` **-873.24062320**. Summing
+`turnover_cost_by_name` over LIVE gives **$4,912,776.38** of cumulative turnover — **$4,075,413.17** in
+equities charged **1.00 bps per side** and **$837,363.21** in futures charged **0.20 bps per side** —
+against a current gross book of **$10,169.58**, i.e. **545×**. Per-name fill counts show where it comes
+from: NVDA **247**, XOM **151**, MSFT **239**, AMZN **207**, GOOG **196**, PFE **186**, on a book whose
+largest single position is a few thousand dollars.
+
+This is not a restatement of item #3, it is the other operand. Item #3 says gross edge (**+0.1655** bps
+aim-weighted at 3600 s) fails to clear the **2.00** bps equity round trip. Nothing can be done about the
+left operand without discovering edge that five windows of telemetry say is not there. The right operand is
+**arithmetic under the desk's control**: round trips per unit of aim. The fee schedule itself makes the
+asymmetry explicit — futures round-trip at **0.40** bps against equities at **2.00** bps, a 5× difference
+the router does not weigh when it chooses where to express a view.
+
+**VERIFY-BY:** `totalFees` as a share of `|firmTotal|`, and cumulative LIVE turnover from
+`turnover_cost_by_name` divided by `risk.total.grossExposure` — both read next cycle. A fix must move the
+turnover multiple down **without** moving gross down with it (cutting the book cuts fees trivially and is
+not a fix). Ranked #2, above the composition item, because it is the half of the inequality that does not
+require new edge to attack.
+
+---
+
+## Item #3 (was #2, carried — conclusion CONFIRMED on a FIFTH independent window; composition inverted for the first time) — **the aim still does not clear its own round-trip cost.**
+
+Aim-weighted 3600 s expectancy, computed from `/api/fusion/targets` contributions against
+`/api/signals/telemetry`: **+0.1655** bps gross, **-1.8345** bps net of the **2.00** bps equity round trip.
+The four prior windows read **-1.7898**, **-1.60**, **-1.9464**, **-1.7605**. Five windows, same sign,
+tight spread — the aggregate is now a stable statistic, exactly as Rule 412 predicted the shares would not
+be.
+
+And the shares duly moved again, this time across a line: **trend 53.36%**, reversion **28.76%**,
+xsreversion **15.64%**, momentum **2.24%**. This is the **first window in which the aim is majority
+trend-following** rather than majority mean-reverting — a swing four earlier cycles would have narrated as
+a cause. It is not one. The aggregate did not move, which is the entire point of grading on it.
+
+Significance is likewise unchanged for a fifth window: of **15** source×horizon cells the only |t| > 2 is
+`xsreversion` at 900 s, **t = -2.64** (was -2.56), against the Bonferroni hurdle of **2.94** from Rule 407.
+`trend` at 3600 s is the best-measured non-negative cell at **+1.552** bps, **t = 1.08** — nowhere near
+significant, but worth recording that it *would* clear the futures round trip (**0.40** bps) while failing
+the equity one (**2.00** bps). That is a hypothesis for a future cycle, not evidence.
+
+**VERIFY-BY (unchanged):** aim-weighted 3600 s expectancy net of the round trip, recomputed from the live
+endpoints. It must turn positive. Do not grade this item on any single source's share.
+
+---
+
+## Item #4 (carried, unchanged, deliberately NOT promoted) — **entry is structurally frozen for names early on their aim path.**
+
+Held gross notional across the **27** live fusion targets is **$10,250.80** against an aim of
+**$358,644.26** — the desk holds **2.86%** of what it says it wants, and each adjustment step moves
+**$4,805.00**, or **1.38%** of the gap. NVDA is the clearest instance: `targetQty` **-381.11** against
+`currentQty` **-9.0**, stepping **-3.65**.
+
+The mission's dormancy rule would normally read a 0.7%-of-cap book with a 2.86% deployment ratio as the
+single biggest opportunity on the register. **This cycle records the inverse explicitly, so a future cycle
+does not misread it:** with net expectancy at **-1.8345** bps, closing the deployment gap would scale a
+*negative* edge by ~35× and multiply the very turnover item #2 identifies as 48.62% of the loss. The
+under-deployment is currently the only thing keeping the loss at three figures. Deployment becomes the
+right item to attack **the moment, and not before, item #3's aggregate turns positive** — at which point it
+becomes urgent. Until then it stays #4 with no action.
+
+---
+
 ## Verification block — 2026-08-06 18:00Z (**NO CHANGE — the ADR-0116 freeze re-opens at `27564bb15` 1/6.** ADR-0143 landed and its code is live, but the commit that carried it **bounced the JVM** — and that is the finding of this cycle. `ops/improve-loop.sh` exempts only `^(reports|docs|ops)/` from rebuild+restart, so `scripts/score-change.py` — the loop's own out-of-band Python, which the app never loads and Gradle never reads — was classified as binary-capable. The app restarted **17:42:18Z**, re-seeded every sensor cold, and two orders fired at **17:42:57Z** with `sources=0`. That is the exact defect ADR-0142 was written to kill, reproduced by an incomplete path list, **inside ADR-0143's own evaluation window**. New **#1**. Composition is **#2**, conclusion confirmed on a fourth window; a new **#4** notes the freeze itself is being spent on a change that cannot move PnL.)
 
 ### Step 0 — `27564bb15` (ADR-0143): ✅ **deployed and live**, ⚠️ **its own claim is NOT YET GRADABLE**, 🔴 **and it cost a restart**

@@ -1,78 +1,38 @@
-No code change — ADR-0143 is under measurement (1 of 6) — but the commit that carried it bounced the trading JVM, because the restart gate exempts `docs`/`reports`/`ops` and not the loop's own `scripts/` tooling.
+# Fees are 48.62% of the entire loss — the cost side of the edge/cost inequality is the half I can actually attack
 
-*(Every figure below is read from `logs/report.md`, the live `/api/fusion/targets` endpoint, `git`, or the
-source files named, or is arithmetic on those read fields. None is authored here — invariant 7 / ADR-0016.)*
+**No change this cycle:** `27564bb15` (ADR-0143) is at **2/6** under the ADR-0116 freeze, so the contract
+forbids a new change while it accumulates evidence.
 
-## Situation
+**Money.** Total PnL **$-875.66**, down **-24.98** since last run and **-62.78** over the last three —
+UNDERWATER and off the +1%-per-3-iterations target.
 
-**Money.** Total PnL **$-849.32**, down **$9.91** since last run and **$53.80** over the last three.
-UNDERWATER is cumulative; the book bleeds slowly rather than sharply.
+**Risk.** Gross **$10,169.58** is **0.7%** of the firm gross cap (headroom **$1,489,830**); net
+**$3,381.56** is **0.3%** of the net cap. `breaker.halted` false, `regime` CALM / `trend` CHOP,
+`volRatio` **1.06**, `riskCuts` empty. Not a danger state — underwater, but nowhere near a ceiling.
 
-**Risk.** Gross **$18,933.02** — **1.3%** of the $1,500,000 firm cap, headroom **$1,481,067**. Net
-**$-1,870.25**, **0.2%** of the $1,000,000 net cap. `breaker.halted` false, `regime` CALM (`trend` CHOP,
-`volRatio` **0.93**), `riskCuts` empty, `bookVolBrake` **0.9098**. Not a danger state. Gross rose
-**$2,947.76** this window — with 1.3% of the budget used that is the book deploying, which is the goal, not
-a concern.
+**Cause.** Last cycle's commits reached only `docs/` and `reports/`, and the boot instant confirms it:
+`ops_jvm.uptimeSeconds` **2864** against `traffic.timestampMillis` **1786041002034** puts the boot at
+**17:42:18.034Z**, the same process as last cycle's **17:42:18.442Z**. The app never restarted, so the
+whole window is market and desk-autonomous — my changes earn neither credit nor blame. That also **verifies
+the ADR-0142 gate as a mechanism**: it passed two exempt commits without bouncing the JVM. Item #1 is the
+prefix it omits (`scripts/`), not the gate itself.
 
-**Cause.** Mixed, for the first time in seven cycles. `git diff --name-only 39451ce..27564bb` touches only
-`docs/`, `reports/` and two files under `scripts/` — nothing the app compiles or loads — so the PnL and gross
-moves are still overwhelmingly market. But my commit **did** restart the app, and that restart's cost is
-visible on the tape (below), so this window is not the clean 0%-change/100%-market read the previous six were.
+**Order post-mortem.** **60** orders, and the only two carrying `sources=0` are the **17:42:57Z** XOM/MCD
+REJECTED pair from last cycle's restart — no new one since, so Rule 422's contamination fingerprint is
+absent and this window is clean. Entries fired at `sources=3–4`; three exits (BAC, WMT, NEE) fired at
+`sources=1` — the desk still dismantles on thinner evidence than it builds on.
 
-**Danger.** No. Not bleeding near a cap, nowhere near the breaker.
+**What I spent the clean window on.** The composition item is confirmed a **fifth** time — aim-weighted
+3600 s expectancy **+0.1655** bps gross, **-1.8345** bps net of the 2.00 bps equity round trip, against
+**-1.7898 / -1.60 / -1.9464 / -1.7605** before it; no cell of 15 clears the Bonferroni hurdle **2.94**
+(best |t| is `xsreversion` 900 s at **-2.64**). Notably the aim went **majority trend-following for the
+first time** (trend **53.36%**) and the aggregate did not move — Rule 412 again. So rather than re-narrate
+the left operand, I measured the right one: `totalFees` **424.560443** against `firmTotal`
+**-873.24062320** is **48.62%** of the loss, on **$4,912,776.38** of cumulative LIVE turnover against a
+**$10,169.58** book — **545×**. Equities pay **1.00 bps/side**, futures **0.20**. Cost is now **#2**,
+above composition, because it is the half of the inequality that needs no new edge to attack.
 
-## Why no change
-
-`scripts/score-change.py score` prints `27564bb15 still accumulating evidence (1/6 cycles)` and
-`reports/.pending-baseline.json` still exists. Under ADR-0116 that forbids a new code change — piling one on
-top would destroy the evidence. Five more cycles.
-
-## Step 0 — ADR-0143 landed, and landing it caused the very defect ADR-0142 was written to kill
-
-The code is live: `REVERT_KEEP_PATHS` at line **73** of `scripts/score-change.py`, with `revertable_paths`
-and `revert_code_paths` alongside it. Its own claim is **not yet gradable** — it only fires on the next ❌ BAD
-verdict, and none has occurred. Nothing this cycle is evidence for or against it.
-
-What *is* evidence is the restart. `ops_jvm.uptimeSeconds` **1064** against `traffic.timestampMillis`
-**1786039202442** puts the boot instant at **17:42:18Z**, against **14:41:21Z** for the process that had
-survived the previous six cycles. Baseline written **17:41:45Z**, status commit **17:42:06Z**, boot
-**17:42:18Z** — my commit did it.
-
-It should not have. `ops/improve-loop.sh:135` reads `NON_BINARY_PATHS='^(reports|docs|ops)/'` and rebuilds
-whenever anything falls outside it. My commit touched `scripts/score-change.py` and
-`scripts/test-score-change.py` — the loop's own out-of-band Python, run by the cron wrapper and never by the
-app. `grep -rn "scripts/" --include=*.gradle --include=settings.gradle*` returns nothing, so neither is a
-Gradle input. They cannot reach the binary; the gate restarted the JVM anyway.
-
-**The cost is on the order tape, not inferred.** Two orders at **17:42:57Z** — `XOM BUY 5.000000` and
-`MCD BUY 9.000000`, both `REJECTED`, both `fusion exit — target decayed to flat [forecast=0.0, sources=0]`,
-reason `no market data`. `sources=0` is every sensor cold: the desk formed an intent to **liquidate two live
-positions** because the restart erased the opinions behind them, and was saved only by marks not having
-loaded yet. The WARN log from 13:42:57-04:00 carries the cold-seed block verbatim (TSLA, GOOGL, AMD, ES,
-PLTR, the whole `USD.TSY.*`/`USD.SOFR.*` curve), and `hedging.covarianceReady` is **false** again. That is
-ADR-0142's mechanism reproducing exactly, through an incomplete path list — inside ADR-0143's own evaluation
-window. It is the new register **#1**.
-
-The fix, next unfrozen cycle, is to **enumerate** the loop's tooling (`score-change.py`,
-`test-score-change.py`, `build-prompt.py`, `system-report.py`) rather than glob `scripts/`: `run-local.sh`,
-`svc.sh` and the `reset-*.sh` scripts are the *launcher*, and a change there genuinely does warrant a
-restart. Enumerating fails safe toward restarting when a future script is added.
-
-## What I re-measured while frozen
-
-Item #2 (composition) confirmed on a **fourth** independent window, this time on the full **20**-target live
-`/api/fusion/targets` set rather than the **6** `logs/report.md` elides to. Shares swung again — mean-reverting
-pair **50.23%** against **46.85% / 61.90% / 51.0%** before, weights barely moved — while the aggregate did
-not: **aim-weighted 3600s expectancy +0.2395 bps gross → -1.7605 bps net** of the **2.00 bps** round trip
-(`fee_bps` **1.00** per side on every equity), against **-1.7898 / -1.60 / -1.9464**. Four windows, same sign;
-900s and 225s are worse (**-2.2297**, **-2.0047** net). `xsreversion` at 900s (**t=-2.56**) is the only |t| > 2
-of 15 rows for a fifth consecutive window — still short of Bonferroni's **2.94**, so the evidence is
-sign-consistency, not the p-value. `social` remains the only source clearing cost at 3600s (**+9.1815** gross
-→ **+7.1815** net, hit **0.580** on **342**) at **0.00%** of the aim; ADR-0139 already tried that gate and was
-graded ❌ BAD, so it stays untouched.
-
-## Next unfrozen cycle
-
-Target register #1 — enumerate the loop's own tooling in `NON_BINARY_PATHS` so a scoring-script edit stops
-re-seeding the desk cold. Graded by the three-part VERIFY-BY in `reports/must-fix.md`: unchanged boot instant,
-no `sensor still cold` WARN, no order with `sources=0`. `baseline` deliberately NOT run this cycle (Rule 396).
+**And an inversion worth recording.** The desk holds **2.86%** of its own aim (**$10,250.80** against
+**$358,644.26**). The mission's dormancy rule would call that the biggest opportunity here. At **-1.8345**
+bps net it is the opposite: deploying the aim would scale a negative edge ~35× and multiply the turnover
+that already eats half the PnL. Deployment stays **#4** with no action until the aggregate turns positive.

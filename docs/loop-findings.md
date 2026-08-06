@@ -5277,3 +5277,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **No change:** `27564bb15` is at **1/6** under ADR-0116, so the freeze forbids one. Window was mostly
   market (PnL **-9.91**, gross **+2947.76**) *except* the restart transient my own commit caused — the first
   window in seven that is not cleanly attributable to the market, and I caused it.
+
+## 2026-08-06 18:30Z — half the loss is fees, and that is the operand I can move
+
+- **Rule 426 — when edge < cost keeps failing to move, stop re-measuring edge and measure cost.** Five
+  windows have now confirmed the same aggregate: aim-weighted 3600 s expectancy **+0.1655** bps gross,
+  **-1.8345** bps net of the 2.00 bps equity round trip (prior four: **-1.7898 / -1.60 / -1.9464 /
+  -1.7605**). Four of those cycles spent themselves re-deriving the left operand. This one measured the
+  right one: `attribution.totalFees` **424.560443** against `firmTotal` **-873.24062320** is **48.62%** of
+  the entire loss, on **$4,912,776.38** of cumulative LIVE turnover against a **$10,169.58** book —
+  **545×**. **Rule: an inequality has two sides; when one side is a statistic you cannot change without new
+  edge, the other side is arithmetic you control.**
+- **Rule 427 — the fee schedule is a routing input the desk currently ignores.** `turnover_cost_by_name`
+  charges equities **1.00 bps per side** and futures (ES/NQ) **0.20** — a 5× round-trip difference
+  (**2.00** vs **0.40**). `trend` at 3600 s measures **+1.552** bps: it would clear the futures round trip
+  and fails the equity one. Not significant (**t = 1.08** against the Bonferroni **2.94**), so it is a
+  hypothesis, not evidence — but **Rule: where a view is expressed is a cost decision, not just a
+  liquidity one.**
+- **Rule 428 — a low deployment ratio is only an opportunity when expectancy is positive; below zero it is
+  the thing keeping the loss small.** The desk holds **2.86%** of its own aim (**$10,250.80** of
+  **$358,644.26**), stepping **1.38%** of the gap per adjustment. The mission's dormancy rule reads that as
+  the top opportunity. At **-1.8345** bps net it inverts: closing the gap scales a negative edge ~35× and
+  multiplies the turnover that already eats half the PnL. **Rule: never promote "deploy more capital" above
+  "make the edge clear its cost" — sizing amplifies the sign it is given.**
+- **Rule 429 — a gate verified on the paths it lists is not verified on the paths it omits, and saying so
+  is the finding.** The JVM did **not** restart this cycle: boot **17:42:18.034Z** (`uptimeSeconds` **2864**
+  vs `traffic.timestampMillis` **1786041002034**) matches last cycle's **17:42:18.442Z**, across two commits
+  wholly inside `^(reports|docs|ops)/`. ADR-0142's mechanism is correct; item #1's `scripts/` omission
+  simply was not exercised. **Rule: record "not exercised" as its own status — it is neither VERIFIED nor
+  STILL-BROKEN, and collapsing it into either one is how a live defect gets struck off.**
+- **Rule 430 — `sources=1` on an exit is a milder cousin of `sources=0`, and worth watching.** Of 60 orders
+  this window, entries fired at `sources=3–4` while three exits (BAC **18:18:28Z**, WMT **18:01:14Z**, NEE
+  **17:49:03Z**) fired `fusion exit — target decayed to flat` at **`sources=1`**. Not contamination — the
+  only `sources=0` orders remain the 17:42:57Z restart pair — but the same asymmetry the register has
+  carried for five cycles, now visible on a clean tape.
+- **No change:** `27564bb15` is at **2/6** under ADR-0116. Window was **100% market** — commits reached only
+  `docs/` and `reports/` and the process never bounced, so PnL **-24.98** and gross **-1263.01** carry
+  neither credit nor blame.
