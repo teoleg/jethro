@@ -5314,3 +5314,36 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **No change:** `27564bb15` is at **2/6** under ADR-0116. Window was **100% market** — commits reached only
   `docs/` and `reports/` and the process never bounced, so PnL **-24.98** and gross **-1263.01** carry
   neither credit nor blame.
+
+## 2026-08-06 19:00Z — the desk holds for 1,141 s and its edge lives at 3,600 s
+
+- **Rule 431 — measure the holding period before grading a signal on any horizon.** Time-weighted ALPHA
+  LIVE inventory **$45,275,028.36** USD·s ÷ half one-way notional **$79,335.97** = **1,141.3 s** (AMZN
+  1,361.8, MSFT 1,528.5, NVDA 1,075.3, XOM 1,051.9, AAPL 743.5, GOOG 738.8, KO 699.9). Five prior cycles
+  graded the desk on the **3600 s** telemetry row without ever checking that it holds nothing that long.
+  **Rule: an expectancy is only the desk's expectancy at the horizon the desk actually holds — pick the
+  telemetry row by measurement, not by convenience.**
+- **Rule 432 — the term structure inverts the diagnosis, and it is worse than "edge < cost".** Weighting
+  `/api/signals/telemetry` by the live `fusion_targets.weights` (sum **5.0**): **225 s -0.2466 bps**,
+  **900 s -0.3990 bps**, **3600 s +1.1265 bps** — monotonic in horizon. At the row bracketing 1,141.3 s the
+  expectancy is negative **before any fee**. **Rule: stop saying "the edge fails to clear the round trip";
+  say "the desk exits inside the window where its signal carries no information, then pays to do it."**
+- **Rule 433 — a ratio whose denominator is the thing you are trying to grow is not a VERIFY-BY.** The
+  turnover multiple fell **545× → 198.9×** and looked like progress, while cumulative turnover **rose**
+  **$4,912,776.38 → $4,984,532.84**; only gross moved (**$10,169.58 → $25,062.42**). Same trap as Rule 412.
+  The denominator-free form is the holding period (one-way turnover per unit of held inventory = 2 ÷ hold).
+  **Rule: before adopting a ratio as a VERIFY-BY, ask which side of it a *good* cycle moves.**
+- **Rule 434 — the churn has a named trigger on the tape.** AAPL `sources=4` sold 14 at
+  `forecast=-5.102394518859727` (**18:40:16Z**) and bought back at `forecast=+5.067425315807982`
+  (**18:52:58Z**) — sign flip in **762 s**. `orders_by_status`: **2,106** CANCELLED vs **5,773** FILLED,
+  nearly all `fusion re-plan — passive order superseded by a fresh target (ADR-0084)`; GOOG re-planned at
+  18:54:29 / 18:54:59 / 18:55:30 before filling 18:56:31. **Rule: the re-plan cadence, not the entry rule,
+  is what sets the holding period — fix the cadence to fix the horizon.**
+- **Rule 435 — deployment gets *less* attractive, not more, once the horizon is matched.** Prior cycles
+  argued against closing the aim gap (NVDA `targetQty` **603.115325** vs `currentQty` **5.0**) because it
+  would scale a **-1.8345** bps *net* edge. The horizon-matched reading is that the edge is negative
+  **gross** at the held horizon. **Rule: sizing amplifies the sign it is given — and the sign must be read
+  at the horizon actually held.**
+- **No change:** `27564bb15` is at **3/6** under ADR-0116. Window was **100% market** — commits reached
+  only `docs/` and `reports/`, boot instant **17:42:18.047Z** unchanged, **zero** `sources=0` orders — so
+  PnL **-7.73** and gross **+8,902.44** carry neither credit nor blame.

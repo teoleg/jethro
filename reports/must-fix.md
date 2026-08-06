@@ -15,6 +15,146 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 19:00Z (**NO CHANGE — the ADR-0116 freeze holds at `27564bb15` 3/6.** The clean window buys the measurement that reframes the whole register. Five cycles have graded the desk on a **3600 s** expectancy. This cycle measured how long the desk actually *holds*: time-weighted ALPHA inventory since boot divided by half its one-way traded notional gives **1,141.3 s** — and at the horizon that brackets it, the fusion-weighted expectancy is **-0.3990 bps GROSS**, negative before a single basis point of fee. The problem is not that a positive edge fails to clear a 2.00 bps hurdle; it is that **the only horizon with positive gross expectancy (3600 s, +1.1265 bps) is one the desk never holds to.** That is the new **#1**, and it subsumes the fee item as its consequence — cumulative turnover *rose* to **$4,984,532.84** while the "turnover multiple" *fell* **545× → 198.9×** purely because gross rose, so that VERIFY-BY is struck as unstable (Rule 412 again). The fee schedule's venue asymmetry survives as a separate **#2**. The `scripts/` restart-gate omission drops to **#3** — NOT EXERCISED for a second cycle.)
+
+### Step 0 — `27564bb15` (ADR-0143): ✅ **deployed**, ⚠️ **still not gradable (3/6)**, ✅ **no restart for a third window**
+
+`scripts/score-change.py score` prints `27564bb15 still accumulating evidence (3/6 cycles) — held, not scored
+this run`, and `reports/.pending-baseline.json` is present. No ❌ BAD verdict has occurred, so ADR-0143's
+VERIFY-BY ("the next BAD row carries `reverted (…)` instead of `⚠️ REVERT FAILED`") remains untestable.
+Not a stall — the design of ADR-0116.
+
+**Third consecutive clean window.** `ops_jvm.uptimeSeconds` **4664** against `traffic.timestampMillis`
+**1786042802047** places boot at **2026-08-06 17:42:18.047Z**, matching last cycle's **17:42:18.034Z** to
+within read jitter. `git diff --name-only c7e1290..HEAD` reaches only `docs/loop-findings.md`,
+`reports/last-analysis.md`, `reports/must-fix.md`, `reports/run-status.json` — all inside
+`NON_BINARY_PATHS`. The tape agrees: **zero** `sources=0` orders in the window.
+
+### Not danger — and for the first time in six cycles, genuinely deploying
+
+Gross **$25,062.42** is **1.7%** of the firm gross cap $1,500,000 (headroom **$1,474,938**); net
+**$507.36** is **0.1%** of the $1,000,000 net cap. `breaker.halted` **false**, `regime` **CALM**
+(`trend` **CHOP**, `volRatio` **1.16**), `riskCuts` **[]**, `var95` **252.18** / `es95` **306.48** on
+`coveredExposure` **25062.42** with `skippedExposure` **0.00**. `hedging.covarianceReady` still **false**
+— the EQUITY axis hedges on assigned betas. Total PnL **-$881.50**; since last run **-7.73**, over three
+runs **-42.10**. UNDERWATER and off the +1%/3-iter target, but no ceiling is near and the book is no
+longer dormant: gross **+8,902.44** this window.
+
+### Window attribution — 100% market and desk-autonomous, third window running
+
+No committed path can reach the app and the process never bounced, so the entire **-7.73** PnL move and
+**+8,902.44** gross move belong to the market and to unmodified desk logic. My changes earn neither credit
+nor blame. What the tape shows is a working desk deploying: `fusion entry` at `sources=2–4` on
+AMZN/MSFT/NVDA/GOOG/KO/PFE, `fusion reduce` against decaying forecasts, and a continuous `auto-hedge
+EQUITY` (ADR-0019) walking ES from **0.016504** to **-0.027115** through the ADR-0098 churn shrink.
+
+---
+
+## Item #1 (NEW, promoted — subsumes the old #2 and #3 into one mechanism) — **the desk's realized holding period is 1,141.3 s; the only horizon at which its fused forecast has positive gross expectancy is 3600 s. It is harvesting the wrong part of its own term structure.**
+
+**The holding period, measured.** Over `fills` where `feed_mode='LIVE' AND book_id='ALPHA'` since boot
+(2026-08-06 17:42:18Z), time-weighted inventory **$45,275,028.36** USD·s against one-way traded notional
+**$79,335.97** gives a holding period of **1,141.3 s**. Per name, turnover-ranked: AMZN **1,361.8**, XOM
+**1,051.9**, NVDA **1,075.3**, MSFT **1,528.5**, KO **699.9**, AAPL **743.5**, GOOG **738.8**. Nothing the
+desk trades in size lives past ~25 minutes.
+
+**The term structure, measured.** Weighting `/api/signals/telemetry` `avgReturnBps` by the live
+`fusion_targets.weights` (reversion **0.8774**, social **1.4990**, trend **1.6000**, momentum **0.7705**,
+xsreversion **0.2530**; sum **5.0**):
+
+| horizon | weighted expectancy | net of 2.00 bps equity RT | net of 0.40 bps futures RT |
+|---|---|---|---|
+| 225 s | **-0.2466** bps | -2.2466 | -0.6466 |
+| 900 s | **-0.3990** bps | -2.3990 | -0.7990 |
+| 3600 s | **+1.1265** bps | -0.8735 | **+0.7265** |
+
+**This inverts five cycles of framing.** The register has been saying "gross edge is positive but too small
+to clear a 2.00 bps round trip". That is true only at **3600 s**. At **900 s** — the row that brackets the
+**1,141.3 s** the desk actually holds — the fused expectancy is **negative before any cost at all**. The
+desk is not paying too much for a thin edge; it is exiting inside the window where its own signal has no
+edge, then paying a round trip for the privilege. The expectancy is **monotonically increasing in horizon**
+across all three rows, which is the signature of a forecast whose information only resolves slowly.
+
+**The tape shows the mechanism.** AAPL, `sources=4`: **18:40:16Z** SELL 14 at `forecast=-5.102394518859727`
+("fusion entry — target increase"); **18:52:58Z** BUY 5 at `forecast=+5.067425315807982` ("fusion reduce").
+A full sign flip in **762 s** — under the measured holding period, well under the horizon where the signal
+pays. `orders_by_status` counts **2,106** CANCELLED against **5,773** FILLED, the cancels almost all
+`fusion re-plan — passive order superseded by a fresh target (ADR-0084)`; GOOG alone was re-planned at
+**18:54:29**, **18:54:59**, **18:55:30** before filling at **18:56:31**.
+
+**Significance, unchanged.** Of the 15 source×horizon cells, the only |t| > 2 remains `xsreversion` at
+900 s, **t = -2.53**, against the Bonferroni hurdle **2.94** (Rule 407). Nothing here is significant —
+including the +1.1265. So this item is not "the 3600 s edge is real, go hold it"; it is "**the desk is
+paying a certain cost to harvest a horizon at which it has measured negative expectancy**", which is
+actionable regardless of whether the 3600 s cell is ever confirmed.
+
+**VERIFY-BY:** the realized holding period, recomputed the same way (time-weighted ALPHA LIVE inventory ÷
+half one-way traded notional) — it must **rise** toward the 3600 s horizon — **together with** the
+horizon-matched weighted expectancy at the row that then brackets it, which must be **≥ 0 gross**. Both, or
+the item is not fixed: lengthening the hold alone is worthless if the expectancy at the new horizon is
+still negative. Do **not** grade this on the fee share or the turnover multiple (see the struck item below).
+
+---
+
+## Item #2 (was part of #2, carried as the one cost lever independent of holding period) — **82.7% of turnover runs through the venue that charges 5× the round trip.**
+
+`turnover_cost_by_name` over LIVE: **$4,123,138.35** in equities at **1.00 bps per side** and
+**$861,394.49** in futures at **0.20 bps per side** — **82.7%** of the flow in the expensive venue. The
+round trips are **2.00** vs **0.40** bps. The 3600 s weighted expectancy **+1.1265** bps clears the futures
+round trip (**+0.7265**) and fails the equity one (**-0.8735**); the same is true of `trend` alone at
+3600 s (**+1.5327** bps). Where a view is expressed is a cost decision the router does not currently weigh.
+Not significant, so this is a hypothesis with a price tag, not evidence — and it is downstream of item #1,
+since at the 900 s horizon **neither** round trip is clearable.
+
+`attribution.totalFees` **429.541737** is **48.73%** of `firmTotal` **-881.50408889**; this window's fee
+delta **4.981294** is **64.44%** of the window's **-7.73** PnL move.
+
+**VERIFY-BY:** the futures share of cumulative LIVE turnover from `turnover_cost_by_name` must rise, and
+`totalFees` as a share of `|firmTotal|` must fall, **without** gross falling.
+
+---
+
+## ~~Item (was #2) — "fees are 48.62% of the loss; the desk turns over 545× its gross book"~~ — **conclusion stands, VERIFY-BY STRUCK as an unstable statistic.**
+
+The fee share held (**48.62% → 48.73%**), but the turnover multiple collapsed **545× → 198.9×** while
+cumulative turnover **rose** **$4,912,776.38 → $4,984,532.84**. The multiple fell only because gross rose
+**$10,169.58 → $25,062.42**. Its VERIFY-BY explicitly said "move the multiple down without moving gross
+down" — and it was satisfied this window by a change in the denominator that has nothing to do with the
+defect. Same trap as Rule 412. The normalized, denominator-free version of exactly this quantity is the
+**holding period** (one-way turnover per unit of held inventory is 2 ÷ holding period), which is item #1's
+metric. Folded there.
+
+---
+
+## Item #3 (was #1, DEMOTED on cost — the mechanism is verified, the omission is NOT EXERCISED for a second cycle) — **the restart gate's exemption list omits `scripts/`, so the loop's own tooling bounces the trading JVM.**
+
+`ops/improve-loop.sh:135` reads `NON_BINARY_PATHS='^(reports|docs|ops)/'`; `:145` rebuilds and restarts on
+anything outside it. `scripts/` holds `score-change.py`, `test-score-change.py`, `build-prompt.py`,
+`system-report.py` — run by the cron wrapper, never by the app.
+
+**Status: not exercised, second cycle running.** No `scripts/` path was committed, so the defect could not
+fire; what was confirmed again is the complement — four docs/reports commits, no restart. Demoted from #1
+not because it got smaller but because item #1 got a measured cost and this one's expected cost is bounded
+by how rarely the loop commits its own tooling. It stays open and it stays cheap to fix. Recording
+"not exercised" as its own status rather than collapsing it into VERIFIED is Rule 429.
+
+**VERIFY-BY (unchanged):** after a commit touching only `scripts/**`, `ops_jvm.uptimeSeconds` measured
+against `traffic.timestampMillis` must still place the boot instant *before* that commit.
+
+---
+
+## Item #4 (carried, unchanged, still NO ACTION — and item #1 makes the case against it stronger) — **entry is structurally frozen for names early on their aim path.**
+
+NVDA is the standing instance: `targetQty` **603.115325** against `currentQty` **5.0**, stepping
+`deltaQty` **3.772989**. The mission's dormancy rule would read a 1.7%-of-cap book with this deployment
+ratio as the top opportunity. It is not, and item #1 sharpens why: the previous reading was "deploying
+would scale a **-1.8345** bps net edge"; the horizon-matched reading is worse — at the **900 s** horizon
+the desk actually holds, the edge is negative **gross**, so deployment would scale a loss that fees merely
+amplify. Deployment becomes urgent the moment item #1's horizon-matched expectancy turns non-negative, and
+not before.
+
+---
+
 ## Verification block — 2026-08-06 18:30Z (**NO CHANGE — the ADR-0116 freeze holds at `27564bb15` 2/6.** Two things got settled. First, item #1's gate is **not broken, only under-enumerated**: this cycle's two commits (`d2b1c1b` in `docs/`, `c7e1290` in `reports/`) both fall inside `NON_BINARY_PATHS`, and the JVM **did not restart** — boot instant is still **17:42:18.034Z**, uptime **2864** s against `traffic.timestampMillis` **1786041002034**, matching last cycle's **17:42:18.442Z** to within the read jitter. ADR-0142 does exactly what it says for the prefixes it lists; the defect is the prefix it omits. Second, the cycle spends its clean window on the **other half of the composition item's inequality** — the cost side — and puts a number on it that no prior cycle measured: `attribution.totalFees` **424.560443** against `firmTotal` **-873.24062320** is **48.62%** of the entire loss, on cumulative LIVE turnover of **$4,912,776.38** against a gross book of **$10,169.58** — **545×**. That is promoted to **#2**, because unlike the edge side it has a lever that does not require discovering new edge. Composition drops to **#3**, conclusion confirmed on a **fifth** window.)
 
 ### Step 0 — `27564bb15` (ADR-0143): ✅ **deployed**, ⚠️ **still not gradable (2/6)**, ✅ **and it cost no second restart**
