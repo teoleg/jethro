@@ -5101,3 +5101,56 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   TIME** on the reduce path — above the deterministic floor, not the guardrail, not the breaker, ADR in
   the same commit; graded on the flip median rising above **425 s** and the reduce-path mean `|forecast|`
   rising toward **6.288**.
+
+## 2026-08-06 16:30Z — decompose the AIM before tuning anything that acts on it
+
+- **Rule 406 — a combined forecast is a portfolio; measure its composition before you measure its
+  behaviour.** Decomposing `fusion_targets.contributions` into `forecast × weight` and summing
+  |contribution| across the six reported names: `trend` **42.6%**, `reversion` **27.9%**, `xsreversion`
+  **23.1%**, `momentum` **6.5%**, `social` **0.0%** (present in **0/6**). The mean-reverting pair is
+  **51.0%** of the aim, outvotes trend+social in **4 of 6** names, and in **2 of 6** `trend` points against
+  the combined aim outright — NEE's **+3.0590** is `xsreversion` **+19.396** + `reversion` **+11.959** vs
+  `trend` **-2.065**. Per-source weights are already directionally right (trend **1.454**, social
+  **1.282**, reversion **0.710**, xsreversion **0.507**) and are simply swamped by raw claim magnitude,
+  because `forecastScalars` equalises each source's *mean* absolute claim (`meanAbsClaim` **10.385** trend
+  / **10.073** reversion) and not its dispersion. **Rule: weights are not influence. Compute each source's
+  realised share of the aim from the contributions themselves — a down-weighted source that shouts louder
+  still runs the book.**
+- **Rule 407 — the desk's loudest minority voice is its worst-measured source, and the sign is consistent
+  across independent windows.** On cohort-clustered SE (`stdCohortMeanBps`/√`cohorts`), `xsreversion` is
+  negative at every horizon — **-0.171** / **-2.080** / **-1.816** bps — hit rate below a coin flip at all
+  three (**0.491** / **0.490** / **0.477**), and its 900s **t = -2.29** (152 cohorts, 2748 resolved) is the
+  only |t| > 2 among 15 rows. It does **not** survive Bonferroni at 15 tests (|t| > 2.94) — say so rather
+  than bury it. The evidence is the consistency: last cycle read **-0.205** / **-2.123** / **-4.363**, same
+  sign, same shape. **Rule: state the multiple-testing caveat in the same sentence as the t-stat, and let
+  sign-consistency across independent windows — not one p-value — carry the conclusion.**
+- **Rule 408 — price the expectancy against the round trip, every time.** `turnover_cost_by_name` gives
+  `fee_bps` **1.00** on every equity, so a round trip is **2.00 bps**. At 3600s that makes `trend`
+  **+1.746** gross **net negative**, `reversion` **-2.3** net, `xsreversion` **-3.8** net. The single
+  source that clears cost is `social` at **+3.595** → **+1.6** net — and it is corroborated on **12** of
+  **1600** kept items, contributing **0.0%** to every aim. **Rule: a gross expectancy is not an edge. The
+  desk's best-measured source contributing nothing is a wiring question, not a threshold to loosen —
+  ADR-0139 already tried loosening that gate and was graded ❌ BAD; do not re-attempt it.**
+- **Rule 409 — the churn was a symptom; do not fix a symptom that a composition defect regenerates.** The
+  entry/exit asymmetry re-measured *sharper* on a fresh window (entry mean `|forecast|` **7.309** n=**4**
+  vs reduce **1.300** n=**36**; 36 of 43 fills on the ungated path; PFE entered at **-11.5747** and began
+  unwinding **122 s** later at **-0.0817**, a **99.3%** same-sign decay; reversal median **548 s**). But a
+  mean-reversion signal flips on short-horizon noise *by construction* — so a 51%-mean-reverting aim
+  mechanically produces exactly that tape. **Rule: time-gating the exit would make the desk hold the wrong
+  opinion for longer at 2 bps a round trip. When a symptom is this reproducible, look one level up for the
+  generator before spending the cycle on the symptom.**
+- **Rule 410 — when one payload calls two different things "the target", stop and settle it before
+  reasoning about convergence.** `insideBuffer` **19** of **24**; four of six reported targets plan
+  `deltaQty` **0.0000** against large gaps (BAC `targetQty` **652.635** vs `currentQty` **0.00**), while
+  the `aims` map for the same name reads **10.669227** — ~**60×** smaller. The last three cycles'
+  time-to-target arithmetic assumed `targetQty` was the routed quantity; if `aims` is, that arithmetic
+  overstated the mismatch. **Rule: record the ambiguity as its own item with a source-read VERIFY-BY
+  rather than letting an unverified field choice propagate into three cycles of diagnosis.**
+- **No change this cycle.** Freeze at **4/6** for `39451ce71`; `baseline` deliberately NOT run (Rule 396).
+  Commit confined to `reports/` + `docs/`. ADR-0142 ✅ verified a fourth time (boot instant
+  **1786027281905** vs **…760** / **…702** / **…035**). Window was **0% change / 100% market** for the
+  fourth cycle running — PnL **-0.17**, gross **+3460.97** earn my changes neither credit nor blame.
+  **Next unfrozen cycle targets the aim's composition, not the exit gate:** cut `xsreversion`'s grip so the
+  aim reflects measured expectancy net of the **2.00 bps** round trip, ADR in the same commit; graded on
+  its contribution share falling below **23.1%**, mean-reversion outvoting trend+social in fewer than
+  **4 of 6** names, and the aim-weighted 3600s expectancy turning positive against cost.
