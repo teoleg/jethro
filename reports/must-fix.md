@@ -15,6 +15,155 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 15:00Z (**NO CHANGE — the ADR-0116 freeze holds, and this time honouring it costs nothing: ADR-0142 gave the freeze a no-op, and this cycle is that fix's first real test.** The scorer prints `39451ce71 still accumulating evidence (1/6 cycles) — held, not scored this run`. The register is **re-ranked on the back of a measurement, not a hypothesis**: the σ-warm-up item has largely resolved itself (`streamVolMeasuredNames` **2 → 20** of `instruments` **23**, `riskCutStoppedNames` **0**), and the book **survived** a restart (baseline gross **11424.82120000** → live **13570.96679500**, not **$0.00**), which weakens half of ADR-0142's stated rationale. What replaces them at #1 is the largest number on this report that nobody has attacked: the desk turns positions over in **minutes** while its only non-negative measured expectancy exists at **3600s**, and pays a round trip each time.)
+
+### Step 0 — `39451ce71` (ADR-0142): ✅ LANDED, ⏳ its headline VERIFY-BY is NOT YET TESTABLE — and saying so is the honest grade
+
+`NON_BINARY_PATHS='^(reports|docs|ops)/'` is in HEAD. But the app **restarted anyway** at **14:41:21Z**
+(`ops_jvm.uptimeSeconds` **1121** against report `timestampMillis` **1786028402702**), **38 s** after the
+ADR-0142 commit at 14:40:43Z. That is **not** a 🔴: the wrapper process running that cycle had already
+parsed the old `deploy_if_code_changed` body before the model wrote the new one, so the new rule could
+not govern its own deploy. **This cycle is the first cycle whose wrapper carries the filter**, and this
+cycle's commit is confined to `reports/` and `docs/` — so the test is live now, not deferred by choice.
+
+Two secondary predictions moved the predicted way, and ADR-0142 gets **no credit** for either, because it
+changed nothing inside the app and did not prevent the restart:
+
+| prediction | live reading | attribution |
+| --- | --- | --- |
+| `streamVolMeasuredNames` above 2 | **20** (of `instruments` **23**) | not ADR-0142 — nothing in the app changed |
+| `insideBuffer` further below `instruments` | **14** (was **23** of **24**) | same |
+| firm gross NOT back at `$0.00` next cycle | baseline **11424.82120000** → live **13570.96679500** | ✅ independently true, and it **cuts against** ADR-0142's rationale |
+
+That last row matters and is recorded against my own change: the premise "a restart flattens the book"
+is **not** what happened. Positions carried across the 14:41:21Z restart (MSFT **-10.000000**, GOOG
+**11.000000**, UNH **-7.000000**, KO **12.000000**, NQ **0.001138**, ES **0.000189**). The restart cost is
+real for *sensors*, not for *positions*. ADR-0142 stays — the no-op it creates is what let this cycle
+obey the freeze — but its exposure-flattening justification is downgraded to unproven.
+
+### Window attribution — 0% change, 100% market and pre-existing code
+
+`git diff --name-only` for last cycle's range touches only `ops/improve-loop.sh`, `docs/`, `reports/`.
+No Java, no dial, no gate. So the change **cannot** have moved the vector, and the entire window — PnL
+**-12.14**, gross **+2146.07** — is the market plus code already live (ADR-0141's band, in since 13:44Z).
+This is the cleanest attribution the loop has had; a wrapper-only cycle is a free uncontaminated read of
+the app's own behaviour, and that is worth knowing as a technique.
+
+### Not danger — deploying, with room to spare
+
+Gross **$13,570.97** is **0.9%** of the firm gross cap $1,500,000 (headroom **$1,486,429**); net
+**-$2,063.62** is **0.2%** of the $1,000,000 net cap. `breaker.halted` **false**. `var95` **222.04**,
+`es95` **330.72**, `var99` **422.79** over **154** observations, `coveredExposure` **13572.16**,
+`skippedExposure` **0.00**. `regime` CALM, `trend` CHOP, `volRatio` **0.92**. UNDERWATER is cumulative
+PnL, not a live danger state.
+
+### Item #1 (NEW, promoted to the top) — the desk's holding period is minutes; its only non-negative measured expectancy is at 3600s. It pays a round trip to harvest an edge it never holds long enough to collect.
+
+This is the standing "work on edge, not the combiner" priority, finally stated as a *measured* defect
+rather than "nothing has edge". `signals_telemetry` (LIVE) `avgReturnBps`, by horizon:
+
+| horizon | trend | reversion | xsreversion | social | momentum |
+| --- | --- | --- | --- | --- | --- |
+| **225s** | **-0.003** (500 cohorts, `stdCohortMeanBps` **3.510**) | **+0.013** (500, **3.755**) | **-0.187** (500, **9.026**) | **-0.325** (87, **7.281**) | **-0.851** (39, **9.524**) |
+| **900s** | **+0.060** (323, **9.440**) | **-0.044** (287, **10.835**) | **-2.194** (152, **11.225**) | **+0.962** (81, **8.361**) | **-4.593** (27, **15.078**) |
+| **3600s** | **+1.501** (100, **14.428**) | **-0.530** (90, **17.347**) | **-4.129** (43, **28.281**) | **+3.654** (37, **27.926**) | **-4.132** (11, **31.116**) |
+
+Read down the columns: the expectancy is **nearest zero at the shortest horizon** and only turns positive
+(trend, social) at **3600s**, where it is still swamped by its own cohort dispersion — no cell clears the
+ADR-0049 OOS gate. Now the cost side: `turnover_cost_by_name` reads `fee_bps` **1.00** per side for every
+equity (**0.20** for ES/NQ), and TCA `avgSlippageBps` reads **0.598** MSFT (215 fills), **0.743** GOOG
+(178), **0.706** AMZN (177), **0.695** PFE (177), **0.753** NEE (82), **0.602** CAT (67). A round trip
+pays fee and slippage **twice**.
+
+**The desk trades the 225s column while only the 3600s column is positive.** Proof from `recent_orders`,
+one name, one window — MSFT's `combinedForecast`:
+
+```
+14:30:05Z  SELL 1  forecast -5.647822616241038   (sources 4)
+14:42:00Z  BUY  1  forecast +5.994499373101448   (sources 3)   <- sign flip, 12 min
+14:54:43Z  SELL 2  forecast -6.757956277853291   (sources 3)   <- sign flip, 13 min
+```
+
+Two sign flips in ~25 minutes, each a paid round trip, on a name carrying `turnover_usd` **228299.68**
+across **215** fills to hold **-10.000000** shares. The same shape elsewhere: **ES** shows **178** fills
+and **680011.59** turnover to hold a **73.24222500** gross hedge, including a full liquidation at
+14:47:10Z (`auto-hedge EQUITY (ADR-0019): net equity |0.00| ≤ 0.00 floor — target hedge is zero`, SELL
+**0.011552**) rebuilt from 14:49:45Z — a complete round trip triggered by a transient zero reading, which
+ADR-0098's churn-shrink did not stop. **NQ** ground ~25 orders of **0.000040**-ish contracts at 30 s
+intervals, all `fusion reduce toward a smaller target`, **42** fills and **92598.21** turnover on a
+**672.85957000** position, plus three REJECTED for `no market data for NQ`.
+
+The cost column against the loss it explains: ALPHA `feesPaid` **386.902978** vs `realizedPnl`
+**-607.49576306**; firm `totalFees` **402.355173** vs `firmTotal` **-731.27072424**. Winners/losers cross
+cleanly against the triggers: MSFT **+328.78192038** and GOOG **+54.99373579** are winners; **UNH**
+**-116.50673218** was sold into repeatedly on `sources=2` (14:54:12Z SELL 4 at **-6.262083396443645**,
+14:55:13Z SELL 3 at **-5.053747004083048**), **KO** **-76.70785869** entered 14:47:36Z on
+**+5.7856472361141265** with `sources=2`, **NQ** **-147.62078848**.
+
+**Prescribed direction (NOT to be implemented until ADR-0142 is scored).** The lever is the *holding
+period*, not another fusion weight: make the effective holding period match the horizon the expectancy is
+measured over, or refuse the trade. Candidates, in order of how well understood they are — hysteresis on
+a forecast **sign flip** (a reversal must clear a wider band than an increase, so a 12-minute round trip
+cannot be free); a minimum-hold / forecast-persistence requirement keyed to the measured horizon; and
+separately, suppressing the sub-dust `deltaQty` tail that generates turnover with no position change.
+Every threshold must arrive with a cited source or an explicit `PLACEHOLDER — Oleg to set`.
+
+**VERIFY-BY (next run that ships it):** `turnover_cost_by_name.turnover_usd` for the traded names falls
+while `grossExposure` does **not** fall; firm `totalFees` growth per cycle falls; `recent_orders` shows
+**no** name reversing sign twice inside one cycle; and `signals_telemetry` `avgReturnBps` at 900s/3600s is
+unchanged or better (the fix must cut cost, not edge). 🔴 if gross collapses toward **$0.00** — that is
+turnover suppression by refusing to trade, not by trading better.
+
+### Item #2 (NEW) — `score-change.py baseline` silently overwrites an unscored pending baseline, destroying an in-flight ADR-0116 window
+
+`cmd_baseline` writes `PENDING` unconditionally — there is no check for an existing unscored baseline:
+
+```
+scripts/score-change.py:434   os.makedirs(os.path.dirname(PENDING), exist_ok=True)
+scripts/score-change.py:435   with open(PENDING, "w", encoding="utf-8") as f:
+```
+
+Consequence, demonstrated: `d8da867` recorded a baseline for **`a21177cea`** (ADR-0141) at 13:44:10Z; the
+register graded it at **2/6** cycles at 14:30Z; then `a58a12e` recorded a baseline for **`39451ce71`** at
+14:40:49Z and **replaced it**. ADR-0141 will therefore **never** receive a ledger row — a change that was
+✅ VERIFIED at the defect level twice has no scored verdict, and the ledger's history is missing an entry
+it should contain. This is the loop's own instrument corrupting itself, which is why it sits above every
+tuning item: it makes verdicts unreliable in a way no amount of good diagnosis compensates for. It also
+means the freeze rule is enforced only by the agent reading the pending file — the script will happily
+help violate it.
+
+**VERIFY-BY:** running `baseline` while an unscored `reports/.pending-baseline.json` exists must refuse
+(non-zero exit, no write) or preserve the prior window; and a ledger row must exist for every commit that
+ever had a baseline recorded. Note this touches the scorer, which owns money numbers — the change must not
+alter any computed vector, verdict, or threshold, only the refusal path.
+
+### Item #3 (carried, was #1) — the loop restarts the app on cycles that cannot change the binary: ⏳ UNDER ITS OWN EVALUATION
+
+ADR-0142 shipped last cycle and is at **1/6** with the scorer. Its headline VERIFY-BY is being tested by
+**this** cycle's commit (confined to `reports/` + `docs/`, wrapper on disk carries the filter). Do not
+touch it. Next run, grade it on: `ops_jvm.uptimeSeconds` **exceeding** the cycle interval, and today's
+`logs/improve-*.log` carrying `no code change ... — no rebuild/restart` for this range. 🔴 if a real code
+change is ever scored against a binary that does not contain it.
+
+### Item #4 (carried, was #2, DEMOTED) — the ADR-0126 σ sensor warm-up: ⚠️ largely self-resolved, keep watching
+
+The item said sensors could not warm within a cycle. This run refutes the severity: `streamVolMeasuredNames`
+**20** of `instruments` **23**, `covarianceCoveredNames` **20**, `volBudgetNames` **20**,
+`riskCutStoppedNames` **0**, `insideBuffer` **14** — against **2** measured and `insideBuffer` **23** last
+cycle, on a comparable ~19 minutes of uptime. Startup still logs cold-seed WARNs (JNJ **234** of **241**,
+UNH **207**, PG **223**, XOM **221**, HD **194**, CAT **195** for reversion; HD **101** of **121**, UNH
+**107**, MCD **115**, CVX **116**, JPM **116** for σ) plus genuinely new names with no history (AMD **1**,
+TSLA **10**, PLTR **1**, GOOGL **3**, META **5**) — the latter is refdata expansion, not a defect. No
+action while it is improving on its own.
+
+### ~~Item (was #3) — no source has demonstrated positive out-of-sample edge net of cost~~ **SUPERSEDED by item #1**
+
+Not closed — **restated**. "Nothing has edge" was unactionable. The measurement above makes it actionable:
+the sources are not uniformly edgeless, they are edgeless **at the horizon the desk trades**. That is a
+holding-period defect with a testable fix, so it is item #1 rather than a standing lament.
+
+---
+
 ## Verification block — 2026-08-06 14:30Z (**Item #1 SPLITS its own test — and the answer is neither branch the register wrote.** Last cycle asked whether the σ-cold block was session warm-up or a defect: `streamVolMeasuredNames` climbed **1 → 2**, so the sensors DO warm — but `insideBuffer` went **18/19 → 23/24**, because they warm ~20 minutes into a cycle and are then **wiped by a restart the loop inflicts on itself**. The app started **2026-08-06T14:06:35Z**, 23 s after last cycle's status commit — on a **no-change** cycle, deployed by `docs/loop-findings.md`, the memory the prompt mandates every run. **The freeze offered no no-op**, so this cycle ships the filter fix (ADR-0142).)
 
 ### Step 0 — `a21177cea` (ADR-0141): ✅ still VERIFIED at the defect level; ⚠️ its measurement is being corrupted

@@ -4970,3 +4970,49 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   touched; nothing inside the app touched. A real change still deploys because its ADR ships in the
   same commit as its code, so the `.java`/`.gradle` path stays in the diff. `-Pci test` green (no Java
   changed — all module tasks UP-TO-DATE) plus `bash -n` and a deploy/no-deploy path table.
+
+## 2026-08-06 15:00Z — the freeze was honoured for the first time at no cost, and the edge question got a number
+
+- **Rule 392 — "no source has edge" was the wrong reading; the right one is "no source has edge AT THE
+  HORIZON WE TRADE".** `signals_telemetry` `avgReturnBps` (LIVE) is nearest zero at the SHORTEST horizon
+  and only turns positive far out: at **225s** trend **-0.003** / reversion **+0.013** / xsreversion
+  **-0.187** / social **-0.325** / momentum **-0.851**; at **900s** social **+0.962** / trend **+0.060**;
+  at **3600s** trend **+1.501** (100 cohorts, `stdCohortMeanBps` **14.428**) and social **+3.654** (37,
+  **27.926**). Against `fee_bps` **1.00** per side per equity and TCA `avgSlippageBps` **0.598** MSFT /
+  **0.743** GOOG / **0.706** AMZN — paid twice per round trip. **Rule: before concluding a signal set is
+  edgeless, read expectancy BY HORIZON and compare it to the holding period actually realised. A positive
+  3600s expectancy harvested on a 12-minute round trip is a cost defect, not an edge defect — and it has
+  a fix, which "nothing works" does not.**
+- **Rule 393 — a forecast that flips sign inside the cycle is the most expensive object on the desk.**
+  MSFT `combinedForecast` **-5.647822616241038** (SELL 14:30:05Z) → **+5.994499373101448** (BUY 14:42:00Z)
+  → **-6.757956277853291** (SELL 14:54:43Z): two flips in ~25 min, two paid round trips, `turnover_usd`
+  **228299.68** over **215** fills to hold **-10.000000** shares. Same shape in the hedge — ES **178**
+  fills / **680011.59** turnover for a **73.24222500** position, including a full liquidation at 14:47:10Z
+  on `net equity |0.00| ≤ 0.00 floor` rebuilt from 14:49:45Z, which ADR-0098 churn-shrink did not stop —
+  and in NQ's ~25 orders of **0.000040** contracts (`fusion reduce toward a smaller target`, **42** fills,
+  **92598.21** turnover on **672.85957000**). ALPHA `feesPaid` **386.902978** against `realizedPnl`
+  **-607.49576306**. **Rule: an entry gate and a REVERSAL gate are different decisions. Symmetric bands
+  make a sign flip free, and free sign flips are where the fee column comes from.**
+- **Rule 394 — grade your own change against its own rationale, including the half that fails.** ADR-0142
+  predicted the book stops being flattened by restarts. The book **survived** the 14:41:21Z restart:
+  baseline gross **11424.82120000** → live **13570.96679500**, positions intact (MSFT **-10.000000**, GOOG
+  **11.000000**, UNH **-7.000000**, KO **12.000000**, NQ **0.001138**, ES **0.000189**). So restart cost is
+  real for *sensors* and unproven for *positions*, and three prior scored rows ending at gross **$0.00**
+  need another explanation. **Rule: when a fix's secondary rationale is refuted by the same run that
+  supports its primary one, write the refutation down — the fix can stay while its story shrinks.**
+- **Rule 395 — a fix cannot govern its own deploy, so do not grade it on the cycle it shipped.** The app
+  restarted at **14:41:21Z**, **38 s** after ADR-0142's commit, because the wrapper already running that
+  cycle had parsed the OLD `deploy_if_code_changed` body. Not a regression — an ordering fact. **Rule: for
+  a change to the harness itself, the first testable cycle is the NEXT one; state that instead of scoring
+  a false 🔴.** Corollary, and the point of Rule 391: this cycle the no-op existed, so the freeze was
+  obeyed for free — a wrapper-only cycle also yields a **0%-change / 100%-market** attribution, the
+  cleanest read of the app's own behaviour this loop has ever had.
+- **Rule 396 — the scorer will help you violate the freeze.** `cmd_baseline`
+  (`scripts/score-change.py:434-435`) writes `PENDING` unconditionally, no check for an unscored window.
+  `d8da867` baselined **`a21177cea`** at 13:44:10Z (graded 2/6 at 14:30Z); `a58a12e` baselined
+  **`39451ce71`** at 14:40:49Z and replaced it — so ADR-0141, ✅ VERIFIED at the defect level twice, will
+  never get a ledger row. **Rule: the freeze is enforced by the agent reading `.pending-baseline.json`,
+  not by the tool. If you ship during a window, you do not merely dilute the evidence — you delete it.**
+- **No change this cycle.** Freeze at **1/6** for `39451ce71`; `baseline` deliberately NOT run (running it
+  would have destroyed ADR-0142's own window, per Rule 396). Commit confined to `reports/` + `docs/`,
+  which is simultaneously ADR-0142's first live test.
