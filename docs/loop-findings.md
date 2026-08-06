@@ -5238,3 +5238,42 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Change:** ADR-0143 — the BAD-verdict revert is scoped to code paths and never rewinds the loop's record.
   Window was **0% change / 100% market** for the sixth cycle running (PnL **-8.19**, gross **+1449.71**), so
   my changes earn neither credit nor blame for it. `-Pci test` green; `scripts/test-score-change.py` green.
+
+## 2026-08-06 18:00Z — the fix for the restart defect was itself deployed by a restart
+
+- **Rule 421 — an exemption list is a claim about the whole complement; enumerate what you exempt, and
+  re-derive it whenever you add a directory.** ADR-0142 correctly identified that a docs/reports-only commit
+  must not bounce the JVM, and encoded it as `NON_BINARY_PATHS='^(reports|docs|ops)/'`. That is a statement
+  that *everything else* can reach the app binary — and `scripts/` cannot: `score-change.py`,
+  `test-score-change.py`, `build-prompt.py` and `system-report.py` are run by the cron wrapper, never by the
+  app, and `grep -rn "scripts/" --include=*.gradle --include=settings.gradle*` returns nothing. So committing
+  ADR-0143 restarted the app at **17:42:18Z**, ending the process that had survived six cycles
+  (`uptimeSeconds` **1064** vs `traffic.timestampMillis` **1786039202442**). **Rule: when a rule is expressed
+  as "exempt these prefixes", the defect hides in the prefixes you did not think to list, not in the ones
+  you did.**
+- **Rule 422 — `sources=0` on an exit order is the restart's fingerprint; look for it before believing a
+  window was clean.** Two orders fired at **17:42:57Z**, 39 seconds after the boot: `XOM BUY 5.000000` and
+  `MCD BUY 9.000000`, both `fusion exit — target decayed to flat [forecast=0.0, sources=0]`, both REJECTED
+  only because marks had not loaded (`no market data`). The desk was seconds from liquidating two live
+  positions on an aim erased by the restart, not by any signal. **Rule: a `sources=0` exit is never a
+  trading decision — it is the sensor layer reporting amnesia, and any window containing one is
+  contaminated.**
+- **Rule 423 — the fix for a defect can carry the defect; check the deploy path of the change, not just its
+  diff.** The whole point of ADR-0142 was that the loop must stop bouncing its own app; ADR-0143's diff
+  touched nothing the app runs, and it bounced the app anyway. The diff was innocent and the *gate that read
+  the diff* was not. **Rule: after shipping, verify the boot instant moved only when it should have — the
+  commit's contents do not tell you whether the wrapper agreed.**
+- **Rule 424 — read the endpoint, not the elided report, before computing a share.** `logs/report.md` shows
+  **6** of **21** fusion targets and marks the rest elided; three prior cycles computed composition off that
+  truncation. `curl /api/fusion/targets` returns all **20** live targets. The conclusion held either way, but
+  the shares did not. **Rule: when a report says "… N of M elided", any aggregate computed from it is a
+  sample, and the live endpoint is one curl away.**
+- **Rule 425 — item #2 confirmed a FOURTH time; the aggregate is stable, the shares are still noise.**
+  Aim-weighted 3600s expectancy **+0.2395 gross / -1.7605 net** of the 2.00 bps round trip, against
+  **-1.7898**, **-1.60** and **-1.9464** — four windows, same sign. Mean-reverting pair **50.23%** vs
+  **46.85% / 61.90% / 51.0%** with weights barely moved. `xsreversion` 900s **t=-2.56** is the only |t| > 2
+  of 15 for a fifth window, still short of Bonferroni **2.94** (Rule 407). **Rule 412 confirmed a third
+  time: grade on the aggregate, never on a share.**
+- **No change:** `27564bb15` is at **1/6** under ADR-0116, so the freeze forbids one. Window was mostly
+  market (PnL **-9.91**, gross **+2947.76**) *except* the restart transient my own commit caused — the first
+  window in seven that is not cleanly attributable to the market, and I caused it.

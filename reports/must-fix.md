@@ -15,6 +15,127 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 18:00Z (**NO CHANGE — the ADR-0116 freeze re-opens at `27564bb15` 1/6.** ADR-0143 landed and its code is live, but the commit that carried it **bounced the JVM** — and that is the finding of this cycle. `ops/improve-loop.sh` exempts only `^(reports|docs|ops)/` from rebuild+restart, so `scripts/score-change.py` — the loop's own out-of-band Python, which the app never loads and Gradle never reads — was classified as binary-capable. The app restarted **17:42:18Z**, re-seeded every sensor cold, and two orders fired at **17:42:57Z** with `sources=0`. That is the exact defect ADR-0142 was written to kill, reproduced by an incomplete path list, **inside ADR-0143's own evaluation window**. New **#1**. Composition is **#2**, conclusion confirmed on a fourth window; a new **#4** notes the freeze itself is being spent on a change that cannot move PnL.)
+
+### Step 0 — `27564bb15` (ADR-0143): ✅ **deployed and live**, ⚠️ **its own claim is NOT YET GRADABLE**, 🔴 **and it cost a restart**
+
+**Deployed.** `git merge-base --is-ancestor 27564bb15 HEAD` passes and `grep -n REVERT_KEEP_PATHS
+scripts/score-change.py` reads `("reports/", "docs/adr/", "docs/loop-findings.md", "docs/loop-playbook.md")`
+at line **73**, with `revertable_paths` / `revert_code_paths` present. The code is in the tree the loop runs.
+
+**Not yet gradable, by construction.** ADR-0143's VERIFY-BY is "the next ❌ BAD row carries `reverted (…)`
+instead of `⚠️ REVERT FAILED`". `scripts/score-change.py score` prints `27564bb15 still accumulating evidence
+(1/6 cycles)`, and no BAD verdict has occurred since. Nothing here is evidence for or against it yet.
+
+**But it bounced the app, and it should not have.** `ops_jvm.uptimeSeconds` **1064** against
+`traffic.timestampMillis` **1786039202442** puts the boot instant at **1786038138442** = **17:42:18Z** —
+against **1786027281687** = **14:41:21Z**, the process that had survived the previous six cycles. The
+sequence is unambiguous: baseline written **17:41:45Z**, status commit **17:42:06Z**, boot **17:42:18Z**.
+
+### Not danger — but the restart's cost is on the tape
+
+Gross **$18,933.02** is **1.3%** of the firm gross cap $1,500,000 (headroom **$1,481,067**); net
+**$-1,870.25** is **0.2%** of the $1,000,000 net cap. `breaker.halted` **false**, `regime` **CALM** (`trend`
+**CHOP**, `volRatio` **0.93**), `riskCuts` **[]**, `bookVolBrake` **0.9098**. Not a danger state. But
+`hedging.covarianceReady` is **false** again, and the WARN log from **13:42:57-04:00** carries the cold-seed
+block verbatim — `trend sensor still cold for TSLA after seeding 36 of 193 stored prices`, likewise GOOGL,
+AMD, ES, PLTR and the whole `USD.TSY.*` / `USD.SOFR.*` curve.
+
+### Window attribution — the first non-market window in seven, and it is a self-inflicted one
+
+`git diff --name-only 39451ce..27564bb` is `docs/adr/0143-*.md`, `docs/adr/README.md`,
+`docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md`, `scripts/score-change.py`,
+`scripts/test-score-change.py` — **nothing the app compiles or loads**. PnL **-9.91** (total **$-849.32**)
+and gross **+2947.76** are therefore still market, *except* for the restart transient my commit caused:
+the two REJECTED liquidations at 17:42:57Z and the cold re-accumulation behind the gross rise. Over the
+last 3 runs: PnL **-53.80**, gross **+8229.76**.
+
+---
+
+## Item #1 (NEW, top-ranked) — **the restart gate's exemption list omits `scripts/`, so the loop's own tooling bounces the trading JVM and re-seeds every sensor cold.**
+
+ADR-0142 established the mechanism and the cost; this is the same defect surviving in the *path list*.
+`ops/improve-loop.sh:135` reads `NON_BINARY_PATHS='^(reports|docs|ops)/'` and `:145` deploys whenever
+`git diff --name-only` leaves anything outside it. `scripts/` holds `score-change.py`,
+`test-score-change.py`, `build-prompt.py`, `system-report.py` — run by the cron wrapper, never by the app;
+`grep -rn "scripts/" --include=*.gradle --include=settings.gradle*` returns **nothing**, so none is a Gradle
+input. They cannot reach the app binary, and they restarted it anyway.
+
+**The measured cost, this cycle:** two orders at **17:42:57Z** — `XOM BUY 5.000000` and `MCD BUY 9.000000`,
+both `REJECTED`, both `fusion exit — target decayed to flat [forecast=0.0, sources=0]`, reason
+`no market data`. `sources=0` is every sensor cold: the desk formed an intent to **liquidate two live
+positions** because the restart erased the opinions behind them, and was stopped only by marks not having
+loaded yet. Had the marks been a few seconds warmer, the restart would have flattened them outright — which
+is precisely the "restart flattens the book" mechanism the three `→ $0.00` scored rows recorded.
+
+**Fix (next unfrozen cycle) — name the files, do NOT glob `scripts/`.** `scripts/run-local.sh`, `svc.sh`,
+`stop-local.sh`, `reset-live.sh`, `reset-sim.sh` are the *launcher*: a change there legitimately warrants a
+restart even though it changes no binary. The exemption must cover only the loop's own out-of-band tooling
+(`score-change.py`, `test-score-change.py`, `build-prompt.py`, `system-report.py`) — an enumerated list, so
+adding a future launcher script fails safe toward restarting. Note the fix lands in `ops/improve-loop.sh`,
+which is already exempt, so it will not itself bounce the app.
+
+**VERIFY-BY (next run):** for the next cycle whose commit touches only exempt paths plus those four files —
+(a) `ops_jvm.uptimeSeconds` minus the elapsed inter-cycle wall time must leave the boot instant
+(`traffic.timestampMillis − uptimeSeconds×1000`) **unchanged** from this register's recorded value; (b)
+`logs/report.md` must contain **no** `sensor still cold … after seeding` WARN dated after that commit; and
+(c) **no** order in `recent_orders` after that commit may carry `sources=0`. All three, or it is STILL-BROKEN.
+
+---
+
+## Item #2 (was #1, carried — conclusion CONFIRMED on a FOURTH independent window) — **the aim still does not clear its own round-trip cost.**
+
+Re-measured on the full live target set this cycle (`curl /api/fusion/targets` — **20** targets, not the **6**
+`logs/report.md` elides to), decomposing `contributions` into `|forecast × weight|` shares:
+
+| source | share of aim | 3600s avgReturnBps | t (cohort-clustered) |
+| --- | --- | --- | --- |
+| trend | 48.45% | +1.5793 | +1.11 |
+| reversion | 41.88% | -0.1024 | -0.06 |
+| xsreversion | 8.35% | -5.0632 | -1.20 |
+| momentum | 1.32% | -4.5346 | -0.72 |
+
+Mean-reverting pair combined **50.23%**, against **46.85%**, **61.90%** and **51.0%** on the three prior
+windows — the share keeps swinging with weights barely moved, exactly as Rule 412/420 warned. The aggregate
+does not: **aim-weighted 3600s expectancy +0.2395 bps gross → -1.7605 bps net** of the **2.00 bps** round trip
+(`turnover_cost_by_name` reads `fee_bps` **1.00** per side on every equity; ES/NQ **0.20**), against
+**-1.7898**, **-1.60** and **-1.9464** before. **Four windows, same sign.** The 900s and 225s aggregates are
+worse still (**-2.2297** and **-2.0047** net). `xsreversion` at 900s (**-2.2409**, **t=-2.56**) is the only
+|t| > 2 of the 15 rows for a **fifth** consecutive window — short of Bonferroni's **2.94**, so the weight of
+that evidence remains sign-consistency, not the p-value (Rule 407).
+
+`social` is still the only source clearing cost at 3600s (**+9.1815** gross → **+7.1815** net, hit rate
+**0.580** on **342** resolved, **t=+1.15**) and still contributes **0.00%** of the aim. ADR-0139 already tried
+loosening that gate and was graded ❌ BAD, so it stays untouched (Rule: never re-attempt a reverted idea).
+
+**VERIFY-BY:** aim-weighted 3600s expectancy exceeding **+2.00 bps** gross on the full `/api/fusion/targets`
+set — the aggregate, never a single source's share.
+
+**Ranked below #1 deliberately:** a restart that erases the sensors makes every composition measurement a
+measurement of the warm-up transient. Fix what corrupts the instrument before re-tuning what it reads.
+
+---
+
+## Item #3 (was #3, carried, unchanged) — **entry is structurally frozen for names early on their aim path.**
+
+`insideBuffer` is **14** of **20** live targets this window. Mechanism unchanged from the 17:00Z block: the
+no-trade `band` is priced off `targetQty` while the gap it gates is `aim − held`. Still ranked below #2 —
+deploying more capital into an aim measured at **-1.7605 bps net of cost** would lose money faster.
+
+---
+
+## Item #4 (NEW, low rank, no action — a structural note on the freeze itself)
+
+ADR-0143 changes `scripts/score-change.py` only, which runs **after** a verdict and touches no trading code —
+so it **cannot** move PnL or exposure by any mechanism. Yet it now consumes a full **6**-cycle ADR-0116
+evaluation window during which the loop may make no other change, and whatever risk-adjusted number the scorer
+eventually computes for it will be pure market noise attributed to a change that could not have caused it.
+The freeze is correct as a general rule and is being honoured this cycle; the observation is that a change
+provably confined to out-of-band tooling arguably should not spend a trading-evidence window. **Not acted on**
+— it is a change to the loop's own governance (ADR-0116), it needs its own ADR, and #1 outranks it.
+
+---
+
 ## Verification block — 2026-08-06 17:30Z (**CHANGE MADE — the ADR-0116 freeze ended: `39451ce71` scored ❌ BAD.** And the scoring exposed something that outranks every item previously on this register: **the scorer's auto-revert has never once worked.** Replaying all nine BAD verdicts at their exact scoring point, the whole-commit `git revert` conflicted **9 of 9** times — every one on the same three files, `docs/loop-findings.md` + `reports/last-analysis.md` + `reports/must-fix.md`, and nothing else — while the same revert scoped to code paths applies **CLEAN 9 of 9**. The loop's only self-correction arm has been dead, silently, and every change the scorer condemned is still executing. That is the new **#1** and this cycle fixes it (ADR-0143). The composition item is re-ranked **#2** — unchanged in conclusion, and its shares swung for a third time.)
 
 ### Step 0 — `39451ce71` (ADR-0142): ✅ **its own claim VERIFIED a sixth time — but the scorer graded it ❌ BAD and the revert FAILED**
