@@ -52,6 +52,14 @@ import java.util.Map;
  * {@code |target| · TARGET_ABS / |forecast|} is that name's position at a typical forecast: Carver's
  * "average position", read off this cycle's own arithmetic with no estimator and no warm-up.
  *
+ * <p><b>And the forecast that scale is priced at is MEASURED, not nominal (ADR-0141).</b> {@code
+ * TARGET_ABS} is what each SOURCE is normalised to; the band is applied to the COMBINED forecast, which
+ * the ADR-0076 DM and the ADR-0124 agreement scalar have already attenuated. Pricing the average position
+ * at the unattenuated constant made the release condition {@code |aim|/|target| > width × TARGET_ABS/|f|}
+ * unsatisfiable for every name with {@code |f| < width × TARGET_ABS}, since ADR-0102 caps that ratio at
+ * one — a permanent dead zone in which attenuations meant to reduce SIZE removed the position entirely.
+ * See {@link #typicalForecastAbs}.
+ *
  * <p><b>And so is the buffer WIDTH (ADR-0101).</b> Carver's 0.10 is a published convention for a desk
  * whose cost and edge he does not know; this desk measures both, per name and per source, and the width
  * that follows from them is not 0.10. See {@link #widthFor} for the derivation and the one-way
@@ -166,6 +174,10 @@ public final class PositionBuffer {
         }
         double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
         double edgeBps = passingEdgeBps(gate); // ADR-0101: measured once, the same for every name
+        // ADR-0141: the forecast strength the "average position" is priced at, measured on this cycle's
+        // own cross-section rather than assumed at the nominal scaling constant. Measured once, the same
+        // for every name — like the edge above.
+        double typicalForecast = typicalForecastAbs(targets);
         List<FusionPlanner.Target> out = new ArrayList<>(targets.size());
         Map<String, BigDecimal> snapshot = new HashMap<>(targets.size());
         int inside = 0;
@@ -175,8 +187,8 @@ public final class PositionBuffer {
             BigDecimal target = t.targetQty() == null ? BigDecimal.ZERO : t.targetQty();
             BigDecimal aim = nextAim(t.instrument(), target, held, rate);
             double width = widthFor(t.instrument(), gate, edgeBps);
-            BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held, width),
-                    target, rate);
+            BigDecimal delta = bufferedDelta(aim, held,
+                    band(target, t.combinedForecast(), held, width, typicalForecast), target, rate);
             if (!mayIncrease(gate, stopArmed, t.instrument())) {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
@@ -455,13 +467,93 @@ public final class PositionBuffer {
 
     /** As above at an explicit width — the ADR-0101 measured one, or the convention when unmeasured. */
     BigDecimal band(BigDecimal target, double forecast, BigDecimal held, double width) {
+        return band(target, forecast, held, width, Forecast.TARGET_ABS);
+    }
+
+    /**
+     * As above with the forecast strength the average position is priced at stated explicitly — the
+     * ADR-0141 measured cross-section, or {@link Forecast#TARGET_ABS} where there is nothing to measure.
+     *
+     * <p>{@code typicalForecastAbs} enters exactly where {@code TARGET_ABS} did, so the band is still
+     * {@code width × |target| × E|f| / |forecast|} — Carver's "a fraction of the average position" — with
+     * {@code E|f|} read off the desk's own arithmetic instead of assumed.
+     */
+    BigDecimal band(BigDecimal target, double forecast, BigDecimal held, double width,
+                    double typicalForecastAbs) {
         double f = Math.abs(forecast);
+        double typical = typicalForecastAbs > 0.0
+                ? Math.min(Forecast.TARGET_ABS, typicalForecastAbs)
+                : Forecast.TARGET_ABS;
         BigDecimal scale = target.signum() != 0 && f > 0.0
-                ? target.abs().multiply(BigDecimal.valueOf(Forecast.TARGET_ABS))
+                ? target.abs().multiply(BigDecimal.valueOf(typical))
                         .divide(BigDecimal.valueOf(f), QTY_SCALE, RoundingMode.HALF_EVEN)
                 : held.abs();
         return scale.multiply(BigDecimal.valueOf(width))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+    }
+
+    /**
+     * ADR-0141 — the forecast strength this desk's combiner actually produces: the mean {@code |f|} over
+     * the names it planned a view on THIS cycle. Zero when it planned fewer than two, which restores
+     * {@link Forecast#TARGET_ABS} at the call site.
+     *
+     * <h3>The dead zone this removes</h3>
+     * The band is {@code width × |target| × S / |f|} for a scaling constant {@code S}, and ADR-0102 bounds
+     * the aim into the interval between flat and the target, so a name opening from flat routes its first
+     * order only when
+     * <pre>
+     *   |aim| &gt; band   ⟺   |aim|/|target| &gt; width × S / |f|      with   |aim|/|target| ≤ 1
+     * </pre>
+     * which is <b>unsatisfiable for every name with {@code |f| &lt; width × S}</b>. At {@code S = TARGET_ABS}
+     * that threshold is a fixed forecast magnitude, and the desk's combined forecasts sit below it as a
+     * matter of course: the ADR-0076 DM and the ADR-0124 agreement scalar are both attenuations, and both
+     * were specified as size reductions ("can only ever SHRINK the combined value") — but the band was
+     * still priced at the UNATTENUATED constant, so what they actually delivered was a position of exactly
+     * zero, permanently, rather than a smaller one. An 80% haircut to conviction became a 100% haircut to
+     * the position. Read off the live plan the two names carrying a corroborated view needed
+     * {@code |aim|/|target|} of 0.8239 and 3.1807 respectively — the second is greater than one, so no aim
+     * path of any length could ever have opened it, and {@code insideBuffer} read every planned name.
+     *
+     * <h3>Why the cross-section, and why it needs no estimator</h3>
+     * {@code S} is Carver's expected absolute forecast, the constant that turns a forecast into "how big is
+     * a typical position" (<i>Systematic Trading</i>, Harriman House 2015). {@code TARGET_ABS} is what each
+     * SOURCE is scaled to before combination — {@code forecastScalars} normalises every source to it — but
+     * the band is applied to the COMBINED forecast, which is the sources' weighted average times two
+     * scalars in {@code (0, 1]} and one in {@code [1, 2.5]}. Its expected absolute value is therefore a
+     * different, smaller number, and it is one the desk computes for itself every cycle. Taking the mean
+     * over the current plan keeps the property the existing scale already has and the class doc already
+     * claims — "read off this cycle's own arithmetic with no estimator and no warm-up" — so it survives a
+     * restart intact, needs no persistence, and self-calibrates to any feed's forecast distribution
+     * (never a hardcoded level). Names planned with no view are excluded: a name the desk has no opinion on
+     * is not one of its typical positions.
+     *
+     * <h3>What it can never do</h3>
+     * Capped at {@code TARGET_ABS} at the call site, so the band is never WIDER than the pre-ADR-0141 one:
+     * this can only ever release a trade the desk's own arithmetic already wanted, never freeze one it was
+     * making. It touches neither the aim path nor the target, so the desk's intended risk is unchanged
+     * quantity for quantity — only the threshold at which intent becomes an order moves. Every control
+     * below it is untouched: the ADR-0064 edge gate, the ADR-0126 σ-cold veto, the ADR-0083 vol budget, the
+     * ADR-0137 gross cap, the pre-trade guardrail and the firm drawdown breaker all still have the last
+     * word, so a released order is still only filled if every deterministic floor permits it.
+     *
+     * <p>Dimensionless — a forecast magnitude, never a size or a price (invariant 7 / ADR-0016), and it
+     * introduces no number at all: the value is the mean of forecasts the planner already computed.
+     */
+    static double typicalForecastAbs(List<FusionPlanner.Target> targets) {
+        double sum = 0.0;
+        int n = 0;
+        for (FusionPlanner.Target t : targets) {
+            double f = Math.abs(t.combinedForecast());
+            if (f > 0.0) {
+                sum += f;
+                n++;
+            }
+        }
+        // n < 2 is not a cross-section. At n = 1 the mean IS the datum, so E|f|/|f| is identically 1 and
+        // the band would collapse to width x |target| for every forecast strength — the statistic
+        // measuring nothing but itself, the same degeneracy ADR-0124 rejected at one effective source.
+        // Below two names the desk has not measured its own forecast distribution and makes no claim.
+        return n < 2 ? 0.0 : sum / n;
     }
 
     /**

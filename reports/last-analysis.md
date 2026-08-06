@@ -1,64 +1,73 @@
-The app has not been running since last cycle — ADR-0140's migration collided with an existing V48 and Flyway killed the boot; renumbered to V51 and added a build guard so a version clash can never silently kill the app again.
+The no-trade band was priced at a forecast the combiner never produces, so a name's whole target could sit inside its own buffer and never open — the average position is now priced at the forecast the desk actually generates (ADR-0141).
 
-*(Every figure below is read from `logs/jethro-app.log`, `logs/report.md`, `reports/run-status.json` and
-the scorer's own output. None is authored here — invariant 7 / ADR-0016.)*
+*(Every figure below is read from `logs/report.md`, `reports/run-status.json` and the scorer's own
+output. None is authored here — invariant 7 / ADR-0016.)*
 
-# Last analysis — 2026-08-05 20:00Z
+## Situation — the live money, first
 
-## Situation
+**Money.** Total PnL reads **-628.06833967**, unchanged **+0.00** since the last run and **+0.00**
+across the last three. `pnl_growth_pct` **0.0** against a target of **1.0** — `on_track` **false**,
+`underwater` **true**. Not bleeding; **stuck**.
 
-1. **Money — unmeasurable, and I will not pretend otherwise.** There is no live PnL, exposure,
-   attribution or order history this run: every endpoint returns
-   `URLError: <urlopen error [Errno 111] Connection refused>` and the report's SITUATION header reads
-   `(risk endpoint unavailable — could not read live PnL/exposure.)`. `scripts/score-change.py score`
-   printed `cannot measure current vector (…Connection refused); leaving pending baseline for next run`.
-   The window is **unmeasured**, not flat — quoting the last-known figures as this window's would be
-   authoring numbers.
-2. **Risk.** Also unreadable, and for the same reason. No breaker state, no cap utilisation. The book is
-   whatever it was when the process died; nothing has been traded into or out of it since.
-3. **Cause — my last change, entirely.** `3cc91bc46` (ADR-0140) shipped
-   `app/…/db/migration/V48__fusion_aim.sql`, but `V48__sector_breadth_equities.sql` already existed in
-   `modules/reference-data` (ADR-0125). `PersistenceConfig.flyway()` runs **one** Flyway over
-   `classpath:db/migration`, merging every module's migrations, so a version number is a **global**
-   identifier. Flyway refused to resolve — `FlywayException: Found more than one migration with version
-   48` — `flyway` failed, then `refDataRepository`, `instrumentRefSource`, `universeController`, and the
-   context aborted. The baseline recorded at **19:44:13Z** came from the *previous* still-live process;
-   the new build died at **19:44:54Z** and nothing has served since.
-4. **Danger.** Not the usual kind — no breaker, no cap. The danger is that the desk was **absent**: a
-   dead JVM trades nothing, reports nothing and hedges nothing, and had the scorer reached a stale
-   process it would have blamed ADR-0140's *mechanism* for a vector produced by its *filename*.
-5. **Attribution.** 100% change, 0% market — the inverse of the last five windows. No market condition
-   can stop a Flyway resolver.
+**Risk.** Gross exposure **$0.00** — **0.0%** of the firm cap $1,500,000, with **$1,500,000** of
+headroom; net **$0.00** of a $1,000,000 net cap. `breaker.halted` **false**, `var95` **0.00** with the
+note `no positions`. This is the **DORMANT** flag, not DANGER: nothing is anywhere near a cap, so under
+ADR-0132 the correct response is to deploy, not de-risk.
 
-## Diagnosis
+**Cause.** Last cycle's change (`3cc91bc46`, ADR-0140, the durable fusion aim) scored ⚠️ INCONCLUSIVE —
+risk-adjusted return/cycle +0.000060 over 36 cycles, t=+1.23 against a 1.5 hurdle. The V51 migration
+rename shipped alongside it **worked**: `ops_jvm` answers with `uptimeSeconds` **62475**, there is no
+`FlywayException` in the log, and every endpoint that read `Connection refused` last run is live.
+Must-fix item #0 closes ✅.
 
-The defect is not in ADR-0140's reasoning; it is in a namespace assumption. Migrations live in four
-module trees and are numbered as if each tree owned its own sequence, but assembly merges them into a
-single Flyway line. V50 was already taken by `modules:order` and V48 by `modules:reference-data`, neither
-visible from `app/`. Nothing caught it: each module is internally consistent, `-Pci test` was green on the
-broken tree, and the collision only comes into existence once the classpaths merge at runtime. That is the
-worst shape a defect can have here — invisible to the build, fatal at boot, and it costs *every* cycle
-rather than some money in one.
+**Attribution — market vs change.** `recent_orders` shows no order since **2026-08-05 20:24:38Z** and
+`orders_day.total` is **0**; the US session was closed for the whole window. The window is therefore
+**100% market, 0% change** — with a flat book and a frozen tape there was nothing for either to move.
+No credit or blame is claimed in either direction.
 
-Verification outranks novelty, so this cycle repairs that and nothing else. The ADR-0116 freeze does not
-bind: a pending change that never executed has no evidence to protect.
+## What I found
 
-## Change
+ADR-0140's mechanism **did** work: the live `aims` map carries **-0.003064** for NQ, a real
+partially-adjusted intent that survived a restart, which is exactly what it promised. The desk still
+routed nothing — so the aim reaching the band was never the whole story. The arithmetic says why.
 
-`V48__fusion_aim.sql` → **`V51__fusion_aim.sql`** (V50 is the repo's highest, so V51 is the next free
-number — read off the tree, not chosen). The table schema, `JdbcAimStore`, the ADR-0080-derived ageing
-window and every ADR-0140 code path are **byte-identical** — only the filename moves. So this *repairs*
-the pending change rather than replacing it, and ADR-0140's own VERIFY-BY survives to be graded next run.
-No dial, band, rate, gate or cap is touched, and the deterministic floor is untouched.
+ADR-0094's band is `width × |target| × TARGET_ABS / |f|`, and ADR-0102 confines the aim to the interval
+between flat and the target. A name opens only when `|aim|/|target| > width × TARGET_ABS/|f|`, and the
+left side is bounded above by **1** — by ADR-0102, not by any dial. The condition is therefore
+**unsatisfiable for every name whose combined forecast is weaker than `width × TARGET_ABS`**. Of the two
+names carrying a view this cycle, NQ (`f` **-1.2137982837547245**) needs **0.8239** and NVDA (`f`
+**-0.31439455218834894**) needs **3.1807** — greater than one, so no aim path of any length could ever
+have opened it. `insideBuffer` reads **8** of **8**, and gross is zero.
 
-Plus the guard that makes the class of defect impossible to ship silently:
-`ModuleBoundariesTest.migrationVersionsAreUniqueAcrossModules` resolves `classpath*:db/migration/V*.sql`
-— exactly the merged view Flyway sees — and fails the build on a repeated version, with a non-vacuity
-assertion so it cannot pass on an empty scan. It was **proven against the live defect before the fix**:
-run on the broken tree it failed, naming both `V48__fusion_aim.sql` and `V48__sector_breadth_equities.sql`.
-After the rename, `./gradlew -Pci test` is green.
+The root is a units error. `TARGET_ABS` is what each **source** is normalised to — live `meanAbsClaim`
+**8.933184091982607** reversion, **6.672769378384960** trend, **9.238246464313300** xsreversion, all
+near it as designed — but the band is applied to the **combined** forecast, which the ADR-0076
+multiplier and the ADR-0124 agreement scalar have already attenuated (NQ's **+18.529717715250550** and
+**-20.0** average to -5.427; agreement **0.1954775485324326** takes it to -1.214). Both scalars were
+specified as reductions in **size**. Feeding a shrunken forecast into a threshold calibrated for an
+unshrunken one does not shrink the position — it deletes it. An 80% haircut to conviction became a 100%
+haircut to the position, permanently, in a place neither ADR intended a tradability gate.
 
-**VERIFY-BY next run:** `ops_jvm` returns a JSON body with an `uptimeSeconds` instead of
-`Connection refused`; `logs/jethro-app.log` contains no `FlywayException`; `flyway_schema_history` shows a
-`51` row. If those hold, the boot regression closes and ADR-0140's mechanism becomes gradeable for the
-first time.
+## The change
+
+ADR-0141 prices the average position at the forecast strength the combiner actually produces: the mean
+`|combined forecast|` over the names planned a view this cycle, capped at `TARGET_ABS`. No number is
+introduced — it is the mean of forecasts the planner already computed. It is cross-sectional, so it
+needs no estimator, no warm-up and no persistence and survives a restart intact, which is the failure
+ADR-0138 and ADR-0140 were both spent repairing. The cap makes it strictly one-way: the band is never
+*wider* than before, so this can release a trade the desk's own arithmetic already wanted but never
+freeze one. The aim path, the target, the ADR-0102 clamp and the ADR-0101 width are untouched, and every
+deterministic floor — edge gate, σ-cold veto, vol budget, gross cap, pre-trade guardrail, drawdown
+breaker — still has the last word on anything released.
+
+I deliberately did **not** touch ADR-0124's agreement scalar, though it is what zeroes the other six
+planned names. Those six are single-source and their only source is **xsreversion**, whose measured
+expectancy is negative at all three horizons (`avgReturnBps` **-1.6172582662041586** at 900 s over 152
+cohorts, **-1.9673663434138422** at 3600 s, **-0.16422896669296588** at 225 s). Unlocking them would
+deploy capital into the desk's worst-measured source. They are flat for the right reason, and the honest
+read of the telemetry is still that **no source measures a significant positive edge** — nothing clears
+its cohort hurdle. This change does not manufacture edge; it stops the desk being unable to act on
+whatever edge it does form.
+
+`-Pci test` green, five new tests including the dead-zone proof (NVDA's nominal band exceeds its entire
+target) and the live frozen-NQ example.

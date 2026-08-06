@@ -763,4 +763,105 @@ class PositionBufferTest {
         assertThat(nullStore.apply(plan, null, RATE).aims().get("AAPL"))
                 .isEqualByComparingTo(withoutStore.apply(plan, null, RATE).aims().get("AAPL"));
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0141 — the average position is priced at the forecast the combiner actually produces.
+    //
+    // Worked example, the live plan of 2026-08-06 13:29:54Z read from /api/fusion/targets. Two names
+    // carried a combined view; the other six were planned flat:
+    //
+    //   NQ    f = −1.2137982837547245   target = −0.017759   held = 0   aim = −0.003064
+    //   NVDA  f = −0.31439455218834894  target = −4.909292   held = 0
+    //
+    //   E|f|  = (1.2137982837547245 + 0.31439455218834894) / 2 = 0.7640964179715367
+    //
+    //   NQ,   nominal  scale = 0.017759 x 10          / 1.2137982837547245 = 0.146310  band = 0.014631
+    //   NQ,   measured scale = 0.017759 x 0.764096417 / 1.2137982837547245 = 0.011179  band = 0.001118
+    //   gap = aim − held = −0.003064; |gap| <= 0.014631 (frozen) but > 0.001118, and the order is then
+    //   gap + band = −(0.003064 − 0.001118) = −0.001946 — traded to the near edge, exactly as before.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    void theTypicalForecastIsTheMeanOverTheNamesActuallyPlannedAView() {
+        // The six flat names contribute nothing: a name the desk has no opinion on is not one of its
+        // typical positions.
+        assertThat(PositionBuffer.typicalForecastAbs(List.of(
+                target("NQ", -1.2137982837547245, "-0.017759", "0"),
+                target("NVDA", -0.31439455218834894, "-4.909292", "0"),
+                target("GOOG", 0.0, "0", "0"),
+                target("AAPL", -0.0, "0", "0"))))
+                .isEqualTo(0.7640964179715367);
+        assertThat(PositionBuffer.typicalForecastAbs(List.of(target("GOOG", 0.0, "0", "0")))).isEqualTo(0.0);
+        assertThat(PositionBuffer.typicalForecastAbs(List.of())).isEqualTo(0.0);
+        // One name is not a cross-section: the mean would be the datum itself, so no claim is made and
+        // the nominal constant stands.
+        assertThat(PositionBuffer.typicalForecastAbs(List.of(target("NQ", -1.21, "-0.017759", "0"))))
+                .isEqualTo(0.0);
+    }
+
+    @Test
+    void aForecastWeakerThanTheDeadZoneCouldNeverRouteAtTheNominalScale() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        // ADR-0102 caps |aim| at |target|, so the largest gap this name can ever present from flat is
+        // |target| itself. At the nominal constant the band exceeds it — no aim path of any length opens
+        // the position. This is the dead zone: |f| = 0.314… < width x TARGET_ABS = 1.0.
+        BigDecimal nominal = buffer.band(new BigDecimal("-4.909292"), -0.31439455218834894,
+                BigDecimal.ZERO, 0.10, Forecast.TARGET_ABS);
+        assertThat(nominal).isEqualByComparingTo("15.615067");
+        assertThat(nominal).isGreaterThan(new BigDecimal("4.909292"));
+
+        // Priced at the forecast strength the combiner actually delivers, the band is a fraction of the
+        // target again and the name is reachable.
+        BigDecimal measured = buffer.band(new BigDecimal("-4.909292"), -0.31439455218834894,
+                BigDecimal.ZERO, 0.10, 0.7640964179715367);
+        assertThat(measured).isEqualByComparingTo("1.193142");
+        assertThat(measured).isLessThan(new BigDecimal("4.909292"));
+    }
+
+    @Test
+    void theLiveFrozenNameRoutesOnceTheScaleIsMeasured() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        BigDecimal target = new BigDecimal("-0.017759");
+        BigDecimal aim = new BigDecimal("-0.003064");
+
+        BigDecimal nominal = buffer.band(target, -1.2137982837547245, BigDecimal.ZERO, 0.10,
+                Forecast.TARGET_ABS);
+        assertThat(nominal).isEqualByComparingTo("0.014631");
+        assertThat(PositionBuffer.bufferedDelta(aim, BigDecimal.ZERO, nominal, target, RATE))
+                .isEqualByComparingTo("0.000000"); // inside the buffer — the live reading
+
+        BigDecimal measured = buffer.band(target, -1.2137982837547245, BigDecimal.ZERO, 0.10,
+                0.7640964179715367);
+        assertThat(measured).isEqualByComparingTo("0.001118");
+        assertThat(PositionBuffer.bufferedDelta(aim, BigDecimal.ZERO, measured, target, RATE))
+                .isEqualByComparingTo("-0.001946"); // to the near edge, on the target's own side
+    }
+
+    @Test
+    void aMeasuredScaleCanOnlyEverNarrowTheBandNeverWidenIt() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        BigDecimal nominal = buffer.band(new BigDecimal("-142.319300"), -9.64, BigDecimal.ZERO, 0.10,
+                Forecast.TARGET_ABS);
+        // A cross-section stronger than TARGET_ABS is capped back to it, so the band is never wider than
+        // the pre-ADR-0141 one: this can release a trade, never freeze one.
+        assertThat(buffer.band(new BigDecimal("-142.319300"), -9.64, BigDecimal.ZERO, 0.10, 40.0))
+                .isEqualByComparingTo(nominal);
+        // And a degenerate measurement (no name carried a view) restores the constant exactly.
+        assertThat(buffer.band(new BigDecimal("-142.319300"), -9.64, BigDecimal.ZERO, 0.10, 0.0))
+                .isEqualByComparingTo(nominal);
+    }
+
+    @Test
+    void aPlanAtTheNominalStrengthIsByteIdenticalToThePreAdr0141Desk() {
+        // Two names averaging exactly TARGET_ABS: the measured scale IS the constant, so nothing moves.
+        var plan = List.of(target("AAPL", -14.0, "-142.319300", "-7"),
+                target("MSFT", 6.0, "60.000000", "0"));
+        assertThat(PositionBuffer.typicalForecastAbs(plan)).isEqualTo(Forecast.TARGET_ABS);
+        var applied = new PositionBuffer(0.10).apply(plan, null, RATE);
+        assertThat(applied.targets().get(0).deltaQty()).isEqualByComparingTo(
+                PositionBuffer.bufferedDelta(applied.aims().get("AAPL"), new BigDecimal("-7"),
+                        new PositionBuffer(0.10).band(new BigDecimal("-142.319300"), -14.0,
+                                new BigDecimal("-7")),
+                        new BigDecimal("-142.319300"), RATE));
+    }
 }

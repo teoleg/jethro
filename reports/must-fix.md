@@ -15,6 +15,80 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 13:30Z (**✅ item #0 CLOSES — the app boots and every endpoint is live.** `ops_jvm` answers with `uptimeSeconds` **62475**, `logs/jethro-app.log` carries no `FlywayException`, and every reading that was `Connection refused` last run is back. Item #1 is therefore gradeable for the first time — and it is ⚠️ STILL-BROKEN, but its mechanism is now pinned to a different, provable cause than the aim's state handling, which ADR-0140 fixed correctly. **The ADR-0116 freeze does not bind:** `3cc91bc46` was scored ⚠️ INCONCLUSIVE and `reports/.pending-baseline.json` is gone.)
+
+### Step 0 — `3cc91bc46` + the V51 repair: ✅ **VERIFIED at the defect level**, scored ⚠️ INCONCLUSIVE on the vector
+
+Both of last cycle's VERIFY-BYs are met. The **boot** repair: `ops_jvm.uptimeSeconds` **62475**, no
+`FlywayException`, and `traffic`, `feeds`, `marks`, `signals_telemetry`, `fusion_targets`, `var`,
+`breaker`, `regime`, `hedging` and `attribution` all return bodies. The **aim** mechanism: the live
+`aims` map carries **-0.003064** for NQ against a `targetQty` of **-0.017759** — a real
+partially-adjusted intent that survived a restart, which is precisely what ADR-0140 promised and what
+no in-memory, churn-pruned map could have produced. The scorer graded the vector ⚠️ INCONCLUSIVE
+(risk-adj return/cycle +0.000060 over 36 cycles, t=+1.23, hurdle 1.5) — kept, not reverted.
+
+### Window attribution — market only, and the window is a CLOSED SESSION
+
+`recent_orders` shows no order since **2026-08-05 20:24:38Z**; `orders_day.total` is **0**. Total PnL
+**-628.06833967**, gross **$0.00** (**0.0%** of the firm cap, headroom **$1,500,000**), net **$0.00**;
+`breaker.halted` **false**; `var95` **0.00** with the note `no positions`. **100% market, 0% change** —
+a flat book against a frozen tape moves for neither reason.
+
+### Item #1 — the desk cannot open a position: ⚠️ STILL-BROKEN → **ADDRESSED THIS CYCLE (ADR-0141)**, cause re-pinned
+
+Still broken on entry: `insideBuffer` **8** of **8** planned names, `currentQty` **0** everywhere, gross
+**$0.00**. But ADR-0140's half is now demonstrably **done** — the aim persists and accumulates. What
+remains is arithmetic, and it is provable rather than inferred.
+
+The release condition for a name opening from flat is `|aim|/|target| > width × TARGET_ABS/|f|`, and
+ADR-0102 bounds the left side above by **1**. So the condition is **unsatisfiable for every name with
+`|f| < width × TARGET_ABS`** — at the shipped `0.10`/`10.0` that is every `|f| < 1.0` on a ±20 scale.
+Both names carrying a view sit at or inside it:
+
+| name | live combined `f` | required `\|aim\|/\|target\|` | reachable? |
+| --- | --- | --- | --- |
+| NQ | **-1.2137982837547245** | **0.8239** | only at 82% of target, on a whole-horizon time constant |
+| NVDA | **-0.31439455218834894** | **3.1807** | **never** — it exceeds the ADR-0102 bound of 1 |
+
+This is why last cycle's diagnosis was necessary but not sufficient: a durable aim is worth nothing when
+the threshold it walks toward is above the ceiling its own clamp imposes.
+
+**Root cause — a units error, not a mis-set dial.** `TARGET_ABS` is what each SOURCE is normalised to
+(live `meanAbsClaim` **8.933184091982607** / **6.672769378384960** / **9.238246464313300**, all near
+it), but the band is applied to the COMBINED forecast, already attenuated by the ADR-0076 multiplier and
+the ADR-0124 agreement scalar (NQ's **+18.529717715250550** and **-20.0** average to -5.427; agreement
+**0.1954775485324326** takes it to -1.214). Both scalars are specified as reductions in SIZE. Passing a
+shrunken forecast into a threshold calibrated for an unshrunken one deletes the position instead of
+shrinking it.
+
+**Fix (ADR-0141).** The average position is priced at `min(TARGET_ABS, E|f|)`, where `E|f|` is the mean
+`|combined forecast|` over the names planned a view this cycle (`n ≥ 2`; below that the mean is the
+datum and no claim is made). Cross-sectional, so no estimator, no warm-up, no persistence, restart-proof
+and feed-agnostic. Capped, so the band is never wider than before — one-way toward releasing, never
+freezing. No dial, band width, rate, gate, cap or floor is touched.
+
+**VERIFY-BY next run:** `fusion_targets.insideBuffer` strictly less than `instruments`; at least one
+`fusion entry` row in `recent_orders` inside the window; and `risk.total.grossExposure` strictly above
+**$0.00**. If `insideBuffer` still reads the full plan, the band was not the binding constraint and this
+diagnosis is wrong — do not re-attempt it, move to why the planner's targets are so small.
+
+### Item #2 (carried, unchanged rank) — no source has a measured positive edge
+
+`signals_telemetry` again shows nothing clearing its cohort hurdle at any horizon; xsreversion — the
+only source covering most of the universe — measures **negative** at all three (`avgReturnBps`
+**-1.6172582662041586** at 900 s over 152 cohorts, **-1.9673663434138422** at 3600 s,
+**-0.16422896669296588** at 225 s). Deliberately **not** attacked this cycle: with the desk unable to
+route at all, a new source could not have been measured either. It becomes #1 the moment item #1 is
+VERIFIED. **VERIFY-BY:** any source's `avgReturnBps` positive with `|t|` over its cohort hurdle.
+
+### ~~Item #0 — a migration version collision is a silent, whole-app kill~~ ✅ **VERIFIED, CLOSED**
+
+`ops_jvm.uptimeSeconds` **62475**, no `FlywayException`, all endpoints live. The
+`ModuleBoundariesTest.migrationVersionsAreUniqueAcrossModules` guard is in the build and was proven
+against the live defect before the fix. Struck.
+
+---
+
 ## Verification block — 2026-08-05 20:00Z (**🔴 REGRESSED — ADR-0140 stopped the app from booting.** The Flyway migration it shipped, `V48__fusion_aim.sql`, collides with the pre-existing `V48__sector_breadth_equities.sql` (ADR-0125, `modules/reference-data`). `PersistenceConfig.flyway()` runs ONE Flyway over `classpath:db/migration`, merging every module's migrations, so a version is a GLOBAL identifier — Flyway refused to resolve, every DB-backed bean failed, and the process died at startup. **This cycle repairs that**, which outranks the ADR-0116 freeze: the pending change never executed, so there is nothing to measure and nothing to pile onto.)
 
 ### Step 0 — `3cc91bc46` (ADR-0140, the durable fusion aim): 🔴 **REGRESSED — boot-breaking, repaired this cycle**

@@ -4840,3 +4840,46 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   byte-identical, so this REPAIRS the pending change instead of replacing it and ADR-0140's own VERIFY-BY
   stays gradeable. No dial, band, rate, gate, cap or floor touched. **The ADR-0116 freeze correctly did
   not bind: a pending change that never executed has no evidence to protect.** `-Pci test` green.
+
+## 2026-08-06 13:30Z — a durable aim is worth nothing when the band it walks toward is above its own ceiling
+
+- **Step 0 — `3cc91bc46` + the V51 repair: ✅ VERIFIED at the defect level, ⚠️ INCONCLUSIVE on the
+  vector.** The app boots (`ops_jvm.uptimeSeconds` **62475**, no `FlywayException`, every endpoint back
+  from `Connection refused`) and ADR-0140's mechanism works — the live `aims` map carries **-0.003064**
+  for NQ against a `targetQty` of **-0.017759**, an intent that survived a restart. Item #0 closes.
+- **Attribution — 100% market, 0% change, closed session.** No order since **2026-08-05 20:24:38Z**,
+  `orders_day.total` **0**, gross **$0.00**, PnL **-628.06833967** flat over three runs. Nothing to
+  credit or blame.
+- **Rule 380 — a threshold stated as a fraction of a quantity the code never produces is not a
+  threshold, it is a ban.** ADR-0094's release condition is `|aim|/|target| > width × TARGET_ABS/|f|`
+  while ADR-0102 bounds the left side above by **1**, so it is *unsatisfiable* for every `|f| < width ×
+  TARGET_ABS`. Live: NQ needed **0.8239**, NVDA **3.1807** — the second is greater than one, so no aim
+  path of any length could ever have opened it, and `insideBuffer` read **8** of **8**.
+  **Rule: whenever a gate compares a ratio against a threshold, check the ratio's own algebraic bound
+  first. If the threshold can exceed it, the gate is closed forever and no amount of state, time or
+  tuning upstream will open it.**
+- **Rule 381 — attenuations composed onto a constant that was never attenuated turn a size cut into a
+  deletion.** `TARGET_ABS` is what each SOURCE is normalised to (live `meanAbsClaim` **8.93** / **6.67**
+  / **9.24**), but the band is applied to the COMBINED forecast, which the ADR-0076 multiplier and the
+  ADR-0124 agreement scalar have already shrunk (NQ: **+18.53** and **-20.0** average to -5.427,
+  agreement **0.1954775485324326** → -1.214). Both were specified as reductions in *size*; what they
+  delivered through the band was a position of exactly zero. **Rule: when you add a scalar that shrinks
+  a quantity, audit every downstream threshold expressed in that quantity's ORIGINAL units — the scalar
+  silently rescales the threshold too, in the opposite direction from the one intended.**
+- **Rule 382 — n=1 is not a cross-section, and the failing test was right.** The first cut of ADR-0141
+  took the mean `|f|` over any number of names; two existing single-name-plan tests changed behaviour,
+  because at n=1 the mean IS the datum, `E|f|/|f|` is identically 1, and the band collapses to
+  `width × |target|` for every forecast strength — the statistic measuring nothing but itself, the same
+  degeneracy ADR-0124 rejected at one effective source. **Rule: when a new estimator breaks an existing
+  test, check whether the test found a degenerate sample size before assuming the test is stale.**
+- **Rule 383 — do not unlock a name whose only source measures negative.** The other six planned names
+  are zeroed by ADR-0124 because they are single-source, and that source is xsreversion, negative at all
+  three horizons (`avgReturnBps` **-1.6172582662041586** at 900 s over 152 cohorts,
+  **-1.9673663434138422** at 3600 s, **-0.16422896669296588** at 225 s). Weakening the agreement scalar
+  would have "fixed" DORMANT by deploying into the worst-measured source. **Rule: before removing a
+  constraint that is keeping the book flat, read what the freed names would actually trade on — an
+  accidental guard against a negative-edge source is still a guard.**
+- **Fix shipped — ADR-0141**, the average position priced at `min(TARGET_ABS, E|f|)` with `E|f|` the
+  cross-sectional mean over names planned a view (`n ≥ 2`). Cross-sectional, so no estimator, warm-up or
+  persistence — restart-proof, unlike ADR-0138/0140's repairs. Capped, so one-way: the band is never
+  wider than before. No dial, width, rate, gate, cap or floor touched. `-Pci test` green.
