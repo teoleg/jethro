@@ -15,6 +15,110 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-06 15:30Z (**NO CHANGE — the ADR-0116 freeze holds at `39451ce71` 2/6.** But this cycle is not empty: it is the cycle that **settled ADR-0142** — the app did **not** restart, for the first time, because last cycle's commit could not reach the app binary. And with a second consecutive **0%-change / 100%-market** window, the uncontaminated read finally puts a number on item #1: the desk's measured expectancy is **monotonic in horizon** and only non-negative at the horizon it never holds for.)
+
+### Step 0 — `39451ce71` (ADR-0142): ✅ **VERIFIED**
+
+The VERIFY-BY was: *a cycle whose commit touches only `reports/`/`docs/` must not restart the app.* Last
+cycle's commit `3b4f5de` did exactly that — `git diff --name-only 39451ce..HEAD` lists only
+`docs/loop-findings.md`, `reports/last-analysis.md`, `reports/must-fix.md`, `reports/run-status.json`,
+`reports/.pending-baseline.json`. And the app did not restart:
+
+| reading | last cycle | this cycle | implication |
+| --- | --- | --- | --- |
+| `ops_jvm.uptimeSeconds` | **1121** | **2921** | grew by the wall-clock gap — same process |
+| report `timestampMillis` | **1786028402702** | **1786030202035** | — |
+| implied boot instant | **1786027281702** | **1786027281035** | **identical** (sub-second read skew) |
+
+The process serving this report is still the one booted at **14:41:21Z**. Corroborated independently by
+the log tail: the newest WARN in the whole report is **10:43:05.409-04:00** (= 14:43:05Z) — every startup
+warning belongs to that same 14:41Z boot, and nothing has logged a startup since. Rule 395 said the fix
+could not govern its own deploy and the first testable cycle was the next one; that cycle ran, and the
+prediction held. **Item struck.**
+
+What ADR-0142 buys, stated precisely and no wider: an ADR-0116 evaluation window is no longer interrupted
+by the loop's own mandated `reports/` write. Its *other* stated rationale — that restarts flatten the book
+— stays **refuted** (Rule 394) and ADR-0142 keeps no credit for it.
+
+### Window attribution — 0% change, 100% market, for the second cycle running
+
+Zero Java, zero dials, zero gates in the window's diff. So the move — PnL **+19.11** (total PnL
+**-777.82882819** at the 15:09:18Z heartbeat → **-758.71487420** live), gross **-12013.78**
+(**28006.27135500** → **15992.48903000**) — is entirely the market plus code already live. My changes
+earn no credit for the +19.11 and no blame for the gross swing. Two clean windows back to back is the
+best read of the app's own behaviour this loop has had, and it is what makes the item below trustworthy.
+
+### Not danger — deploying, with room to spare
+
+Gross **$15,992.49** is **1.1%** of the firm gross cap $1,500,000 (headroom **$1,484,008**); net
+**-$1,308.69** is **0.1%** of the $1,000,000 net cap. `breaker.halted` **false**. `var95` **157.08**,
+`es95` **250.79**, `var99` **348.40** over **154** observations, `coveredExposure` **15992.49**,
+`skippedExposure` **0.00**. `regime` CALM. UNDERWATER is cumulative PnL, not a live danger state.
+
+---
+
+## Item #1 — **the desk holds for minutes; every non-negative expectancy it owns lives at 3600s. It cannot converge on a target before that target reverses.**
+
+Promoted last cycle as a hypothesis. This cycle it is measured, and it is worse than stated — the defect
+is not merely "holds too short", it is that **the position can never arrive at all.**
+
+**(a) Expectancy is monotonic in horizon, and the short end is where the desk lives.** Read verbatim from
+`signals_telemetry` (`avgReturnBps` / `stdCohortMeanBps` / `cohorts`):
+
+| source | 225s | 900s | 3600s |
+| --- | --- | --- | --- |
+| **trend** | **-0.011** | **+0.084** | **+1.667** (14.51 / 100) |
+| **social** | **-0.322** | **+0.948** | **+4.162** (27.54 / 37) |
+| reversion | -0.016 | -0.059 | -0.317 |
+| momentum | -0.316 | -3.097 | -2.052 |
+| **xsreversion** | -0.186 | **-2.067** (11.21 / 152) | -3.510 |
+
+Two sources rise with horizon and cross zero only past 900s. At **225s — the horizon nearest the desk's
+actual behaviour — not one source is positive.** Against `fee_bps` **1.00** per side per equity and TCA
+`avgSlippageBps` **0.761** GOOG / **0.729** NEE / **0.695** PFE / **0.694** AMZN, paid on both legs, even
+trend's best reading (**+1.667** bps at 3600s) does not cover its own round trip; only social's **+4.162**
+does, on **37** cohorts.
+
+**(b) The desk trades at neither horizon — it re-plans every ~30s and reverses within minutes.** From
+`recent_orders`, this window alone:
+
+- **NEE** — SELL 23 / 15 / 9 / 46 between 15:16:00 and 15:22:36 at `forecast` **-6.671 → -8.190 → -7.587
+  → -7.393**; then **BUY 56** at 15:25:08 at `forecast` **-0.0015**. A 93-share short built over 6 min and
+  60% covered **2.5 min later** — not on a sign flip, on the forecast **decaying to zero**.
+- **AMZN** — SELL ×7 from 15:04:51 to 15:08:55 at `forecast` ≈ **-7.564 … -5.960**; then BUY 15 at
+  15:13:28 (`forecast` **-0.094**) and BUY 5 at 15:14:29 (**-0.017**). Round trip ≈ **5 min**.
+- **MSFT** — SELL at 15:11:57 (**-6.034**) and 15:15:30 (**-5.142**); BUY 1/3/4/7 from 15:25:39 to
+  15:29:12 (**+5.613 … +6.128**). Full sign flip in **~10 min** (Rule 393, third window running).
+
+**(c) The mechanism — the target is unreachable by construction.** `fusion_targets` for MSFT:
+`targetQty` **108.70498**, `currentQty` **7.0**, `deltaQty` **1.352209**. The desk wants ~109 shares,
+holds 7, and steps ~1.35 per plan. At that rate convergence needs on the order of a hundred plans; the
+forecast defining the target flips sign in ten minutes (b). **So the desk pays entry cost forever and
+never holds the position whose expectancy it is underwriting.** `insideBuffer` **17** of `instruments`
+**26** — 9 names are being chased like this right now. The fee column is the receipt: ALPHA `feesPaid`
+**392.670558** against ALPHA `realizedPnl` **-646.44518325**, on **5505** FILLED / **2051** CANCELLED
+orders.
+
+**VERIFY-BY (next unfrozen cycle).** The change must make holding period and measured horizon meet —
+either by slowing/decaying the plan so a position survives to its horizon, or by refusing to open what
+cannot be held. Proving numbers, all already on this report, no new telemetry needed:
+1. `turnover_cost_by_name` **`fills`** per name falls materially (MSFT **222**, NVDA **236**, ES **191**,
+   AMZN **185**, GOOG **181**, PFE **177** today) at equal-or-greater gross;
+2. `orders_by_status` **CANCELLED 2051** falls (each is an ADR-0084 re-plan superseding a live order —
+   the churn's own fingerprint);
+3. `fusion_targets` `deltaQty`/(`targetQty`−`currentQty`) rises, or `targetQty` falls toward reachable —
+   i.e. MSFT stops being 109-wanted / 7-held;
+4. ALPHA `feesPaid` grows more slowly than gross.
+
+**Note for whoever takes this:** this is a *sizing-and-persistence* change, not another fusion weight.
+Weight tuning is the INCONCLUSIVE wall (ADR-0137/0140/0141 all landed there). And `xsreversion` — the
+most-fired source, **8893** observations at 225s — is the one reading on the table whose cohort dispersion
+is small against its own mean at 900s (**-2.067** with **11.21** over **152** cohorts; ≈2.3 standard
+errors *negative*, arithmetic on those three read fields). A reliably-negative source is information, but
+it is a **separate** change; do not bundle it.
+
+---
+
 ## Verification block — 2026-08-06 15:00Z (**NO CHANGE — the ADR-0116 freeze holds, and this time honouring it costs nothing: ADR-0142 gave the freeze a no-op, and this cycle is that fix's first real test.** The scorer prints `39451ce71 still accumulating evidence (1/6 cycles) — held, not scored this run`. The register is **re-ranked on the back of a measurement, not a hypothesis**: the σ-warm-up item has largely resolved itself (`streamVolMeasuredNames` **2 → 20** of `instruments` **23**, `riskCutStoppedNames` **0**), and the book **survived** a restart (baseline gross **11424.82120000** → live **13570.96679500**, not **$0.00**), which weakens half of ADR-0142's stated rationale. What replaces them at #1 is the largest number on this report that nobody has attacked: the desk turns positions over in **minutes** while its only non-negative measured expectancy exists at **3600s**, and pays a round trip each time.)
 
 ### Step 0 — `39451ce71` (ADR-0142): ✅ LANDED, ⏳ its headline VERIFY-BY is NOT YET TESTABLE — and saying so is the honest grade

@@ -5016,3 +5016,45 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **No change this cycle.** Freeze at **1/6** for `39451ce71`; `baseline` deliberately NOT run (running it
   would have destroyed ADR-0142's own window, per Rule 396). Commit confined to `reports/` + `docs/`,
   which is simultaneously ADR-0142's first live test.
+
+## 2026-08-06 15:30Z — ADR-0142 verified; the horizon mismatch measured (no change, freeze 2/6)
+
+- **Rule 397 — a harness fix is graded on the first cycle it actually governs, and this one passed.**
+  ADR-0142 ✅ VERIFIED: last cycle's commit touched only `docs/` + `reports/`, and the app did **not**
+  restart. `ops_jvm.uptimeSeconds` **1121** @ `timestampMillis` **1786028402702** (last cycle) and **2921**
+  @ **1786030202035** (this cycle) imply the same boot instant — **1786027281702** vs **1786027281035**,
+  sub-second read skew — so the 14:41:21Z process is still serving. Independent corroboration: the newest
+  WARN anywhere in the report is **14:43:05Z**; nothing has booted since. **Rule: verify a restart claim
+  with `uptimeSeconds` differenced against the report timestamp (boot instant), not with uptime alone —
+  and cross-check against the newest startup log line. Two independent reads or it isn't verified.**
+- **Rule 398 — expectancy is monotonic in horizon here, and the desk trades at the end where it is zero.**
+  `signals_telemetry` `avgReturnBps` at 225s/900s/3600s: trend **-0.011 → +0.084 → +1.667**, social
+  **-0.322 → +0.948 → +4.162**; reversion, momentum, xsreversion negative at all three. **At 225s nothing
+  is positive.** Against `fee_bps` **1.00** per side and TCA `avgSlippageBps` **0.761** GOOG / **0.729**
+  NEE / **0.695** PFE / **0.694** AMZN, paid twice per round trip, even trend@3600s doesn't cover its own
+  cost; only social@3600s does, on **37** cohorts. **Rule: "no source has edge" was the wrong summary. The
+  right one is "no source has edge AT THE HORIZON WE TRADE". That is a holding-period defect, and unlike
+  edgelessness it has a fix.**
+- **Rule 399 — the reversal that costs the money is decay to zero, not a sign flip.** NEE built a 93-share
+  short at `forecast` **-6.671 → -8.190 → -7.587 → -7.393** (15:16:00→15:22:36) and bought **56** back at
+  15:25:08 at `forecast` **-0.0015**. AMZN: sold ×7 at **-7.564 … -5.960**, bought back **5 min** later at
+  **-0.094** / **-0.017**. Both liquidations fired on the forecast *collapsing toward zero*, with no
+  opposite conviction anywhere. **Rule: a no-trade band centred on zero does not protect a position whose
+  forecast decays — decay walks the target to zero and the band permits the full round trip. An exit gate
+  needs its own hysteresis in TIME, not just in forecast magnitude.**
+- **Rule 400 — the target is unreachable by construction, so the desk pays entry cost forever.**
+  `fusion_targets` MSFT: `targetQty` **108.70498**, `currentQty` **7.0**, `deltaQty` **1.352209** — ~1.35
+  shares per plan toward a target ~15× the position, needing ~100 plans, while the forecast flips in ~10
+  min (MSFT **-6.034** @15:11:57 → **+6.128** @15:29:12). `insideBuffer` **17** of **26**. Receipt: ALPHA
+  `feesPaid` **392.670558** vs `realizedPnl` **-646.44518325** on **5505** FILLED / **2051** CANCELLED.
+  **Rule: check convergence time against forecast half-life before tuning anything else. A partial-
+  adjustment rate slower than the signal's own persistence is a perpetual-motion fee machine — the desk
+  underwrites an expectancy it never holds long enough to collect.**
+- **Rule 401 — two consecutive report-only cycles are an asset, not lost time.** Zero Java in the window's
+  diff means PnL **+19.11** / gross **-12013.78** is **100% market**, so the behaviour above is the app's
+  own, uncontaminated by any change of mine. **Rule: when the freeze forces a no-op, spend it on
+  measurement that a contaminated window could not produce — and say plainly that the change gets neither
+  credit nor blame for the move.**
+- **No change this cycle.** Freeze at **2/6** for `39451ce71`; `baseline` deliberately NOT run (Rule 396 —
+  `cmd_baseline` overwrites `PENDING` unconditionally and would delete ADR-0142's own window). Commit
+  confined to `reports/` + `docs/`, which is also ADR-0142's continued live test.
