@@ -1,20 +1,20 @@
 {
-  "commit": "a21177cea89e5cd7120e1d4e418d23713127681d",
-  "fees": "399.099763",
-  "gross_exposure": "0E-8",
-  "net_exposure": "0E-8",
+  "commit": "39451ce7135083d2701a6629942eb917dbaffb6a",
+  "fees": "400.355614",
+  "gross_exposure": "11424.82120000",
+  "net_exposure": "-2451.80520000",
   "source": {
     "feedMode": "LIVE",
-    "grossExposure": "0.00000000",
-    "hedgePnl": "24.35397774",
-    "netExposure": "0.00000000",
-    "realizedPnl": "-628.06833967",
-    "strategyAlpha": "-652.42231741",
-    "totalFees": "399.099763",
-    "totalPnl": "-628.06833967",
-    "unrealizedPnl": "0.00000000"
+    "grossExposure": "11424.82120000",
+    "hedgePnl": "24.88392203",
+    "netExposure": "-2451.80520000",
+    "realizedPnl": "-699.01301620",
+    "strategyAlpha": "-743.85932706",
+    "totalFees": "400.355614",
+    "totalPnl": "-719.05540503",
+    "unrealizedPnl": "-20.04238883"
   },
-  "summary": "the no-trade band's average position is priced at the forecast the combiner actually produces rather than the constant sources are normalised to, so a name whose whole target sat inside its own buffer \u2014 a release condition its own ADR-0102 clamp made unsatisfiable \u2014 can finally open (ADR-0141)",
-  "total_pnl": "-628.06833967",
-  "ts": "2026-08-06T13:44:10Z"
+  "summary": "the loop rebuilds and restarts the trading app only when a path that can reach the app binary changed, so the mandated per-run findings write no longer bounces the process mid-cycle \u2014 which was re-seeding every warm-up-gated sensor cold, flattening the book, and measuring the restart instead of the change inside every ADR-0116 evaluation window (ADR-0142)",
+  "total_pnl": "-719.05540503",
+  "ts": "2026-08-06T14:40:49Z"
 }
