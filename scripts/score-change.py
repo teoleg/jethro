@@ -14,8 +14,7 @@ Subcommands
       Score the change recorded in reports/.pending-baseline.json (if any). Fetches the current
       objective vector from the live app, computes deltas vs the recorded baseline, applies the
       deterministic verdict rule, prepends a ledger row, writes an audited JSON snapshot, and — on a
-      BAD verdict — reverts the offending commit's CODE (ADR-0143: scoped to the paths that can reach
-      the running app, never the loop's own record). Commits reports/ (and the revert). Clears the
+      BAD verdict — reverts the offending commit. Commits reports/ (and the revert). Clears the
       pending file. If the app can't be reached, leaves the pending file untouched and retries next
       run (never fabricates a number).
 
@@ -44,7 +43,6 @@ import os
 import statistics
 import subprocess
 import sys
-import tempfile
 import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -57,20 +55,6 @@ SNAP_DIR = os.path.join(REPO, "reports", "attribution")
 STATUS = os.path.join(REPO, "reports", "run-status.json")  # per-cycle heartbeat the UI reads
 STATUS_CAP = 300
 ANALYSIS = os.path.join(REPO, "reports", "last-analysis.md")  # Claude's own reasoning, written each run
-
-# --- What a BAD-verdict revert must NEVER rewind (ADR-0143). These are the loop's own append-only
-# record: the scorer's ledger/snapshots/heartbeat, the agent's mandated per-cycle analysis and
-# must-fix register, its compounding findings memory, and the ADR set. `ops/improve-prompt.md`
-# REQUIRES the agent to rewrite `last-analysis.md`/`must-fix.md` and append to `loop-findings.md`
-# EVERY cycle, change or not — so by the time an ADR-0116 window (MIN_CYCLES) elapses, those files
-# have been rewritten ~6 times and a whole-commit `git revert` conflicts on them with certainty.
-# Measured 2026-08-06: all 9 BAD verdicts since the register was introduced failed their auto-revert,
-# every one of them conflicting on exactly these paths and no others, leaving every graded-BAD commit
-# LIVE in the running code. Scoping the revert to code paths makes all 9 apply cleanly.
-# Keeping them is also the existing hand-practised convention (the loop has manually completed 5 of
-# these reverts "keeping the annotated record and the loop's memory"): a rejected decision leaves an
-# annotated ADR and a finding behind, so the loop cannot relearn what it already paid for.
-REVERT_KEEP_PATHS = ("reports/", "docs/adr/", "docs/loop-findings.md", "docs/loop-playbook.md")
 
 # --- Deadbands: below these a move is treated as market noise, not an effect of the change. They
 # gate the GOOD/BAD/revert decision, so per CLAUDE.md they carry provenance and are NOT silent
@@ -308,74 +292,6 @@ def git(*args, check=True):
                           capture_output=True, text=True)
 
 
-def is_record_path(path):
-    """True if `path` is the loop's own append-only record, which a revert must never rewind."""
-    return any(path == k.rstrip("/") or path.startswith(k) for k in REVERT_KEEP_PATHS)
-
-
-def revertable_paths(touched):
-    """The subset of a commit's paths a BAD-verdict revert should undo — pure function (ADR-0143)."""
-    return [p for p in touched if p.strip() and not is_record_path(p)]
-
-
-def revert_code_paths(sha, short):
-    """Undo a graded-BAD commit's effect on the RUNNING CODE, leaving the loop's record intact.
-
-    A whole-commit `git revert` also rewinds `reports/`+`docs/`, which the loop rewrites every cycle
-    by mandate — that conflicts with certainty over an ADR-0116 window and aborts the WHOLE revert,
-    so the bad code stays live (measured: 9 of 9). Reverting only the code paths is both conflict-free
-    and the convention the loop already applies by hand (ADR-0143).
-
-    Returns (applied, note_suffix):
-      True  — the code change is out of the running tree (or there was none to pull), commit made.
-      False — a genuine conflict in a CODE path; nothing applied, tree left clean. Still live.
-    """
-    dirty = git("status", "--porcelain", "--untracked-files=no", check=False)
-    if dirty.returncode != 0 or dirty.stdout.strip():
-        return False, ("the working tree was not clean, so the revert was not attempted "
-                       "(refusing to discard uncommitted work)")
-
-    listing = git("diff", "--name-only", f"{sha}^", sha, check=False)
-    if listing.returncode != 0:
-        return False, "the commit's paths could not be listed (no single parent?)"
-    touched = listing.stdout.splitlines()
-    paths = revertable_paths(touched)
-    if not paths:
-        # Record-only commit: nothing of it ever reached the binary, so there is nothing to pull.
-        return True, "record-only commit — nothing of it was in the running code"
-
-    patch = git("diff", sha, f"{sha}^", "--", *paths, check=False)
-    if patch.returncode != 0 or not patch.stdout.strip():
-        return False, "the reverse patch could not be produced"
-
-    with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as fh:
-        fh.write(patch.stdout)
-        patch_file = fh.name
-    try:
-        applied = git("apply", "--3way", "--index", patch_file, check=False)
-        if applied.returncode != 0 or git("diff", "--name-only", "--diff-filter=U",
-                                          check=False).stdout.strip():
-            # Genuine code conflict — restore the tree exactly, touching only what we staged.
-            git("reset", "--quiet", "--hard", "HEAD", check=False)
-            git("clean", "--quiet", "--force", "-d", "--", *paths, check=False)
-            return False, "a CODE path genuinely conflicted"
-    finally:
-        os.unlink(patch_file)
-
-    subject = git("log", "-1", "--format=%s", sha, check=False).stdout.strip()
-    git("add", "--", *paths, check=False)
-    msg = (f'Revert "{subject}"\n\n'
-           f"This reverts the code of commit {sha}, graded ❌ BAD by scripts/score-change.py.\n"
-           f"Scoped to the paths that can reach the running app; the ADR, the ledger and the loop's\n"
-           f"findings are deliberately KEPT so the rejected decision stays on the record (ADR-0143).\n\n"
-           + "\n".join(f"  {p}" for p in paths))
-    committed = git("commit", "--no-verify", "-m", msg, check=False)
-    if committed.returncode != 0:
-        git("reset", "--quiet", "--hard", "HEAD", check=False)
-        return False, "the revert applied but could not be committed"
-    return True, f"code reverted in {len(paths)} path(s); ADR + ledger + findings kept"
-
-
 # ----------------------------- subcommands -----------------------------
 
 def cmd_score():
@@ -437,22 +353,22 @@ def cmd_score():
     # a BAD commit LIVE while every downstream reader — the ledger note, the Improve page, next run's
     # Step 0 — believes it was pulled.
     reverted_ok = None  # None = no revert intended; True = reverted; False = revert intended but FAILED
-    revert_detail = ""
     if revert and sha != "unknown":
-        reverted_ok, revert_detail = revert_code_paths(sha, short)
-        if reverted_ok:
-            print(f"score: BAD verdict — reverted {short} ({revert_detail})")
+        r = git("revert", "--no-edit", sha, check=False)
+        if r.returncode != 0:
+            git("revert", "--abort", check=False)
+            reverted_ok = False
+            print(f"score: BAD verdict but `git revert {short}` conflicted — NOT reverted; still LIVE, "
+                  f"needs a manual revert")
         else:
-            print(f"score: BAD verdict but the revert of {short} did not apply — {revert_detail}; "
-                  f"still LIVE, needs a manual revert")
+            reverted_ok = True
+            print(f"score: BAD verdict — reverted {short}")
 
     # A revert that was intended but FAILED must never read as "reverted": mark the note that lands in both
     # the ledger and the snapshot, so the record states plainly that the commit is still live.
     if reverted_ok is False:
-        note = note + (f" — ⚠️ REVERT FAILED ({revert_detail}): the BAD commit is STILL LIVE and needs a "
-                       f"manual revert")
-    elif reverted_ok is True:
-        note = note + f" — reverted ({revert_detail})"
+        note = note + (" — ⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a "
+                       "manual revert")
 
     # Audited snapshot — every number a verdict rests on, recomputable by anyone. `revertApplied` records
     # the ACTUAL git outcome (True = reverted / False = intended but failed / None = none intended),
