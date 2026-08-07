@@ -15,6 +15,134 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 15:30Z (**NO CHANGE — the ADR-0116 freeze holds at `403a95ffd` 4/6.** Two things landed this cycle. First, item #1's root cause is now **quantitatively confirmed** rather than argued: across four observations today `ops_jvm.uptimeSeconds` **838 → 2638 → 4438 → 6238** maps to `streamVolMeasuredNames` **1 → 2 → 21 → 21**, and the arithmetic predicted the switch at **3630 s** — which falls exactly in the 2638→4438 gap. The σ seed is a pure function of process lifetime. Second, and this is the reordering: I split `recent_orders` by **origin** instead of by aggregate status, and the cancel path I demoted last cycle as a one-name artifact is a **structural one-way ratchet**. Entries POST (ADR-0084 DAY LIMIT at the mark) and are swept by the next 30 s re-plan; reduces CROSS as MARKET. This window: **7 of 11 entries CANCELLED (0 filled of those 7), 0 of 41 reduces cancelled.** The reduce leg executes with certainty, the build leg only when the market comes to the mid inside 30 s. Gross fell **-$1,273.50** and PnL **-$50.34** on the window. That bites every cycle all day, whereas #1 bites only for the first hour after each restart — so the ratchet enters at **#1** and the σ seed moves to **#2**. Rule 454 was right that the `NQ` storm was an artifact and wrong to close the file on the cancel path; the aggregate hid the asymmetry.)
+
+### Step 0 — `403a95ffd` (ADR-0144): ⚠️ **UNGRADED, window intact (4/6)** — unchanged verdict, fourth cycle
+
+`scripts/score-change.py score` prints `403a95ffd still accumulating evidence (4/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` is present. Freeze holds; no code change.
+
+Precondition still well met — **21** equity positions, `held.signum() != 0` on each. The window ran **41**
+`fusion reduce toward a smaller target` and **zero** `fusion exit — target decayed to flat` (`grep -c` over
+the whole report returns **0**). Consistent with the branch suppressing absence-as-exit, still not proof:
+the counterfactual is unobservable and no counter records a hold. Verdict stays **ungraded** (Rule 455).
+Regression check cleared — nothing was suppressed that should have traded: all 21 planned names carry a
+target, and the three zero `aims` (`EURUSD`, `PG`, and `NQ` at **-0.005705**) are flat/near-flat targets.
+
+### Not danger — but the book is now shrinking, and that is the new signal
+
+Gross **$18,465.91** = **1.2%** of the firm gross cap $1,500,000 (headroom **$1,481,534**); net
+**$3,800.15** = **0.4%** of the $1,000,000 net cap. `breaker.halted` **false**; `riskCuts` **[]**;
+`edgeGate` **null**. Feed healthy — `provider: alpaca`, `ticksIn` **65004**, `ticksDropped` **0**. Total PnL
+**-$902.04** (UNDERWATER stands); `on_track=true` at `pnl_growth_pct` **5.14%** vs target **1.0%**.
+
+The change from the last three cycles: gross **fell** -$1,273.50 for the first time since the book came off
+dormant, with 41 reduces against 4 filled entries. That is the ratchet in item #1, not a risk cut.
+
+---
+
+## Item #1 (NEW — promoted above the σ seed) — **ADR-0084's passive entry is swept by the 30 s re-plan before it can fill, so the desk's build leg executes ~36% of the time while its cut leg executes 100%: a structural one-way ratchet that can only shrink the book.**
+
+**Mechanism, read end-to-end in code and confirmed in the order log.**
+`FusionExecutor.route` (app/src/main/java/io/jethro/app/fusion/FusionExecutor.java:164) routes a
+risk-INCREASING delta as a `DAY` `LIMIT` at `passiveLimitPrice` — the mark, i.e. the **mid** — and a
+risk-REDUCING delta as a `GTC` `MARKET` order. `FusionLifecycle.tick`
+(app/src/main/java/io/jethro/app/fusion/FusionLifecycle.java:262) opens **every** cycle with an
+unconditional `executor.cancelStalePassiveOrders()`, and `jethro.fusion.interval-seconds=30`. So a passive
+entry gets **at most 30 seconds resting at the mid**, then is cancelled and re-planned — while a reduce
+crosses and fills immediately.
+
+**Live numbers this window (`recent_orders`, split by origin — the split is the whole point):**
+
+| origin | FILLED | CANCELLED | fill rate |
+| --- | --- | --- | --- |
+| `fusion entry — target increase` | 4 | 7 | 36% |
+| `fusion reduce toward a smaller target` | 41 | 0 | 100% |
+
+Every one of the 7 cancels carries `reason` = `fusion re-plan — passive order superseded by a fresh target
+(ADR-0084)`. `orders_by_status` day totals: FILLED **5988**, CANCELLED **2159**, REJECTED **208**.
+
+**Why this outranks the σ seed.** The two throttles sit in series. ADR-0140's partial-adjustment `aim` is
+*designed* to converge geometrically on the target (`AAPL` `aim` **28.976441** against `targetQty`
+**266.629944**; `KO` **-44.376377** against **-922.651672**; `NVDA` **-6.134052** against **-312.262346**).
+That is intended. What is **not** intended is that the build half of that convergence is then multiplied by
+a ~0.36 fill probability while the cut half is multiplied by 1.0. The desk holds a few percent of its own
+target book and gross sits at **1.2%** of the cap — and this cycle it moved **down**. Item #2 costs the
+first hour after a restart; this costs every 30 s tick the market is open.
+
+**Not a floor edit.** The pre-trade guardrail, the drawdown breaker and the ADR-0049 backtest veto all sit
+upstream of `route` and are untouched by anything proposed here — this is order *working time*, not a
+risk gate.
+
+**Candidate fix for the next unfrozen cycle (architecturally significant ⇒ ADR in the same commit).** Make
+the sweep **conditional on intent actually changing** rather than unconditional: a working passive entry
+survives the re-plan when the fresh target still wants the same side in the same name at a size no smaller
+than the working quantity, and is cancelled only when the side flips, the name leaves the target book, or
+the fresh size is smaller. That restores multi-cycle working time to the build leg without crossing the
+spread and without touching the reduce leg. The stacking hazard the current sweep exists to prevent is
+handled by the same predicate: the surviving order is *counted against* the fresh delta rather than
+re-posted alongside it.
+
+**VERIFY-BY (next run, read from `recent_orders` split by `origin`):** the FILLED share of
+`fusion entry — target increase` must exceed the **36%** (4 of 11) measured here, with the count of
+`fusion re-plan — passive order superseded by a fresh target (ADR-0084)` cancels on entry origins falling
+below **7**. Guard against a false pass: the reduce leg must stay at or near **100%** filled (a fix that
+merely made reduces passive too would equalise the ratio while making things worse), and gross must not be
+read as confirmation on its own — a rising gross with an unchanged entry fill rate is the clock again
+(Rule 452), not this fix.
+
+---
+
+## Item #2 (was #1, DEMOTED on cost — ⚠️ **STILL-BROKEN**, root cause now QUANTITATIVELY CONFIRMED)  — **the σ seed can never complete on any cycle: it needs ~60 min of contiguous series and the loop's teardown leaves islands of ~15–30 min.**
+
+Still broken, and this cycle it stopped being an argument and became a fitted curve. Four observations
+today, nothing edited between them:
+
+| `ops_jvm.uptimeSeconds` | `streamVolMeasuredNames` |
+| --- | --- |
+| 838 | 1 |
+| 2638 | 2 |
+| 4438 | 21 |
+| 6238 | 21 |
+
+The arithmetic recorded last cycle predicts the switch at `warmupPrices()` = `vol-span` **120** + 1 =
+**121** prices × `jethro.fusion.interval-seconds` **30** = **3630 s**. That threshold falls inside the only
+gap where the count jumps (2638 → 4438). σ is a pure function of process lifetime, exactly as derived —
+the overnight session gap was a special case, not the cause. `history_status` confirms the data is there
+and unused: `days` **1574**, `ready` **true**, `instruments` **55**.
+
+Deferred **only** because item #1 outranks it on live cost, not because it is closed. Its planned fix — seed
+σ from the daily series scaled by the √time convention `StreamVolatility` already documents (conservative:
+a daily σ carries overnight jumps and so *over*states intraday σ, widening rather than tightening the
+ADR-0086 stop) — stands unchanged and buildable.
+
+**VERIFY-BY (unchanged):** `streamVolMeasuredNames` must equal `fusion_targets.instruments` at an
+`ops_jvm.uptimeSeconds` **below 3630** — the anti-clock guard. A full count at a high uptime proves nothing.
+
+---
+
+## Items #3–#6 (re-ranked below the promotion above)
+
+- **#3** (was #2) — **ADR-0144 exit/entry corroboration asymmetry**, ungraded at 4/6. No action until the
+  window closes. VERIFY-BY unchanged from the 15:00Z block: it needs a **counter of uncorroborated holds**
+  on `/api/fusion/targets` (a disclosure count, not an input — it sizes nothing, invariant 7), because an
+  absence is not evidence (Rule 455).
+- **#4** (was #3) — **82.70% of turnover runs through the venue charging 5× the round trip.** Now cleanly
+  readable: `turnover_cost_by_name` shows `fee_bps` **1.00** on all 21 equities against **0.20** on `ES`
+  and `NQ`. Day fees total **$441.17**. First actionable item once #1 is verified.
+- **#5** (was #4) — the volatility-regime baseline latches after a frozen tape. `regime` reads `CALM`;
+  still masked by the restart. VERIFY-BY still requires a session boundary crossed **without** an
+  intervening restart (Rule 448).
+- **#6** (was #5) — entry structurally frozen for names early on their aim path. `insideBuffer` fell
+  **15 → 13** of **21**. Largely subsumed by item #1 — an entry that is planned but cancelled looks the
+  same from the outside as one never planned. Re-assess after #1 lands.
+- ~~**former #6** — the restart gate's `scripts/` omission~~ — VERIFIED, closed.
+- **Note on the demoted `NQ` cancel storm:** last cycle's demotion (Rule 454) was correct about the `NQ`
+  one-name pathology and wrong to close the cancel path. `NQ` this window is **19 of 19 FILLED** — genuinely
+  an artifact — but that is because `NQ` reduces *cross*. The entry-side asymmetry it masked is now item #1.
+
+---
+
 ## Verification block — 2026-08-07 15:00Z (**NO CHANGE — the ADR-0116 freeze holds at `403a95ffd` 3/6.** A second free controlled experiment, and it closes item #1's ROOT CAUSE. Nothing was edited, yet `streamVolMeasuredNames` went **2 → 21** — now equal to `fusion_targets.instruments` (**21 of 21**) — `insideBuffer` fell **22 → 15**, the book went from one `NQ` future to **21** equity positions, and gross went **$11,677.55 → $17,910.83**. `ops_jvm.uptimeSeconds` is **4438** against **2638**, so it is the clock again and #1 stays **STILL-BROKEN** on its own anti-clock guard. But this cycle I stopped re-measuring the symptom and read the boot logs: retention is NOT the constraint (`jethro.ui.history-hours=12`, LMDB accumulating since Jul 27). The constraint is **arithmetic** — σ needs **121** prices at a **30000 ms** step ≈ **3630 s** of CONTIGUOUS series, `GAP_TOLERANCE_SAMPLES` is **30** steps, and the loop's own teardown leaves islands of one app lifetime (~900–1800 s). **The σ seed can never complete, on any cycle, at any time of day.** The overnight gap was a special case of a per-cycle defect. #1 holds at #1 with a buildable fix. ADR-0144 stays **ungraded** at #2 — 27 `fusion reduce` orders and **zero** `fusion exit — target decayed to flat`, consistent with the branch working but not proof. **Item #3 is DEMOTED below the line as an ARTIFACT**: the cancel storm was a one-name pathology and cleared itself — **45 FILLED / 13 CANCELLED / 2 ROUTED** this window against **1 of 12** last cycle.)
 
 ### Step 0 — `403a95ffd` (ADR-0144): ⚠️ **REACHABLE, STILL NOT EXERCISED — ungraded, window intact (3/6)**

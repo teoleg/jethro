@@ -5541,3 +5541,43 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   widening rather than tightening the ADR-0086 stop. Architecturally significant ⇒ ADR in the same commit.
   **Absorb this up front: that change restarts the process, so its own ADR-0116 window opens with a cold
   hour.**
+
+## 2026-08-07 15:30Z — the aggregate hid a one-way ratchet; splitting orders by ORIGIN found it
+
+- **Rule 456 — split the order log by ORIGIN before you read a fill rate; the aggregate averages away the
+  asymmetry that matters.** Two cycles running I read `orders_by_status` in aggregate (**45 FILLED / 13
+  CANCELLED** last cycle, **5988 / 2159 / 208** on the day) and concluded the cancel path was healthy. Split
+  by `origin` this window: `fusion entry — target increase` is **4 FILLED / 7 CANCELLED** (**36%**), while
+  `fusion reduce toward a smaller target` is **41 FILLED / 0 CANCELLED** (**100%**). A blended 75% fill rate
+  was the average of a build leg that mostly fails and a cut leg that never does. **Rule: a fill rate over
+  mixed intents is not a fill rate — it is two numbers with the interesting one hidden.**
+- **Rule 457 — when two throttles sit in series, the designed one can disguise the broken one.** ADR-0140's
+  partial-adjustment `aim` is *meant* to crawl toward the target (`AAPL` `aim` **28.976441** vs `targetQty`
+  **266.629944**; `KO` **-44.376377** vs **-922.651672**). So a book at a few percent of target looked like
+  the design working. It isn't: `FusionExecutor.route` posts an entry as a `DAY` `LIMIT` at the mid and
+  crosses a reduce as `MARKET`, and `FusionLifecycle.tick` unconditionally sweeps working passives every
+  `jethro.fusion.interval-seconds=30`. So the build half of the convergence carries a ~0.36 fill probability
+  and the cut half carries 1.0 — a one-way ratchet the book can only lose ground to. Gross fell
+  **-$1,273.50** this window with 98.8% of the cap unused. **Rule: before crediting a slow book to an
+  intentional throttle, check whether a second, unintentional throttle is multiplying it.**
+- **Rule 458 — a demotion should name what it closes, not the whole file.** Rule 454 demoted the passive
+  re-plan cancel storm as a one-name `NQ` artifact. That was right about `NQ` — it is **19 of 19 FILLED**
+  this window, because `NQ` reduces *cross*. It was wrong to close the cancel path, because the entry-side
+  asymmetry was sitting underneath it. **Rule: when demoting a defect as an artifact, state the narrow claim
+  the evidence supports and keep the general mechanism open.**
+- **Rule 459 — a root cause is confirmed when the predicted threshold lands inside the observed gap.** Item
+  #2's σ arithmetic (121 prices × a 30 s step = **3630 s**) now has four unedited observations behind it:
+  `uptimeSeconds` **838 → 2638 → 4438 → 6238** against `streamVolMeasuredNames` **1 → 2 → 21 → 21**. The
+  jump falls in the 2638→4438 gap, straddling 3630. σ is a pure function of process lifetime; the overnight
+  session gap was a special case. **Rule: stop re-measuring once the derived threshold predicts where the
+  step occurs — that is confirmation, and the next observation is redundant.**
+- **Attribution — the window's -$50.34 and -$1,273.50 are credited to NOTHING, fourth cycle running.**
+  Nothing was edited. `403a95ffd`'s branch fired **zero** times (**0** `fusion exit — target decayed to
+  flat` in the whole report). The gross move is the ratchet plus the clock, and on 21 positions inside one
+  window I cannot split market from mechanism without guessing — so I don't. **Rule: four cycles of no-change
+  attribution is not four data points about the change; it is four about the environment.**
+- **Change:** none. `403a95ffd` is **4/6** with `reports/.pending-baseline.json` present. Next cycle's one
+  change targets the NEW must-fix **#1**: make `cancelStalePassiveOrders` conditional on intent actually
+  changing — a working entry survives when the fresh target still wants the same side, same name, size no
+  smaller, counted against the fresh delta rather than re-posted alongside it. VERIFY-BY is the entry fill
+  rate above **36%**, guarded by the reduce leg holding at **100%** so an equalising regression cannot pass.
