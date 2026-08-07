@@ -5425,3 +5425,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   nothing and ages on ADR-0140's clock. Entry untouched, corroborated flat exits untouched, stop cut
   outranks it, strictly one-way. Window itself was **100% nothing**: market shut, PnL **+0.00**, and the
   app rebooted **10:03:34.412Z** mid-closure leaving every equity sensor cold (`seeding 1 of 193`).
+
+## 2026-08-07 14:00Z — the reopen exposed a structural morning lockout: σ can't warm across the session gap
+
+- **Rule 445 — a warm-up that refuses to cross a session boundary is a daily trading halt wearing a
+  sensor's clothes.** The market reopened, the plan was healthy (`routing: true`, `instruments: 20`,
+  `edgeGate: null`, `riskCuts: []`, BAC `combinedForecast` **+16.105** / `targetQty` **4351.609784**) — and
+  the desk took nothing: gross **$0.00** against **$1,500,000** headroom, `insideBuffer` **19** of **20**,
+  every equity `aim` **0.0**. Chain: `streamVolMeasuredNames` **1** → `stopArmed` false for 19 names →
+  ADR-0126 `mayIncrease` false → order clamped reduce-only **and the aim re-seeded to held** → pinned at
+  zero forever. σ is cold because `SensorWarmup.GAP_TOLERANCE_SAMPLES` (**30** steps × a **30000ms** step
+  = 15 min) is far short of an overnight close, so every seed dies `GAP_BREAK`/`HISTORY_EXHAUSTED` at
+  **22–46 of 121** covering ~**900s** — the session's whole length so far. **Rule: when a gate's input is a
+  warm-up, the gate's real period is the warm-up's, not the gate's — price the lockout in sessions, and
+  check whether history you already hold could have prevented it.** `history_status` reads `days: 1574,
+  ready: true` and the σ seed never touches it.
+- **Rule 446 — a reduce-only clamp that also RE-SEEDS the intent is a ratchet, not a brake.** ADR-0126's
+  clamp is right; re-seeding `aim = held + delta` alongside it means a name that is merely *temporarily*
+  ineligible has its accumulated intent erased every cycle, so it starts from zero the instant the gate
+  reopens. A brake that resets the odometer is a different mechanism from a brake. **Rule: separate "may
+  not act on this intent now" from "no longer holds this intent" — ADR-0140 already made that distinction
+  for absence; the clamp path never got it.**
+- **Rule 447 — verify a change is EXERCISED before grading it, not merely deployed.** ADR-0144
+  (`403a95ffd`) deployed cleanly (commit `09:45:23`, boot `09:46:11`, 48 s later) and is **correct** — and
+  ran **zero times**, because `uncorroboratedHold` requires `held.signum() != 0` and the book is flat. Its
+  VERIFY-BY has an empty numerator *and* denominator. Recording it as STILL-BROKEN would have been a false
+  negative and triggered a wrong "fix"; the honest verdict is **ungraded**. **Rule: a VERIFY-BY needs a
+  reachability precondition stated with it — "this metric is only meaningful when X exists" — or an idle
+  window reads as a failure.** Cf. Rule 443, the same blind spot from the other side.
+- **Rule 448 — a restart can FAKE a pass on a latch bug.** `/api/market/regime` now reads `volRatio`
+  **0.86** / **CALM** against **277215656.99** / **ELEVATED** last cycle. Nothing was fixed; the heap-resident
+  baseline died with the JVM. Its VERIFY-BY is retightened to require a session boundary crossed *without*
+  an intervening restart. **Rule: for any defect in process-local state, the verify-by must outlive a
+  restart or it measures the restart.**
+- **Change:** none. `403a95ffd` is at **1/6** under ADR-0116 with `reports/.pending-baseline.json` present;
+  the freeze holds. Window was **100% neither** — no orders at all (last fill **2026-08-06 20:17:40.939Z**),
+  PnL **+0.00**. Next cycle's one change targets the new must-fix **#1**, at the σ **seed**, never at
+  ADR-0126's gate.

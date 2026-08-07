@@ -15,6 +15,136 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 14:00Z (**NO CHANGE — the ADR-0116 freeze holds at `403a95ffd` 1/6.** The freeze bought the measurement that reorders the whole register. The market REOPENED this cycle and the desk did not take a single position: `fusion_targets` reads `routing: true`, `instruments: 20`, `edgeGate: null`, `riskCuts: []` and real conviction (BAC `combinedForecast` **+16.105**, `sources: 2`, `targetQty` **4351.609784**), yet `insideBuffer` is **19** of **20**, every equity `aim` is **0.0**, and gross is **$0.00** against **$1,500,000** of headroom. The cause is read end-to-end and is NEW: `streamVolMeasuredNames` is **1**, so `stopArmed` is false for 19 names, so ADR-0126's `mayIncrease` clamps them reduce-only AND re-seeds each aim to held — pinning it at zero. σ is cold because `SensorWarmup` truncates at the overnight session gap (`GAP_TOLERANCE_SAMPLES` **30** steps × a **30000ms** step = 15 min, against a multi-hour close), so every seed terminates `GAP_BREAK`/`HISTORY_EXHAUSTED` at **22–46 of 121** covering ~**900s** — the session's whole length so far. That enters at **#1**: it is UPSTREAM of every other item, because a desk with no position cannot exercise ADR-0144, cannot generate turnover to measure the venue asymmetry, and has no holding period. ADR-0144 drops to **#2** — deployed and correct but **NOT YET EXERCISED**, its branch unreachable at `held = 0`. Item #3's live symptom CLEARED on the restart without being fixed.)
+
+### Step 0 — `403a95ffd` (ADR-0144): ⚠️ **DEPLOYED, NOT YET EXERCISED — ungraded, window intact**
+
+**It deployed.** The commit is stamped `09:45:23 -0400`; `ops_jvm.uptimeSeconds` **838** against the report
+clock puts boot at **09:46:11 -0400**, 48 s later. The restart gate rebuilt on it, correctly, for an `app/`
+path.
+
+**It has not run once.** `PositionBuffer.uncorroboratedHold` requires `held.signum() != 0`. Every name in
+`fusion_targets` reads `currentQty: 0`; gross is **$0.00**; the newest order in the window is
+**2026-08-06 20:17:40.939144+00**, before the change existed. Its VERIFY-BY — the share of full exits
+carrying one source falling below all of them — has an empty numerator *and* an empty denominator. This is
+**not** STILL-BROKEN and **not** VERIFIED. It keeps its ADR-0116 window and its VERIFY-BY unchanged.
+
+Cleared the obvious regression risk: ADR-0144 is **not** what holds the book flat — its branch is
+unreachable at `held = 0`, so it cannot suppress an entry. The cause is item #1 below.
+
+### Not danger — DORMANT with the session OPEN, which is the opportunity
+
+Gross **$0.00** = **0.0%** of the firm gross cap $1,500,000 (headroom **$1,500,000**); net **$0.00** of the
+$1,000,000 net cap. `breaker.halted` **false**; `var95` **0.00** / `es95` **0.00** on `coveredExposure`
+**0.00** (`note: no positions`). Total PnL **-$897.88**, **+0.00** since last run and **+0.00** over three.
+The tape is live — `traffic` reads `provider: alpaca`, `ticksIn` **9734**, `ticksDropped` **0**, feed
+`lastUpdateAgeMillis` **179**.
+
+### Window attribution — 100% neither
+
+No orders at all in the window (last fill predates the change), PnL **+0.00**. Nothing to credit to the
+market and nothing to blame on the change.
+
+---
+
+## Item #1 (NEW — promoted above everything, because it is UPSTREAM of the whole register) — **the σ warm-up cannot cross a session boundary, so 19 of 20 names are reduce-only and the book cannot leave flat.**
+
+**The chain, read end to end.**
+
+1. `FusionLifecycle.stopArmed` = `streamVol == null || streamVol.sigmaPerSample(instrument).isPresent()`.
+2. `fusion_targets.streamVolMeasuredNames` is **1** — the stop is unarmed for 19 of 20 planned names. The
+   single measured name is, by inference, **NQ**: the only non-zero `aim` (**0.033791**) and the plan's
+   only non-zero `deltaQty` (**0.018429**).
+3. `PositionBuffer.mayIncrease` is false for an unarmed stop (ADR-0126). That clamps the order reduce-only
+   **and re-seeds the aim to where the desk will actually be** — `aim = held + delta`.
+4. On a flat position reduce-only is nothing, so the aim is pinned at **0**, written back at **0**, and the
+   name can never leave flat. Nineteen times over: `insideBuffer` **19**, `aims` **0.0** for every equity.
+
+**Why σ is cold, and why it recurs every session.** The warm-up says it outright — `risk-cut σ sensor still
+cold for BAC after seeding 30 of 121 stored prices — stopped on HISTORY_EXHAUSTED covering 932s in 1
+read(s) at a 30000ms step`. Every equity terminates the same way at **22–46 of 121** on `GAP_BREAK` or
+`HISTORY_EXHAUSTED`, all covering ~**900–1000 s** — the length of the live session so far, not a store
+defect. `SensorWarmup.GAP_TOLERANCE_SAMPLES` is **30** consumption steps; at the σ sensor's **30000 ms**
+step that is 15 minutes of tolerance against a multi-hour overnight close, so the replay stops dead at the
+session boundary — deliberately, rather than fabricating a jump. σ must then accumulate its full **121**
+prices at a 30 s step from live prints alone: about an hour of continuous session, restarted from zero by
+any restart inside the session.
+
+**The same boundary truncates every mark-fed estimator** — trend `145 of 193` (AAPL), reversion `82 of 241`
+(AAPL), covariance `still cold after seeding 82 synchronised snapshots of 18 name(s)` — one bug class, not
+one sensor. This is Rule 444 arriving from the other side.
+
+**The pointed detail.** `history_status` reads `days: 1574, instruments: 55, ready: true, source:
+"existing"`. A deep daily history **is loaded and available**; the σ warm-up simply never draws on it, only
+on the intraday mark series the overnight gap severs.
+
+**Where the fix goes — and where it does NOT.** At the **seed**, not at ADR-0126's gate. Refusing to
+increase a name the risk cut cannot protect is correct policy and part of what keeps the autonomy safe; it
+stays untouched. The defect is that the seed declines to use history it already has.
+
+**VERIFY-BY (next run, all read from `/api/fusion/targets` and the boot log):**
+- `streamVolMeasuredNames` **rises from 1** toward the planned-name count within the first cycle after a
+  boot, instead of after ~an hour of session; and
+- `insideBuffer` **falls below `instruments`** (from 19 of 20), with at least one equity carrying a
+  non-zero `deltaQty`; and
+- the `risk-cut σ sensor still cold` WARN count **falls**, with any remaining seed no longer terminating
+  `GAP_BREAK`/`HISTORY_EXHAUSTED` at ~900 s.
+- Guard against grading the clock (Rule 433): all three are read **at a fixed short offset from boot**
+  (`ops_jvm.uptimeSeconds`), never cumulatively — a count that rises merely because the session got longer
+  proves nothing.
+
+---
+
+## Item #2 (was #1, DEMOTED — shipped, correct, NOT YET EXERCISED) — **the exit gate is not corroboration-symmetric with the entry gate: 6 of 6 full exits fired at `sources=1`, 0 of 25 entries did.**
+
+Addressed by ADR-0144 (`403a95ffd`), which is live and at **1/6** under ADR-0116. Demoted purely because it
+**cannot be exercised** while item #1 holds the book flat — not because the diagnosis weakened. Its
+VERIFY-BY is unchanged and carries forward: over the window's FILLED LIVE orders, the share of
+`fusion exit — target decayed to flat` carrying `sources ≤ 1` must fall below all of them, paired with the
+fixed-width trailing-window holding period rising without gross falling. **Both require a book with
+positions in it, so item #1 is a strict prerequisite for grading this one.**
+
+---
+
+## Item #3 (carried from #2, rank shifted by the promotion above) — **82.70% of turnover runs through the venue that charges 5× the round trip.**
+
+Unchanged in substance; no new evidence this cycle because the window contained **no orders at all**.
+Carried at its existing VERIFY-BY. Note it shares item #2's prerequisite: with gross at **$0.00** there is
+no turnover to re-measure.
+
+---
+
+## Item #4 (carried from #3 — live symptom CLEARED BY RESTART, mechanism NOT fixed) — **a zero-variance stretch drives the volatility-regime baseline to a denormal, and the ELEVATED branch then LATCHES it there for the life of the process.**
+
+⚠️ **STILL OPEN — masked, not fixed.** `/api/market/regime` now reads `volRatio` **0.86**, `regime`
+**CALM**, `trend` **CHOP** — against **277215656.99** / **ELEVATED** last cycle. The latch did not survive
+the **09:46:11 -0400** restart, which is exactly what the diagnosis predicts: the baseline lives in heap and
+a fresh process re-seeds it. The mechanism — `VolatilityRegime` absorbing a frozen mark as a zero return,
+then `baseline = ewma.min(baseline)` under ELEVATED preventing recovery — is untouched in the code.
+
+**VERIFY-BY tightened, because a restart can now fake a pass:** the item is only VERIFIED when `volRatio`
+reads a plausible ratio **after a session boundary has been crossed WITHOUT an intervening restart** —
+i.e. `ops_jvm.uptimeSeconds` exceeds the elapsed time since the previous close. A CALM reading on a JVM
+younger than the last close proves nothing.
+
+---
+
+## Item #5 (carried from #4, DEMOTED — first EXERCISED, and VERIFIED) — ~~**the restart gate's exemption list omits `scripts/`**~~
+
+Struck; verified in the 13:30Z block. Retained here only for the audit trail.
+
+---
+
+## Item #6 (carried from #5, unchanged, still NO ACTION) — **entry is structurally frozen for names early on their aim path.**
+
+Unchanged in substance. Note this cycle sharpened its relationship to item #1: the aim-path freeze
+described here is the *general* case, while item #1 is a specific, mechanical, and fully-diagnosed
+instance of it — the aim re-seeded to held by the reduce-only clamp. Fixing #1 does not close this item,
+but it removes the dominant cause of it that is live right now. Deployment remains gated on the
+horizon-matched expectancy turning non-negative.
+
+---
+
 ## Verification block — 2026-08-07 13:30Z (**CHANGE SHIPPED — ADR-0144, targeting item #1.** The ADR-0116 freeze is over: `27564bb15` was scored **❌ BAD** and auto-reverted by `ac15c43`, `reports/.pending-baseline.json` is gone, and `scripts/score-change.py score` prints `no pending change to score`. Item #1 is now **fixed at its mechanism** rather than re-measured: ADR-0124's agreement scalar, which correctly zeroes an unestimable view, was being read downstream as an affirmative flat target and worked in full as an exit. The prerequisite the register set last cycle (Rule 440 — is ADR-0140 reached?) is **answered: it is NOT**, so the two candidate fixes did not both apply and the right one was buildable. A NEW item enters at **#3** — the volatility-regime baseline latches permanently after a frozen tape. Item #2 (venue asymmetry) and the `scripts/` omission are carried, the latter now **EXERCISED and VERIFIED** for the first time.)
 
 ### Step 0 — `27564bb15` (ADR-0143): ✅ **VERIFIED on its own VERIFY-BY**, then **❌ BAD** on a vector it could not have moved

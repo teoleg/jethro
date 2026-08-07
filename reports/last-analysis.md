@@ -1,80 +1,98 @@
-# Every full exit fires because corroboration went AWAY — so an uncorroborated view now HOLDS, not liquidates (ADR-0144)
+The desk is locked flat with the market OPEN and 20 live forecasts, because 19 of 20 names are reduce-only: their risk-cut σ sensor cannot warm across the overnight session gap, so their trailing stop is unarmed and ADR-0126 forbids any increase.
 
-## Situation — the four questions, in live numbers
+**No code change this cycle.** `403a95ffd` (ADR-0144) is at **1/6** under ADR-0116 and
+`reports/.pending-baseline.json` is present — `scripts/score-change.py score` prints
+`403a95ffd still accumulating evidence (1/6 cycles) — held, not scored this run`. Piling a change on top
+would destroy its evidence window. The register is updated and the #1 target for next cycle is set.
 
-1. **Money.** Total PnL **-$897.87616775**. Since last run **+0.00**; over the last three runs **+0.00** —
-   the US session was closed for all of them (`chore(status)` reads `market-closed` from 08:30Z through
-   13:00Z) and it reopened as this report was cut. The daily curve is the real move: **-628.07** (08-05) →
-   **-897.88** (08-06) → **-897.88** (08-07, unchanged). Yesterday bled; today has not started.
-2. **Risk.** Gross **$0.00** — **0.0%** of the firm gross cap $1,500,000, headroom **$1,500,000**; net
-   **$0.00** against the $1,000,000 net cap. `breaker.halted` **false**. **DORMANT**, which the mission
-   names a failure to attack, not a rest state.
-3. **Cause.** Last cycle's change `27564bb15` (ADR-0143) was scored **❌ BAD** and auto-reverted by
-   `ac15c43`. Two things are true at once and both matter: the vector it was graded on
-   (PnL **-838.66 → -897.88**, gross **15,986.26 → 0.00**) moved across a window in which
-   **`scripts/` cannot reach the running app** — it holds the loop's own Python tooling, never loaded by
-   the JVM — so the verdict is not attribution, it is coincidence with a session close; and ADR-0143's
-   own **VERIFY-BY passed in the same breath that removed it**, the ledger note reading
-   `reverted (code reverted in 2 path(s); ADR + ledger + findings kept)` where all nine prior BAD rows read
-   `⚠️ REVERT FAILED`. The self-correction arm works now. I am not re-attempting the reverted idea.
-4. **Danger.** No. Nothing is near a cap, the breaker is clear, and gross is zero. The live state is the
-   inverse — an idle book, which is the opportunity.
+---
 
-**Restart, stated plainly:** `ops_jvm.uptimeSeconds` **12388** against `traffic.timestampMillis`
-**1786109402412** puts boot at **2026-08-07T10:03:34.412Z**, mid-closure. Every equity sensor is
-consequently cold — the log carries `seeding 1 of 193` / `1 of 241` on KO, GOOG, UNH, CAT, PG, PYPL, CVX,
-MCD, JNJ, PFE, all terminating `HISTORY_EXHAUSTED`/`NO_HISTORY` — because a frozen overnight tape stores
-no recent prices to seed from. `fusion_targets.instruments` is **2**: NQ and EURUSD, the two names that
-print overnight.
+## Step 0 — verifying `403a95ffd` (ADR-0144): ⚠️ **DEPLOYED AND CORRECT, BUT NOT YET EXERCISED**
 
-## Order-level post-mortem — the close liquidated the whole book for a non-reason
+It **deployed**: the commit is stamped `09:45:23 -0400` and the JVM's `uptimeSeconds` **838** against the
+report clock puts boot at **09:46:11 -0400**, 48 s later — the restart gate rebuilt on it, as it should
+for an `app/` path.
 
-The window contains no orders (closed tape), so the post-mortem is the last seven minutes of the previous
-session, and it is unambiguous. At **20:10:31Z** BAC, PFE and HD all flattened on
-`fusion exit — target decayed to flat [forecast=-0.0, sources=1]`; at **20:16:06Z** and **20:17:37Z** MSFT,
-NVDA and AMZN followed at `sources=1`, `sources=1`, `sources=0`. Six full exits, every one at
-`sources ≤ 1`, none at a reversed forecast. That is the census's mechanism firing on the entire book at
-once: as the tape stopped printing, sources dropped out, and the desk paid the **2.00 bps** equity round
-trip to liquidate positions its own signals had not turned against. `totalFees` **435.119863** is
-**48.46%** of `|firmTotal|`.
+It has **not run once**. `PositionBuffer.uncorroboratedHold` requires `held.signum() != 0` — it only ever
+holds a position the desk already has. Every name in `fusion_targets` reads `currentQty: 0`, gross is
+**$0.00**, and the newest order in the window is **2026-08-06 20:17:40.939144+00**, before the change
+existed. So its VERIFY-BY (the share of full exits carrying one source falling below all of them) has an
+empty numerator and an empty denominator. **Not STILL-BROKEN, not VERIFIED — ungraded.** It stays #2 and
+keeps its window; it can only be graded once the desk holds something again, which is exactly what the new
+#1 blocks.
 
-**Change vs market:** nothing to split. The market was shut for the whole span, PnL moved **+0.00**, and
-no committed path reached the app before the 10:03:34Z restart. My changes earn neither credit nor blame.
+I checked the obvious regression risk and cleared it: ADR-0144 cannot be what is holding the book flat,
+because its branch is unreachable at `held = 0`.
 
-## The mechanism, and the one change
+---
 
-ADR-0124 zeroes the agreement scalar at one *effective* source because the dispersion is unestimable — a
-correct answer to "may risk go ON this name". But that scalar multiplies the combined forecast, and the
-combined forecast is **also the exit trigger**: `TargetPlanner` turns 0 into a flat target and ADR-0090
-works a flat target in full, this cycle. So "no corroboration" is executed as "the view is zero, sell
-everything". This run's `fusion_targets` shows it frozen in place — EURUSD carries one contribution,
-`trend forecast=20.0` at the cap, and a `combinedForecast` of **0.0**.
+## Situation triage
 
-I first checked the register's prerequisite (Rule 440): **ADR-0140's aging is not reached here.** It ages
-names *absent from the target list*; an uncorroborated name is *present*, with an affirmative flat target,
-so it never enters the absence clock. Unreached rule, not wrong horizon.
+**1. Money.** Total PnL **-$897.88**. Since last run **+0.00**; over the last three runs **+0.00**. Not
+bleeding — frozen. The daily curve's last real move was **-628.07** (08-05) → **-897.88** (08-06), and
+nothing since: `chore(status)` read `market-closed` from 08:30Z through 13:00Z.
 
-**ADR-0144:** a flat target on a **held** name with **≤ 1 source** that the ADR-0086 cut did **not**
-flatten routes nothing and is left out of the aim snapshot, so ADR-0140 ages its intent over one evidence
-horizon exactly as any other absence. `sources ≤ 1` is the precise characterisation of the unestimable
-case and needs no new state. Entry is untouched (the census's `0 of 25` entries at one source stays zero),
-a corroborated flat view still exits in full, a stop cut still outranks it, and the branch can only ever
-*remove* an order — one-way, like ADR-0076/0098/0124 before it. Five new `PositionBufferTest` cases;
-`-Pci test` green (625 app tests, 0 failures).
+**2. Risk.** Gross **$0.00** — **0.0%** of the $1,500,000 firm cap, headroom **$1,500,000**. Net **$0.00**
+of the $1,000,000 net cap. `breaker.halted` **false**; `var95` **0.00** on `coveredExposure` **0.00**
+(`note: no positions`). **DORMANT** — the opportunity, not the danger.
 
-**VERIFY-BY next run:** the trigger × source-count census over the window — the share of
-`fusion exit — target decayed to flat` fills carrying `sources=1` must fall **below 1.0** — paired with the
-stationary holding-period estimator rising **without** gross falling.
+**3. Cause.** Not the change. See Step 0 — ADR-0144 never executed.
 
-## Also found, recorded not acted on
+**4. Danger.** None. Zero exposure, breaker clear, nothing near a cap. The inverse applies: with the full
+budget unused and the session open, staying flat is the failure.
 
-`/api/market/regime` reads `volRatio` **277215656.99**, `regime` **ELEVATED**. The mechanism is certain:
-`VolatilityRegime` skips no frozen mark, so an overnight tape of identical prices gives `relVol = 0` for
-every name, the EWMA baseline (λ=0.97) decays toward zero across thousands of cycles, and the first real
-reading at the open divides by it. Worse, it **latches** — `baseline = ewma.min(baseline)` while ELEVATED
-means the baseline can never climb back, so the process stays risk-off for its whole life. The identical
-lesson is already coded one file away (`FusionLifecycle.applyRiskCut`, ADR-0116: "absorbing those as zero
-returns decays σ toward zero"). It is **not** this cycle's change because it costs no money today —
-`fusion_targets.routing` is **true**, so `StrategyLifecycle.autoExecuting()` is false and the regime scale
-gates nothing that trades; it reaches only the landing-page badge and the sim backtest. Filed as must-fix
-**#3** with its own VERIFY-BY.
+**5–7. Order-level post-mortem and change-vs-market attribution.** The window contains **no orders at all**
+— the last fill predates the change. PnL moved **+0.00**. The window is therefore **100% neither**: no
+market move to attribute and no change effect to credit or blame. What the window *does* contain is the
+reopen, and that is where the finding is.
+
+---
+
+## The finding: the σ warm-up cannot cross a session boundary, so the whole book is reduce-only
+
+The market is open and the plan is healthy. `fusion_targets` reads `routing: true`, `instruments: 20`,
+`edgeGate: null` (not gating), `portfolioRiskMultiplier: 1.0`, `riskCuts: []`, and real conviction —
+BAC at `combinedForecast` **+16.105**, `sources: 2`, `targetQty` **4351.609784** on a price of **62.66**.
+Marks are live: `ticksIn` **9734**, `ticksDropped` **0**, alpaca `lastUpdateAgeMillis` **179**.
+
+And yet `BAC` reads `currentQty: 0, deltaQty: 0`. So does every other equity. `insideBuffer` is **19** of
+**20**, and the `aims` map is **0.0** for all nineteen equities — only **NQ** carries an aim
+(**0.033791**) and the plan's only non-zero delta (**0.018429**).
+
+The chain, read end to end in the code:
+
+1. `FusionLifecycle.stopArmed` is `streamVol == null || streamVol.sigmaPerSample(instrument).isPresent()`.
+2. `fusion_targets.streamVolMeasuredNames` is **1**. So the stop is unarmed for 19 of 20 names — and the
+   one measured name is, by inference, the one name that moved.
+3. `PositionBuffer.mayIncrease` is false for an unarmed stop (ADR-0126), which clamps the order
+   reduce-only **and re-seeds the aim to where the desk will actually be** — `aim = held + delta` = **0**.
+4. Reduce-only on a flat position is nothing. The aim is pinned at zero, is written back at zero, and the
+   name cannot leave flat. Nineteen times over.
+
+**Why σ is cold, and why this recurs every session.** The warm-up logs say it exactly: `risk-cut σ sensor
+still cold for BAC after seeding 30 of 121 stored prices — stopped on HISTORY_EXHAUSTED covering 932s in
+1 read(s) at a 30000ms step`. Every equity terminates the same way, **22–46 of 121**, on `GAP_BREAK` or
+`HISTORY_EXHAUSTED`, all covering roughly **900–1000 s**. That is the length of the live session so far,
+not a defect in the store. `SensorWarmup.GAP_TOLERANCE_SAMPLES` is **30** consumption steps; at the σ
+sensor's **30000 ms** step that tolerance is 15 minutes, and the overnight close is many hours — so the
+replay stops dead at the session boundary, deliberately, rather than fabricating a jump across it. The
+sensor then needs its full **121** prices at a 30 s step accumulated from live prints alone: about an hour
+of continuous session.
+
+So the desk is structurally unable to put risk on for roughly the first hour of **every** session, and any
+restart inside the session restarts that clock from zero. The trend and reversion sensors truncate at the
+same boundary (`145 of 193`, `82 of 241`, same `GAP_BREAK`/`HISTORY_EXHAUSTED`) — this is one bug class
+across every mark-fed estimator, which is Rule 444's lesson arriving from the other side.
+
+The pointed detail: `history_status` reads `days: 1574, instruments: 55, ready: true, source: "existing"`.
+A rich daily history **is loaded and available** — the σ warm-up simply does not draw on it, only on the
+intraday mark series that the overnight gap severs.
+
+That is the new **#1**, and it is upstream of everything else in the register: while it holds, no position
+exists, so ADR-0144 cannot be exercised, the venue-fee item has no turnover to measure, and the horizon
+item has no holding period. Next cycle's one change targets it — at the seed, not at ADR-0126's gate,
+which is correct policy and stays untouched.
+
+**Also cleared, without action:** must-fix #3 (the volatility-regime baseline latching) reads
+`volRatio` **0.86**, `regime` **CALM** this cycle, against **277215656.99** / **ELEVATED** last cycle. The
+latch did not survive the restart — it was masked, not fixed. The mechanism stands and the item stays open.
