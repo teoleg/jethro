@@ -5830,3 +5830,42 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Change: none.** `3c43242ba` is at **5/6** in its ADR-0116 window with `.pending-baseline.json` present;
   the contract freezes new code while a change is under measurement. Its exit leg verified a **fourth** time
   (`fusion exit — target decayed to flat` on WMT and NVDA 18:35:39, BAC 18:27:02).
+
+## 2026-08-07 19:30Z — the floor was one-sided: opened at conviction, closed at nothing
+
+- **Rule 484 — when a control has an asymmetric threshold, look for the mirror question before looking for a
+  better number.** Four cycles confirmed item #1's mechanism ("the target tracks a ~90s mean-reverting forecast
+  1:1") and three of them proposed *widening the band*. The band was never the defect. `FusionLifecycle.tick`
+  applies the ADR-0059 conviction floor **only to `!reducing`**: a name may be OPENED only at `|f| ≥ 5.0` and
+  CLOSED at nothing at all. Since `targetQuantity` is linear in the forecast, a forecast that merely DECAYS
+  collapses the target and unwinds the whole position at a strength that could not have opened a share of it.
+- **Rule 485 — `f ≈ 0` from a combiner means "no view", and no view is a reason to HOLD, not to liquidate.**
+  Proof from this window's own FILLED LIVE ALPHA orders, `forecast=` read off each ADR-0134 reason: **AMZN
+  `BUY 34` at f=+9.25 (18:54:25) → `SELL 26` at f=+0.0688 (18:59:59)** — the sign NEVER CHANGED, 82% sold back
+  five minutes later. **BAC `SELL 156` at f=−7.38 → `BUY 1`×4 at f≈+0.0023…+0.10 → `BUY 115` at f=−0.288**,
+  inside four minutes. **KO `SELL 45` at f=−5.04 → nine buys totalling 117.** Not one of those exits was a view
+  reversing.
+- **Rule 486 — gate the reduction by its AUTHOR, not by its size.** A reduction has two possible authors and
+  only one is the forecast. Capture the planner's target BEFORE the controls run; then with `s=sgn(held)`,
+  `h=|held|`, `p=s·planned`, `c=s·controlled`, the controls authored exactly `max(0, min(h,p) − min(h,c))` and
+  that always routes, while `h − min(h,p)` is the forecast's and needs conviction. The ADR-0137 gross cap
+  halving the book still routes its whole half (h=100, p=120, c=60 ⇒ 40 of 40); decayed AMZN routes nothing
+  (h=34, p=c=0.25 ⇒ 0 of 33.75). No new number: the threshold is `min-forecast-to-route` itself.
+- **Rule 487 — when you withhold an order, re-seed the intent to where the desk actually is.** Without it the
+  withheld unwind accumulates in the ADR-0080 aim and fires as ONE large liquidation the moment conviction
+  returns — strictly worse than the behaviour removed. ADR-0064/0075 already does this one branch above; the
+  pattern was there to copy.
+- **Rule 488 — a ❌ BAD verdict on a REVERT is not an instruction to un-revert.** `3c43242ba` was scored ❌ BAD
+  with a failed auto-revert, but it *is* the revert of ADR-0144, itself graded ❌ BAD. Completing that revert
+  would reinstate condemned code — the one thing "never re-attempt a reverted idea" forbids. Two mutually
+  exclusive changes cannot both be reverted; say so in the register rather than silently skipping.
+- **Rule 489 — a proof metric the loop can compute by hand will eventually be computed by hand.** Item #1's
+  VERIFY-BY survived last cycle's drift test but still lived only as prose. It is now `scripts/reversal-rate.py`,
+  committed, run as `--window 6` over the report archives. Baseline **0.1975 (32 of 162 pairs)**, MDE **<0.080**,
+  pooled sample gate **≥150 pairs** (exit 2 = NO VERDICT, never a pass).
+- **Attribution — this window's −$176.69 PnL and +$29,438.14 gross are credited to NOTHING.** No logic deployed
+  this cycle or last (`git log`: `docs/` and `chore(status)` only); `uptimeSeconds` **10452** at a 19:30:01Z
+  stamp derives a JVM start of **16:35:49Z**, the same continuous process as the four prior verifications.
+- **Cost side, restated:** `totalFees` **$488.284665** of `firmTotal` **-$1,188.68635665** = **41.1%** (ALPHA
+  alone **$465.190115** of **-$949.70770444** = **49.0%**), over **$5,716,068.55** LIVE turnover and **3,319**
+  fills, against LIVE hit rates **0.490 / 0.501 / 0.498** on n = 14,672 / 14,395 / 13,471.

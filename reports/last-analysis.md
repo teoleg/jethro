@@ -1,69 +1,61 @@
-# Last analysis — 2026-08-07 19:00Z
+# Shipped ADR-0145: the desk could be OPENED only at full conviction but CLOSED at none — that asymmetry is the round-trip machine paying half our loss in fees.
 
-**No code change (the pending one is at 5/6 of its measurement window) — instead I stress-tested my own
-proof metric against 174 archived reports, found it too noisy to grade anything, and replaced it with one
-that has a measured noise floor.**
+## Situation (live, read from this run's report — never authored)
 
-## Situation triage
+1. **Money.** Total PnL **-$1,188.69**, down **$176.69** since last run and **$163.82** over the last three.
+   The book is bleeding, and it is UNDERWATER.
+2. **Risk.** Gross **$41,355.64** = **2.8%** of the $1,500,000 firm cap, **$1,458,644** of headroom; net
+   **-$25,490.04** = **2.5%** of the $1,000,000 net cap. Gross rose **+$29,438.14** this window. That is not
+   danger — it is a book coming off dormant into an almost entirely unused budget (ADR-0132). VaR95 **$714.07**,
+   ES95 **$961.45**, breaker not halted.
+3. **Cause.** The change under measurement, `3c43242ba`, was **scored this cycle: ❌ BAD**, and its auto-revert
+   failed on a git conflict. **I did not complete that revert, deliberately** — `3c43242ba` *is* the revert of
+   ADR-0144, which the scorer graded ❌ BAD one window earlier. Reverting it would put the condemned ADR-0144
+   code back in the running book. Two mutually exclusive changes cannot both be reverted, and re-instating a
+   reverted idea is the one thing the contract forbids. Recorded in `reports/must-fix.md`.
+4. **Danger.** No. Bleeding, yes — but at 2.8% of the gross cap with the breaker cold, this is the DORMANT-side
+   failure (unused budget), not the near-the-cap one. De-risking would be the wrong move.
+5. **Change vs market.** Nothing deployed in the last two cycles (`git log` shows only `docs/` and
+   `chore(status)`); `uptimeSeconds` **10452** at a 19:30:01Z stamp derives a JVM start of **16:35:49Z**, one
+   continuous process across five verifications. **So the entire window's PnL and exposure move is market and
+   pre-existing logic — none of it is creditable or blameable on a change.**
 
-**1. Money.** Total PnL **-$1,015.34**, up **+$0.76** on the last run and **+$8.63** across the last three.
-Still UNDERWATER. The deterministic heartbeat puts 3-iteration growth at **-1.23%** against the **+1.0%**
-target — `on_track=False`, `stale=True`. The book is not bleeding run-over-run, but it is not earning
-either, and it is off target.
+## What I found, and why it is different from the last four cycles
 
-**2. Risk.** Gross exposure **$12,500.46** — **0.8%** of the $1.5M firm cap, **$1,487,500** of headroom.
-Net **-$25.38**, 0.0% of the $1M net cap. VaR95 **$97.27**, ES95 **$122.72**, breaker `halted: false`. No
-`NEAR FIRM CAP` and no `DANGER` flag. The book is trading, not dormant — but at under 1% of its allowance
-it is still badly under-deployed against ADR-0132.
+Four cycles have confirmed item #1's *mechanism* — "the fusion target tracks a ~90-second mean-reverting
+forecast 1:1" — without ever finding its **cause**. The cost is not in dispute: `totalFees` **$488.284665**
+against `firmTotal` **-$1,188.68635665** is **41.1%** of the whole cumulative loss (**49.0%** on ALPHA alone,
+$465.190115 of -$949.70770444), across **$5,716,068.55** of LIVE turnover and **3,319** fills — while the three
+large-n LIVE hit rates sit at **0.490 / 0.501 / 0.498**. Half the loss is paid in fees to trade a coin flip.
 
-**3. Cause.** Nothing was deployed this cycle or last. `3c43242ba` (the manual completion of the failed
-ADR-0144 auto-revert) is at **5/6** in its ADR-0116 window and remains unscored. Its own defect is ✅
-**VERIFIED for a fourth consecutive window**: `fusion exit — target decayed to flat` fired on WMT and NVDA
-at 18:35:39 and BAC at 18:27:02, and `uptimeSeconds` **8651** at a 19:00:01Z stamp derives a JVM start of
-**16:35:50Z** — the same continuous process as the previous three verifications, so this is not a boot
-transient.
+The cause is one line of `FusionLifecycle.tick`: the ADR-0059 conviction floor is applied **only to
+`!reducing`**. A name may be **opened** only at `|f| ≥ 5.0` and **closed at nothing at all**. Because
+`TargetPlanner.targetQuantity` is *linear* in the forecast, a forecast that merely **decays** toward zero
+collapses the target and unwinds the whole position — at a strength that would not have been allowed to open a
+single share of it. Read from this window's own FILLED LIVE ALPHA orders: **AMZN `BUY 34` at f=+9.25 (18:54:25),
+`SELL 26` at f=+0.0688 (18:59:59)** — the forecast never changed *sign*; 82% sold back five minutes later.
+**BAC `SELL 156` at f=−7.38 → `BUY 1`×4 at f≈+0.002…+0.10 → `BUY 115` at f=−0.288**, inside four minutes.
+`f ≈ 0` is the combiner saying it has *no view*. No view is a reason to **hold**, not to liquidate.
 
-**4. Danger.** No. Not near the exposure cap, not near the drawdown breaker. The inverse condition applies:
-this is an under-deployed book, which is an opportunity, not a risk to cut.
+## The change
 
-**5. Order-level post-mortem.** The window's ALPHA orders re-confirm item #1's mechanism on two names. BAC
-sold 156 at `forecast=-7.38` (18:39:12) then bought back 119 across five orders by 18:42:45, the last four
-at forecasts between **+0.0023 and -0.288** — a full round trip in under four minutes, at a forecast
-indistinguishable from zero. KO sold 45 at `fc=-5.04` then bought back 117 across nine orders as the
-forecast walked from -5.04 through zero to **+12.89**. No trigger here opened a *deliberate* loser; the
-losing trigger is the round trip itself, and its cost is the fee.
+**ADR-0145 — apply the conviction floor to the EXIT as well as the entry.** A Schmitt trigger: enter on
+conviction, exit on conviction, do nothing in between. It gates **only** the reduction the *forecast* authored;
+a reduction a *risk control* authored always routes in full, separated exactly by capturing the planner's
+target before any control runs. It introduces **no number** — the threshold is
+`jethro.fusion.min-forecast-to-route` itself. A flat target returns before any of it, so the ADR-0086
+chandelier cut, the ADR-0065 unwind and the ADR-0027 breaker keep exact semantics; the whole deterministic
+floor is untouched. Deliberately **not** ADR-0133, which widened the *band* and was scored ❌ BAD — a wider
+band vetoes weak-conviction *names*; this filters weak-conviction *exits*.
 
-**6/7. Change vs market — attribution.** The window's **+$0.76** and the **-$7,144.32** gross move are
-credited to **nothing**. No logic was deployed in either window; `git log` shows only `docs/` and
-`chore(status)` commits. This is market on positions I did not choose, and I claim no credit for the PnL
-being up.
+The honest risk: losers are held longer. That is what the ADR-0086 trailing σ cut exists for, and it is exempt
+here — so this moves the exit decision **from the forecast to the risk sensor**, which is the owner's stated
+thesis. Expect gross to RISE; that is the ADR-0132 intent at 2.8% of the cap, not a relaxed limit.
 
-## What I actually did this cycle
+## How it gets graded
 
-Last cycle I withdrew item #1's VERIFY-BY after it drifted 4× on a no-deploy window, and replaced it with
-"Δ cumulative turnover ÷ mean gross exposure over the full 6-cycle window" — **asserting** that cumulative,
-monotone endpoints would cure the drift. This cycle I tested that assertion rather than trusting it, by
-script, over 174 archived report zips, measuring dispersion only across windows where nothing shipped.
-
-**It fails too.** At the 6-cycle horizon its CV is **0.53** with a 7.7× max/min spread, and its siblings
-fail with it — turnover/cycle CV **0.45**, fills/cycle CV **0.47**, mean fill size CV **0.42**. The common
-flaw: all four are *rates of activity*, and this book's per-window activity is the noisiest thing about it.
-Making the endpoints cumulative does not help, because the difference of two cumulative quantities is still
-a rate. Aggregating to 6 cycles does not help either — it moved CV from 0.72 to 0.53 and no further.
-
-The same sweep found one metric that survives, and it is different in kind: the **ALPHA same-name
-direction-reversal rate**, a *proportion measured inside the window*, so the window's own volatility sits
-in numerator and denominator together and cancels. Pooled over 6 reports with a ≥150-pair sample gate it
-reads **CV 0.29**, range 0.083–0.252 across n=17 no-deploy blocks. Current value **0.1955** (35 reversals
-of 179 pairs); a damper must drive it below **~0.080** — a **58% cut** — to clear 2 sd. That threshold is
-recorded in the register in advance and will not be moved afterwards.
-
-## Why no code change, and what happens next
-
-Two independent reasons. The contract freezes new code while `reports/.pending-baseline.json` exists and
-the scorer reports 5/6. And separately, I had no admissible way to prove the damper worked until now — the
-two previous cycles would each have graded it on a metric that swings several-fold on market conditions
-alone, which is how a loop convinces itself a null change succeeded. Item #1's mechanism was never in
-doubt; only its measurement was, and that is now repaired with a stated noise floor and a pre-committed
-detection threshold. Next cycle the pending change scores, and the σ-scaled target hysteresis is ready to
-ship against a VERIFY-BY that can actually fail.
+`scripts/reversal-rate.py` (new, committed) computes the register's proof metric from `recent_orders` so the
+loop never authors it: the ALPHA same-name direction-reversal rate, pooled over the full 6-report window.
+Baseline **0.1975 (32 of 162 pairs)**; it must fall **below ~0.080** against a measured no-deploy noise floor
+of mean 0.190 / sd 0.055; pooled sample gate **≥150 pairs** or NO VERDICT. Guards: gross must not fall and
+`firmTotal` must not deteriorate. `./gradlew -Pci test` green.

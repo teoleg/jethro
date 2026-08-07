@@ -164,6 +164,25 @@ public final class PositionBuffer {
      */
     public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
                         java.util.function.Predicate<String> stopArmed) {
+        return apply(targets, gate, adjustmentRate, stopArmed, null, 0.0);
+    }
+
+    /**
+     * ADR-0145 — as above, plus the mirror of the ADR-0059 conviction floor. A reduction the PLANNER
+     * authored — the forecast-implied target has decayed below the holding — routes only when that
+     * forecast is strong enough that it would have been allowed to OPEN the position; a reduction a risk
+     * control authored is never held. {@code plannedTargets} maps a name to the target the planner
+     * produced BEFORE any control ran; null means unwired, which leaves every path byte-identical.
+     *
+     * @param adjustmentRate     the ADR-0080 derived partial-adjustment fraction for this cycle
+     * @param stopArmed          per-name predicate: true when the risk-cut sensor can price this name's stop
+     * @param plannedTargets     name → the planner's own target, before the risk controls; null = unwired
+     * @param minForecastToRoute the ADR-0059 conviction floor; at or below zero the floor is off
+     */
+    public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
+                        java.util.function.Predicate<String> stopArmed,
+                        java.util.function.Function<String, BigDecimal> plannedTargets,
+                        double minForecastToRoute) {
         ensureRestored();
         if (targets == null || targets.isEmpty()) {
             // ADR-0140: an empty plan is a cycle in which every name was absent, not proof that the
@@ -200,6 +219,19 @@ public final class PositionBuffer {
                         ? held.negate().setScale(QTY_SCALE, RoundingMode.HALF_EVEN)
                         : TargetPlanner.reduceOnly(delta, held);
                 aim = held.add(delta).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+            } else if (plannedTargets != null) {
+                // ADR-0145: the conviction floor, applied to the exit as well as the entry. A reduction
+                // the forecast alone authored — its target has decayed below the holding — is held back
+                // unless that forecast would have been strong enough to open the position; whatever a
+                // risk control authored still routes in full. Re-seed the aim to where the desk will
+                // actually be, for the same reason the clamp above does: an intent it is not acting on
+                // must not accumulate into one large unwind that fires the moment conviction returns.
+                BigDecimal convicted = ConvictionHold.apply(delta, held, plannedTargets.apply(t.instrument()),
+                        target, t.combinedForecast(), minForecastToRoute);
+                if (convicted.compareTo(delta) != 0) {
+                    delta = convicted;
+                    aim = held.add(delta).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+                }
             }
             aims.put(t.instrument(), aim);
             snapshot.put(t.instrument(), aim);

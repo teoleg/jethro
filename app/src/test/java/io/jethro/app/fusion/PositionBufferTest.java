@@ -864,4 +864,80 @@ class PositionBufferTest {
                                 new BigDecimal("-7")),
                         new BigDecimal("-142.319300"), RATE));
     }
+
+    // ---- ADR-0145: the conviction floor applied to the exit as well as the entry ----
+
+    /**
+     * The live pattern: AMZN bought at a forecast of +9.25 and unwound five minutes later at +0.0688,
+     * the target having merely decayed. Alongside a name still carrying a view, so the ADR-0141
+     * cross-section is a real one and the band does not swallow the order by itself.
+     */
+    private static List<FusionPlanner.Target> decayedAmzn() {
+        return List.of(target("AMZN", 0.0688, "0.250000", "34"),
+                target("MSFT", 7.9312, "60.000000", "0"));
+    }
+
+    @Test
+    void unwiredTheDecayedNameStillUnwindsExactlyAsBefore() {
+        var applied = new PositionBuffer(0.10).apply(decayedAmzn(), null, RATE);
+        // The forecast has decayed, not reversed — and the desk sells nearly the whole position for it.
+        assertThat(applied.targets().get(0).deltaQty().signum()).isNegative();
+        assertThat(applied.targets().get(0).deltaQty().abs()).isGreaterThan(new BigDecimal("30"));
+    }
+
+    @Test
+    void aReductionAuthoredByADecayedForecastAloneDoesNotRoute() {
+        // planned == controlled: no risk control shrank this target, so the whole reduction is the
+        // planner's own and the forecast behind it is far below the ADR-0059 floor.
+        var applied = new PositionBuffer(0.10).apply(decayedAmzn(), null, RATE, null,
+                id -> "AMZN".equals(id) ? new BigDecimal("0.250000") : new BigDecimal("60.000000"), 5.0);
+        assertThat(applied.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+        // and the aim is re-seeded to where the desk actually is, so the withheld unwind cannot
+        // accumulate and fire all at once the moment conviction returns.
+        assertThat(applied.aims().get("AMZN")).isEqualByComparingTo("34.000000");
+    }
+
+    @Test
+    void theSameNameUnwindsInFullOnceTheViewHasReversedWithConviction() {
+        var plan = List.of(target("AMZN", -8.25, "-30.000000", "34"),
+                target("MSFT", 7.9312, "60.000000", "0"));
+        var applied = new PositionBuffer(0.10).apply(plan, null, RATE, null,
+                id -> "AMZN".equals(id) ? new BigDecimal("-30.000000") : new BigDecimal("60.000000"), 5.0);
+        assertThat(applied.targets().get(0).deltaQty().signum()).isNegative();
+    }
+
+    @Test
+    void aReductionARiskControlAuthoredStillRoutesWithNoConvictionAtAll() {
+        // The planner wanted MORE than is held; the control cut the target to 4. None of the reduction
+        // is the forecast's, so the hold must not touch it.
+        var plan = List.of(target("AMZN", 0.0688, "4.000000", "34"),
+                target("MSFT", 7.9312, "60.000000", "0"));
+        var applied = new PositionBuffer(0.10).apply(plan, null, RATE, null,
+                id -> "AMZN".equals(id) ? new BigDecimal("50.000000") : new BigDecimal("60.000000"), 5.0);
+        var unheld = new PositionBuffer(0.10).apply(plan, null, RATE);
+        assertThat(applied.targets().get(0).deltaQty())
+                .isEqualByComparingTo(unheld.targets().get(0).deltaQty());
+    }
+
+    @Test
+    void anExitOrderedByAControlIsNeverHeld() {
+        var plan = List.of(target("AMZN", 0.0688, "0.000000", "34"),
+                target("MSFT", 7.9312, "60.000000", "0"));
+        var applied = new PositionBuffer(0.10).apply(plan, null, RATE, null,
+                id -> "AMZN".equals(id) ? new BigDecimal("0.250000") : new BigDecimal("60.000000"), 5.0);
+        assertThat(applied.targets().get(0).deltaQty()).isEqualByComparingTo("-34.000000");
+    }
+
+    @Test
+    void anEntryIsUntouchedByTheHold() {
+        var plan = List.of(target("AAPL", -14.0, "-142.319300", "-7"),
+                target("MSFT", 6.0, "60.000000", "0"));
+        var held = new PositionBuffer(0.10).apply(plan, null, RATE, null,
+                id -> "AAPL".equals(id) ? new BigDecimal("-142.319300") : new BigDecimal("60.000000"), 5.0);
+        var unheld = new PositionBuffer(0.10).apply(plan, null, RATE);
+        assertThat(held.targets().get(0).deltaQty())
+                .isEqualByComparingTo(unheld.targets().get(0).deltaQty());
+        assertThat(held.targets().get(1).deltaQty())
+                .isEqualByComparingTo(unheld.targets().get(1).deltaQty());
+    }
 }

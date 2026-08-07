@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -280,6 +281,14 @@ public final class FusionLifecycle implements AutoCloseable {
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
                     multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), cycleParams);
+            // ADR-0145: the target the FORECAST asked for, captured before any risk control shrinks it.
+            // Every control below is one-way, so the difference between this and the target that
+            // survives them is exactly the reduction the controls authored — which is what lets the
+            // conviction floor be applied to the planner's own unwind without touching theirs.
+            Map<String, BigDecimal> plannedTargets = new HashMap<>(targets.size());
+            for (FusionPlanner.Target t : targets) {
+                plannedTargets.put(t.instrument(), t.targetQty() == null ? BigDecimal.ZERO : t.targetQty());
+            }
             ReturnCovarianceSource dailyCov = covariance == null ? ReturnCovarianceSource.NONE : covariance.get();
             // ADR-0089: both sizing controls below are silent on a name their covariance does not cover,
             // and the daily-close estimate covers none of this book on a stream only a session or two
@@ -353,7 +362,8 @@ public final class FusionLifecycle implements AutoCloseable {
             // evaluated independently of the edge gate so switching that gate off cannot silence it.
             var buffered = positionBuffer == null
                     ? new PositionBuffer.Result(targets, Map.of(), 0, targets.size())
-                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate(), this::stopArmed);
+                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate(), this::stopArmed,
+                            plannedTargets::get, minForecastToRoute);
             targets = buffered.targets();
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
                     normalised.multiplier(), normalised.coveredNames(),

@@ -15,6 +15,88 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 19:30Z (**CHANGE SHIPPED — ADR-0145.** `3c43242ba` has been **scored** (❌ BAD, ledger commit `fcacfc8`), `reports/.pending-baseline.json` is gone and `scripts/score-change.py score` prints "no pending change to score", so the ADR-0116 freeze that blocked the last two cycles is lifted. Item #1's VERIFY-BY was drift-tested last cycle and survived; this cycle it is also **reproducible by code** — `scripts/reversal-rate.py` computes it from `recent_orders`, so the register never has to author it. The three cycles before this one confirmed item #1's *mechanism* but never found its **cause**; this cycle did, and it is not band width. It is that the ADR-0059 conviction floor in `FusionLifecycle.tick` is applied only to `!reducing`: **a name may be opened only at `|f| ≥ 5.0` and closed at nothing at all.**)
+
+### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED (closed)** / 🔴 **its ❌ BAD verdict is NOT to be acted on**
+
+The exit leg it restored is live for a **fifth** consecutive window: `ops_jvm.uptimeSeconds` **10452** against
+a report stamp of **2026-08-07T19:30:01Z** derives a JVM start of **16:35:49Z** — the same continuous process
+as the four prior verifications, so none of this is boot transient. The register closes the item.
+
+**But the scorer graded `3c43242ba` ❌ BAD and its auto-revert failed (git conflict) — and that revert must
+NOT be completed by hand.** `3c43242ba` *is* the revert of ADR-0144, which the scorer had itself graded ❌ BAD
+one window earlier. Reverting it would put the condemned ADR-0144 corroboration-hold code back into the
+running book. Two mutually exclusive changes cannot both be reverted; the loop's own rule is "never
+re-attempt a reverted idea", and re-instating ADR-0144 is exactly that. Recorded here rather than silently
+skipped, per Rule 483.
+
+### Open items, re-ranked
+
+**#1 — ✅ CAUSE FOUND AND FIXED THIS CYCLE (ADR-0145). Now awaiting its 6-report verification window.** The
+fusion target tracks a ~90-second mean-reverting forecast 1:1 and the desk round-trips its book.
+
+Cost side, read live this cycle: `/api/attribution` `totalFees` **$488.284665** against `firmTotal`
+**-$1,188.68635665** — **41.1%** of the entire cumulative loss (47.8 / 46.6 / 46 / 46% in the four prior
+windows). ALPHA alone: **$465.190115** of **-$949.70770444** = **49.0%**. Cumulative LIVE turnover
+**$5,716,068.55** over **3,319** fills. `signal_observations` LIVE 225s hit rates **0.490 / 0.501 / 0.498**
+on n = 14,672 / 14,395 / 13,471 — none of the motion is information.
+
+**The cause, which four cycles of diagnosis had not reached.** `FusionLifecycle.tick`:
+
+```java
+if (!reducing && Math.abs(t.combinedForecast()) < minForecastToRoute) continue;  // ADR-0059
+```
+
+The floor is **one-sided**. And `TargetPlanner.targetQuantity` is **linear** in the forecast, so a forecast
+that merely *decays* toward zero collapses the target and unwinds the whole position — at a strength that
+would not have been allowed to open a single share of it. Read from this window's own FILLED LIVE ALPHA
+orders, with the `forecast=` each ADR-0134 reason carries:
+
+| name | opened | closed | inside |
+|---|---|---|---|
+| AMZN | `BUY 34` at **f = +9.25** (18:54:25) | `SELL 26` at **f = +0.0688** (18:59:59), `SELL 2` at **f = +0.1135** | 5 min |
+| BAC | `SELL 156` at **f = −7.38** (18:39:12) | `BUY 1` ×4 at **f ≈ +0.0023…+0.10**, `BUY 115` at **f = −0.288** | 4 min |
+| KO | `SELL 45` at **f = −5.04** (18:26:32) | `BUY 19` at **f = −0.165**, then nine buys totalling 117 | 32 min |
+
+AMZN is decisive: the forecast **never changed sign**. It decayed from +9.25 to +0.07 and the desk sold back
+82% of a position its own view still nominally supported. That is not a view changing its mind — `f ≈ 0` is
+the combiner saying it has *no view*, which is a reason to hold, not to liquidate.
+
+**Shipped: ADR-0145** — the conviction floor applied symmetrically, gating only the reduction the *forecast*
+authored and never the one a *risk control* authored (separated exactly by capturing the planner's target
+before any control runs). No number introduced: the threshold is `jethro.fusion.min-forecast-to-route`
+itself. Deliberately **not** ADR-0133, which widened the *band* and was scored ❌ BAD — a wider band is a
+permanent veto on weak-conviction *names*, not a filter on weak-conviction *exits*.
+
+> **VERIFY-BY (unchanged from last cycle, and now computed by committed code).** Metric: the **ALPHA
+> same-name direction-reversal rate**, pooled over the change's full 6-report ADR-0116 window — per
+> instrument, order its LIVE ALPHA FILLED orders chronologically, count consecutive pairs whose `side`
+> flips, pooled rate = Σ reversals ÷ Σ pairs. Run
+> `python3 scripts/reversal-rate.py --window 6 $(ls -t logs/jethro-report-*.zip | head -6)` — **never
+> compute it by hand** (invariant 7 / ADR-0016).
+> **Baseline ("before"), read by that script over the six reports preceding this change: 0.1975 — 32
+> reversals of 162 pairs.**
+> **Measured noise floor on no-deploy data: mean 0.190, sd 0.055, CV 0.29, range 0.083–0.252 over n=17
+> blocks.** ⇒ **minimum detectable effect, stated in advance and not to be moved: the pooled rate must fall
+> below ~0.080 (a ≥58% cut) to clear 2 sd.** **Sample gate: pooled pairs ≥ 150**, applied to the pooled
+> window and not per-report, so a change that thins each report's fill count cannot select its own sample;
+> the script exits 2 and prints NO VERDICT under it. Guards, both required: gross exposure must not fall
+> (ADR-0132) and `firmTotal` must not deteriorate.
+> **Secondary corroboration (not the verdict):** `totalFees` as a share of `|firmTotal|` should fall from
+> **41.1%**, and the share of `fusion reduce`/`fusion exit` fills carrying `|forecast| < 5.0` should fall
+> toward zero — that share is what the change directly removes, so it failing to move means the code did
+> not deploy rather than that the idea was wrong.
+
+**#2 — (unchanged, still open, unranked-above only because #1 is now in flight) No source has demonstrated
+positive out-of-sample edge.** LIVE hit rates span **0.447–0.583** across every source and horizon, with the
+extremes on the smallest samples (`social` 3600s 0.583 on n=484; `momentum` 225s 0.447 on n=304) and the
+three large-n series pinned at **0.490 / 0.501 / 0.498**. A 1.00 bps per-side fee covers none of it. This
+item is NOT actionable by tuning the combiner (see the standing 2026-07-28 priority); it needs a genuinely
+new predictor through the ADR-0049 OOS gate. Held below #1 because ADR-0145 removes a cost that is being
+paid *regardless* of whether any edge exists.
+
+---
+
 ## Verification block — 2026-08-07 19:00Z (**NO CHANGE — `3c43242ba` is at 5/6 cycles in its ADR-0116 window (`scripts/score-change.py score` prints "still accumulating evidence (5/6 cycles) — held, not scored this run") and `reports/.pending-baseline.json` is present, so the contract freezes new code.** Last cycle I withdrew item #1's VERIFY-BY after it drifted 4× on a no-deploy window, and replaced it with "Δ cumulative turnover ÷ mean gross exposure over the full 6-cycle window" — asserting that cumulative, monotone endpoints would fix the drift. **This cycle I tested that assertion instead of trusting it, and it fails too.** A script reconstructed the metric from **174 archived report zips** and measured its dispersion across windows where nothing was deployed: at the 6-cycle horizon its coefficient of variation is **0.53**, range **0.59–4.57**, max/min **7.7×**. Aggregation did not rescue it — the volatile gross-exposure denominator is the problem, and every raw churn-rate sibling fails alongside it (turnover/cycle CV **0.45**, fills/cycle CV **0.47**, avg fill size CV **0.42**). The same script then found one that survives, and item #1's VERIFY-BY is re-specified onto it **with a measured noise floor and a stated minimum detectable effect** — the first proof metric in this register validated on no-deploy data *before* being adopted rather than after it failed.)
 
 ### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED (fourth consecutive window, same process)**
