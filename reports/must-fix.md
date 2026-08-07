@@ -15,6 +15,54 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 17:00Z (**NO CHANGE — `3c43242ba` is at 1/6 in its ADR-0116 window with `reports/.pending-baseline.json` present, so the contract freezes new code.** Two results this cycle, both read from artifacts rather than argued. First, last cycle's revert is **✅ VERIFIED** on its categorical VERIFY-BY: `fusion exit — target decayed to flat` appears **6 times** after **0** across all five held cycles, and `grep -rn "0144"` over the fusion main and test packages is clean, so a stale build cannot explain it. Second — and this re-ranks the register — I read the **open** baseline instead of waiting for its verdict, and `reports/.pending-baseline.json` records **`gross_exposure: 13194.49`** at `16:35:20Z`. **Non-zero.** Item #1 rested entirely on every graded change opening at `gross_start: 0.0`; that is now falsified as an invariant. The flat baseline is a **race between the sample and the restart**, not a structural property of the scorer, so item #1 is **demoted to #2** — not struck, because I caused none of it and one observation is not a fix. The entry-cancel ratchet, re-measured unchanged in kind with nothing edited, takes **#1**.)
+
+### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED — the suppressed exit leg is executing again**
+
+Ungraded by the scorer (`still accumulating evidence (1/6 cycles)`), but its stated VERIFY-BY is a
+categorical count and it passed. `recent_orders` carries **6** `fusion exit — target decayed to flat` rows —
+`PFE BUY 63` and `NQ BUY 0.000246`, each REJECTED `no market data` in the seconds after the restart, then
+retried and **FILLED** at 16:38:00 and 16:42:34. That trigger returned **0** for all five cycles ADR-0144's
+corroboration-hold branch was live. Anti-stale guard satisfied: `grep -rn "0144"` over
+`app/src/main/java/io/jethro/app/fusion/` and its test package returns only an unrelated decimal literal in
+`EffectiveSpreadCostTest`.
+
+**Qualification, stated rather than buried (Rule 470):** all six rows fall in 16:36–16:42, the first six
+minutes of a **1,452 s** process. The path is proven *reachable*; that it fires on a warmed book is not yet
+shown. Carry that as the follow-on observation, not as an open defect.
+
+### Open items, re-ranked
+
+**#1 — (was #2) Every cancelled order is an entry; the cut leg always executes and the build leg does not.**
+Re-measured this window with nothing edited: **12** `fusion entry` orders CANCELLED against **8** FILLED,
+while **27 of 27** `fusion reduce` and **7 of 7** `auto-hedge EQUITY` rows FILLED — zero cancels on either.
+Every CANCELLED row carries `fusion re-plan — passive order superseded by a fresh target (ADR-0084)`.
+Splitting the cancels by what superseded them: **4 survivable** (same side, no-smaller size — a resting
+order would have done the job), **1** genuine side flip, **1** size reduction. Entries POST as ADR-0084 DAY
+LIMIT at the mark and are swept by the next 30 s re-plan; reduces and hedges CROSS. This is a one-way
+ratchet that can only shrink the book, and it bites every cycle all day. **VERIFY-BY (categorical, per Rule
+461 — a rate on this measure already passed itself once on noise):** survivable cancels — same side,
+no-smaller size — falling from **4** toward **0**, guarded by the side-flip cancel still cancelling and the
+reduce and hedge legs holding at **100%** filled, so neither a do-nothing nor an equalising regression can
+pass.
+
+**#2 — (was #1, DEMOTED on falsified evidence) The scoring baseline can be sampled against a flat book, condemning capital deployment via the exposure clause.**
+The mechanism is real and the ledger records it three times (`851082687` gross `0 → 956` BAD, `fb9273505`
+`0 → 43,624` BAD, `403a95ffd` `0 → 15,835` BAD, the last with `t = -0.591` against a `tHurdle` of `1.5` —
+the return test silent, the exposure clause deciding alone). But the claim that it is **structural** is now
+falsified: the open baseline for `3c43242ba` reads `gross_exposure: 13194.49`, non-zero. So it is a timing
+race — the baseline lands flat only when it is sampled in the window after a restart — which is both
+narrower and cheaper than a scorer defect. **Caution carried forward (Rule 467):** ADR-0143 attempted
+surgery on the scorer's *revert scoping* and was itself graded BAD and reverted, so that remedy is spent;
+the baseline's *timing relative to restart* is a different mechanism and remains untried. **VERIFY-BY:** the
+next two graded snapshots both showing `before.gross > 0`, which would confirm the race resolves on its own
+and let this item be struck without a code change.
+
+**#3 — The σ seed is a pure function of process lifetime.** Unchanged, not re-measured this cycle
+(`uptimeSeconds` **1452** is inside the warm-up, so a reading now would prove nothing either way). Carried.
+
+---
+
 ## Verification block — 2026-08-07 16:30Z (**CHANGE: completed the failed auto-revert of the graded-BAD `403a95ffd` / ADR-0144.** The ADR-0116 window closed and the scorer returned **❌ BAD**, but its `git revert` conflicted on the loop's own report files and aborted — `revertApplied: false` in the audited snapshot — so for one further cycle a condemned change was still executing in the running book. That is the loop's unclosed-loop failure mode and it outranks every novelty item, so this cycle's one change is the manual completion of that revert over the three code paths only, keeping the ADR, the ledger row and the findings. **The register is also re-ranked, on evidence read from the scorer's own snapshot.** The BAD verdict did NOT come from the risk-adjusted return test: `n = 7`, `t = -0.591` against the scorer's `tHurdle` of `1.5` — inside the noise band, which is the INCONCLUSIVE region. It came entirely from the exposure clause, `grew: true` on `gross_start: 0.0 → gross_end: 15835.17`. The baseline was sampled at `2026-08-07T13:45:27Z`, straight after the previous BAD-revert restarted the app, so the book was **flat when the baseline was taken** — and against a flat baseline every change that deploys any capital reads as "exposure grew with no PnL gain". That is the objective ADR-0132 sets, being graded as the failure. It enters at **#1**; the entry-cancel ratchet, re-confirmed again this window and unchanged, moves to **#2**.)
 
 ### Step 0 — `403a95ffd` (ADR-0144): 🔴 **GRADED BAD, AND THE REVERT DID NOT LAND** — closed by hand this cycle

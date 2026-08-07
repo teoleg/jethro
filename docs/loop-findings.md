@@ -5652,3 +5652,34 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   ADR and the record. VERIFY-BY next run is categorical, not a rate (Rule 461): `fusion exit — target
   decayed to flat` must **reappear** in `recent_orders` after returning 0 for all five held cycles, guarded
   by `grep -rn "0144"` over the fusion package returning nothing so a stale build cannot pass.
+
+## 2026-08-07 17:00Z — the revert landed and the exit leg came back; the flat baseline turns out to be a race, not an invariant
+
+- **Rule 468 — a categorical VERIFY-BY did its job: it passed on evidence, not on noise.** Last cycle I
+  replaced a rate with a count, and this cycle `fusion exit — target decayed to flat` appears **6 times**
+  (`PFE BUY 63`, `NQ BUY 0.000246` — each REJECTED `no market data` at boot, then retried and FILLED at
+  16:38:00 and 16:42:34) after returning **0** for all five cycles ADR-0144's corroboration-hold branch was
+  live. `grep -rn "0144"` over the fusion main and test packages returns nothing, so a stale build cannot
+  have produced it. **Rule: when a fix restores a suppressed behaviour, prove it with the behaviour's
+  presence/absence count, not with a ratio that drifts on its own.**
+- **Rule 469 — read the OPEN baseline, don't wait for the verdict to tell you about it.** Item #1 claimed
+  the exposure clause structurally condemns capital deployment because every graded change opened at
+  `gross_start: 0.0`. But `reports/.pending-baseline.json` for `3c43242ba`, stamped `16:35:20Z`, records
+  **`gross_exposure: 13194.49`** — non-zero, the first in the sequence. The flat baseline is therefore a
+  **race between the sample and the restart**, not an invariant of the scorer. **Rule: an item's VERIFY-BY
+  can be satisfied by an artifact already on disk mid-window; check it before spending a cycle's one change
+  on the fix.** Item #1 demoted from structural blocker to timing race — not struck, since I caused none of
+  it and one observation is not a fix.
+- **Rule 470 — reachability inside a restart window is not steady-state behaviour.** All six exit rows fall
+  in 16:36–16:42, the first six minutes of a **1,452 s** process, and none after. The path is demonstrably
+  alive; whether it fires on a warmed book is unproven. **Rule: state the window an observation came from,
+  because "it fired" and "it fires" are different claims.**
+- **Item #2 re-measured with nothing edited:** **12 entries CANCELLED / 8 FILLED**, against **27/27 reduces**
+  and **7/7 hedges** FILLED. Of the cancels with a successor, **4 survivable** (same side, no-smaller size),
+  **1** side flip, **1** size reduction. Unchanged in kind — cancels are still exclusively `fusion entry`
+  origin, the cut and hedge legs still certain.
+- **Attribution — the window's -$53.09 and +$5,106.59 gross are credited to NOTHING.** I deployed no logic;
+  the revert only removed code. The PnL is market on positions I did not choose; the gross rise is the
+  post-restart σ warm-up re-deploying the fusion book, the same clock effect Rules 433/459 already record.
+- **Change: none.** `3c43242ba` is at **1/6** in its ADR-0116 window with `.pending-baseline.json` present;
+  the contract freezes new code while a change is under measurement.
