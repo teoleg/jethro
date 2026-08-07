@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-08-07T16:30:09Z",
+    "fees": "460.927154",
+    "gross": "15835.17466250",
+    "net": "-3316.11466250",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "15835.17466250",
+      "hedgePnl": "29.19552323",
+      "netExposure": "-3316.11466250",
+      "realizedPnl": "-927.41467908",
+      "strategyAlpha": "-977.48523169",
+      "totalFees": "460.927154",
+      "totalPnl": "-948.28970846",
+      "unrealizedPnl": "-20.87502938"
+    },
+    "total_pnl": "-948.28970846"
+  },
+  "before": {
+    "at": "2026-08-07T13:45:27Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-897.87616775"
+  },
+  "commit": "403a95ffdb0867f8ef1326ab293daeb06da43397",
+  "delta": {
+    "gross": "15835.17466250",
+    "net": "-3316.11466250",
+    "total_pnl": "-50.41354071"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.000524 over 7 cycles, t=-0.59 (hurdle 1.5); gross 0\u219215,835 [grew] \u2014 \u26a0\ufe0f REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert",
+  "revert": true,
+  "revertApplied": false,
+  "scoredAt": "2026-08-07T16:30:09Z",
+  "summary": "an uncorroborated view is treated as ABSENCE and holds its position, instead of arriving as an affirmative flat target that is liquidated in full \u2014 so the desk stops exiting because corroboration went away rather than because its view reversed (ADR-0144)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": true,
+    "gross_end": 15835.1746625,
+    "gross_start": 0.0,
+    "mean_ret_per_cycle": -0.00052353,
+    "n": 7,
+    "scale": 13756.36,
+    "t": -0.591
+  }
+}
