@@ -1,68 +1,67 @@
-# Last analysis — 2026-08-07 15:30Z
+# Last analysis — 2026-08-07 16:00Z
 
-**No change: the ADR-0116 window on `403a95ffd` is 4/6. The freeze paid for itself a third time — splitting
-this window's orders by ORIGIN rather than by status exposed a structural one-way ratchet: the desk's build
-leg fills 4 of 11 while its cut leg fills 41 of 41, because an ADR-0084 passive entry is swept by the next
-30-second re-plan and a reduce crosses as MARKET. That is now must-fix #1, above the σ seed.**
+**No change: the ADR-0116 window on `403a95ffd` is 5/6, its final held cycle. The freeze paid again — this
+time by catching a flaw in my own test. The entry fill rate I nominated last cycle as the proof metric for
+must-fix #1 climbed 36% → 48% with nothing edited, so it would have graded the unbuilt fix as a pass on
+noise. Replaced with the measure that did not move: 9 of the window's 12 cancels were superseded by a
+same-side, no-smaller target — orders that should never have been cancelled at all.**
 
 ## 1. Money
 
-Total PnL **-$902.04**, **-$50.34** on the run and **-$4.17** over the last three. The deterministic
-heartbeat reads `pnl_growth_pct` **5.14%** against `pnl_target_pct` **1.0%** — `on_track=true`,
-`stale=false`, `underwater=true`. First down-run since the book came off dormant; small, and inside the
-noise of a book this size, so I am not treating -$50.34 as a signal on its own.
+Total PnL **-$908.75**, **+$10.00** on the window and **-$48.59** across the last three. The deterministic
+heartbeat's last entry (`2026-08-07T15:34:57Z`) reads `pnl_growth_pct` **-2.32%** against
+`pnl_target_pct` **1.0%** — `on_track=false`, `stale=true`, `underwater=true`. Not bleeding this window,
+but flat-to-underwater and off the growth target, which is a monitored failure, not a rest state.
 
-## 2. Risk — not danger, and for the first time the concern points the other way
+## 2. Risk — not danger; the book is undeployed, which is the opposite problem
 
-Gross **$18,465.91** = **1.2%** of the firm gross cap $1,500,000 (headroom **$1,481,534**); net
-**$3,800.15** = **0.4%** of the $1,000,000 net cap. `breaker.halted` **false**, `riskCuts` **[]**,
-`edgeGate` **null**. Feed healthy: `provider: alpaca`, `ticksIn` **65004**, `ticksDropped` **0**.
+Gross **$20,625.93** = **1.4%** of the firm gross cap $1,500,000 (headroom **$1,479,374**); net
+**$1,036.11** = **0.1%** of the $1,000,000 net cap. `breaker.halted` **false**, `riskCuts` **[]**,
+`edgeGate` **null**. `var95` **165.86**, `es95` **225.80**, `var99` **297.67** on `coveredExposure`
+**$20,625.93** with `skippedExposure` **$0.00`. Feed healthy — `provider: alpaca`, `ticksIn` **77677**,
+`ticksDropped` **0**; `regime` **CALM**, `trend` **CHOP**, `volRatio` **0.96**. Nothing here is near a
+limit. With 98.6% of the gross cap unused, the live problem is that the desk cannot build, not that it
+holds too much.
 
-Gross **fell -$1,273.50** this window. With 98.8% of the cap unused, a shrinking book is the failure mode
-CLAUDE.md names — undeployed capital under the budget — not safety. That is what I went looking for a
-mechanism behind.
+## 3. Cause — the pending change is still ungraded, and the freeze is binding
 
-## 3. Cause — the ratchet, and it is mechanical, not a market call
+`scripts/score-change.py score` prints `403a95ffd still accumulating evidence (5/6 cycles) — held, not
+scored this run`; `reports/.pending-baseline.json` is present. Per ADR-0116 that forbids a code change this
+cycle. Its precondition still holds — **0** `fusion exit — target decayed to flat` against **26** reduces,
+fifth cycle running — but absence is not evidence, so the verdict stays ungraded. It scores next cycle.
 
-I have been reading `orders_by_status` in aggregate and concluding the cancel path was healthy. Split by
-`origin` it is not:
+## 4. Danger — no
 
-| origin | FILLED | CANCELLED | fill rate |
-| --- | --- | --- | --- |
-| `fusion entry — target increase` | 4 | 7 | 36% |
-| `fusion reduce toward a smaller target` | 41 | 0 | 100% |
+The only flag is UNDERWATER. Not near the exposure cap, not near the drawdown breaker, no risk cuts firing.
 
-Every cancel carries `reason` = `fusion re-plan — passive order superseded by a fresh target (ADR-0084)`.
-The mechanism reads end-to-end in code: `FusionExecutor.route` posts a risk-increasing delta as a `DAY`
-`LIMIT` at the mark and crosses a risk-reducing one as `MARKET`; `FusionLifecycle.tick` opens every cycle
-with an unconditional `cancelStalePassiveOrders()`; `jethro.fusion.interval-seconds=30`. So an entry gets at
-most 30 seconds resting at the mid and a cut fills instantly.
+## 5. Order-level post-mortem — the ratchet re-measured, and my proof metric failed
 
-ADR-0140's partial-adjustment `aim` is *supposed* to converge slowly (`AAPL` `aim` **28.976441** against
-`targetQty` **266.629944**). What is not supposed to happen is that the build half of that convergence is
-then multiplied by a ~0.36 fill probability while the cut half is multiplied by 1.0. The book can only
-drift below its own target, which is exactly what gross did.
+Splitting `recent_orders` by origin a second time: entry **11 FILLED / 12 CANCELLED**, reduce **26/0**,
+hedge **11/0**. **All 12 cancelled orders in the window are entry origin** — the reduce and hedge legs
+never cancel, in either window measured.
 
-## 4. Change vs market — the window's move is credited to NOTHING, fourth cycle running
+But the fill *rate* moved 36% → 47.83% with no code change, because it depends on how often the tape
+touches the mid inside the 30-second re-plan. Had I built the fix and graded it on that threshold, I would
+have credited it for the weather. So I re-cut the same 12 cancels by what the *fresh* target wanted:
+**9 were the same side at a no-smaller size**, **1** was a genuine side flip, **0** were size reductions.
+Those 9 are orders the re-plan cancelled and then immediately re-expressed. `MSFT` posted
+`SELL 6 → 7 → 11 → 13 → 14` over three minutes, cancelling four times before the fifth filled; `JNJ` posted
+`BUY 23 → 28`, cancelled both, and never filled. That count is a property of the predicate the fix changes,
+not of the tape — it is the new VERIFY-BY.
 
-`403a95ffd`'s branch has still fired zero times (**0** `fusion exit — target decayed to flat` in the whole
-report), so none of the move is its. And the σ story is now a fitted curve rather than an argument: across
-four observations today with nothing edited between them, `ops_jvm.uptimeSeconds` **838 → 2638 → 4438 →
-6238** maps to `streamVolMeasuredNames` **1 → 2 → 21 → 21**, and the arithmetic predicted the switch at
-**3630 s** — which falls exactly in the 2638→4438 gap. σ is a pure function of process lifetime. The
-remaining PnL move sits on 21 positions inside a single window and I am not going to guess a split between
-market and mechanism that the numbers do not support.
+## 6. Change vs. market
 
-## 5. What next cycle does
+Nothing was edited this cycle, so the **+$10.00** and the **-$422.67** gross move are credited to nothing.
+Gross fell **-$1,273.50** last window and **-$422.67** this one while the entry fill rate rose — directionally
+what the ratchet predicts, but two points on a noisy rate with no intervention is not evidence, and on 21
+positions inside one window I cannot separate market from mechanism without guessing. Logged, not chased.
 
-Once the window closes, the one change targets **#1**: make the passive sweep conditional on intent actually
-changing — a working entry survives the re-plan when the fresh target still wants the same side, same name,
-size no smaller, and is cancelled only on a side flip, a drop from the target book, or a smaller size, with
-the surviving order counted against the fresh delta rather than re-posted alongside it. That restores
-working time to the build leg without crossing the spread and without touching the reduce leg or the
-deterministic floor. Architecturally significant ⇒ ADR in the same commit. Its VERIFY-BY is the entry fill
-rate rising above **36%**, guarded by the reduce leg staying at **100%** so an equalising regression cannot
-read as a pass.
+## Next cycle
 
-The σ seed drops to **#2** — still broken, unchanged fix, deferred on cost only: it bites the first hour
-after each restart, the ratchet bites every 30-second tick the market is open.
+`403a95ffd` scores, which frees the one change for must-fix **#1**: make `cancelStalePassiveOrders`
+conditional on intent actually changing — a working passive entry survives when the fresh target still
+wants the same side in the same name at a no-smaller size, counted against the fresh delta rather than
+re-posted alongside it; cancelled only on a side flip, a smaller size, or the name leaving the target book.
+Architecturally significant, so it ships with its ADR in the same commit. It touches order working time
+only — the pre-trade guardrail, the drawdown breaker and the ADR-0049 veto all sit upstream of `route` and
+are untouched.

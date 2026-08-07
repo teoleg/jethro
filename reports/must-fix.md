@@ -15,6 +15,35 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 16:00Z (**NO CHANGE — the ADR-0116 freeze holds at `403a95ffd` 5/6, final held cycle.** Item #1 is re-confirmed, and the confirmation corrected my own VERIFY-BY. The entry fill rate I proposed last cycle as the proving metric moved **36% → 47.83%** (11 FILLED of 23) **with nothing edited** — so a threshold on that rate would have graded the unbuilt fix as a pass on noise alone. Two measures that did *not* move: **every one of the window's 12 CANCELLED orders is `fusion entry` origin** — reduce is 26/26 filled, hedge 11/11, zero cancels on either — and, decisively, **9 of the 12 cancels were superseded by a same-side target of no-smaller size**, exactly the case where a working order should have survived. Only **1** was a genuine side flip and **0** were size reductions. `MSFT` alone posted `SELL 6 → 7 → 11 → 13 → 14` over ~3 minutes, cancelling four times before the fifth filled — one order left resting would have done the same job. The defect is categorical, not a rate. VERIFY-BY replaced accordingly. Item #2's σ seed needs no re-measurement (Rule 459): `uptimeSeconds` **8038** is far past the fitted **3630 s** threshold and `streamVolMeasuredNames` reads **21** as predicted.)
+
+### Step 0 — `403a95ffd` (ADR-0144): ⚠️ **UNGRADED, window intact (5/6)** — unchanged verdict, fifth and last held cycle
+
+`scripts/score-change.py score` prints `403a95ffd still accumulating evidence (5/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` is present. Freeze holds; no code change. It scores
+next cycle, which frees the one change for item #1.
+
+Precondition still met — 23 `aims` published, 20 of them non-zero (`META`, `MU`, `EURUSD` at exactly 0.0).
+`fusion exit — target decayed to flat` returns **0** over the whole report for the fifth consecutive cycle,
+while **26** `fusion reduce toward a smaller target` ran. Consistent with the branch suppressing
+absence-as-exit; still not proof, since the counterfactual is unobservable and no counter records a hold
+(Rule 455). Verdict stays **ungraded**. Regression check cleared: no name that should have traded was
+suppressed — `insideBuffer` **14**, `riskCuts` **[]**, `edgeGate` **null**.
+
+### Not danger — the book is undeployed, and this window it stopped shrinking
+
+Gross **$20,625.93** = **1.4%** of the firm gross cap $1,500,000 (headroom **$1,479,374**); net
+**$1,036.11** = **0.1%** of the $1,000,000 net cap. `breaker.halted` **false**. `var95` **165.86**,
+`es95` **225.80**, `var99` **297.67** on `coveredExposure` **20,625.93** with `skippedExposure` **0.00`.
+Feed healthy — `provider: alpaca`, `ticksIn` **77677**, `ticksDropped` **0**; `regime` **CALM**, `trend`
+**CHOP**, `volRatio` **0.96**. Total PnL **-$908.75** (UNDERWATER stands), **+$10.00** on the window.
+
+Last cycle gross fell **-$1,273.50**; this cycle **-$422.67** while the entry fill rate rose 36% → 48%.
+Directionally consistent with the ratchet, but n=2 on a noisy rate and nothing was edited — logged, not
+chased (Rule 460 below).
+
+---
+
 ## Verification block — 2026-08-07 15:30Z (**NO CHANGE — the ADR-0116 freeze holds at `403a95ffd` 4/6.** Two things landed this cycle. First, item #1's root cause is now **quantitatively confirmed** rather than argued: across four observations today `ops_jvm.uptimeSeconds` **838 → 2638 → 4438 → 6238** maps to `streamVolMeasuredNames` **1 → 2 → 21 → 21**, and the arithmetic predicted the switch at **3630 s** — which falls exactly in the 2638→4438 gap. The σ seed is a pure function of process lifetime. Second, and this is the reordering: I split `recent_orders` by **origin** instead of by aggregate status, and the cancel path I demoted last cycle as a one-name artifact is a **structural one-way ratchet**. Entries POST (ADR-0084 DAY LIMIT at the mark) and are swept by the next 30 s re-plan; reduces CROSS as MARKET. This window: **7 of 11 entries CANCELLED (0 filled of those 7), 0 of 41 reduces cancelled.** The reduce leg executes with certainty, the build leg only when the market comes to the mid inside 30 s. Gross fell **-$1,273.50** and PnL **-$50.34** on the window. That bites every cycle all day, whereas #1 bites only for the first hour after each restart — so the ratchet enters at **#1** and the σ seed moves to **#2**. Rule 454 was right that the `NQ` storm was an artifact and wrong to close the file on the cancel path; the aggregate hid the asymmetry.)
 
 ### Step 0 — `403a95ffd` (ADR-0144): ⚠️ **UNGRADED, window intact (4/6)** — unchanged verdict, fourth cycle
@@ -52,15 +81,34 @@ unconditional `executor.cancelStalePassiveOrders()`, and `jethro.fusion.interval
 entry gets **at most 30 seconds resting at the mid**, then is cancelled and re-planned — while a reduce
 crosses and fills immediately.
 
-**Live numbers this window (`recent_orders`, split by origin — the split is the whole point):**
+**Live numbers, two independent windows (`recent_orders`, split by origin — the split is the whole point):**
 
-| origin | FILLED | CANCELLED | fill rate |
+| origin | 15:30Z FILLED/CANCELLED | 16:00Z FILLED/CANCELLED | fill rate |
 | --- | --- | --- | --- |
-| `fusion entry — target increase` | 4 | 7 | 36% |
-| `fusion reduce toward a smaller target` | 41 | 0 | 100% |
+| `fusion entry — target increase` | 4 / 7 | 11 / 12 | 36% → 47.83% |
+| `fusion reduce toward a smaller target` | 41 / 0 | 26 / 0 | 100% both windows |
+| `auto-hedge EQUITY (ADR-0019)` | — | 11 / 0 | 100% |
 
-Every one of the 7 cancels carries `reason` = `fusion re-plan — passive order superseded by a fresh target
-(ADR-0084)`. `orders_by_status` day totals: FILLED **5988**, CANCELLED **2159**, REJECTED **208**.
+Every cancel in both windows carries `reason` = `fusion re-plan — passive order superseded by a fresh
+target (ADR-0084)`, and **every CANCELLED order in the 16:00Z window — all 12 of 12 — is entry origin.**
+Zero cancels on the reduce leg, zero on the hedge leg, in either window. `orders_by_status` day totals now
+FILLED **6070**, CANCELLED **2180**, REJECTED **208**.
+
+**The decisive cut — what the fresh target actually wanted.** Classifying each 16:00Z cancel by its next
+same-name entry:
+
+| successor intent | n | should the working order have survived? |
+| --- | --- | --- |
+| same side, no-smaller size | **9** | **yes — this is the defect** |
+| same side, smaller size | 0 | no |
+| side flip | 1 | no — correctly cancelled |
+| no successor in window | 2 | undetermined |
+
+`MSFT` is the clean illustration: `SELL 6` (15:48:28, cancelled) → `SELL 7` (cancelled) → `SELL 11`
+(cancelled) → `SELL 13` (cancelled) → `SELL 14` (15:51:30, **FILLED**). Five posts, four cancels, one
+monotonically growing short over ~3 minutes — a single resting order would have expressed the identical
+intent with ~6× the working time. `JNJ` shows the loss case: `BUY 23` → `BUY 28`, both cancelled, **no fill
+at all** in the window.
 
 **Why this outranks the σ seed.** The two throttles sit in series. ADR-0140's partial-adjustment `aim` is
 *designed* to converge geometrically on the target (`AAPL` `aim` **28.976441** against `targetQty`
@@ -83,13 +131,24 @@ spread and without touching the reduce leg. The stacking hazard the current swee
 handled by the same predicate: the surviving order is *counted against* the fresh delta rather than
 re-posted alongside it.
 
-**VERIFY-BY (next run, read from `recent_orders` split by `origin`):** the FILLED share of
-`fusion entry — target increase` must exceed the **36%** (4 of 11) measured here, with the count of
-`fusion re-plan — passive order superseded by a fresh target (ADR-0084)` cancels on entry origins falling
-below **7**. Guard against a false pass: the reduce leg must stay at or near **100%** filled (a fix that
-merely made reduces passive too would equalise the ratio while making things worse), and gross must not be
-read as confirmation on its own — a rising gross with an unchanged entry fill rate is the clock again
-(Rule 452), not this fix.
+**VERIFY-BY — REVISED 2026-08-07 16:00Z (the previous fill-rate version was unsound; see below).**
+Read `recent_orders`, split by `origin`, and count the **survivable cancels**: a CANCELLED
+`fusion entry — target increase` whose next same-name entry order carries the **same side** at a
+**no-smaller quantity**. That is the exact population the fix removes. This window it is **9 of 12** cancels
+(75%); after the fix it must fall to **at or near 0**. Three guards against a false pass:
+- the **1** genuine side-flip cancel (`AMZN` `SELL 2` → `BUY 16`) must **still** be cancelled — a fix that
+  simply stopped cancelling is a regression, not a pass;
+- the reduce leg must stay at **26/26 = 100%** filled and the hedge leg at **11/11 = 100%** (a fix that
+  equalised the ratio by making reduces passive too would look identical on a blended rate while making
+  things worse);
+- gross is **not** confirmation on its own — a rising gross with the survivable-cancel count unchanged is
+  the clock again (Rule 452), not this fix.
+
+**Why the previous VERIFY-BY was replaced.** Last cycle it read "entry FILLED share must exceed 36%".
+With **nothing edited**, that share moved to **47.83%** (11 of 23) this window — the metric cleared its own
+threshold on noise. The fill rate depends on how often the market happens to touch the mid inside 30 s,
+which varies with the tape; the survivable-cancel count depends only on the predicate the fix changes.
+Grade the mechanism, not the weather.
 
 ---
 
@@ -119,11 +178,16 @@ ADR-0086 stop) — stands unchanged and buildable.
 **VERIFY-BY (unchanged):** `streamVolMeasuredNames` must equal `fusion_targets.instruments` at an
 `ops_jvm.uptimeSeconds` **below 3630** — the anti-clock guard. A full count at a high uptime proves nothing.
 
+*2026-08-07 16:00Z — not re-measured, deliberately (Rule 459).* This cycle reads `uptimeSeconds` **8038**
+with `streamVolMeasuredNames` **21**: far past the fitted threshold, so it is the predicted value and
+carries no new information. A fifth confirming observation above 3630 s would add nothing the fitted curve
+does not already state. Re-measurement resumes only at a **low** uptime, which is the case that can falsify.
+
 ---
 
 ## Items #3–#6 (re-ranked below the promotion above)
 
-- **#3** (was #2) — **ADR-0144 exit/entry corroboration asymmetry**, ungraded at 4/6. No action until the
+- **#3** (was #2) — **ADR-0144 exit/entry corroboration asymmetry**, ungraded at 5/6. No action until the
   window closes. VERIFY-BY unchanged from the 15:00Z block: it needs a **counter of uncorroborated holds**
   on `/api/fusion/targets` (a disclosure count, not an input — it sizes nothing, invariant 7), because an
   absence is not evidence (Rule 455).

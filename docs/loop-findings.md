@@ -5581,3 +5581,37 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   changing — a working entry survives when the fresh target still wants the same side, same name, size no
   smaller, counted against the fresh delta rather than re-posted alongside it. VERIFY-BY is the entry fill
   rate above **36%**, guarded by the reduce leg holding at **100%** so an equalising regression cannot pass.
+
+## 2026-08-07 16:00Z — my own VERIFY-BY cleared its threshold on noise, with nothing built
+
+- **Rule 460 — a VERIFY-BY must measure the predicate the fix changes, not an outcome the tape also moves.**
+  Last cycle I nominated "entry FILLED share above **36%**" as proof for must-fix #1. This cycle, **nothing
+  edited**, it read **47.83%** (11 of 23) — the test passed itself. The fill rate depends on how often the
+  market touches the mid inside the 30 s re-plan, which is weather. Re-cutting the *same* 12 cancels by what
+  the fresh target wanted gave the stable measure: **9 same-side-no-smaller**, **1** side flip, **0** size
+  reductions. That count moves only when the cancel predicate moves. **Rule: before adopting a proving
+  metric, ask what it reads when the fix does NOT exist — if it can pass on its own, it is not a test.**
+- **Rule 461 — prefer the categorical form of a defect over its rate.** The entry fill rate is noisy
+  (36% → 48% between windows). Two things were invariant: **every** CANCELLED order in the window is entry
+  origin (**12 of 12**; reduce **26/26** filled, hedge **11/11**, zero cancels on either), and the cancels
+  are dominated by same-side re-expression. A defect stated as "this class of event happens and that class
+  never does" survives a noisy tape; the same defect stated as a percentage does not.
+- **Rule 462 — read the per-name order chain, not just the aggregate split.** `MSFT` posted
+  `SELL 6 → 7 → 11 → 13 → 14` over ~3 minutes — four cancels, then a fill — one monotonically growing short
+  re-expressed five times. `JNJ` posted `BUY 23 → 28`, cancelled both, filled nothing. The chain shows the
+  mechanism (working time destroyed, intent unchanged) in a way the 11/12 split cannot. **Rule: when a split
+  by origin finds an asymmetry, follow one name's chain end-to-end to see what it costs.**
+- **Rule 463 — stop confirming a fitted threshold from the wrong side.** Item #2's σ seed reads
+  `uptimeSeconds` **8038** with `streamVolMeasuredNames` **21** — past the fitted **3630 s**, so it is the
+  predicted value and adds nothing. Only a **low**-uptime observation can falsify it. **Rule: once a
+  threshold is fitted, further observations on the satisfied side are not evidence; schedule the measurement
+  where the model could still be wrong.**
+- **Attribution — the window's +$10.00 and -$422.67 gross are credited to NOTHING, fifth cycle running.**
+  Gross fell -$1,273.50 then -$422.67 while the entry fill rate rose 36% → 48%: directionally what the
+  ratchet predicts, but two points, no intervention, 21 positions, one window. **Rule: a correlation observed
+  across cycles in which you changed nothing is a fact about the environment, not support for your hypothesis.**
+- **Change:** none. `403a95ffd` is **5/6** with `reports/.pending-baseline.json` present; it scores next
+  cycle. That cycle's one change targets must-fix **#1**: make `cancelStalePassiveOrders` conditional on
+  intent actually changing, with the revised VERIFY-BY — survivable cancels (same side, no-smaller size)
+  falling from **9** toward **0**, guarded by the **1** side-flip cancel still cancelling and the reduce and
+  hedge legs holding at **100%** filled, so neither a do-nothing nor an equalising regression can pass.
