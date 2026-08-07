@@ -5388,3 +5388,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **No change:** `27564bb15` is at **4/6** under ADR-0116. Window was **100% market** — commits reached only
   `docs/` and `reports/`, boot instant **17:42:18.386Z** unchanged — so PnL **-13.08** and gross
   **-10,711.12** carry neither credit nor blame.
+
+## 2026-08-07 13:30Z — the close liquidated the whole book at sources≤1; the exit gate now holds instead (ADR-0144)
+
+- **Rule 441 — an unestimable statistic is not a zero, and the difference is worth the whole book.**
+  ADR-0124 zeroes the agreement scalar at one effective source (residual df `1 − Σŵᵢ² = 0`, dispersion
+  UNESTIMABLE). That scalar multiplies the combined forecast, which `TargetPlanner` turns into a target
+  and ADR-0090 works IN FULL as an exit — so a sizing veto is executed as a liquidation order. Watch it
+  fire on the whole book at the previous close: **20:10:31Z** BAC/PFE/HD and **20:16:06–20:17:37Z**
+  MSFT/NVDA/AMZN, six full exits, `sources=1,1,1,1,1,0`, not one at a reversed forecast. Live right now
+  in `fusion_targets`: EURUSD carries one contribution at `trend forecast=20.0` (the cap) and
+  `combinedForecast=0.0`. **Rule: when a scalar that means "do not put risk ON" multiplies a quantity that
+  also decides "take risk OFF", it silently acquires the second meaning — check every consumer of a
+  shrink factor, not just the one it was written for.**
+- **Rule 442 — Rule 440 paid off: the existing rule was UNREACHED, not mis-tuned.** ADR-0140 ages a name
+  ABSENT from the target list; an uncorroborated name is PRESENT with an affirmative flat target, so it
+  never enters the absence clock. Those two diagnoses called for opposite changes and checking cost one
+  grep. **Rule: keep doing this — establish reached-vs-wrong before building, every time.**
+- **Rule 443 — a scripts-only change cannot move the book, and grading it as if it did is the scorer's
+  blind spot.** `27564bb15` (ADR-0143) touched only `scripts/score-change.py` + its test — loop tooling
+  the JVM never loads — yet was graded **❌ BAD** on PnL **-838.66 → -897.88** / gross **15,986.26 → 0.00**
+  across a window whose gross move is the session close. Its own VERIFY-BY passed *in the same row*: the
+  note reads `reverted (code reverted in 2 path(s); ADR + ledger + findings kept)` where all nine prior BAD
+  rows read `⚠️ REVERT FAILED`. **Rule: the arm works — but the scorer attributes market moves to commits
+  that cannot reach the binary, so read a verdict against the changed PATHS before believing its sign.**
+- **Rule 444 — a zero-variance stretch is missing data, not calm, and an asymmetric baseline LATCHES on it.**
+  `/api/market/regime` reads `volRatio` **277215656.99**, `regime` **ELEVATED**. `VolatilityRegime` never
+  skips a frozen mark, so an overnight tape of identical prices yields `relVol = 0` for every name, the
+  λ=0.97 baseline decays toward zero over thousands of cycles, and the first real reading at the open
+  divides by it — then `baseline = ewma.min(baseline)` while ELEVATED prevents it EVER climbing back, so
+  the process is risk-off for life. `FusionLifecycle.applyRiskCut` already carries the identical lesson for
+  σ (ADR-0116). Costs nothing today only because `routing=true` makes `StrategyLifecycle` non-executing.
+  **Rule: when one sensor is fixed for absorbing a frozen tape as zero returns, sweep every OTHER estimator
+  fed by the same mark cache in the same breath — the bug class is per-mark-consumer, not per-sensor.**
+- **Change:** ADR-0144 — a flat target on a held name at `sources ≤ 1` that ADR-0086 did not cut routes
+  nothing and ages on ADR-0140's clock. Entry untouched, corroborated flat exits untouched, stop cut
+  outranks it, strictly one-way. Window itself was **100% nothing**: market shut, PnL **+0.00**, and the
+  app rebooted **10:03:34.412Z** mid-closure leaving every equity sensor cold (`seeding 1 of 193`).

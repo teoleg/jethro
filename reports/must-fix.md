@@ -15,6 +15,151 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 13:30Z (**CHANGE SHIPPED — ADR-0144, targeting item #1.** The ADR-0116 freeze is over: `27564bb15` was scored **❌ BAD** and auto-reverted by `ac15c43`, `reports/.pending-baseline.json` is gone, and `scripts/score-change.py score` prints `no pending change to score`. Item #1 is now **fixed at its mechanism** rather than re-measured: ADR-0124's agreement scalar, which correctly zeroes an unestimable view, was being read downstream as an affirmative flat target and worked in full as an exit. The prerequisite the register set last cycle (Rule 440 — is ADR-0140 reached?) is **answered: it is NOT**, so the two candidate fixes did not both apply and the right one was buildable. A NEW item enters at **#3** — the volatility-regime baseline latches permanently after a frozen tape. Item #2 (venue asymmetry) and the `scripts/` omission are carried, the latter now **EXERCISED and VERIFIED** for the first time.)
+
+### Step 0 — `27564bb15` (ADR-0143): ✅ **VERIFIED on its own VERIFY-BY**, then **❌ BAD** on a vector it could not have moved
+
+ADR-0143's VERIFY-BY was "the next ❌ BAD row carries `reverted (…)` instead of `⚠️ REVERT FAILED`, and a
+`Revert "…"` commit appears on `claude/auto-improve` with no agent action". Both happened, in the row that
+condemned it: the ledger note reads `reverted (code reverted in 2 path(s); ADR + ledger + findings kept)`
+against `⚠️ REVERT FAILED` on all nine prior BAD rows, and `ac15c43` is a machine-authored revert touching
+exactly `scripts/score-change.py` and `scripts/test-score-change.py` while `docs/adr/0143-*.md`, the ledger
+and `docs/loop-findings.md` all survive at their latest content. **The loop's self-correction arm is alive
+for the first time.**
+
+The **verdict** on it, though, is not attribution. The graded vector — PnL **-838.66 → -897.88**, gross
+**15,986.26 → 0.00** — moved across a window in which the only changed paths were under `scripts/`, which
+the JVM never loads. The gross collapse to zero is the session close (see item #1's instance below), not a
+Python edit. Recorded as Rule 443; the change is reverted per the rules and will not be re-attempted.
+
+### Not danger — DORMANT, and the session has just reopened
+
+Gross **$0.00** is **0.0%** of the firm gross cap $1,500,000 (headroom **$1,500,000**); net **$0.00** of
+the $1,000,000 net cap. `breaker.halted` **false**, `var95` **0.00** / `es95` **0.00** on `coveredExposure`
+**0.00** (`note: no positions`), `hedging` flat on every axis with `covarianceReady` **false**. Total PnL
+**-$897.87616775**; since last run **+0.00**, over three runs **+0.00** — `chore(status)` reads
+`market-closed` from 08:30Z through 13:00Z. The daily curve carries the real move: **-628.07** (08-05) →
+**-897.88** (08-06) → **-897.88** (08-07).
+
+**Restart mid-closure.** `ops_jvm.uptimeSeconds` **12388** against `traffic.timestampMillis`
+**1786109402412** puts boot at **2026-08-07T10:03:34.412Z**. Every equity sensor is cold in consequence —
+`seeding 1 of 193` (trend) / `1 of 241` (reversion) terminating `HISTORY_EXHAUSTED`/`NO_HISTORY` on KO,
+GOOG, UNH, CAT, PG, PYPL, CVX, MCD, JNJ, PFE — because a frozen overnight tape stores no recent prices to
+seed from. `fusion_targets.instruments` is **2**: NQ and EURUSD, the only names that print overnight.
+
+### Window attribution — 100% nothing
+
+The market was shut for the entire span since the last fill (**2026-08-06 20:17:40.939Z**), PnL moved
+**+0.00**, and no committed path reached the app before the 10:03:34Z reboot. Neither credit nor blame.
+
+---
+
+## Item #1 (ADDRESSED THIS CYCLE — ADR-0144) — **the exit gate is not corroboration-symmetric with the entry gate: 6 of 6 full exits fired at `sources=1`, 0 of 25 entries did.**
+
+**The mechanism, now located to the line.** `ForecastCombiner.agreement()` returns **0** when the residual
+degrees of freedom `1 − Σŵᵢ²` vanish — one effective source, dispersion UNESTIMABLE, an untested view has
+earned no conviction (ADR-0124, correct). But that scalar **multiplies the combined forecast**, and the
+combined forecast is not only a sizing input: `TargetPlanner.targetQuantity` returns 0 for a zero forecast,
+and ADR-0090 works a flat target **in full, this cycle**, deliberately bypassing partial adjustment because
+a flat target is an exit. So a statement meaning *"no risk may go ON"* is executed as *"the view is zero,
+sell everything"*.
+
+**Fresh instance — the whole book, at the close.** The last seven minutes of the previous session:
+**20:10:31Z** BAC / PFE / HD all `fusion exit — target decayed to flat [forecast=-0.0, sources=1]`;
+**20:16:06Z** MSFT `sources=1`; **20:17:37Z** NVDA `sources=1` and AMZN `sources=0`. Six full exits, every
+one at `sources ≤ 1`, not one at a reversed forecast — the desk paid the **2.00 bps** equity round trip to
+liquidate positions its own signals had not turned against, because the tape stopped printing. Live right
+now, frozen mid-mechanism: `fusion_targets` shows EURUSD with a single contribution of
+`trend forecast=20.0` (the cap) against `combinedForecast` **0.0**.
+
+**Rule 440 discharged.** ADR-0140's aging applies to a name **absent from the target list**; an
+uncorroborated name is **present**, with an affirmative flat target, so it never enters the absence clock.
+The rule is UNREACHED, not mis-horizoned — which is why a fix was buildable this cycle rather than a
+re-measurement.
+
+**The change.** ADR-0144: in `PositionBuffer.apply`, a target that is flat, **held**, carries **≤ 1**
+contributing source and was **not** cut by ADR-0086 this cycle routes no order and is left out of the aim
+snapshot, so its ADR-0140 aim ages over one evidence horizon. `sources ≤ 1` is the exact characterisation
+of the unestimable case (with every weight positive, `Σŵᵢ² ≥ 1` iff one source carries all the weight) and
+needs no new state. Entry untouched; a corroborated flat view still exits in full; a stop cut outranks it;
+strictly one-way — the branch can only ever remove an order.
+
+**VERIFY-BY:** the trigger × source-count census recomputed over the next window — the share of
+`fusion exit — target decayed to flat` fills carrying `sources=1` must fall **below 1.0**. Paired with the
+**stationary** holding-period estimator (2 × time-average |inventory| ÷ one-way turnover rate, fixed
+30-minute trailing windows), which must rise **without** gross falling. Do **not** grade on any since-boot
+integral (struck, Rule 437).
+
+---
+
+## Item #2 (carried, rank unchanged) — **82.70% of turnover runs through the venue that charges 5× the round trip.**
+
+`turnover_cost_by_name` over LIVE this cycle: cumulative turnover **$5,050,816.06**, of which futures
+(ES + NQ at **0.20** bps per side) are **$874,521.98** = **17.31%** and equities (**1.00** bps per side)
+are **$4,176,294.08** = **82.69%** — round trips of **0.40** vs **2.00** bps. The 3600 s weighted
+expectancy **+1.0442** bps clears the futures round trip and fails the equity one.
+`attribution.totalFees` **435.119863** is **48.46%** of `firmTotal` **-897.87616775**, a stable share
+across three windows (48.73%, 48.73%, 48.46%). Where a view is expressed is a cost decision the router
+does not weigh.
+
+**VERIFY-BY:** the futures share of cumulative LIVE turnover must rise, and `totalFees` as a share of
+`|firmTotal|` must fall, **without** gross falling. (The turnover *multiple* remains struck, Rule 433.)
+
+---
+
+## Item #3 (NEW) — **a zero-variance stretch drives the volatility-regime baseline to a denormal, and the ELEVATED branch then LATCHES it there for the life of the process.**
+
+`/api/market/regime` reads `volRatio` **277215656.99**, `regime` **ELEVATED**, `trend` **CHOP** — against
+**1.00** and **1.16** in the two prior windows, both of which lived entirely inside one session.
+`VolatilityRegime.update` skips only marks flagged `stale()`, so an overnight tape of identical prices
+fills every window with zero steps, `relVol` returns **0**, and the λ=**0.97** EWMA baseline decays toward
+zero across thousands of 5 s cycles. The first genuine reading at the open then divides by it. Worse,
+`baseline = regime == ELEVATED ? ewma.min(baseline) : ewma` (`VolatilityRegime.java:107`) forbids the
+baseline from ever climbing back, so once latched the ratio can never return under the **1.1** hysteresis
+floor and the process stays risk-off permanently. The identical lesson is already coded one file away —
+`FusionLifecycle.applyRiskCut`, ADR-0116: *"absorbing those as zero returns decays σ toward zero"*.
+
+**Ranked #3, not higher, deliberately.** It costs **no money today**: `fusion_targets.routing` is **true**,
+so `StrategyLifecycle.autoExecuting()` is false and `regimeVolatileScale` gates nothing that trades. Its
+live reach is the landing-page badge and `BacktestEngine` (the ADR-0049 OOS gate). It becomes urgent the
+moment routing returns to the legacy strategy path, or a source is taken through the backtest gate.
+
+**VERIFY-BY:** `/api/market/regime` `volRatio` must read within an order of magnitude of **1** on a process
+that has run across a market closure, and `regime` must return to **CALM** once the session's own vol is
+within the hysteresis band — i.e. the reading must be a ratio of two live-tape volatilities, never a live
+one over a frozen one.
+
+---
+
+## Item #4 (carried, DEMOTED — first EXERCISED, and VERIFIED) — ~~**the restart gate's exemption list omits `scripts/`**~~
+
+`ops/improve-loop.sh:135` reads `NON_BINARY_PATHS='^(reports|docs|ops)/'`, excluding `scripts/`. This cycle
+finally exercised it: `ac15c43` committed **only** `scripts/score-change.py` and
+`scripts/test-score-change.py`. The predicted defect **did fire** — `ops_jvm.uptimeSeconds` **12388** places
+boot at **2026-08-07T10:03:34.412Z**, *after* that commit, so the loop's own Python tooling bounced the
+trading JVM exactly as forecast. The VERIFY-BY is therefore **met in the negative**: the defect is real and
+confirmed, not hypothetical.
+
+It stays **below** items #1–#3 because its cost is bounded by what a restart destroys, and the restart it
+caused landed **during a market closure** on a book that was already flat — the sensors it re-seeded cold
+had no recent history to seed from either way. Fix is one character class in a shell variable; it is not
+this cycle's change because ADR-0144 outranks it and only one change ships per run.
+
+**VERIFY-BY (restated):** after a commit touching only `scripts/**`, `ops_jvm.uptimeSeconds` measured
+against `traffic.timestampMillis` must place the boot instant *before* that commit.
+
+---
+
+## Item #5 (carried from #4, unchanged, still NO ACTION) — **entry is structurally frozen for names early on their aim path.**
+
+Unchanged in substance and now partly addressed from the other side: deploying scales whatever sign the
+desk is given, and at the horizon it actually holds the fused expectancy is negative-to-marginal **gross**.
+ADR-0144 attacks the numerator of that problem — it lengthens the realised holding period toward the only
+horizon (**3600 s**, **+1.0442** bps) with positive gross expectancy. Deployment becomes urgent once the
+horizon-matched expectancy turns non-negative, and not before.
+
+---
+
 ## Verification block — 2026-08-06 19:30Z (**NO CHANGE — the ADR-0116 freeze holds at `27564bb15` 4/6.** Two results. First, **the exit trigger is now measured**: censusing every FILLED LIVE order since boot by trigger × source count, `fusion exit — target decayed to flat` fired **6 of 6 at `sources=1`** while `fusion entry` fired **0 of 25** there. Exit reads source *availability*; entry reads source *content*. That asymmetry is the concrete, fixable mechanism that PRODUCES last cycle's horizon mismatch, so it becomes **#1** and the horizon item folds into it as the consequence. Second, **I have to strike my own VERIFY-BY**: the since-boot holding period read **1,141.3 → 1,610.5 s** (**×1.411**) in a window with no change and no restart, while uptime went **4664 → 6463 s** (**×1.386**) — the estimator grades the clock. Rule 433 again, numerator side. Replaced with a fixed-width trailing-window form. Venue asymmetry holds at **#2**; the `scripts/` omission is NOT EXERCISED a third cycle at **#3**.)
 
 ### Step 0 — `27564bb15` (ADR-0143): ✅ **deployed**, ⚠️ **still not gradable (4/6)**, ✅ **no restart for a fourth window**

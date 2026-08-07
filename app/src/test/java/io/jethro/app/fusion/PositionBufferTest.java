@@ -851,6 +851,66 @@ class PositionBufferTest {
                 .isEqualByComparingTo(nominal);
     }
 
+    /** As {@link #target} but with the contributing-source count under test (ADR-0144). */
+    private static FusionPlanner.Target sourced(String instrument, int sources, String targetQty,
+                                                String currentQty) {
+        return new FusionPlanner.Target(instrument, 0.0, sources, 1.0, 0.0, new BigDecimal("189.714100"),
+                new BigDecimal(targetQty), new BigDecimal(currentQty), BigDecimal.ZERO, List.of());
+    }
+
+    @Test
+    void anUncorroboratedFlatTargetHoldsThePositionInsteadOfLiquidatingIt() {
+        // ADR-0144. Short 47 with ONE surviving source: ADR-0124 cannot estimate the dispersion, so it
+        // zeroes the agreement scalar and the target reads flat. That is absence of a view, not a view
+        // of flat, so nothing is routed and the aim ages on the ADR-0140 clock (name absent from the
+        // snapshot) rather than being snapped to zero and worked in full by ADR-0090.
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        var held = buffer.apply(List.of(sourced("AAPL", 1, "0", "-47")), null, RATE);
+        assertThat(held.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+        assertThat(held.aims()).doesNotContainKey("AAPL");
+        assertThat(held.traded()).isZero();
+    }
+
+    @Test
+    void noSurvivingSourceIsAlsoAbsenceNotAnExit() {
+        // ADR-0065 plans over names the desk HOLDS, so a name every sensor has gone quiet on still
+        // reaches here — with zero sources. Same statement one step further; same answer.
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        var held = buffer.apply(List.of(sourced("AAPL", 0, "0", "-47")), null, RATE);
+        assertThat(held.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+        assertThat(held.aims()).doesNotContainKey("AAPL");
+    }
+
+    @Test
+    void aCorroboratedFlatTargetStillExitsInFull() {
+        // Two sources netting to zero is a genuine flat VIEW — corroborated, tested, and exactly the
+        // case ADR-0090 was written for. Untouched: the whole position is worked this cycle.
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        var exit = buffer.apply(List.of(sourced("AAPL", 2, "0", "-47")), null, RATE);
+        assertThat(exit.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("47.000000"));
+        assertThat(exit.aims().get("AAPL")).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void aTrailingRiskCutOutranksTheCorroborationHold() {
+        // ADR-0086 is the desk's own affirmative word on a name and must never be softened by ADR-0144:
+        // a cut name flattens in full even though it carries a single source.
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        var cut = buffer.apply(List.of(sourced("AAPL", 1, "0", "-47")), null, RATE, null,
+                java.util.Set.of("AAPL"));
+        assertThat(cut.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("47.000000"));
+        assertThat(cut.aims().get("AAPL")).isEqualByComparingTo("0");
+    }
+
+    @Test
+    void anUncorroboratedNameWithNoPositionIsByteIdenticalToThePreAdr0144Desk() {
+        // The hold only ever removes an order, and there is no order to remove when nothing is held.
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        var flat = buffer.apply(List.of(sourced("AAPL", 1, "0", "0")), null, RATE);
+        assertThat(flat.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+        assertThat(flat.aims().get("AAPL")).isEqualByComparingTo("0");
+    }
+
     @Test
     void aPlanAtTheNominalStrengthIsByteIdenticalToThePreAdr0141Desk() {
         // Two names averaging exactly TARGET_ABS: the measured scale IS the constant, so nothing moves.

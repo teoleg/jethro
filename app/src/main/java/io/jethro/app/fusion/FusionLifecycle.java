@@ -341,6 +341,15 @@ public final class FusionLifecycle implements AutoCloseable {
             long horizon = gate != null && gate.horizonSeconds() > 0 ? gate.horizonSeconds() : baseHorizonSeconds;
             var cut = applyRiskCut(targets, now, horizon, cycleParams);
             targets = cut.targets();
+            // ADR-0134: the names the ADR-0086 trailing stop flattened this cycle. A stop cut and a
+            // decayed view both arrive here as a reduce, but they are different triggers and the
+            // post-mortem needs to tell them apart, so the distinction is captured where it is known.
+            // ADR-0144: the buffer needs the same distinction for a different reason — a stop is the
+            // desk's own affirmative word on a name and outranks the corroboration hold below.
+            java.util.Set<String> stopped = new java.util.HashSet<>();
+            for (TrailingRiskCut.Cut c : cut.cuts()) {
+                stopped.add(c.instrument());
+            }
             // ADR-0094: the no-trade region, applied LAST and against the AIM rather than the target.
             // Everything above decides where the desk means to be; this decides whether the difference
             // between that and where it is is worth paying spread for. It runs after the risk cut so a
@@ -353,7 +362,8 @@ public final class FusionLifecycle implements AutoCloseable {
             // evaluated independently of the edge gate so switching that gate off cannot silence it.
             var buffered = positionBuffer == null
                     ? new PositionBuffer.Result(targets, Map.of(), 0, targets.size())
-                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate(), this::stopArmed);
+                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate(), this::stopArmed,
+                            stopped);
             targets = buffered.targets();
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
                     normalised.multiplier(), normalised.coveredNames(),
@@ -365,13 +375,6 @@ public final class FusionLifecycle implements AutoCloseable {
                     braked.samples());
             if (routeOrders) {
                 int routed = 0;
-                // ADR-0134: the names the ADR-0086 trailing stop flattened this cycle. A stop cut and a
-                // decayed view both arrive here as a reduce, but they are different triggers and the
-                // post-mortem needs to tell them apart, so the distinction is captured where it is known.
-                java.util.Set<String> stopped = new java.util.HashSet<>();
-                for (TrailingRiskCut.Cut c : cut.cuts()) {
-                    stopped.add(c.instrument());
-                }
                 for (FusionPlanner.Target t : targets) {
                     if (t.deltaQty().signum() == 0) {
                         continue; // inside the no-trade band — nothing to do
