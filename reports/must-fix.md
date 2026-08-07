@@ -15,6 +15,53 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 17:30Z (**NO CHANGE — `3c43242ba` is still ungraded: the ledger's newest row remains `403a95ffd` at 16:30:09Z and `reports/.pending-baseline.json` is present, so the contract freezes new code.** Three results, all read rather than argued. (1) Last cycle's ✅ on the ADR-0144 revert is now **unqualified** — the exit leg fires ~46 and ~50 minutes into a warmed process, not just in the boot transient, closing the Rule 470 caveat. (2) A new **#1**: fees are **$467.71** of the **-$1,019.60** cumulative firm total — **46%** — because the desk churns roughly **$5.49M** of turnover across **3,191 LIVE fills** to carry an **$11,433.64** book while not one signal source beats a coin flip. Cost is the only drain here with a measured dollar figure and a certain fix, so it outranks both the inferred-cost ratchet and speculative signal work. (3) The entry-cancel ratchet is unchanged in kind but **my own VERIFY-BY drifted the wrong way with nothing edited** — survivable cancels read **5** against the "falling from 4 toward 0" I set — so its metric is re-specified to a category that cannot drift.)
+
+### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED, qualification now closed**
+
+Still ungraded by the scorer, but last cycle's open caveat is settled by this window. The JVM started
+**16:35:57Z** (`ops_jvm.uptimeSeconds` **3251**), and `fusion exit — target decayed to flat` rows land at
+**17:22:09** (`WMT SELL 4`) and **17:26:12** (`KO BUY 1`) — roughly **46 and 50 minutes** in, well outside
+the boot transient that produced every row last cycle. "It fired" is now "it fires". No follow-on defect;
+this item needs no further verification.
+
+### Open items, re-ranked
+
+**#1 — (NEW) The desk pays ~46% of its cumulative loss in fees, churning ~480× its book size for a signal that does not predict.**
+`turnover_cost_by_name` records **3,191 LIVE fills** and roughly **$5.49M of turnover** against a gross
+exposure of **$11,433.64**, at 1.00 bps a side on equities (0.20 on ES/NQ). The resulting **$467.71** is
+**46%** of the **-$1,019.60** firm total. Cross-checked two ways: per-name fills sum exactly to the 3,191
+in `fills_by_day`, and per-name fees sum to `/api/attribution` `totalFees`. Meanwhile no source has edge —
+`signals_telemetry` means are a rounding error on their own dispersion (trend **+0.583** bps on **52.51**,
+n=836; reversion **+0.254** on **50.30**; social **+2.838** on **96.34**; momentum **-0.717** on **51.96**)
+and `signal_observations` hit rates sit at **0.501 / 0.498 / 0.489** on samples of 13,966 / 13,053 / 14,228.
+A random walk minus fees drifts at the fee rate, which is a better explanation of the INCONCLUSIVE wall
+than any combiner hypothesis. Leading candidate mechanism (not yet committed): the 30 s fusion re-plan
+cadence, which sweeps passive entries while reduces cross — one change could cut turnover *and* item #2.
+**VERIFY-BY:** LIVE `turnover_usd` per fill falling — i.e. `turnover_cost_by_name` fills growing materially
+slower than gross exposure over the window — guarded by `/api/attribution` `firmTotal` not deteriorating
+and gross exposure not collapsing, so "trade less by holding nothing" cannot pass.
+
+**#2 — (was #1) Every cancelled order is an entry; the cut leg always executes and the build leg does not.**
+Re-measured with nothing edited: **13** `fusion entry` orders CANCELLED against **9** FILLED, while **32 of
+32** `fusion reduce` and **3 of 3** `auto-hedge EQUITY` rows FILLED — still zero cancels outside the entry
+leg. Every CANCELLED row carries `fusion re-plan — passive order superseded by a fresh target (ADR-0084)`.
+**My previous VERIFY-BY failed on its own terms:** survivable cancels (same side, no-smaller size) read
+**5**, up from **4**, with no code changed — Rule 461 applies to a small count's *level*, not just to rates.
+**VERIFY-BY (re-specified to a drift-proof category):** cancels with **no successor entry at all** — the
+order pulled and never replaced — falling from **6 of 13**, guarded by the reduce and hedge legs holding at
+**100%** filled so an equalising regression cannot pass.
+
+**#3 — (was #2) The scoring baseline can be sampled against a flat book, condemning capital deployment via the exposure clause.**
+Unchanged this cycle and awaiting its own evidence. The mechanism is real and recorded three times
+(`851082687` gross `0 → 956` BAD, `fb9273505` `0 → 43,624` BAD, `403a95ffd` `0 → 15,835` BAD, the last with
+`t = -0.591` against a `tHurdle` of `1.5` — the return test silent, the exposure clause deciding alone), but
+"structural" is falsified: the open baseline for `3c43242ba` reads `gross_exposure: 13194.49`. So it is a
+timing race against restart, not a scorer defect. **Caution carried forward (Rule 467):** ADR-0143 attempted
+surgery on the scorer's revert scoping and was itself graded BAD, so that remedy is spent. **VERIFY-BY:**
+the next two graded snapshots both showing `before.gross > 0` — **one of two in hand** (ungraded), which
+would let this be struck with no code change.
+
 ## Verification block — 2026-08-07 17:00Z (**NO CHANGE — `3c43242ba` is at 1/6 in its ADR-0116 window with `reports/.pending-baseline.json` present, so the contract freezes new code.** Two results this cycle, both read from artifacts rather than argued. First, last cycle's revert is **✅ VERIFIED** on its categorical VERIFY-BY: `fusion exit — target decayed to flat` appears **6 times** after **0** across all five held cycles, and `grep -rn "0144"` over the fusion main and test packages is clean, so a stale build cannot explain it. Second — and this re-ranks the register — I read the **open** baseline instead of waiting for its verdict, and `reports/.pending-baseline.json` records **`gross_exposure: 13194.49`** at `16:35:20Z`. **Non-zero.** Item #1 rested entirely on every graded change opening at `gross_start: 0.0`; that is now falsified as an invariant. The flat baseline is a **race between the sample and the restart**, not a structural property of the scorer, so item #1 is **demoted to #2** — not struck, because I caused none of it and one observation is not a fix. The entry-cancel ratchet, re-measured unchanged in kind with nothing edited, takes **#1**.)
 
 ### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED — the suppressed exit leg is executing again**

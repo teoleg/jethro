@@ -5683,3 +5683,35 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   post-restart σ warm-up re-deploying the fusion book, the same clock effect Rules 433/459 already record.
 - **Change: none.** `3c43242ba` is at **1/6** in its ADR-0116 window with `.pending-baseline.json` present;
   the contract freezes new code while a change is under measurement.
+
+## 2026-08-07 17:30Z — the desk pays 46% of its loss in fees to trade a coin flip; the exit leg now fires warm
+
+- **Rule 471 — when no source has edge, the cost line IS the strategy's PnL, so measure it before tuning
+  anything else.** Read together for the first time: every `signals_telemetry` source is a coin flip
+  (trend `avgReturnBps` **+0.583** on `stdReturnBps` **52.51**, n=836; reversion **+0.254** on **50.30**;
+  social **+2.838** on **96.34**; momentum **-0.717** on **51.96** — and hit rates **0.501 / 0.498 / 0.489**
+  on `signal_observations` samples of 13,966 / 13,053 / 14,228), while `turnover_cost_by_name` shows
+  **3,191 LIVE fills** and roughly **$5.49M of turnover** carrying a gross book of **$11,433.64** — about
+  **480× churn**. The fees on it, **$467.71**, are **46%** of the **-$1,019.60** cumulative firm total.
+  Cross-checked: per-name fills sum exactly to `fills_by_day`'s 3,191 and per-name fees to
+  `/api/attribution` `totalFees`. **Rule: a random walk minus fees drifts at the fee rate — which explains
+  the INCONCLUSIVE wall better than any combiner hypothesis, because re-weighting sources that don't
+  predict cannot outrun a deterministic cost. Rank cost above signal work when edge is absent.**
+- **Rule 472 — close a qualification in the window that can close it, and say which window closed it.**
+  Last cycle's ✅ on the ADR-0144 revert was honest but partial: all exit rows sat in the first six minutes
+  of the process. This window the JVM started **16:35:57Z** (uptime **3251s**) and
+  `fusion exit — target decayed to flat` fired at **17:22:09** (`WMT SELL 4`) and **17:26:12** (`KO BUY 1`)
+  — **~46 and ~50 minutes** in. **Rule: "it fired" becomes "it fires" only when a row lands outside the
+  boot transient; carry the qualification forward until one does.**
+- **Rule 473 — a VERIFY-BY threshold on a small count can move against you with nothing edited.** I set
+  survivable entry-cancels "falling from 4 toward 0"; with no code changed they read **5**. Item #1 is
+  otherwise unchanged in kind — **13 entries CANCELLED / 9 FILLED**, against **32/32 reduces** and **3/3
+  hedges** FILLED, still zero cancels outside the entry leg — but my own metric drifted. **Rule: Rule 461
+  applies to the count's *level* too, not just to rates; prefer a category that cannot drift (here: the
+  **6 of 13** cancels with no successor entry at all) over a numeric threshold on a small sample.**
+- **Attribution — the window's -$15.88 and -$5,696.43 gross are credited to NOTHING.** I deployed no logic;
+  the running commit only removed code. Read against last window's **+$5,106.59**, the pair shows the
+  sawtooth whole: restart → σ warms and the fusion book re-deploys → the reduce leg (32 fills) outruns the
+  entry leg (9 fills, 13 cancelled) and grinds it back down, netting roughly flat.
+- **Change: none.** `3c43242ba` is ungraded — the ledger's newest row is still `403a95ffd` and
+  `.pending-baseline.json` is present — so the contract freezes new code while it measures.
