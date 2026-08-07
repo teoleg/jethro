@@ -5462,3 +5462,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   the freeze holds. Window was **100% neither** — no orders at all (last fill **2026-08-06 20:17:40.939Z**),
   PnL **+0.00**. Next cycle's one change targets the new must-fix **#1**, at the σ **seed**, never at
   ADR-0126's gate.
+
+## 2026-08-07 14:30Z — a freeze cycle became a controlled experiment: σ warm-up, not conviction, gates deployment
+
+- **Rule 449 — when nothing changes and the number moves anyway, you have been handed a free controlled
+  experiment; spend it.** The ADR-0116 freeze meant zero edits between 14:00Z and 14:30Z, yet gross went
+  **$0.00 → $11,677.55**. The only other thing that moved was the clock (`uptimeSeconds` **838 → 2638**),
+  and with it `streamVolMeasuredNames` **1 → 2**. The mapping to `aims` is one-for-one in both cycles —
+  exactly the σ-measured names (`NQ` **0.038287**, `MSFT` **-2.935877**) carry a non-zero aim, all 21
+  others read exactly **0.0** — while `AAPL` sits at `combinedForecast` **-6.411632656835155**,
+  `sources: 3`, `targetQty` **-421.799922**, `deltaQty` **0**. Last cycle #1 was an inference from reading
+  the code; now it is measured. **Rule: a no-change cycle is the cleanest attribution you will ever get —
+  diff the telemetry against it before you diff anything else.**
+- **Rule 450 — grade your own item against its own guard, especially when the guard is inconvenient.**
+  `streamVolMeasuredNames` rose, which is the *direction* item #1's VERIFY-BY asked for — and I marked it
+  **STILL-BROKEN** anyway, because the VERIFY-BY required the read at a fixed short offset from boot and
+  this rise came from the session lengthening (σ accumulating **121** prints at a **30000 ms** step ≈ an
+  hour). Calling it progress would have closed the item and let the morning lockout recur every session.
+  **Rule: an anti-clock guard only earns its keep on the cycle it costs you a win — honour it then.**
+- **Rule 451 — a passive order whose life equals the re-plan interval is a cancel engine, not an execution
+  strategy.** New must-fix #3: **12** `NQ` orders in the window, **1** FILLED, **11** CANCELLED by
+  `fusion re-plan — passive order superseded (ADR-0084)` on a ~30 s cadence. After the 14:23:43 fill the
+  size ladder **restarts from 0.001829** and climbs again, so `aims.NQ` **0.038287** never converges from
+  a held **0.019661** — and the forecast is stable at **5.476118838093129** throughout, so the target is
+  not what is moving. **Rule: compare the passive order's time-to-live against the re-plan period; if TTL
+  ≤ period, the fill rate is set by the canceller, not the market.**
+- **Attribution — the window's +$37.71 is credited to NOTHING.** Realized PnL got *worse*
+  (**-897.87616775 → -898.10895975**, the entry cost); the entire gain is `unrealizedPnl` **+37.94573000**
+  on `NQ` **0.019661** (`avgCost` **29600.75** vs `mark` **29697.25**), filled **14:23:43**, measured
+  **14:30:03** — a **six-minute** hold. Not market movement on held positions (the other 21 are flat), and
+  not caused by `403a95ffd`. **Rule: a mark blip shorter than the strategy's own horizon is not evidence
+  in either direction — refuse to bank it as a win.**
+- **Change:** none. `403a95ffd` is **2/6** with `reports/.pending-baseline.json` present; its branch became
+  reachable (a non-zero held position now exists) but it has still **fired zero times** — no exit in the
+  window, last `fusion exit` stamped **2026-08-06 20:17:37**, so it stays **ungraded** (Rule 447 holds a
+  second cycle). Next cycle's one change targets must-fix **#1 at the σ seed** — draw on the
+  `history_status` **days: 1574, ready: true** daily history the seed already has and ignores — never at
+  ADR-0126's reduce-only gate.
