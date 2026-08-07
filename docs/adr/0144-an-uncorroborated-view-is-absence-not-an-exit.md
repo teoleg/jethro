@@ -1,9 +1,19 @@
 # ADR-0144: An uncorroborated view is ABSENCE, not an exit
 
-- **Status:** Implemented
+- **Status:** Reverted
 - **Date:** 2026-08-07
+- **Reverted:** 2026-08-07 — see "Why it was reverted" at the foot of this record.
 - **Deciders:** Oleg
 - **Tags:** fusion, execution, turnover, holding-period
+
+> **REVERTED.** `scripts/score-change.py` scored the implementing commit `403a95ffd` **❌ BAD** at the
+> close of its ADR-0116 evaluation window; the ledger row carries the computed vector, the t-statistic,
+> the cycle count and the verdict — every number there is the scorer's, not this record's. The scorer's
+> own `git revert` conflicted on the loop's report files and did not land, so the running code was
+> reverted by hand in the next cycle, restoring `PositionBuffer.apply` to its four-argument form and
+> `FusionLifecycle`'s stop-set to its original scope, and deleting the five tests that asserted the
+> corroboration-hold shape, while leaving this record and the loop's findings in place. The mechanism is
+> **not** to be re-attempted as specified.
 
 ## Context
 
@@ -118,3 +128,38 @@ the stationary holding-period estimator (2 × time-average |inventory| ÷ one-wa
 - **Require corroboration to *exit* as well** (a symmetric gate) — would trap a position whose intact
   ensemble genuinely reversed behind a source that has gone quiet. Absence must not block risk coming
   off; that is the ADR-0065 lesson.
+
+## Why it was reverted
+
+`scripts/score-change.py` closed this change's ADR-0116 window and returned **❌ BAD**, so under the
+loop's contract the code comes out and the mechanism is not re-attempted. The scorer's own `git revert`
+conflicted on the loop's report files and aborted, leaving the rejected code live in the running book for
+one further cycle; this record's revert completed it by hand over the three code paths only, keeping the
+ADR, the ledger row and the findings.
+
+**What the window actually measured — stated honestly, because it bears on where the next attempt goes.**
+Every number below is read from the scorer's own audited snapshot
+(`reports/attribution/20260807T163009Z-403a95ffd.json`), not authored here:
+
+- The risk-adjusted return test did **not** condemn the change. Over `n = 7` cycles the scorer measured
+  `t = -0.591` against its own `tHurdle` of `1.5` — well inside the noise band, which is the
+  ⚠️ INCONCLUSIVE region, not the BAD one.
+- The verdict came from the **other** clause: `grew: true`, on `gross_start: 0.0 → gross_end: 15835.17`.
+- That `gross_start` is the whole story. The baseline was recorded at `2026-08-07T13:45:27Z`, immediately
+  after the previous cycle's BAD-revert restarted the app, so the book was **flat when the baseline was
+  taken**. Against a flat baseline, any change that deploys capital at all reads as "exposure grew with no
+  PnL gain".
+
+So the honest reading is that this window graded **the restart, not the mechanism** — the same confound
+ADR-0142 named. The defect this ADR documents (an exit keyed to source *availability* rather than source
+*content*) is not refuted by the scored window; nothing in the vector speaks to it either way. But a BAD
+verdict binds regardless of how sympathetic the reading is — that rule is what makes the loop's autonomy
+safe, and this record is not an argument for re-running the same code.
+
+**Where the next reader should look instead.** The open question is not "was the corroboration hold
+right" but "why is a baseline being recorded against a flat book at all". A change measured from
+`gross = 0` cannot pass the exposure clause no matter what it does, which means the clause is currently
+condemning exactly the behaviour ADR-0132 asks for — deploying capital under an unused budget. That is a
+question about the scoring baseline's timing, and it is where the cost is. Note for whoever takes it:
+ADR-0143 attempted surgery on the scorer and was itself graded BAD and reverted, so that specific remedy
+is spent; the baseline's *timing relative to restart* is a different question and is untried.

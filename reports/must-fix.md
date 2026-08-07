@@ -15,6 +15,65 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 16:30Z (**CHANGE: completed the failed auto-revert of the graded-BAD `403a95ffd` / ADR-0144.** The ADR-0116 window closed and the scorer returned **❌ BAD**, but its `git revert` conflicted on the loop's own report files and aborted — `revertApplied: false` in the audited snapshot — so for one further cycle a condemned change was still executing in the running book. That is the loop's unclosed-loop failure mode and it outranks every novelty item, so this cycle's one change is the manual completion of that revert over the three code paths only, keeping the ADR, the ledger row and the findings. **The register is also re-ranked, on evidence read from the scorer's own snapshot.** The BAD verdict did NOT come from the risk-adjusted return test: `n = 7`, `t = -0.591` against the scorer's `tHurdle` of `1.5` — inside the noise band, which is the INCONCLUSIVE region. It came entirely from the exposure clause, `grew: true` on `gross_start: 0.0 → gross_end: 15835.17`. The baseline was sampled at `2026-08-07T13:45:27Z`, straight after the previous BAD-revert restarted the app, so the book was **flat when the baseline was taken** — and against a flat baseline every change that deploys any capital reads as "exposure grew with no PnL gain". That is the objective ADR-0132 sets, being graded as the failure. It enters at **#1**; the entry-cancel ratchet, re-confirmed again this window and unchanged, moves to **#2**.)
+
+### Step 0 — `403a95ffd` (ADR-0144): 🔴 **GRADED BAD, AND THE REVERT DID NOT LAND** — closed by hand this cycle
+
+`scripts/score-change.py score` now prints `no pending change to score`, and `reports/.pending-baseline.json`
+is gone — the window closed and the ledger carries the row. The verdict is **❌ BAD**. The snapshot
+`reports/attribution/20260807T163009Z-403a95ffd.json` records `"revert": true` with `"revertApplied": false`
+and the note `⚠️ REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert`.
+
+Verified against the tree rather than trusting the note: `git log -3` on
+`app/src/main/java/io/jethro/app/fusion/PositionBuffer.java` returned `403a95f` as its most recent commit,
+and `grep -rn "0144"` over the fusion package returned four live references — the rejected code was
+executing. Reverted by reverse-applying the commit over exactly three paths (`FusionLifecycle.java`,
+`PositionBuffer.java`, `PositionBufferTest.java`); `grep -rn "0144"` over the fusion main and test packages
+now returns nothing. ADR-0144 is marked **Reverted** with its rationale; the ADR index row follows.
+
+**VERIFY-BY next run (categorical, per Rule 461 — not a rate):** `fusion exit — target decayed to flat`
+must **reappear in `recent_orders`**. That trigger returned **0 for all five held cycles** while ADR-0144's
+branch suppressed it, and its restoration is the direct observable of the revert having landed. Guarded by
+`grep -rn "0144" app/src/main/java/io/jethro/app/fusion/` returning nothing, so a stale build cannot pass.
+
+### Open items, re-ranked
+
+**#1 — The scoring baseline is sampled against a flat book, so the exposure clause condemns capital deployment.**
+Read from the scorer's own snapshots, not authored: `403a95ffd` was graded BAD on `gross_start: 0.0` with
+`t = -0.591` (hurdle `1.5`) — the return test was silent and the exposure clause decided it alone. The
+ledger shows the same shape repeatedly: `851082687` gross `0 → 956` BAD, `fb9273505` gross `0 → 43,624` BAD,
+`403a95ffd` gross `0 → 15,835` BAD. The mechanism is that the wrapper restarts the app on a code change and
+the baseline is recorded immediately after, while the book is still flat; any change that then deploys
+capital inside an unused budget — the ADR-0132 objective — is scored as exposure growth with no return.
+This structurally blocks the loop from ever landing a capital-deploying change, which is why it ranks above
+a per-order execution defect. **Caution for whoever takes it:** ADR-0143 attempted surgery on the scorer's
+*revert scoping* and was itself graded BAD and reverted, so that remedy is spent. The baseline's *timing
+relative to restart* is a different question and is untried. **VERIFY-BY:** a scored snapshot whose
+`before.gross` is non-zero when the app carried a position at baseline time — i.e. `gross_start > 0` on the
+next graded change — so the exposure clause is comparing two live books rather than a flat one against a
+live one.
+
+**#2 — Every cancelled order is an entry; the cut leg always executes and the build leg does not.**
+Re-confirmed this window with nothing edited: in `recent_orders`, **every** CANCELLED row carries
+`fusion entry — target increase` origin with reason `fusion re-plan — passive order superseded by a fresh
+target (ADR-0084)`; every `fusion reduce toward a smaller target` and every `auto-hedge EQUITY` row is
+FILLED. Entries POST as ADR-0084 DAY LIMIT at the mark and are swept by the next 30 s re-plan; reduces
+CROSS as MARKET. `GOOG` posted `BUY 5 → 7 → 3` and `JPM` posted `BUY 14 → 18`, all cancelled, none filled.
+The remedy remains: make `cancelStalePassiveOrders` conditional on intent actually *changing* — a working
+entry survives when the fresh target still wants the same side, same name, size no smaller, counted
+against the fresh delta rather than re-posted alongside it. **VERIFY-BY (per Rule 460 — a measure that
+cannot pass on its own):** survivable cancels (same side, no-smaller size) falling toward **0**, guarded by
+genuine side-flip cancels still cancelling and the reduce and hedge legs holding at 100% filled, so neither
+a do-nothing nor an equalising regression can pass. Explicitly **not** the entry fill rate, which cleared
+its own threshold on noise with nothing built.
+
+**#3 — The σ seed is a pure function of process lifetime.** Unchanged and not re-measured this cycle
+(Rule 463: further observations on the satisfied side are not evidence). `uptimeSeconds` reads **9838**,
+far past the fitted **3630 s** switch. Only a low-uptime observation can falsify it, and that measurement
+must be scheduled right after a restart.
+
+---
+
 ## Verification block — 2026-08-07 16:00Z (**NO CHANGE — the ADR-0116 freeze holds at `403a95ffd` 5/6, final held cycle.** Item #1 is re-confirmed, and the confirmation corrected my own VERIFY-BY. The entry fill rate I proposed last cycle as the proving metric moved **36% → 47.83%** (11 FILLED of 23) **with nothing edited** — so a threshold on that rate would have graded the unbuilt fix as a pass on noise alone. Two measures that did *not* move: **every one of the window's 12 CANCELLED orders is `fusion entry` origin** — reduce is 26/26 filled, hedge 11/11, zero cancels on either — and, decisively, **9 of the 12 cancels were superseded by a same-side target of no-smaller size**, exactly the case where a working order should have survived. Only **1** was a genuine side flip and **0** were size reductions. `MSFT` alone posted `SELL 6 → 7 → 11 → 13 → 14` over ~3 minutes, cancelling four times before the fifth filled — one order left resting would have done the same job. The defect is categorical, not a rate. VERIFY-BY replaced accordingly. Item #2's σ seed needs no re-measurement (Rule 459): `uptimeSeconds` **8038** is far past the fitted **3630 s** threshold and `streamVolMeasuredNames` reads **21** as predicted.)
 
 ### Step 0 — `403a95ffd` (ADR-0144): ⚠️ **UNGRADED, window intact (5/6)** — unchanged verdict, fifth and last held cycle

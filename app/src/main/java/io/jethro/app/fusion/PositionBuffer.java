@@ -164,42 +164,6 @@ public final class PositionBuffer {
      */
     public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
                         java.util.function.Predicate<String> stopArmed) {
-        return apply(targets, gate, adjustmentRate, stopArmed, java.util.Set.of());
-    }
-
-    /**
-     * ADR-0144 — as above, plus the names the ADR-0086 trailing risk cut flattened THIS cycle, so an
-     * uncorroborated view can be told apart from an affirmative decision to be flat.
-     *
-     * <p><b>The defect this repairs.</b> ADR-0124 returns an agreement scalar of 0 for a name with one
-     * effective source, because with zero residual degrees of freedom the sources' dispersion is
-     * UNESTIMABLE and an untested view has earned no conviction. That is the right answer to "may this
-     * name have risk put ON it". But the scalar multiplies the combined forecast, and the combined
-     * forecast is also what {@link TargetPlanner} turns into a target — so an unestimable view arrives
-     * downstream as an affirmative target of ZERO, which ADR-0090 works in FULL, this cycle, as an exit.
-     * The desk therefore liquidates a position because corroboration went AWAY, never because the intact
-     * ensemble reversed: absence of evidence is being executed as evidence of zero. Measured on the tape
-     * since the 2026-08-06 boot, every full exit fired at one source and no entry ever did — the
-     * asymmetry is the mechanism, and it is what sets the desk's holding period.
-     *
-     * <p><b>The rule.</b> A name whose view is uncorroborated is ABSENT for the cycle, not flat. It keeps
-     * its position, routes no order, and its ADR-0140 aim ages on the same clock as any other absence —
-     * one full evidence horizon — after which the intent is dropped exactly as it is today. Entry is
-     * untouched: the agreement scalar still zeroes the target, so no risk can be put on without a second
-     * opinion, and the branch below can only ever REMOVE an order. It is one-way, like ADR-0076,
-     * ADR-0098 and ADR-0124 before it.
-     *
-     * <p><b>What still flattens the position.</b> This runs after the ADR-0086 trailing risk cut, and a
-     * cut name is excluded by {@code stoppedNow} — a stop is the desk's own affirmative word on a name
-     * and outranks corroboration. The pre-trade guardrail and the firm drawdown breaker are downstream
-     * and unchanged. Nothing here is a money, risk or exposure number (invariant 7).
-     *
-     * @param stoppedNow instruments the trailing risk cut set flat this cycle; empty leaves the ADR-0086
-     *                   exit path byte-identical
-     */
-    public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
-                        java.util.function.Predicate<String> stopArmed,
-                        java.util.Set<String> stoppedNow) {
         ensureRestored();
         if (targets == null || targets.isEmpty()) {
             // ADR-0140: an empty plan is a cycle in which every name was absent, not proof that the
@@ -221,13 +185,6 @@ public final class PositionBuffer {
         for (FusionPlanner.Target t : targets) {
             BigDecimal held = t.currentQty() == null ? BigDecimal.ZERO : t.currentQty();
             BigDecimal target = t.targetQty() == null ? BigDecimal.ZERO : t.targetQty();
-            if (uncorroboratedHold(t, held, target, stoppedNow)) {
-                // ADR-0144: not flat — UNCORROBORATED. Hold the position, route nothing, and leave the
-                // name out of the snapshot so ADR-0140 ages its aim like any other absence.
-                out.add(withoutDelta(t));
-                inside++;
-                continue;
-            }
             BigDecimal aim = nextAim(t.instrument(), target, held, rate);
             double width = widthFor(t.instrument(), gate, edgeBps);
             BigDecimal delta = bufferedDelta(aim, held,
@@ -259,37 +216,6 @@ public final class PositionBuffer {
         ageAndRetain(snapshot.keySet(), rate); // ADR-0140: absence ages the intent, it does not erase it
         persist();
         return new Result(out, Collections.unmodifiableMap(snapshot), inside, traded);
-    }
-
-    /**
-     * ADR-0144 — is this cycle's flat target the absence of a view rather than a view of flat?
-     *
-     * <p>Exactly when the desk HOLDS the name, its target is flat, no ADR-0086 cut fired on it, and it
-     * carries at most one contributing source. One source is the precise characterisation of ADR-0124's
-     * unestimable case and needs no new state to detect: the agreement scalar is zeroed when the residual
-     * degrees of freedom {@code 1 − Σŵᵢ²} vanish, and with every weight positive that happens if and only
-     * if a single source carries all the weight. Zero sources is the same statement one step further —
-     * the name is in the plan only because ADR-0065 plans over what is held.
-     *
-     * <p>Two or more sources netting to zero is a genuine flat view, corroborated, and still exits in
-     * full: that is the case ADR-0090 was written for and it is deliberately untouched.
-     */
-    private static boolean uncorroboratedHold(FusionPlanner.Target t, BigDecimal held, BigDecimal target,
-                                              java.util.Set<String> stoppedNow) {
-        return t.sources() <= 1
-                && target.signum() == 0
-                && held.signum() != 0
-                && !(stoppedNow != null && stoppedNow.contains(t.instrument()));
-    }
-
-    /** The same target with no order attached — the position is held, so nothing is routed. */
-    private static FusionPlanner.Target withoutDelta(FusionPlanner.Target t) {
-        if (t.deltaQty() != null && t.deltaQty().signum() == 0) {
-            return t;
-        }
-        return new FusionPlanner.Target(t.instrument(), t.combinedForecast(), t.sources(),
-                t.diversificationMultiplier(), t.agreement(), t.price(), t.targetQty(), t.currentQty(),
-                BigDecimal.ZERO.setScale(QTY_SCALE), t.contributions());
     }
 
     /**

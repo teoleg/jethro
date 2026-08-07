@@ -5615,3 +5615,40 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   intent actually changing, with the revised VERIFY-BY — survivable cancels (same side, no-smaller size)
   falling from **9** toward **0**, guarded by the **1** side-flip cancel still cancelling and the reduce and
   hedge legs holding at **100%** filled, so neither a do-nothing nor an equalising regression can pass.
+
+## 2026-08-07 16:30Z — a condemned change kept trading for a cycle, and the verdict that condemned it was measuring a restart
+
+- **Rule 464 — verify a revert against the TREE, never against the scorer's note.** The snapshot said
+  `"revertApplied": false`, but the note is only as good as the next reader acting on it. `git log -3` on
+  `PositionBuffer.java` returned the condemned `403a95f` as its most recent commit and `grep -rn "0144"`
+  over the fusion package returned four live references — the rejected code was **executing in the book for
+  a full extra cycle**. This is the fourth failed auto-revert (ADR-0136, ADR-0139, ADR-0142, now ADR-0144);
+  every one conflicted on the loop's own report files, which every cycle rewrites. **Rule: Step 0 confirms a
+  revert by grepping the running code for the reverted marker, not by reading the verdict that ordered it.**
+- **Rule 465 — read WHICH clause produced a verdict before accepting what it says about your change.**
+  `403a95ffd` was graded BAD, and the natural reading is "the mechanism lost money". The snapshot says
+  otherwise: `n = 7`, `t = -0.591` against a `tHurdle` of `1.5` — the return test was **silent**, squarely
+  in the INCONCLUSIVE band. The verdict came wholly from `grew: true` on `gross_start: 0.0`. A composite
+  verdict is not one judgement; **rule: open the snapshot and name the clause, because the remedy for a
+  failed return test and the remedy for a tripped exposure clause have nothing in common.**
+- **Rule 466 — a baseline sampled against a flat book cannot grade capital deployment.** The baseline for
+  `403a95ffd` was taken at `13:45:27Z`, right after the prior BAD-revert restarted the app, so gross was
+  **0.0**. Against zero, *every* change that puts on any risk satisfies "exposure grew", and if PnL has not
+  visibly risen in the same window it is condemned. The ledger shows the pattern, not the one-off:
+  `851082687` gross `0 → 956` BAD, `fb9273505` gross `0 → 43,624` BAD, `403a95ffd` gross `0 → 15,835` BAD.
+  **Rule: the exposure clause is currently condemning the ADR-0132 objective itself, so the loop cannot land
+  a capital-deploying change until the baseline is sampled against a live book.** Ranked must-fix #1.
+- **Rule 467 — a spent remedy does not close the defect it failed on.** ADR-0143 attacked the *revert
+  scoping* and was itself graded BAD and reverted, which is why the conflict recurred immediately. That
+  forecloses re-attempting revert-scoping surgery — it does **not** foreclose the baseline's *timing
+  relative to restart*, which is a different mechanism and untried. **Rule: when a fix is reverted, record
+  precisely which mechanism is now off-limits, so the next cycle does not treat the whole problem as closed.**
+- **Attribution — the window's -$38.15 and -$4,479.67 gross are credited to NOTHING.** I deployed no code
+  during it; the only live intervention was the condemned branch the scorer already measured as noise. The
+  gross decline is consistent with the #2 entry-cancel ratchet (every CANCELLED row is `fusion entry`
+  origin; every reduce and every hedge row FILLED — `GOOG BUY 5 → 7 → 3` and `JPM BUY 14 → 18` all cancelled,
+  none filled), but that is a correlation observed across cycles in which I changed nothing.
+- **Change:** completed the failed auto-revert of `403a95ffd` (ADR-0144) over three code paths, keeping the
+  ADR and the record. VERIFY-BY next run is categorical, not a rate (Rule 461): `fusion exit — target
+  decayed to flat` must **reappear** in `recent_orders` after returning 0 for all five held cycles, guarded
+  by `grep -rn "0144"` over the fusion package returning nothing so a stale build cannot pass.
