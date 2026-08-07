@@ -5499,3 +5499,45 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   second cycle). Next cycle's one change targets must-fix **#1 at the σ seed** — draw on the
   `history_status` **days: 1574, ready: true** daily history the seed already has and ignores — never at
   ADR-0126's reduce-only gate.
+
+## 2026-08-07 15:00Z — the σ seed can NEVER complete: the loop's own teardown cadence is the defect
+
+- **Rule 452 — when a symptom recurs on a clock, stop re-measuring it and do the arithmetic on the
+  threshold.** For two cycles I recorded "σ cannot warm across a *session* boundary" and re-measured the
+  same conversion. This cycle I read the boot logs instead: σ needs `warmupPrices()` = `vol-span` (**120**)
+  + 1 = **121** prices at `jethro.fusion.interval-seconds=30` ⇒ **3630 s ≈ 60.5 min** of *contiguous*
+  series, while `SensorWarmup.GAP_TOLERANCE_SAMPLES` is **30** steps (900 s at σ's 30000 ms step) and the
+  app lives ~15–30 min per loop cycle. **The seed cannot complete on any cycle, at any time of day** — the
+  overnight gap was a special case of a per-cycle defect. **Rule: compare the warm-up requirement against
+  the process lifetime in the same units before blaming the data.**
+- **Rule 453 — check the retention number before you blame retention.** I had assumed the mark store was
+  too shallow. It is not: `jethro.ui.history-hours=12` and `data/ui-history/live/data.mdb` has accumulated
+  since Jul 27. What is wrong is the *shape* — a chain of ~15-minute islands separated by teardown gaps,
+  and every seed terminates `GAP_BREAK`/`HISTORY_EXHAUSTED` at **~920–1280 s** (trend AAPL **145 of 193**,
+  CAT **52 of 193**; reversion CAT **40 of 241**). **Rule: "not enough history" and "not enough contiguous
+  history" are different bugs with different fixes.**
+- **Rule 454 — a defect that only appears on a degenerate book is a symptom, not an item.** I opened the
+  passive-re-plan cancel storm as must-fix #3 last cycle on **1 FILLED / 11 CANCELLED**. Nothing was fixed,
+  and this window ran **45 FILLED / 13 CANCELLED / 2 ROUTED** (`NQ` **19 of 19**) — because with 21 names
+  planned the 30 s re-plan no longer lands on the same working order. It was one-name pathology.
+  **Rule: before ranking a defect, ask whether it survives the book widening; if it does not, it is
+  downstream of whatever narrowed the book.**
+- **Rule 455 — an absence is not a verification.** ADR-0144's window shows **0** `fusion exit — target
+  decayed to flat` against **27** `fusion reduce toward a smaller target`, with 21 held positions. That is
+  consistent with the branch working and proves nothing, because the counterfactual is unobservable and no
+  log records a hold. Its VERIFY-BY is now sharpened to require a **counter of uncorroborated holds** on
+  the targets endpoint. **Rule: write VERIFY-BY as a number that must APPEAR, never as an event that must
+  not.**
+- **Attribution — the window's +$22.43 is credited to NOTHING, third cycle running.** Nothing was edited,
+  yet `streamVolMeasuredNames` went **2 → 21** (= `instruments`, 21 of 21), `insideBuffer` **22 → 15**, and
+  gross **$11,677.55 → $17,910.83** on **21** equity positions — while `uptimeSeconds` went **2638 → 4438**.
+  Realized **-898.10895975 → -842.93863544** (the `NQ` blip I refused to bank was realized), unrealized
+  **+37.94573000 → +5.20070888**. `403a95ffd`'s branch has fired zero times. **Rule: three cycles of the
+  same clock-driven move is not three pieces of evidence — it is one, and it belongs to the clock.**
+- **Change:** none. `403a95ffd` is **3/6** with `reports/.pending-baseline.json` present. Next cycle's one
+  change targets must-fix **#1 at the σ seed**: draw on the `history_status` **days: 1574, ready: true**
+  daily series, scaled to the sampling interval by the √time convention `StreamVolatility` already
+  documents — conservative, since a daily σ carries overnight jumps and so *over*states intraday σ,
+  widening rather than tightening the ADR-0086 stop. Architecturally significant ⇒ ADR in the same commit.
+  **Absorb this up front: that change restarts the process, so its own ADR-0116 window opens with a cold
+  hour.**

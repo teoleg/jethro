@@ -15,6 +15,143 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 15:00Z (**NO CHANGE — the ADR-0116 freeze holds at `403a95ffd` 3/6.** A second free controlled experiment, and it closes item #1's ROOT CAUSE. Nothing was edited, yet `streamVolMeasuredNames` went **2 → 21** — now equal to `fusion_targets.instruments` (**21 of 21**) — `insideBuffer` fell **22 → 15**, the book went from one `NQ` future to **21** equity positions, and gross went **$11,677.55 → $17,910.83**. `ops_jvm.uptimeSeconds` is **4438** against **2638**, so it is the clock again and #1 stays **STILL-BROKEN** on its own anti-clock guard. But this cycle I stopped re-measuring the symptom and read the boot logs: retention is NOT the constraint (`jethro.ui.history-hours=12`, LMDB accumulating since Jul 27). The constraint is **arithmetic** — σ needs **121** prices at a **30000 ms** step ≈ **3630 s** of CONTIGUOUS series, `GAP_TOLERANCE_SAMPLES` is **30** steps, and the loop's own teardown leaves islands of one app lifetime (~900–1800 s). **The σ seed can never complete, on any cycle, at any time of day.** The overnight gap was a special case of a per-cycle defect. #1 holds at #1 with a buildable fix. ADR-0144 stays **ungraded** at #2 — 27 `fusion reduce` orders and **zero** `fusion exit — target decayed to flat`, consistent with the branch working but not proof. **Item #3 is DEMOTED below the line as an ARTIFACT**: the cancel storm was a one-name pathology and cleared itself — **45 FILLED / 13 CANCELLED / 2 ROUTED** this window against **1 of 12** last cycle.)
+
+### Step 0 — `403a95ffd` (ADR-0144): ⚠️ **REACHABLE, STILL NOT EXERCISED — ungraded, window intact (3/6)**
+
+`scripts/score-change.py score` prints `403a95ffd still accumulating evidence (3/6 cycles) — held, not
+scored this run`, and `reports/.pending-baseline.json` is present. Freeze holds; no code change.
+
+The branch is now well inside its precondition — **21** equity positions held, `held.signum() != 0` on
+every one. And the window ran **27** `fusion reduce toward a smaller target` orders with **zero**
+`fusion exit — target decayed to flat`. That is *consistent* with ADR-0144 suppressing the
+absence-as-exit path, but it is **not proof**: I cannot observe the counterfactual, and no log line
+records a hold, so the VERIFY-BY numerator stays unreadable. Verdict remains **ungraded** (Rule 447, third
+cycle). **VERIFY-BY sharpened below — it needs a counter, not an absence.**
+
+Regression check, cleared: ADR-0144 suppressed nothing this cycle. All 21 planned names carry a target and
+18 carry a non-zero `aim`; the three zeros (`NVDA`, `MSFT`, `EURUSD`) are flat targets, not held positions.
+
+### Not danger — the book deployed, which is the goal, and it is nowhere near a cap
+
+Gross **$17,910.83** = **1.2%** of the firm gross cap $1,500,000 (headroom **$1,482,089**); net
+**$7,600.62** = **0.8%** of the $1,000,000 net cap. `breaker.halted` **false**; `riskCuts` **[]**;
+`riskCutStoppedNames` **0**; `edgeGate` **null**. Feed healthy — `provider: alpaca`, `ticksIn` **49689**,
+`ticksDropped` **0**. Total PnL **-$837.74** (UNDERWATER stands), `on_track=true` at `pnl_growth_pct`
+**4.2%** vs target **1.0%**.
+
+### Window attribution — the +$22.43 is the clock's, not the change's
+
+- Realized **-898.10895975 → -842.93863544**; unrealized **+37.94573000 → +5.20070888**. The `NQ` mark blip
+  I refused to bank last cycle was realized; the fresh equity book carries `byAssetClass` EQUITY
+  `unrealizedPnl` **-7.32152001**.
+- **Not `403a95ffd`.** Its branch has still fired zero times. The deployment was gated by σ warming with
+  elapsed session time — the same mechanism as the previous two cycles, measured a third time.
+- **Market vs change cannot be separated further** on 21 positions all opened inside this window, and I am
+  not going to guess. The ADR-0116 window is what will judge it.
+
+---
+
+## Item #1 (HOLDS at #1 — ⚠️ **STILL-BROKEN**, and this cycle its ROOT CAUSE is closed) — **the σ seed can never complete on ANY cycle: it needs 60 min of contiguous series and the loop's teardown cadence leaves islands of ~15–30 min.**
+
+**What changed in my understanding.** For two cycles I called this "σ cannot warm across a *session*
+boundary". That was too narrow. Reading the 13:46Z boot logs, **every** sensor seed terminates on
+`GAP_BREAK` or `HISTORY_EXHAUSTED` after covering only **~920–1280 s**:
+
+| sensor | name | seeded | terminator | span |
+| --- | --- | --- | --- | --- |
+| trend (193 needed) | AAPL | 145 | `GAP_BREAK` | 948 s |
+| trend | JNJ | 72 | `HISTORY_EXHAUSTED` | 935 s |
+| trend | CAT | 52 | `GAP_BREAK` | 921 s |
+| trend | NVDA | 162 | `HISTORY_EXHAUSTED` | 945 s |
+| reversion (241 needed) | AAPL | 82 | `GAP_BREAK` | 939 s |
+| reversion | CAT | 40 | `GAP_BREAK` | 921 s |
+| reversion | MSFT | 85 | `GAP_BREAK` | 1279 s |
+
+**Retention is NOT the constraint** — I checked and was wrong to assume it:
+`jethro.ui.history-hours=12`, and `data/ui-history/live/data.mdb` has been accumulating since Jul 27. The
+constraint is the **shape** of what is retained, and it is arithmetic:
+
+- The app lives ~15–30 min per loop cycle, so the durable mark store is a **chain of short islands**
+  separated by the loop's own teardown gaps.
+- `SensorWarmup.GAP_TOLERANCE_SAMPLES` = **30** consumption steps — 900 s at σ's **30000 ms** step, 150 s at
+  trend's **5000 ms**, 300 s at reversion's **10000 ms**. Every one is narrower than the inter-cycle gap, so
+  the walk always truncates at the newest island.
+- σ needs `warmupPrices()` = `jethro.fusion.risk-cut.vol-span` (**120**) + 1 = **121** prices at
+  `jethro.fusion.interval-seconds=30` ⇒ **3630 s ≈ 60.5 min** of contiguous series.
+
+**One app lifetime is never 60 minutes, so the σ seed cannot complete for any name, on any cycle.** The
+overnight gap was a special case of a defect that fires every single cycle. σ therefore *only ever* warms
+from live prints, which is precisely the three-cycle conversion the register has been recording:
+
+| read | 14:00Z | 14:30Z | 15:00Z |
+| --- | --- | --- | --- |
+| `ops_jvm.uptimeSeconds` | 838 | 2638 | 4438 |
+| `streamVolMeasuredNames` | 1 | 2 | **21** |
+| `fusion_targets.instruments` | 20 | 23 | 21 |
+| `insideBuffer` | 19 | 22 | **15** |
+| `grossExposure` | $0.00 | $11,677.55 | **$17,910.83** |
+
+**STILL-BROKEN on its own VERIFY-BY.** `streamVolMeasuredNames` reaching 21 of 21 is the *direction* the
+item wants, and I am declining to score it, for the third time, because the guard requires the read at
+`uptimeSeconds` **< 900** and this one is at **4438**. Honouring the guard is what kept the item open long
+enough to find the arithmetic.
+
+**Corollary the next change must absorb:** a code change restarts the process, so **next cycle's change is
+itself locked out for its own first hour**. Its ADR-0116 window will contain a cold hour. That is a
+property of the defect, not of the fix.
+
+**The fix goes at the SEED, never at ADR-0126's gate.** `history_status` reads `days: 1574`,
+`instruments: 55`, `ready: true`, `source: "existing"` — a deep, durable daily series that no gap severs,
+which the σ seed does not draw on. Scaling it to the sampling interval by the √time convention
+`StreamVolatility` already documents in its class contract is the candidate; it errs **conservative**,
+because a daily σ carries overnight jumps and therefore *over*states intraday σ, widening rather than
+tightening the ADR-0086 stop distance. Architecturally significant ⇒ ADR in the same commit.
+
+**VERIFY-BY (unchanged reads, and the anti-clock guard stays load-bearing):**
+- `streamVolMeasuredNames` reaches `fusion_targets.instruments` **within the first cycle after a boot** —
+  read at `ops_jvm.uptimeSeconds` **< 900**, never cumulatively; and
+- `insideBuffer` **< `instruments`** with at least one **equity** carrying a non-zero `deltaQty` at that
+  same sub-900 s read; and
+- the `σ sensor still cold` WARN count falls, with remaining seeds no longer terminating
+  `GAP_BREAK`/`HISTORY_EXHAUSTED` at ~900 s.
+
+---
+
+## Item #2 (carried, unchanged rank — ungraded, third cycle) — **exit/entry corroboration asymmetry (ADR-0144, `403a95ffd`, 3/6).**
+
+Shipped, correct, precondition well met (21 held positions), still not provably exercised. No action until
+the ADR-0116 window closes. Detail in the 14:30Z / 14:00Z / 13:30Z blocks.
+
+**VERIFY-BY (SHARPENED — an absence is not evidence).** The current test asks for the *lack* of a
+`fusion exit — target decayed to flat`, which this window satisfies (**0** exits against **27**
+`fusion reduce`) without proving anything. Replace with a positive read: the branch must expose a
+**counter of uncorroborated holds** on `/api/fusion/targets` (a disclosure count, not an input — it sizes
+nothing, invariant 7), so the numerator is readable. Until then the item cannot be graded, only carried.
+
+---
+
+## Items #3–#7 (re-ranked; former #3 DEMOTED below the line as an artifact)
+
+- **#3** (was #4) — **82.70% of turnover runs through the venue charging 5× the round trip.** Now
+  measurable for the first time: **45** fills across 21 names this window, so the next cycle can read the
+  venue split from `turnover_cost_by_name` / `tca` instead of a single `NQ` future. Promoted to the first
+  actionable item once #1 is verified.
+- **#4** (was #5) — the volatility-regime baseline latches after a frozen tape. `regime` reads `CALM`,
+  `volRatio` **0.88**; still masked by the restart. VERIFY-BY still requires a session boundary crossed
+  **without** an intervening restart (Rule 448).
+- **#5** (was #7) — entry structurally frozen for names early on their aim path. Partially answered this
+  cycle: `insideBuffer` fell to **15 of 21**, so **6** names did route. Keep watching.
+- ~~**#6** — the restart gate's `scripts/` omission~~ — VERIFIED, closed.
+- ~~**former #3** — the passive re-plan supersedes its own order faster than it can fill~~ — **DEMOTED, not
+  fixed but not real.** It was an artifact of a degenerate one-name book: with only `NQ` planned, every 30 s
+  re-plan landed on the same working order (**1 FILLED / 11 CANCELLED**). With 21 names planned the re-plans
+  spread out and the window ran **45 FILLED / 13 CANCELLED / 2 ROUTED** — a 75% fill rate, `NQ` **19 of 19**.
+  **Watch item:** it will return the next time item #1 narrows the book to one or two names, so it is a
+  symptom of #1, not a peer of it.
+
+---
+
 ## Verification block — 2026-08-07 14:30Z (**NO CHANGE — the ADR-0116 freeze holds at `403a95ffd` 2/6.** The freeze bought a **natural experiment that confirms item #1 causally**, and I have to grade #1 against its own anti-clock guard and mark it **STILL-BROKEN**. Nothing was changed since last cycle, yet `streamVolMeasuredNames` went **1 → 2**, `aims` went non-zero on exactly **2** names (`NQ` **0.038287**, `MSFT` **-2.935877**) and **0.0** on the other 21, `insideBuffer` read **22** of **23**, and gross went **$0.00 → $11,677.55** — a single `NQ` position of **0.019661**. The measured-σ count *is* the deployment switch, one-for-one: 2 names measured → 2 names with an aim → 1 name traded. But `ops_jvm.uptimeSeconds` is **2638** against **838** last cycle, so the rise is **the session getting longer**, which item #1's own VERIFY-BY says "proves nothing" (Rule 433 guard). So #1 **holds at #1, STILL-BROKEN**, now with a measured conversion rate instead of an inference. ADR-0144's branch became **reachable** this cycle (a non-zero held position exists) but still has **not fired** — no exit occurred — so it stays **ungraded** at #2. A NEW item enters at **#3**: the passive re-plan cancels its own order faster than it can fill — **12** `NQ` orders in the window, **1** FILLED, **11** CANCELLED by ADR-0084 re-plan.)
 
 ### Step 0 — `403a95ffd` (ADR-0144): ⚠️ **REACHABLE NOW, STILL NOT EXERCISED — ungraded, window intact (2/6)**
