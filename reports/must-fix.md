@@ -15,6 +15,85 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 19:00Z (**NO CHANGE — `3c43242ba` is at 5/6 cycles in its ADR-0116 window (`scripts/score-change.py score` prints "still accumulating evidence (5/6 cycles) — held, not scored this run") and `reports/.pending-baseline.json` is present, so the contract freezes new code.** Last cycle I withdrew item #1's VERIFY-BY after it drifted 4× on a no-deploy window, and replaced it with "Δ cumulative turnover ÷ mean gross exposure over the full 6-cycle window" — asserting that cumulative, monotone endpoints would fix the drift. **This cycle I tested that assertion instead of trusting it, and it fails too.** A script reconstructed the metric from **174 archived report zips** and measured its dispersion across windows where nothing was deployed: at the 6-cycle horizon its coefficient of variation is **0.53**, range **0.59–4.57**, max/min **7.7×**. Aggregation did not rescue it — the volatile gross-exposure denominator is the problem, and every raw churn-rate sibling fails alongside it (turnover/cycle CV **0.45**, fills/cycle CV **0.47**, avg fill size CV **0.42**). The same script then found one that survives, and item #1's VERIFY-BY is re-specified onto it **with a measured noise floor and a stated minimum detectable effect** — the first proof metric in this register validated on no-deploy data *before* being adopted rather than after it failed.)
+
+### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED (fourth consecutive window, same process)**
+
+`ops_jvm.uptimeSeconds` **8651** against a report stamp of **2026-08-07T19:00:01Z** puts JVM start at
+**16:35:50Z** — identical to the derived start in each of the last three cycles (6852s, 5052s, 3251s), so
+one continuous process spans all four verifications and none of this is boot transient. `fusion exit —
+target decayed to flat` fired **three times** this window: `WMT SELL 29` and `NVDA SELL 2` (both 18:35:39,
+`forecast=-0.0/0.0, sources=1`) and `BAC SELL 3` (18:27:02) — the last of them **144 minutes** into the
+process. Closed; no further verification needed.
+
+### 🔴 Correction — the replacement VERIFY-BY adopted on 2026-08-07 18:30Z is ALSO WITHDRAWN
+
+Measured by script over the archived report series, on windows with no deployment. Per-cycle dispersion of
+each candidate churn metric, and the same metric aggregated to the 6-cycle horizon the scorer grades on:
+
+| candidate proof metric | CV @ 1 cycle | CV @ 6 cycles | max/min @ 6 | verdict |
+|---|---|---|---|---|
+| Δ turnover ÷ mean gross *(adopted last cycle)* | 0.72 | **0.53** | 7.7× | ❌ unusable |
+| Δ turnover per cycle ($) | 0.68 | 0.45 | 10.8× | ❌ unusable |
+| Δ fills per cycle (count) | 0.70 | 0.47 | 16.7× | ❌ unusable |
+| mean fill size ($) | 1.11 | 0.42 | 5.1× | ❌ unusable |
+| ALPHA same-name direction-reversal rate, pooled | 0.98 | 0.29 | 3.0× | ✅ **usable** |
+
+The four rejects share one flaw: they are **rates of activity**, and this book's activity per window is
+itself the noisiest thing about it. Making the endpoints cumulative and monotone (last cycle's fix) does
+nothing about that, because the *difference* of two cumulative quantities is still a rate. The survivor is
+different in kind — it is a **proportion measured within the same window**, so the window's own volatility
+appears in numerator and denominator together and cancels.
+
+### Open items, re-ranked
+
+**#1 — (rank unchanged; mechanism unchanged and re-confirmed a third time; VERIFY-BY replaced and, for the first time, drift-tested before adoption) The fusion target tracks a ~90-second mean-reverting forecast 1:1, so the desk round-trips its book and pays the fee each way.**
+The cost side, read this cycle: `/api/attribution` `totalFees` **$485.123025** against `firmTotal`
+**-$1,015.33773818** — **47.78%** of the entire cumulative loss (46%, 46%, 46.6% in the three prior
+windows). On the ALPHA book alone it is **$463.502062** of **-$933.09131744** — **49.67%**. Cumulative LIVE
+turnover **$5,716,068.55** over **3,319** fills. The mechanism is intact in this window's `forecast=`
+series on two names: **BAC** `SELL 156 at fc=-7.38` (18:39:12) → `BUY 1` ×4 at fc≈**+0.00…+0.10**
+(18:40:44–18:42:15) → `BUY 115 at fc=-0.288` (18:42:45) — short 156 and 119 bought back inside four
+minutes; and **KO** `SELL 45 at fc=-5.04` (18:26:32) → `BUY 19 at fc=-0.165` (18:27:33) → `BUY 4`, `BUY 60`,
+`BUY 3`, `BUY 8`, `BUY 1`, `BUY 3`, `BUY 1`, `BUY 6`, `BUY 12` → `BUY 43 CANCELLED at fc=+12.89` (18:58:28)
+— the forecast walks the full sign range and the target follows one-for-one. `signal_observations` LIVE
+225s hit rates are **0.490 / 0.501 / 0.498** on n = 14,672 / 14,395 / 13,471, so none of that motion is
+information. **Leading candidate (unchanged — a damper, NOT a size cut; ADR-0132 forbids buying quiet by
+holding nothing):** hysteresis on the *target* scaled to the target's own rolling σ, and/or a minimum
+holding period, so a target must move by more than its own noise before it routes.
+
+> **VERIFY-BY (drift-tested — this is the change from last cycle).** Metric: the **ALPHA same-name
+> direction-reversal rate**, pooled over the change's full 6-report ADR-0116 window — for each instrument,
+> order its LIVE ALPHA FILLED orders chronologically and count consecutive pairs whose `side` flips;
+> pooled rate = Σ reversals ÷ Σ pairs across the window. Computed by script from `recent_orders`, never by
+> hand. **Sample gate: pooled pairs ≥ 150** — applied to the *pooled* window, deliberately not per-report,
+> so a damper that thins each report's fill count cannot select its own sample.
+> **Current reading (the "before"): 0.1955 — 35 reversals of 179 pairs.**
+> **Measured noise floor on no-deploy data: mean 0.190, sd 0.055, CV 0.29, observed range 0.083–0.252
+> over n=17 blocks.** ⇒ **minimum detectable effect: the rate must fall below ~0.080 (a ≥58% cut) to clear
+> 2 sd.** A σ-scaled hysteresis damper suppresses exactly the sub-noise target moves that produce these
+> reversals, so a >58% cut is the plausible-success case rather than a stretch — but the threshold is
+> stated in advance and is not to be moved afterwards. Guard clauses, both required alongside: gross
+> exposure must not fall (ADR-0132 — a damper that merely holds nothing is a failure, not a pass) and
+> `firmTotal` must not deteriorate. If the pooled pair count comes in under 150, the result is **NO
+> VERDICT** — not a pass.
+
+**#2 — (rank unchanged; its metric remains drift-suspect and is NOT yet repaired) Every cancelled order is an entry; the cut leg always executes and the build leg does not.**
+Re-confirmed in kind this window — `orders_by_status` reads FILLED **6,306** / CANCELLED **2,242** /
+REJECTED **212**, and both of this window's cancels (`KO BUY 43`, `BAC SELL 125`) are `fusion entry` origin
+with the ADR-0084 supersede reason, zero cancels on the reduce or hedge legs. But the right-censoring
+problem flagged last cycle is unfixed, so this item still has **no admissible VERIFY-BY**. It cannot be
+worked until it gets one, and it does not get one by assertion — it needs the same no-deploy drift test
+item #1 just went through.
+
+**#3 — (unchanged; informational, NOT actionable as a change) No signal source has measurable edge, so cost is the only lever with a certain sign.**
+LIVE hit rates across every source and horizon this cycle span **0.447–0.583**, with the extremes sitting
+on the smallest samples (`social` 3600s at 0.583 on n=484; `momentum` 225s at 0.447 on n=304) and the three
+large-n series pinned at **0.490 / 0.501 / 0.498** on n≈13–15k. A 1.00 bps per-side fee covers none of it.
+This is why item #1 outranks any signal work: cost is the one drain whose sign is known.
+
+---
+
 ## Verification block — 2026-08-07 18:30Z (**NO CHANGE — `3c43242ba` is at 4/6 cycles in its ADR-0116 window (`scripts/score-change.py score` prints "still accumulating evidence (4/6 cycles) — held, not scored this run") and `reports/.pending-baseline.json` is present, so the contract freezes new code.** The cycle's finding is a *correction to this register*: **last cycle's VERIFY-BY for item #1 is falsified — it is not drift-proof.** With **zero code deployed** between the two windows, the ALPHA churn ratio I specified as the proving metric moved from **4.4× to 1.17×**, and zero-net round-trip names went from **1 of 8 to 0 of 10**. Had I shipped the damper last cycle, I would have graded it ✅ on a move the market made for me. Item #1's mechanism stands; its VERIFY-BY is re-specified below onto the same 6-cycle horizon the scorer uses.)
 
 ### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED (third consecutive window, same process)**

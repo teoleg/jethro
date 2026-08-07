@@ -5783,3 +5783,50 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Change: none.** `3c43242ba` is at **4/6** in its ADR-0116 window with `.pending-baseline.json` present;
   the contract freezes new code while a change is under measurement. Its exit leg verified a third time
   (`fusion exit — target decayed to flat` fired on BAC 18:27:02, PG 18:09:48, KO 17:59:09).
+
+## 2026-08-07 19:00Z — I tested my own replacement metric instead of trusting it, and it failed too
+
+- **Rule 480 (supersedes Rule 478's prescription; Rule 477 stands and is now operationalised) — "cumulative
+  and monotone" does NOT make a metric drift-proof, because the DIFFERENCE of two cumulative quantities is
+  still a rate, and a rate of activity is the noisiest thing this book produces.** Last cycle Rule 478
+  re-specified item #1's VERIFY-BY as Δ cumulative turnover ÷ mean gross exposure over the full 6-cycle
+  window, on the reasoning that monotone endpoints cure drift. A script reconstructed it from **174 archived
+  report zips**, measuring only windows where nothing deployed: CV **0.53** at the 6-cycle horizon, range
+  **0.59–4.57**, max/min **7.7×**. Its siblings fail identically — turnover/cycle CV **0.45**, fills/cycle CV
+  **0.47**, mean fill size CV **0.42**. Aggregating from 1 to 6 cycles only moved CV 0.72 → 0.53. **Two
+  consecutive VERIFY-BYs for the same item have now died; both died because I reasoned about the metric
+  instead of measuring it.**
+- **Rule 481 — a proof metric must be a PROPORTION measured inside the window, not a rate of activity across
+  windows, so the window's own volatility cancels between numerator and denominator.** The one survivor of
+  the sweep: **ALPHA same-name direction-reversal rate** — per instrument, order LIVE ALPHA FILLED orders
+  chronologically, count consecutive pairs whose side flips, pool Σreversals ÷ Σpairs over the 6-report
+  window. CV **0.29**, range **0.083–0.252** over n=17 no-deploy blocks, versus 0.42–0.53 for every rate.
+  Current reading **0.1955** (35 of 179 pairs).
+- **Rule 482 — state the minimum detectable effect and the sample gate BEFORE shipping, and pool the gate
+  over the whole window so the change cannot select its own sample.** From the measured sd, item #1's damper
+  must cut the reversal rate below **~0.080 (a ≥58% fall)** to clear 2 sd; that threshold is written into the
+  register in advance and is not to be moved afterwards. The sample gate is **pooled pairs ≥ 150**,
+  deliberately not per-report — a per-report minimum would let a damper that thins fill counts filter out
+  exactly the reports it affected. Under-gate ⇒ **NO VERDICT**, never a pass. Guards: gross must not fall
+  (ADR-0132) and `firmTotal` must not deteriorate.
+- **Rule 483 — the honest reason a defect goes unshipped can be "I could not yet prove it", and that is
+  worth a cycle.** Item #1's mechanism has been confirmed three cycles running and was never in doubt; only
+  its measurement was. Shipping the damper in either of the last two cycles would have graded it on a metric
+  that swings 4–8× on market conditions alone — the exact way a loop talks itself into a null result.
+- **Mechanism re-confirmed, third window (Rule 479 applies — do not re-open the diagnosis):** `BAC SELL 156
+  at fc=-7.38` (18:39:12) → `BUY 1`×4 at fc≈**+0.0023…+0.10** (18:40:44–18:42:15) → `BUY 115 at fc=-0.288`
+  (18:42:45): short 156, 119 bought back inside four minutes at a forecast indistinguishable from zero. `KO
+  SELL 45 at fc=-5.04` (18:26:32) → nine buys totalling 117 as the forecast walks to **+12.89** (18:58:28).
+  Cost side: `totalFees` **$485.123025** of `firmTotal` **-$1,015.33773818** = **47.78%** (46 / 46 / 46.6% in
+  the three prior windows); ALPHA alone **$463.502062** of **-$933.09131744** = **49.67%**. Cumulative LIVE
+  turnover **$5,716,068.55** over **3,319** fills.
+- **Edge re-checked, still none:** LIVE hit rates span **0.447–0.583** across every source and horizon, with
+  the extremes on the smallest samples (`social` 3600s 0.583 on n=484; `momentum` 225s 0.447 on n=304) and
+  the three large-n series pinned at **0.490 / 0.501 / 0.498** on n = 14,672 / 14,395 / 13,471. A 1.00 bps
+  per-side fee covers none of it.
+- **Attribution — the window's +$0.76 and -$7,144.32 gross are credited to NOTHING.** No logic deployed this
+  cycle or last; `git log` shows only `docs/` and `chore(status)`. `uptimeSeconds` **8651** at a 19:00:01Z
+  stamp derives a JVM start of **16:35:50Z**, the same continuous process as the last three cycles.
+- **Change: none.** `3c43242ba` is at **5/6** in its ADR-0116 window with `.pending-baseline.json` present;
+  the contract freezes new code while a change is under measurement. Its exit leg verified a **fourth** time
+  (`fusion exit — target decayed to flat` on WMT and NVDA 18:35:39, BAC 18:27:02).
