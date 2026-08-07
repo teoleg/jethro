@@ -15,6 +15,80 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 18:30Z (**NO CHANGE — `3c43242ba` is at 4/6 cycles in its ADR-0116 window (`scripts/score-change.py score` prints "still accumulating evidence (4/6 cycles) — held, not scored this run") and `reports/.pending-baseline.json` is present, so the contract freezes new code.** The cycle's finding is a *correction to this register*: **last cycle's VERIFY-BY for item #1 is falsified — it is not drift-proof.** With **zero code deployed** between the two windows, the ALPHA churn ratio I specified as the proving metric moved from **4.4× to 1.17×**, and zero-net round-trip names went from **1 of 8 to 0 of 10**. Had I shipped the damper last cycle, I would have graded it ✅ on a move the market made for me. Item #1's mechanism stands; its VERIFY-BY is re-specified below onto the same 6-cycle horizon the scorer uses.)
+
+### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED (third consecutive window, same process)**
+
+`ops_jvm.uptimeSeconds` **6852** against a report stamp of **2026-08-07T18:30:02Z** puts JVM start at
+**16:35:50Z** — the same process as the last two cycles (5052s, then 3251s), so no restart has intervened
+and none of this is boot transient. `fusion exit — target decayed to flat` fired **three times** in this
+window: `BAC SELL 3` (18:27:02, `forecast=-0.0, sources=1`), `PG BUY 2` (18:09:48, `forecast=0.0`), and
+`KO SELL 13` (17:59:09) — the last of them **114 minutes** into the process. Closed; no further verification
+needed. ADR-0144's mechanism is confirmed out of the tree (no live references outside a test file name).
+
+### 🔴 Correction — the item #1 VERIFY-BY specified on 2026-08-07 18:00Z is WITHDRAWN
+
+Both halves of it drifted on market conditions alone, across two adjacent windows with **no deployment**
+between them (the running commit is unchanged; `git log` shows only `docs/` and `chore(status)` commits):
+
+| metric, computed by script from `recent_orders` + `marks` | 18:00Z window | 18:30Z window |
+|---|---|---|
+| ALPHA gross notional traded | $60,988 | $45,649 |
+| ALPHA \|net notional moved\| | $13,846 | $39,130 |
+| **churn ratio** (the proposed VERIFY-BY) | **4.4×** | **1.17×** |
+| zero-net round-trip names | 1 of 8 (KO) | **0 of 10** |
+| worst single name | KO ∞ (184 sh → 0 net) | KO 1.23× (242 sh → −196 net) |
+
+Same defect, same code, ratio down 73%. The reason is structural, not lucky: over a ~30-minute slice the
+denominator (net position moved) is whatever the forecast happened to leave on the book at the two arbitrary
+endpoints, so the ratio measures *where the sawtooth was sampled*, not how much the desk churns. This is the
+third time this register has picked a small-sample count or rate and watched it drift (Rules 461, 473) — the
+lesson has now cost three cycles and is promoted to a standing rule in `docs/loop-findings.md`.
+
+### Open items, re-ranked
+
+**#1 — (rank unchanged; mechanism unchanged and re-confirmed; VERIFY-BY replaced) The fusion target tracks a ~90-second mean-reverting forecast 1:1, so the desk round-trips its book and pays the fee each way.**
+The *cost* is the part that does not drift. Read this cycle: `/api/attribution` `totalFees` **$477.838078**
+against `firmTotal` **-$1,025.93604547** — **46.6%** of the entire cumulative loss, against 46% and 46% in
+the two prior windows. Cumulative LIVE turnover **$5,623,205** over **3,267** fills. The mechanism is intact
+in this window's `forecast=` series: `KO SELL 82 at fc=-8.78` (18:21:58) → `KO SELL 45 at fc=-5.04`
+(18:26:32) → `KO BUY 19 at fc=-0.165` (18:27:33) → `KO BUY 4 at fc=-0.389` (18:28:03) — the forecast walks
+from -8.78 to -0.165 in **five and a half minutes** and the target follows it one-for-one. `signal_observations`
+LIVE hit rates remain **0.490 / 0.499 / 0.500** at the 225s horizon on n = 14,518 / 13,335 / 14,252.
+**Leading candidate (unchanged, still a damper — not a size cut; ADR-0132 forbids buying quiet by holding
+nothing):** hysteresis on the *target* scaled to the target's own rolling σ, and/or a minimum holding period,
+so a target must move by more than its own noise before it routes.
+**VERIFY-BY (replaces the withdrawn ratio — measured on the SAME 6-cycle horizon as the scorer's verdict,
+never on one window):** over the change's full ADR-0116 evaluation window, **Δ cumulative LIVE turnover
+(`turnover_cost_by_name` total, end − start) ÷ mean `/api/risk` `.total.grossExposure` across those cycles**
+must fall against the same quantity computed over the 6 cycles preceding the change. Both endpoints are
+cumulative and monotone, so neither can be moved by where the window is sampled. Confirming secondary, also
+cumulative: `totalFees ÷ |firmTotal|` falling from **46.6%**. Guard unchanged — `.total.grossExposure` must
+not fall materially and `firmTotal` must not deteriorate, so "trade less by holding nothing" cannot pass.
+
+**#2 — (rank unchanged; its metric is now ALSO flagged drift-suspect) Every cancelled order is an entry; the cut leg always executes and the build leg does not.**
+Re-measured, nothing edited: **11** `fusion entry` CANCELLED against **11** FILLED, while **22/22** `fusion
+reduce`, **3/3** `fusion exit` and **13/13** `auto-hedge` rows FILLED — still **zero** cancels outside the
+entry leg, now the fourth window running. Every CANCELLED row carries `fusion re-plan — passive order
+superseded by a fresh target (ADR-0084)`. The refined metric reads **6 of 11** cancels with no successor
+entry (was 5 of 17, before that 6 of 13) — **but a script check shows 4 of those 6 sit in the last 10 minutes
+of the window and are simply right-censored**, so the metric is biased by the window edge and must not be
+used as a VERIFY-BY either. **Coupling to #1 is unchanged and is the reason this stays at #2 rather than
+being worked separately:** the superseding re-plan *is* the churn engine, so a target-hysteresis fix for #1
+should shrink this leg as a side effect and can be graded on it.
+
+**#3 — (new, informational; NOT actionable as a change) No signal source has measurable edge, so cost is the only lever with a certain sign.**
+Checked this cycle per the standing priority, from `/api/signals/telemetry` and `signal_observations`.
+At the 3600s horizon: `xsreversion` avgReturnBps **-3.016** (n=810, std 64.7), `trend` **+0.668** (n=837,
+std 52.5), `reversion` **+0.105** (n=793, std 50.2), `social` **+1.953** (n=304, std 96.9), `momentum`
+**+1.605** (n=78, std 51.8). Every LIVE hit rate across every horizon sits between **0.467 and 0.512**.
+Nothing clears its own dispersion, and the two nominally largest means sit on the two smallest samples.
+Against an equity fee of **1.00 bps** per side (`turnover_cost_by_name`), no source's mean return covers a
+round trip. **This is the honest answer, restated, not a new defect:** re-weighting sources without edge
+cannot create edge, so the one change stays on item #1, where the sign of the saving is deterministic.
+
+---
+
 ## Verification block — 2026-08-07 18:00Z (**NO CHANGE — `3c43242ba` is at 3/6 cycles in its ADR-0116 window (`scripts/score-change.py score` prints "still accumulating evidence (3/6 cycles) — held, not scored this run") and `reports/.pending-baseline.json` is present, so the contract freezes new code.** But the cycle bought the thing item #1 was missing: **the mechanism**. Item #1 is no longer "the desk churns" — it is **measured, per-name, with a drift-proof ratio**: in this window's `recent_orders` the ALPHA book traded **$60,988** of gross notional to move its net position by **$13,846** — a **4.4× churn ratio** — and on **KO** it traded **184 shares for a net position change of exactly ZERO** ($16,015 of turnover, $0 of position). The `forecast=` field on each order names the cause: AAPL entered short 34 at **fc=-9.97** (17:37:51) and was bought back 16 at **fc=-0.119** (17:39:23) and 8 more at **fc=-0.00018** (17:41:55) — the forecast collapsed to zero in **92 seconds** and the target followed it 1:1. That is a *specification* for next cycle's change, not a hypothesis.)
 
 ### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED — no qualification remains**
