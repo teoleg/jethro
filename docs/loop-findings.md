@@ -5715,3 +5715,33 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
   entry leg (9 fills, 13 cancelled) and grinds it back down, netting roughly flat.
 - **Change: none.** `3c43242ba` is ungraded — the ledger's newest row is still `403a95ffd` and
   `.pending-baseline.json` is present — so the contract freezes new code while it measures.
+
+## 2026-08-07 18:00Z — the churn has a mechanism: a ninety-second forecast the target tracks 1:1
+
+- **Rule 474 — measure turnover as gross-traded ÷ net-position-moved, per name, over one window; the ratio
+  names the defect where a fill count cannot.** This window's 32 ALPHA fills traded **$60,988** of notional
+  to move the book by **$13,846** — a **4.4× churn ratio** — and **KO traded 184 shares for a net position
+  change of exactly ZERO** ($16,015 of turnover, $0 of position; NVDA 7.8×, AAPL 5.4×). Cumulatively that is
+  **3,235 LIVE fills** and **$5,586,655** of turnover carrying a **$13,141.18** book, with fees of **$474.61**
+  against a firm total of **-$1,032.14** — **46%** of the loss. **Rule: a raw fill count says "busy"; the
+  ratio says "wasted", and only the ratio is drift-proof enough to be a VERIFY-BY (Rules 461/473).**
+- **Rule 475 — the `forecast=` annotation on each order is a time series; read consecutive orders on ONE name
+  and the decay rate falls out.** AAPL entered short 34 at **fc=-9.97** (17:37:51), was bought back 16 at
+  **fc=-0.119** (17:39:23) and 8 more at **fc=-0.00018** (17:41:55) — the forecast collapsed to zero in
+  **92 seconds** and the target followed it one-for-one. KO ran **BUY 92 at +5.52 → SELL 48 at +2.19 → SELL 13
+  at -3.69 → SELL 18 at -0.62 → SELL 13 at -0.0** in 18 minutes. `fusion_targets` shows the source: KO's
+  `combinedForecast` **-3.06** is built from a `reversion` contribution of **-19.90** against `trend` **+1.26**
+  — the reversion leg swings an order of magnitude wider than the combined signal and nothing damps it between
+  forecast and order. **Rule: when hit rates are 0.501/0.498/0.489, a target that tracks a 90-second
+  mean-reverting forecast 1:1 is a fee pump, not a strategy. Damp the target, never the size — ADR-0132
+  forbids buying quiet by holding nothing, so any fix must be guarded by gross exposure not falling.**
+- **Rule 476 — close a qualification on the longest warm window available, and prove there was no restart.**
+  `ops_jvm.uptimeSeconds` **5052** at an 18:00:02Z stamp puts JVM start at **16:35:50Z** — the *same* process
+  as last cycle (3251s then), not a fresh one — and `fusion exit — target decayed to flat` fired at **17:59:09**
+  (`KO SELL 13`), **83 minutes** in. **Rule: uptime plus a same-process check turns "it fired twice" into
+  "it fires"; quote the arithmetic, not the impression.**
+- **Attribution — the window's -$8.17 and +$1,713.05 gross are credited to NOTHING.** No logic was deployed
+  this cycle or last; the running commit only removed code. The PnL is market on positions I did not choose;
+  the gross rise is the fusion book still re-deploying in an 83-minute-warm process (Rules 433/459).
+- **Change: none.** `3c43242ba` is at **3/6** in its ADR-0116 window with `.pending-baseline.json` present;
+  the contract freezes new code while a change is under measurement.

@@ -1,86 +1,64 @@
-# Last analysis — 2026-08-07 17:30Z
+# Last analysis — 2026-08-07 18:00Z
 
-**No change (the ADR-0116 window on `3c43242ba` is still open) — but the cycle bought a real diagnosis:
-the desk has traded ~$5.49M of turnover to carry an $11.4k book, and the fees on it are 46% of the
-entire cumulative loss, while not one signal source measures better than a coin flip.**
+**No change (`3c43242ba` is at 3/6 cycles in its evaluation window) — but this cycle found the mechanism
+behind the cost problem: the desk traded $60,988 of notional to move its position by $13,846, and on KO it
+traded 184 shares for a net position change of exactly zero, because the fusion target tracks a forecast
+that decays from -9.97 to -0.0002 in ninety seconds.**
 
 ## Situation (live, read from this run's report — never authored)
 
-1. **Money.** Total PnL **$-1,019.60**. Down **$15.88** on the window and **$110.82** across the last
-   three runs. Bleeding slowly, UNDERWATER, and off the +1%/3-iteration target (`pnl_growth_pct`
-   **-9.25%**, `on_track=False`, `stale=True`).
-2. **Risk.** Gross **$11,433.64** = **0.8%** of the firm cap $1,500,000, headroom **$1,488,566**; net
-   **$-614.90** = **0.1%** of the $1,000,000 net cap. Gross fell **$5,696.43** on the window. No
-   `NEAR FIRM CAP` flag, no breaker. The book is barely deployed — under ADR-0132 that undeployed
-   capital is the failure, not the safety.
-3. **Cause.** Last cycle's change was the hand-completed revert of ADR-0144 (`3c43242ba`). It is still
-   **ungraded** — the ledger's newest row is `403a95ffd` at 16:30:09Z and `reports/.pending-baseline.json`
-   is present. The contract freezes new code while a change is under measurement, so I made none.
-4. **Danger.** No. Bleeding, but at 0.8% of the cap with $1.49M of headroom. The danger state
-   (bleeding *at* the cap) does not apply; the opposite problem does.
+1. **Money.** Total PnL **$-1,032.14**. Down **$8.17** on the window, **$86.77** across the last three runs.
+   Bleeding slowly, UNDERWATER, off the +1%/3-iteration target (`pnl_growth_pct` **-12.68%**,
+   `on_track=False`, `stale=True`).
+2. **Risk.** Gross **$13,141.18** = **0.9%** of the $1,500,000 firm cap, headroom **$1,486,859**; net
+   **$-4,224.78** = **0.4%** of the $1,000,000 net cap. Gross **rose $1,713.05** on the window. No
+   `NEAR FIRM CAP` flag, no breaker. Under ADR-0132 the barely-deployed book is the failure here, and gross
+   rising with this much headroom is the right direction, not a danger.
+3. **Cause.** No change was deployed this cycle or last. `3c43242ba` (the hand-completed revert of ADR-0144)
+   is still under measurement — `scripts/score-change.py score` prints *"still accumulating evidence (3/6
+   cycles)"* and `reports/.pending-baseline.json` is present — so the contract freezes new code.
+4. **Danger.** None. Bleeding, yes; near the cap or the breaker, no. So the live danger state does not apply
+   and de-risking would be exactly the wrong move.
 
-## Step 0 — `3c43242ba`: ✅ VERIFIED, and this cycle closes last cycle's qualification
+## Step 0 — verification: `3c43242ba` ✅ VERIFIED, qualification closed
 
-Last cycle I passed this on a categorical count but flagged honestly (Rule 470) that all six
-`fusion exit — target decayed to flat` rows fell inside the first six minutes of the process, so the path
-was proven *reachable* but not *operating*. This window settles it. The JVM started **16:35:57Z**
-(uptime **3251s**), and exit rows land at **17:22:09** (`WMT SELL 4`) and **17:26:12** (`KO BUY 1`) —
-roughly **46 and 50 minutes** into a warmed process, not in the boot transient. The restored leg works in
-steady state. Qualification closed; no follow-on defect.
+`ops_jvm.uptimeSeconds` is **5052** at a report stamp of **18:00:02Z**, so the JVM has run since **16:35:50Z**
+— the *same* process as last cycle (3251s then), no restart in between. `fusion exit — target decayed to flat`
+fired at **17:59:09** (`KO SELL 13`), **83 minutes** into that process. Last cycle's caveat — that every exit
+row sat inside the boot transient — is now closed on a long warm window. The exit leg fires, repeatedly.
 
-## The finding that should set the agenda: the book is paying to be a coin flip
+## The diagnosis this window bought (must-fix #1, now specified)
 
-Two facts, each read straight off the report, that only matter together.
+Fees are **$474.61** of the **-$1,032.14** firm total — **46%** of the entire cumulative loss — on **3,235
+LIVE fills** and **$5,586,655** of turnover carrying a **$13,141.18** book. That was already known. What was
+missing was *why*, and `recent_orders` answers it in the `forecast=` field:
 
-**No source has edge.** `signals_telemetry` mean returns are a rounding error against their own
-dispersion: trend `avgReturnBps` **+0.583** on `stdReturnBps` **52.51** (n=836), reversion **+0.254** on
-**50.30** (n=792), social **+2.838** on **96.34** (n=307), momentum **-0.717** on **51.96** (n=77). The
-big `signal_observations` samples say the same in hit-rate terms — trend **0.501** on n=13,966,
-reversion **0.498** on n=13,053, xsreversion **0.489** on n=14,228. Coin flips, at n in the tens of
-thousands.
+- **AAPL**: entered short 34 at `fc=-9.97` (17:37:51); bought back 16 at `fc=-0.119` (17:39:23) and 8 more at
+  `fc=-0.00018` (17:41:55). The forecast collapsed to zero in **92 seconds** and the target followed it 1:1.
+- **KO**: `BUY 92 at fc=+5.52` (17:41:55) → `SELL 48 at +2.19` → `SELL 13 at -3.69` → `SELL 18 at -0.62` →
+  `SELL 13 at -0.0`. A complete round trip in 18 minutes, **184 shares traded for zero net position**.
+- Across the 32 ALPHA fills in the window: **$60,988 gross traded / $13,846 net moved = 4.4× churn**
+  (NVDA 7.8×, AAPL 5.4×, KO infinite).
 
-**And it trades enormously.** `turnover_cost_by_name` records **3,191 LIVE fills** and roughly
-**$5.49M of turnover** — cross-checked, the per-name fills sum exactly to the 3,191 in `fills_by_day`, and
-the per-name fees sum to the **$467.71** `/api/attribution` reports as `totalFees`. That is **~480×
-churn** against a gross exposure of **$11,433.64**, at 1.00 bps a side on equities.
+`fusion_targets` shows the volatility at source: KO's `combinedForecast` of **-3.06** is built from a
+`reversion` contribution of **-19.90** against `trend` **+1.26**. The reversion source swings an order of
+magnitude wider than the combined signal and nothing damps it between forecast and order. Set against
+`signal_observations` hit rates of **0.501 / 0.498 / 0.489** on samples of 14,105 / 13,196 / 14,372, the desk
+is paying roughly 2 bps a round trip to re-express a coin flip every ninety seconds. **That is a better
+explanation of the INCONCLUSIVE wall than any combiner hypothesis** — a random walk minus fees drifts down at
+the fee rate, and re-weighting sources that don't predict cannot outrun a deterministic cost.
 
-Put together: **fees are $467.71 of a $1,019.60 cumulative loss — 46% of it.** Gross of fees the book is
-roughly half as underwater. When the signal is a coin flip, PnL is a random walk minus costs, and the
-drift *is* the fee rate. That also explains the wall of ⚠️ INCONCLUSIVE verdicts better than any
-combiner hypothesis has: no re-weighting of sources that don't predict can outrun a deterministic cost
-line, so every such change measures as noise — correctly.
+## Change vs. market — attributed honestly
 
-This re-ranks the register. Cost is the only drain here with a **measured dollar figure** and a certain
-fix; the entry-cancel ratchet is real but its cost is inferred, and a new signal is speculative. Cost
-takes **#1**.
+**The window's -$8.17 and +$1,713.05 gross are credited to nothing I did.** No logic was deployed this cycle
+or last; the running commit only removed code. The PnL move is market on positions I did not choose, and the
+gross rise is the fusion book continuing to re-deploy in a process that has now been warm for 83 minutes —
+the same clock effect Rules 433/459 already record. I claim no credit and accept no blame for either.
 
-## Item #1 re-measured (nothing edited — a free observation, and it cuts against me)
+## Next cycle
 
-The ratchet holds in kind: **13 `fusion entry` orders CANCELLED against 9 FILLED**, while **32 of 32**
-`fusion reduce` and **3 of 3** `auto-hedge EQUITY` rows FILLED — still zero cancels outside the entry leg.
-But my stated VERIFY-BY was survivable cancels (same side, no-smaller size) **falling from 4 toward 0**,
-and with no code changed they read **5** this window. It moved the wrong way on its own. That is Rule 461
-landing on me a second time: a count this small drifts on sample size, and I should not have set a
-threshold on it. Six of the 13 cancels had **no successor entry at all** — the order was pulled and never
-replaced — which is the more damning category and the one I will measure going forward.
-
-## Attribution — change vs market, honestly
-
-The window's **-$15.88** and **-$5,696.43** of gross are credited to **nothing of mine**: I deployed no
-logic, and the running commit only *removed* code. The PnL is market on positions I did not choose. The
-gross decline is the mirror image of last window's **+$5,106.59** rise, and the two together show the
-sawtooth plainly — restart, σ warms and the fusion book re-deploys, then the reduce leg (32 fills)
-outruns the entry leg (9 fills, 13 cancelled) and grinds it back down. Net across the pair the book is
-roughly where it started. I claim neither leg of that; it is the environment operating, observed across
-cycles in which I changed nothing.
-
-## What I do next cycle
-
-`3c43242ba` should reach 6/6 and, per Rule 465, I want to see **which clause** decides it — its baseline
-opened at `gross_exposure: 13194.49`, non-zero, so for the first time the risk-adjusted return test is
-not pre-empted by the exposure clause (item #3's VERIFY-BY, one of two observations in hand). Then the
-one change targets **#1, the cost drain**. The leading candidate is the fusion re-plan cadence itself:
-entries POST passively at the mark and are swept by the next 30s re-plan while reduces cross, so
-lengthening the cadence (or letting a passive entry rest across re-plans when its side and size still
-agree) would cut turnover *and* the cancel ratchet with one coherent change. I am not committing to that
-shape until the pending verdict is in.
+Once `3c43242ba` is scored, the one change targets must-fix #1 with a **damper, not a size cut**: hysteresis
+on the target proportional to the target's own rolling σ (and/or a minimum holding period), so a target must
+move by more than its own noise before it routes. ADR-0132 forbids buying quiet by holding nothing, so the
+VERIFY-BY is the **churn ratio** (gross traded ÷ net moved, from **4.4×**) guarded by gross exposure not
+falling below **$13,141.18** and `firmTotal` not deteriorating.

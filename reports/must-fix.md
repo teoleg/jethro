@@ -15,6 +15,60 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-07 18:00Z (**NO CHANGE — `3c43242ba` is at 3/6 cycles in its ADR-0116 window (`scripts/score-change.py score` prints "still accumulating evidence (3/6 cycles) — held, not scored this run") and `reports/.pending-baseline.json` is present, so the contract freezes new code.** But the cycle bought the thing item #1 was missing: **the mechanism**. Item #1 is no longer "the desk churns" — it is **measured, per-name, with a drift-proof ratio**: in this window's `recent_orders` the ALPHA book traded **$60,988** of gross notional to move its net position by **$13,846** — a **4.4× churn ratio** — and on **KO** it traded **184 shares for a net position change of exactly ZERO** ($16,015 of turnover, $0 of position). The `forecast=` field on each order names the cause: AAPL entered short 34 at **fc=-9.97** (17:37:51) and was bought back 16 at **fc=-0.119** (17:39:23) and 8 more at **fc=-0.00018** (17:41:55) — the forecast collapsed to zero in **92 seconds** and the target followed it 1:1. That is a *specification* for next cycle's change, not a hypothesis.)
+
+### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED — no qualification remains**
+
+Confirmed a second time on a much longer warm window, and this time with no restart in between: `ops_jvm.uptimeSeconds` is **5052** against a report stamp of **2026-08-07T18:00:02Z**, so the JVM has been up since **16:35:50Z** — the *same* process as last cycle (3251s then), not a fresh one. `fusion exit — target decayed to flat [forecast=-0.0, sources=1]` fired at **17:59:09** (`KO SELL 13`), **83 minutes** into that process. The exit leg is live, warm, and repeating. This item is closed and needs no further verification.
+
+### Open items, re-ranked
+
+**#1 — (unchanged rank, now with its mechanism) The fusion target tracks a ~90-second mean-reverting forecast 1:1, so the desk round-trips its book several times an hour and pays the fee each way.**
+Cumulative cost, read from `/api/attribution`: fees **$474.61** against a firm total of **-$1,032.14** — **46%** of the entire loss — on **3,235 LIVE fills** and **$5,586,655** of turnover carrying a gross book of **$13,141.18** (≈**425×** churn). The *mechanism*, new this cycle from `recent_orders` (32 ALPHA fills, ~22 minutes):
+
+| instrument | gross qty traded | net qty change | gross $ | net $ | churn ratio |
+|---|---|---|---|---|---|
+| KO | 184 | **0** | 16,015 | **0** | **∞ — pure cost** |
+| NVDA | 78 | -10 | 17,325 | 2,221 | 7.8× |
+| AAPL | 59 | -11 | 18,466 | 3,443 | 5.4× |
+| MSFT | 8 | -6 | 4,003 | 3,002 | 1.3× |
+| **ALPHA total** | | | **60,988** | **13,846** | **4.4×** |
+
+The `forecast=` annotations show why: KO was entered **BUY 92 at fc=+5.52** (17:41:55) and then sold back
+**48 at fc=+2.19**, **13 at fc=-3.69**, **18 at fc=-0.62** and **13 at fc=-0.0** — a full round trip inside
+18 minutes. `fusion_targets` shows the same volatility at source: KO's `combinedForecast` is **-3.06** built
+from a `reversion` contribution of **-19.90** against `trend` **+1.26**. The reversion source swings roughly
+an order of magnitude wider than the combined signal, and nothing damps it between the forecast and the
+order. Against `signal_observations` hit rates of **0.501 / 0.498 / 0.489** (n = 14,105 / 13,196 / 14,372),
+this is paying 2 bps a round trip to re-express a coin flip every ninety seconds.
+**Leading candidate for next cycle** (a damper, *not* a size cut — ADR-0132 forbids buying quiet by holding
+nothing): hysteresis on the *target* proportional to the target's own rolling σ, and/or a minimum holding
+period, so a target must move by more than its own noise before it routes.
+**VERIFY-BY (drift-proof ratio, not a count):** the **ALPHA churn ratio** — gross notional traded ÷ |net
+notional position change| over the `recent_orders` window — falling from **4.4×**, and **KO-style zero-net
+round trips** (an instrument with material gross traded and net change 0) falling from **1 of 8** names.
+Guarded by `/api/risk` `.total.grossExposure` **not** falling materially below **$13,141.18** and
+`/api/attribution` `firmTotal` not deteriorating, so "trade less by holding nothing" cannot pass.
+
+**#2 — (was #2) Every cancelled order is an entry; the cut leg always executes and the build leg does not.**
+Re-measured, nothing edited: **17** `fusion entry` CANCELLED against **11** FILLED, while **20/20** `fusion
+reduce`, **1/1** `fusion exit` and **11/11** `auto-hedge` rows FILLED — still **zero** cancels outside the
+entry leg, now over a larger sample than last cycle's 13/9. Every CANCELLED row carries `fusion re-plan —
+passive order superseded by a fresh target (ADR-0084)`. On the re-specified drift-proof metric: cancels with
+**no successor entry at all** read **5 of 17** (AMZN BUY 11, KO BUY 13, NVDA SELL 7, NEE SELL 46, PFE SELL 93),
+down from **6 of 13** — directionally right but on a sample too small to claim. **Note the coupling to #1:**
+the superseding re-plan *is* the churn engine, so a target-hysteresis fix for #1 should reduce this leg too.
+Do not spend a separate change on it until #1's fix has been measured.
+**VERIFY-BY:** cancels with no successor entry falling from **5 of 17**, guarded by the reduce / exit / hedge
+legs holding at **100%** filled so an equalising regression cannot pass.
+
+**#3 — (was #3) The scoring baseline can be sampled against a flat book, condemning capital deployment via the exposure clause.**
+Unchanged and awaiting its own evidence; nothing this cycle bears on it. The mechanism is recorded three
+times (`851082687` gross `0 → 956` BAD, `fb9273505` `0 → 43,624` BAD, `403a95ffd` `0 → 15,835` BAD, the last
+with `t = -0.591` against a `tHurdle` of `1.5` — the return test silent, the exposure clause deciding alone),
+but "structural" is falsified: the open baseline for `3c43242ba` reads `gross_exposure: 13194.49365500`. It is
+a timing race against restart, not a scorer defect. **Caution carried forward (Rule 467):** ADR-0143 attempted
+
 ## Verification block — 2026-08-07 17:30Z (**NO CHANGE — `3c43242ba` is still ungraded: the ledger's newest row remains `403a95ffd` at 16:30:09Z and `reports/.pending-baseline.json` is present, so the contract freezes new code.** Three results, all read rather than argued. (1) Last cycle's ✅ on the ADR-0144 revert is now **unqualified** — the exit leg fires ~46 and ~50 minutes into a warmed process, not just in the boot transient, closing the Rule 470 caveat. (2) A new **#1**: fees are **$467.71** of the **-$1,019.60** cumulative firm total — **46%** — because the desk churns roughly **$5.49M** of turnover across **3,191 LIVE fills** to carry an **$11,433.64** book while not one signal source beats a coin flip. Cost is the only drain here with a measured dollar figure and a certain fix, so it outranks both the inferred-cost ratchet and speculative signal work. (3) The entry-cancel ratchet is unchanged in kind but **my own VERIFY-BY drifted the wrong way with nothing edited** — survivable cancels read **5** against the "falling from 4 toward 0" I set — so its metric is re-specified to a category that cannot drift.)
 
 ### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED, qualification now closed**
