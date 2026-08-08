@@ -35,20 +35,37 @@ public final class MuniIngestController {
     private final HttpFetcher http;
     private final OfficialStatementExtractor osExtractor;
     private final io.muniworld.ingest.DirectoryIngestService dirIngest;
+    private final boolean ocrEnabled;
 
     public MuniIngestController(IngestService ingest, HttpFetcher http,
                                OfficialStatementExtractor osExtractor,
-                               io.muniworld.ingest.DirectoryIngestService dirIngest) {
+                               io.muniworld.ingest.DirectoryIngestService dirIngest,
+                               @org.springframework.beans.factory.annotation.Value("${muni.ocr.enabled:false}")
+                               boolean ocrEnabled) {
         this.ingest = ingest;
         this.http = http;
         this.osExtractor = osExtractor;
         this.dirIngest = dirIngest;
+        this.ocrEnabled = ocrEnabled;
     }
 
     /** Load every PDF sitting in the OS inbox folder now (also runs automatically on a schedule). */
     @PostMapping("/api/muni/ingest/scan")
     public List<OfficialStatementExtractor.Summary> scanInbox() {
         return dirIngest.scanNow();
+    }
+
+    /**
+     * Diagnose an OS PDF that loads 0 bonds — reports the EVIDENCE (pages, extracted text size, whether the
+     * PDF is image-only, the CUSIP tokens found and the verbatim lines they sit on) plus a plain-language
+     * diagnosis. Read-only: it indexes nothing. Use it when a load reports "0 saved".
+     */
+    @PostMapping("/api/muni/debug/os-probe")
+    public Map<String, Object> probeOsPdf(@RequestParam("file") MultipartFile file) throws IOException {
+        byte[] body = file.getBytes();
+        int pages = io.muniworld.pdf.PdfText.pageCount(body);
+        return io.muniworld.extract.OfficialStatementProbe.probe(
+                io.muniworld.pdf.PdfText.extract(body), pages, ocrEnabled);
     }
 
     /** Request body for direct row ingest: the source rows plus the map naming their columns. */

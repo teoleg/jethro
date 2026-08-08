@@ -88,8 +88,24 @@ public final class OfficialStatementExtractor {
 
             IngestService.Summary ing = ingest.indexRows(rows, OfficialStatementParser.FIELD_MAP);
             int quarantined = res.quarantined() + ing.skipped();
+            // 8 placeholders, 8 args — `pages` used to be missing, which shifted every value one slot left
+            // and printed a literal "(conf {})". A log that misreports the extraction is worse than no log:
+            // a failed parse (0 rows, 1 quarantined) read as "1 indexed" (see 2026-08-08 upload).
             log.info("OS extract {} [{}]: {} pages, {} rows ({} assisted), {} indexed, {} quarantined (conf {})",
-                    osPdf.sourceId(), method, rows.size(), assistedCount, ing.indexed(), quarantined, res.confidence());
+                    osPdf.sourceId(), method, pages, rows.size(), assistedCount, ing.indexed(), quarantined,
+                    res.confidence());
+            if (ing.indexed() == 0) {
+                // Nothing landed. Say why in the same breath, so a silent no-op never looks like a load:
+                // an image-only OS needs OCR (muni.ocr.enabled), a text OS that yields no rows is a parser
+                // gap. /api/muni/debug/os-probe reports the evidence for either.
+                log.warn("OS extract {}: NO bonds indexed — {} chars of text over {} pages{}, {} row(s) "
+                                + "quarantined. Probe it with POST /api/muni/debug/os-probe (file=@the.pdf) to "
+                                + "see whether it is a scanned PDF (needs muni.ocr.enabled=true + tesseract) or "
+                                + "a schedule layout the parser does not read yet.",
+                        osPdf.sourceId(), text.length(), pages,
+                        OcrText.isSparse(text, pages) ? " (under 100 chars/page — likely image-only)" : "",
+                        quarantined);
+            }
             return new Summary(osPdf.sourceId(), osPdf.sha256(), pages, method, rows.size(),
                     assistedCount, ing.indexed(), quarantined, res.confidence(), true, null);
         } catch (Exception e) {
