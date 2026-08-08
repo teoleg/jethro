@@ -1,4 +1,4 @@
-# ADR-0135: The loop changes one thing and holds until it is measured
+# ADR-0146: The loop changes one thing and holds until it is measured
 
 - **Status:** Proposed
 - **Date:** 2026-08-03
@@ -42,8 +42,15 @@ We will make the one-change-at-a-time discipline **mechanical, not behavioural**
   cadence; the week's 6–7-cycle windows produced zero decisive verdicts). Still `PLACEHOLDER — Oleg
   to tune`, env-overridable.
 - **Revert cannot fail.** `git revert` stays the first attempt; on conflict the scorer falls back to a
-  **path restore**: check out the change's files (excluding `reports/`) at `sha^`, commit. A forced
-  restore has no conflict path, so a BAD change is always out of the code.
+  **path restore**: check out the change's files at `sha^` and commit, excluding ADR-0143's keep-paths
+  (`reports/`, `docs/adr/`, `docs/loop-findings.md`, `docs/loop-playbook.md`) so the rejected decision
+  stays on the record while its code comes out. A forced restore has no conflict path, so a BAD change
+  is always out of the code; a record-only commit (no code paths) needs no revert at all (ADR-0142).
+  ADR-0143 diagnosed the conflict mechanism precisely (the loop rewrites its own memory files every
+  cycle on top of the commit being reverted — 9 of 9 replays conflicted on those files only); its
+  implementation (`27564bb`) was then **graded ❌ BAD by the scorer it fixed and auto-reverted** — the
+  cadence disease eating its own cure, and the reason this ADR re-lands the mechanism together with
+  the cadence fix instead of separately.
 - **Fee-churn verdict.** The window carries cumulative fees; if the mean per-cycle return is ≤ 0 and
   the change burned more than `FEE_DEADBAND` (default **$25**/window, `PLACEHOLDER — Oleg to tune`,
   env `JETHRO_SCORE_FEE_DEADBAND_USD`) it scores **BAD** — paid to churn, earned nothing.
@@ -76,4 +83,11 @@ We will make the one-change-at-a-time discipline **mechanical, not behavioural**
 ## Related
 
 ADR-0063 (loop), ADR-0110/0123 (deploy verification), ADR-0116 (evidence window — amended here),
-ADR-0132 (deploy-capital objective the fee rule serves).
+ADR-0132 (deploy-capital objective the fee rule serves), ADR-0143 (revert scoped to code — its
+mechanism is adopted here after its own implementation was BAD-graded and auto-reverted).
+
+**Deferred (register):** the gap that killed `27564bb` remains — a loop-plumbing change (scorer/ops
+code that cannot alter what the desk trades) is still *graded on the book*, so market noise can BAD it
+and pull it. The exclusivity + fee rules shrink the odds; the real fix is a plumbing classification
+that scores such commits as record-only (no book verdict). Trigger: the next time a scorer/ops-only
+commit draws a BAD verdict.

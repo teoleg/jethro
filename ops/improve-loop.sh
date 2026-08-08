@@ -255,7 +255,7 @@ HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
 #     trigger the rebuild. All numbers come from /api/attribution + /api/risk, none from Claude.
 python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-zero (see above)" >> "$LOG"
 
-# 2b-HOLD (ADR-0135): ONE change in flight, mechanically. If a pending baseline STILL exists after the
+# 2b-HOLD (ADR-0146): ONE change in flight, mechanically. If a pending baseline STILL exists after the
 # scorer ran, its change is under evaluation (window not yet full) — so this cycle makes NO model call
 # and NO new change: the prompt-level HOLD alone failed in production (35 changes in 4 trading days,
 # week of 07-28, every window contaminated by the next change and 12 of 18 BAD reverts conflicting on
@@ -264,7 +264,7 @@ python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-
 # live book. The scorer just above still runs every cycle, so the moment the window fills the change is
 # scored, pending clears, and the NEXT cycle analyses/changes again.
 if [ -f reports/.pending-baseline.json ]; then
-  echo "HOLD (ADR-0135) — pending change under evaluation; skipping analysis/change this cycle" >> "$LOG"
+  echo "HOLD (ADR-0146) — pending change under evaluation; skipping analysis/change this cycle" >> "$LOG"
   # --scored 0: the pending SURVIVED the scorer (window not full), so nothing was scored this cycle —
   # a stale snapshot verdict must not surface as if fresh.
   python3 scripts/score-change.py status --scored 0 --holding 1 >> "$LOG" 2>&1 \

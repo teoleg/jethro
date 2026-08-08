@@ -72,14 +72,14 @@ EXP_DEADBAND_FRAC = Decimal(os.environ.get("JETHRO_SCORE_EXPOSURE_DEADBAND_FRAC"
 # revert), so per CLAUDE.md they carry provenance — but they are METHODOLOGY knobs, not market/money
 # numbers, and are PLACEHOLDER — Oleg to tune:
 #   MIN_CYCLES  how many OPEN-MARKET heartbeats must accrue with the change live before it is scored at
-#               all (a change is left running, not re-tried, until then). ADR-0135: raised 6 → 12 —
+#               all (a change is left running, not re-tried, until then). ADR-0146: raised 6 → 12 —
 #               ~one full US session at the 30-min cadence — after the 07-28 week's 6–7-cycle windows
 #               produced 0 GOOD in 52 scored cycles. Closed-market heartbeats no longer count (frozen
 #               tape is not evidence).
 #   T_HURDLE    |t| of the mean per-cycle risk-adjusted return the window must clear to call GOOD/BAD;
 #               below it the verdict is INCONCLUSIVE (kept, not reverted). 1.5 is deliberately lenient.
 #   GROSS_FLOOR normalisation floor so a near-zero book can't turn a $1 mark wiggle into a huge "edge".
-#   FEE_DEADBAND (ADR-0135) fee burn over the window above which a change with mean return <= 0 scores
+#   FEE_DEADBAND (ADR-0146) fee burn over the window above which a change with mean return <= 0 scores
 #               BAD — paid to churn, earned nothing. $25/window is a round starting point.
 MIN_CYCLES = int(os.environ.get("JETHRO_SCORE_MIN_CYCLES", "12"))
 T_HURDLE = Decimal(os.environ.get("JETHRO_SCORE_T_HURDLE", "1.5"))
@@ -193,7 +193,7 @@ def classify(before, after):
 # ----------------------------- evidence-based verdict (ADR-0116) -----------------------------
 
 def evaluate_window(points, t_hurdle, exp_frac, floor, fee_deadband=None):
-    """Score a change over its evaluation WINDOW rather than a single delta (ADR-0116, ADR-0135).
+    """Score a change over its evaluation WINDOW rather than a single delta (ADR-0116, ADR-0146).
 
     `points` — the change's trajectory as chronological (pnl, gross[, fees]) tuples (Decimals), oldest
     first, starting at the baseline and ending at the current vector. The verdict rests on the SIGN and
@@ -204,7 +204,7 @@ def evaluate_window(points, t_hurdle, exp_frac, floor, fee_deadband=None):
     near-zero book amplifying a $1 wiggle into a huge apparent edge. t = mean·√n / stdev(r).
 
       BAD (revert)   t ≤ −hurdle (significantly losing risk-adjusted), OR exposure grew with a
-                     non-positive mean return (bought risk, earned nothing), OR — ADR-0135 — the window
+                     non-positive mean return (bought risk, earned nothing), OR — ADR-0146 — the window
                      burned more than `fee_deadband` in fees with a non-positive mean return (paid to
                      churn, earned nothing; PnL is net of fees, so flat PnL + high burn = harm).
       GOOD           t ≥ +hurdle (significantly positive) AND exposure did not grow.
@@ -228,7 +228,7 @@ def evaluate_window(points, t_hurdle, exp_frac, floor, fee_deadband=None):
     g1 = abs(float(points[-1][1]))
     grew = (g1 - g0) > exp_frac_float(exp_frac) * max(g0, float(floor))
 
-    # ADR-0135 fee-churn test: cumulative fees across the window, when both ends carry them. Fees are
+    # ADR-0146 fee-churn test: cumulative fees across the window, when both ends carry them. Fees are
     # monotonically increasing (money spent), so end - start is the burn attributable to the window.
     fee_burn = None
     if fee_deadband is not None and len(points[0]) > 2 and len(points[-1]) > 2 \
@@ -243,7 +243,7 @@ def evaluate_window(points, t_hurdle, exp_frac, floor, fee_deadband=None):
              "scale": round(scale, 2), "gross_start": g0, "gross_end": g1, "grew": grew,
              "fee_burn": (str(fee_burn) if fee_burn is not None else None)}
     if churned:
-        return "❌ BAD", True, note + " — fee churn with nothing earned (ADR-0135)", stats
+        return "❌ BAD", True, note + " — fee churn with nothing earned (ADR-0146)", stats
     if t <= -th or (grew and mean <= 0):
         return "❌ BAD", True, note, stats
     if t >= th and not grew:
@@ -257,7 +257,7 @@ def exp_frac_float(exp_frac):
 
 def window_since(base_ts, base_mode):
     """The change's evaluation window: heartbeats recorded strictly AFTER the baseline, same feed mode
-    (invariant 8), OPEN-MARKET only (ADR-0135 — a closed market's tape is frozen, so its heartbeats are
+    (invariant 8), OPEN-MARKET only (ADR-0146 — a closed market's tape is frozen, so its heartbeats are
     zero-delta filler, not evidence; counting them let a hold window "fill" overnight and clear at the
     open on a verdict made of nothing), with valid numbers — returned chronological (oldest first) as
     (pnl, gross, fees) Decimals (fees None when the entry predates fee recording)."""
@@ -272,7 +272,7 @@ def window_since(base_ts, base_mode):
         if not ts or not base_ts or ts <= base_ts:
             continue
         if e.get("action") == "market-closed":
-            continue  # frozen tape is not evidence (ADR-0135); open-market `holding` beats ARE the evidence
+            continue  # frozen tape is not evidence (ADR-0146); open-market `holding` beats ARE the evidence
         if base_mode and e.get("feedMode") and e.get("feedMode") != base_mode:
             continue
         p, g = e.get("total_pnl"), e.get("gross")
@@ -398,35 +398,46 @@ def cmd_score():
             print(f"score: BAD verdict — reverted {short}")
         else:
             git("revert", "--abort", check=False)
-            # ADR-0135: `git revert` conflicts whenever later commits touched the same code — which the
-            # week of 07-28 proved happens (12 of 18 BAD reverts failed, each leaving measured-BAD code
-            # LIVE for the rest of the session). Fall back to a PATH RESTORE: put the change's own files
-            # (never reports/) back to their pre-change state. A forced restore has no conflict path, so
-            # a BAD change is always out of the code. Honest cost (stated in the ADR): an edit someone
-            # else made to the SAME files inside the window is clobbered back too — restoring to
-            # known-good beats leaving measured-BAD live, and the exclusive window makes overlap rare.
+            # ADR-0146 (mechanism per ADR-0143): `git revert` conflicts deterministically because the
+            # loop rewrites its own memory files every cycle on top of the commit being reverted —
+            # ADR-0143's replay showed 9 of 9 failures conflicted on exactly those files while the CODE
+            # paths were clean 9 of 9. Fall back to a PATH RESTORE of the change's files, excluding the
+            # loop's record (REVERT_KEEP_PATHS — the list 27564bb established): the ledger, findings and
+            # the ADR stay, so the rejected decision remains on the record while its code comes out. A
+            # forced restore has no conflict path, so a BAD change is always out of the code. Honest
+            # cost (stated in the ADR): an edit someone else made to the SAME code files inside the
+            # window is clobbered back too — restoring to known-good beats leaving measured-BAD live,
+            # and the exclusive window makes overlap rare.
+            keep = ("reports/", "docs/adr/", "docs/loop-findings.md", "docs/loop-playbook.md")
             files = [f for f in git("diff-tree", "--no-commit-id", "--name-only", "-r", sha,
                                     check=False).stdout.splitlines()
-                     if f.strip() and not f.startswith("reports/")]
-            restored = False
-            if files:
+                     if f.strip() and not any(f == k.rstrip("/") or f.startswith(k) for k in keep)]
+            if not files:
+                # Only kept paths were touched (docs/reports-only) — nothing can reach the binary
+                # (ADR-0142), so there is no code to pull; the record itself is deliberately kept.
+                reverted_ok = True
+                revert_method = "no-code-paths"
+                print(f"score: BAD verdict on {short}, but it touched no code paths (record-only "
+                      f"commit) — nothing to revert")
+            else:
+                restored = False
                 rc = git("checkout", f"{sha}^", "--", *files, check=False)
                 if rc.returncode == 0:
                     git("add", "--", *files, check=False)
                     c = git("commit", "-m",
                             f"revert(loop): restore {len(files)} file(s) to pre-{short} state — BAD "
-                            f"verdict, git revert conflicted (ADR-0135)\n\n" + "\n".join(files),
+                            f"verdict, git revert conflicted (ADR-0146/0143)\n\n" + "\n".join(files),
                             check=False)
                     restored = c.returncode == 0
-            if restored:
-                reverted_ok = True
-                revert_method = "path-restore"
-                print(f"score: BAD verdict — `git revert {short}` conflicted; restored the change's "
-                      f"files to their pre-change state instead ({len(files)} file(s))")
-            else:
-                reverted_ok = False
-                print(f"score: BAD verdict but `git revert {short}` conflicted AND the path restore "
-                      f"failed — NOT reverted; still LIVE, needs a manual revert")
+                if restored:
+                    reverted_ok = True
+                    revert_method = "path-restore"
+                    print(f"score: BAD verdict — `git revert {short}` conflicted; restored the change's "
+                          f"code files to their pre-change state instead ({len(files)} file(s))")
+                else:
+                    reverted_ok = False
+                    print(f"score: BAD verdict but `git revert {short}` conflicted AND the path restore "
+                          f"failed — NOT reverted; still LIVE, needs a manual revert")
 
     # A revert that was intended but FAILED must never read as "reverted": mark the note that lands in both
     # the ledger and the snapshot, so the record states plainly that the commit is still live.
@@ -434,7 +445,7 @@ def cmd_score():
         note = note + (" — ⚠️ REVERT FAILED (git conflict + restore failure): the BAD commit is STILL "
                        "LIVE and needs a manual revert")
     elif revert_method == "path-restore":
-        note = note + " — reverted via path restore (git revert conflicted; ADR-0135)"
+        note = note + " — reverted via path restore (git revert conflicted; ADR-0146)"
 
     # Audited snapshot — every number a verdict rests on, recomputable by anyone. `revertApplied` records
     # the ACTUAL git outcome (True = reverted / False = intended but failed / None = none intended),
@@ -482,7 +493,7 @@ def cmd_baseline(argv):
     if len(argv) < 2:
         print("usage: score-change.py baseline <sha> <summary...>", file=sys.stderr)
         return 2
-    # ADR-0135: ONE change in flight, mechanically. While a pending baseline exists its change is still
+    # ADR-0146: ONE change in flight, mechanically. While a pending baseline exists its change is still
     # under measurement — a second baseline would both orphan the first (never scored) and contaminate
     # its window with a new treatment. The prompt-level HOLD alone did not stop this (35 changes in 4
     # days, week of 07-28), so the scorer refuses outright.
@@ -493,7 +504,7 @@ def cmd_baseline(argv):
             pshort = (pend.get("commit") or "unknown")[:9]
         except Exception:
             pshort = "unknown"
-        print(f"baseline: REFUSED — change {pshort} is still under evaluation (ADR-0135: one change in "
+        print(f"baseline: REFUSED — change {pshort} is still under evaluation (ADR-0146: one change in "
               f"flight). HOLD: no new change until it is scored.", file=sys.stderr)
         return 3
     sha = argv[0]
@@ -560,7 +571,7 @@ def cmd_status(argv):
     if market_closed:
         brain_ran = False  # the market-closed cycle skips the analysis entirely — no model call
     if holding:
-        brain_ran = False  # ADR-0135: the hold cycle skips the model BY DESIGN — evidence is accruing
+        brain_ran = False  # ADR-0146: the hold cycle skips the model BY DESIGN — evidence is accruing
 
     available = True
     vec = raw = None
@@ -628,7 +639,7 @@ def cmd_status(argv):
     on_track = pnl_growth is not None and Decimal(str(pnl_growth)) >= PNL_TARGET_PCT
     underwater = available and vec["pnl"] <= 0
     # A closed-market cycle is expected to be flat — never flag it as a staleness FAILURE (ADR-0063).
-    # A holding cycle is likewise not stale (ADR-0135): evidence is accruing by design, and staleness
+    # A holding cycle is likewise not stale (ADR-0146): evidence is accruing by design, and staleness
     # pressure during a hold is exactly the every-cycle-change thrash the ADR removes.
     stale = (not market_closed) and (not holding) and available and pnl_growth is not None and not on_track
 
@@ -671,7 +682,7 @@ def cmd_status(argv):
                     "closed, so the tape is frozen and there is nothing to analyse; the loop resumes at "
                     "the next open. Flat/unchanged here is expected, not a failure.")
     elif holding:
-        # ADR-0135: a deployed book left alone while a change accrues evidence is the loop WORKING —
+        # ADR-0146: a deployed book left alone while a change accrues evidence is the loop WORKING —
         # a first-class success state, never idleness or staleness. Show what's measured and how far.
         pshort, psumm, progress = "", "", ""
         if os.path.exists(PENDING):
@@ -685,7 +696,7 @@ def cmd_status(argv):
             except Exception:
                 pass
         decision = (f"⏸ HOLD — change {pshort or 'pending'} under evaluation{progress}; no model call, "
-                    f"no new change until it is scored (ADR-0135). "
+                    f"no new change until it is scored (ADR-0146). "
                     + (f"Measuring: {psumm}" if psumm else ""))
     elif not brain_ran:
         decision = ("⚠️ ANALYSIS STEP DID NOT RUN this cycle — `claude` was not invoked (not found on "

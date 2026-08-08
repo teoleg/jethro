@@ -131,7 +131,7 @@ than a checklist would. Two conditions on that freedom:
   (mandatory — do not hand-derive money math); **`adr`** when authoring or superseding an ADR;
   **`design-review`** before shipping an architecturally-significant change.
 
-## Scoring is evidence-based and takes a full session (ADR-0116, ADR-0135) — ONE change in flight, enforced
+## Scoring is evidence-based and takes a full session (ADR-0116, ADR-0146) — ONE change in flight, enforced
 The loop wrapper runs `scripts/score-change.py score` **before** it invokes you. A single 30-minute PnL
 delta on this book is almost all market noise, so a change is no longer judged on one cycle. Instead it
 is **held live for an evaluation window** (`MIN_CYCLES`, default 12 **open-market** cycles ≈ one US
@@ -139,13 +139,13 @@ session; closed-market heartbeats do not count — a frozen tape is not evidence
 **sign and statistical significance** of its per-cycle *risk-adjusted* PnL over that window:
 - **✅ GOOD** — significantly positive risk-adjusted return, exposure not grown.
 - **❌ BAD** — significantly negative, or exposure grew for no return, **or the window burned more than
-  the fee deadband in fees with nothing earned** (paid to churn — ADR-0135) → auto-reverted. The revert
+  the fee deadband in fees with nothing earned** (paid to churn — ADR-0146) → auto-reverted. The revert
   cannot silently fail any more: if `git revert` conflicts, the scorer restores the change's own files
   to their pre-change state (path restore).
 - **⚠️ INCONCLUSIVE** — not enough evidence to distinguish it from noise. **Kept, not reverted.** This is
   the honest verdict for most micro-changes, and it is telling you the change had *no measurable effect*.
 
-**The hold is now MECHANICAL (ADR-0135), not a request:** while `reports/.pending-baseline.json` exists,
+**The hold is now MECHANICAL (ADR-0146), not a request:** while `reports/.pending-baseline.json` exists,
 the wrapper does not invoke you at all (it writes a `holding` heartbeat instead), and
 `score-change.py baseline` **refuses** to record a second baseline. You will only be invoked when no
 change is in flight — so when you ARE running, the previous change has been scored and your job is to
