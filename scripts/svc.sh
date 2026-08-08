@@ -88,32 +88,8 @@ muni_stop() {
     rm -f "$MUNI_PIDFILE"
   fi
 }
-# One-time (idempotent) DB provisioning: muni-world uses the SHARED compose Postgres but its OWN
-# database + role (muni_world / muni). Runs only when the DB is opted in (MUNI_FLYWAY_ENABLED=true);
-# needs the postgres container up. Safe to run every start — CREATEs are skipped when already present.
-muni_provision_db() {
-  [ "${MUNI_FLYWAY_ENABLED:-false}" = "true" ] || return 0
-  if ! docker compose ps --status running postgres 2>/dev/null | grep -q postgres; then
-    echo "==> muni DB: postgres container not running — start it first (svc.sh start postgres);" \
-         "muni-world will boot LMDB-only until then"
-    return 0
-  fi
-  local u="${MUNI_DB_USER:-muni}" p="${MUNI_DB_PASSWORD:-muni}"
-  if ! docker compose exec -T postgres psql -U jethro -tAc \
-      "SELECT 1 FROM pg_roles WHERE rolname='$u'" 2>/dev/null | grep -q 1; then
-    docker compose exec -T postgres psql -U jethro -c "CREATE USER $u PASSWORD '$p'" >/dev/null \
-      && echo "==> muni DB: created role $u"
-  fi
-  if ! docker compose exec -T postgres psql -U jethro -tAc \
-      "SELECT 1 FROM pg_database WHERE datname='muni_world'" 2>/dev/null | grep -q 1; then
-    docker compose exec -T postgres psql -U jethro -c "CREATE DATABASE muni_world OWNER $u" >/dev/null \
-      && echo "==> muni DB: created database muni_world"
-  fi
-}
-
 muni_start() {
   if muni_running; then echo "==> muni-world already running (pid $(cat "$MUNI_PIDFILE"))"; return; fi
-  muni_provision_db
   echo "==> building muni-world jar"
   ./gradlew -q :muni-world:bootJar
   mkdir -p logs
