@@ -19,16 +19,25 @@ public final class MuniStatusController {
 
     private final MuniLmdbStore lmdb;
     private final MuniBondService bonds;
+    private final io.muniworld.audio.AudioSourceCatalog audioSources;
     private final boolean kafkaEnabled;
     private final boolean flywayEnabled;
+    private final boolean captureEnabled;
+    private final String whisperModel;
 
     public MuniStatusController(MuniLmdbStore lmdb, MuniBondService bonds,
+                                io.muniworld.audio.AudioSourceCatalog audioSources,
                                 @Value("${muni.kafka.enabled}") boolean kafkaEnabled,
-                                @Value("${spring.flyway.enabled}") boolean flywayEnabled) {
+                                @Value("${spring.flyway.enabled}") boolean flywayEnabled,
+                                @Value("${muni.audio.capture.enabled:false}") boolean captureEnabled,
+                                @Value("${muni.audio.whisper.model:}") String whisperModel) {
         this.lmdb = lmdb;
         this.bonds = bonds;
+        this.audioSources = audioSources;
         this.kafkaEnabled = kafkaEnabled;
         this.flywayEnabled = flywayEnabled;
+        this.captureEnabled = captureEnabled;
+        this.whisperModel = whisperModel == null ? "" : whisperModel;
     }
 
     @GetMapping("/api/muni/status")
@@ -53,6 +62,24 @@ public final class MuniStatusController {
         counts.put("lmdbSecurities", lmdbRows);
         counts.put("dbSecurities", dbRows.isPresent() ? dbRows.getAsLong() : null);
         out.put("counts", counts);
+
+        // TV/audio capture (ADR-0014): report the three gates that must ALL be satisfied before a single
+        // second of audio is captured, and which one is blocking. Reported, never inferred — the capture
+        // loop is silent when idle, so without this the UI cannot say why nothing is happening.
+        int capturable = audioSources.capturable().size();
+        Map<String, Object> audio = new LinkedHashMap<>();
+        audio.put("captureEnabled", captureEnabled);
+        audio.put("feeds", audioSources.all().size());
+        audio.put("capturableFeeds", capturable);
+        audio.put("whisperModelSet", !whisperModel.isBlank());
+        audio.put("blocker", !captureEnabled
+                ? "capture is OFF (MUNI_AUDIO_CAPTURE=false) — run `svc.sh start tv`"
+                : capturable == 0
+                  ? "no feed is enabled AND bound to a host audio device — edit the TV source registry"
+                  : whisperModel.isBlank()
+                    ? "no whisper model configured (MUNI_WHISPER_MODEL) — run `svc.sh setup tv`"
+                    : null);
+        out.put("audio", audio);
         return out;
     }
 }

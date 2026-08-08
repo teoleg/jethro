@@ -56,6 +56,8 @@
   <div class="kicker">Broadcast soft-signal</div>
   <h1>TV / Audio processing</h1>
   <div class="banner">Work in progress — local ASR of a licensed broadcast feed produces <b>leads to verify</b>, never a number that feeds risk/PnL. Capture runs only where an audio device is bound (the Pi); it does nothing here.</div>
+  <!-- The capture loop is SILENT when idle, so state it plainly: is capture on, and if nothing is happening, which gate is blocking. -->
+  <div id="captureState" class="banner" style="border-left-color:var(--dim)">checking capture state…</div>
 
   <div class="section" style="margin-top:22px">
     <h2 style="font-size:16px">TV sources <span id="srcCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
@@ -138,6 +140,25 @@
       }).join("");
     } catch (e) { document.getElementById("leads").textContent = "unavailable"; }
   }
+
+  // Which of the three gates (capture switch → a device-bound enabled feed → a whisper model) is blocking.
+  async function loadCaptureState() {
+    const el = document.getElementById("captureState");
+    try {
+      const a = (await (await fetch("/api/muni/status", { cache: "no-store" })).json()).audio || {};
+      if (!a.blocker) {
+        el.style.borderLeftColor = "var(--up)";
+        el.innerHTML = `<b style="color:var(--up)">Capturing</b> — ${a.capturableFeeds} of ${a.feeds} feed(s) live.`;
+        return;
+      }
+      el.style.borderLeftColor = "var(--warn)";
+      el.innerHTML = `<b style="color:var(--warn)">Not capturing</b> — ${esc(a.blocker)}.`
+        + `<div style="margin-top:4px;font-size:11.5px">capture switch: <b>${a.captureEnabled ? "on" : "off"}</b>`
+        + ` · feeds bound to a device: <b>${a.capturableFeeds}/${a.feeds}</b>`
+        + ` · whisper model: <b>${a.whisperModelSet ? "set" : "not set"}</b></div>`;
+    } catch (e) { el.textContent = "capture state unavailable — is muni-world up?"; }
+  }
+  loadCaptureState(); setInterval(loadCaptureState, 10000);
 
   loadSources(); setInterval(loadSources, 30000);
   loadTranscripts(); setInterval(loadTranscripts, 8000);

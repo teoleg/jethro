@@ -32,6 +32,8 @@ public final class AudioCaptureScheduler {
     private final RecentLeadsStore store;
     private final RecentTranscriptsStore transcripts;
     private final String ffmpegBin;
+    private final String registryPath;
+    private volatile boolean warnedNoFeeds;
 
     public AudioCaptureScheduler(
             AudioSourceCatalog catalog,
@@ -39,13 +41,15 @@ public final class AudioCaptureScheduler {
             TranscriptLeadService leadService,
             RecentLeadsStore store,
             RecentTranscriptsStore transcripts,
-            @Value("${muni.audio.ffmpeg.bin:ffmpeg}") String ffmpegBin) {
+            @Value("${muni.audio.ffmpeg.bin:ffmpeg}") String ffmpegBin,
+            @Value("${muni.audio.sources.file:}") String registryPath) {
         this.catalog = catalog;
         this.transcriber = transcriber;
         this.leadService = leadService;
         this.store = store;
         this.transcripts = transcripts;
         this.ffmpegBin = ffmpegBin;
+        this.registryPath = registryPath == null ? "" : registryPath;
         log.info("audio capture ENABLED: {} capturable feed(s) in the registry", catalog.capturable().size());
     }
 
@@ -54,7 +58,22 @@ public final class AudioCaptureScheduler {
     public void captureOnce() {
         var feeds = catalog.capturable();
         if (feeds.isEmpty()) {
-            return;   // nothing enabled+device-bound in the registry — nothing to do this pass
+            // Capture is ON but the registry offers nothing to capture — the loop would otherwise spin
+            // silently forever, which from the outside is indistinguishable from "the TV feature is broken".
+            // Say so ONCE, naming the actual blocker, and re-arm so a later regression is reported again.
+            if (!warnedNoFeeds) {
+                warnedNoFeeds = true;
+                log.warn("audio capture is ENABLED but NO feed is capturable: of {} registered feed(s), none "
+                        + "is both enabled=true AND bound to a host audio device. Edit the registry ({}), "
+                        + "set a device (e.g. pulse:default.monitor or alsa:hw:1,0) and enabled=true on a "
+                        + "row, then `svc.sh restart tv`. Nothing will be captured until then.",
+                        catalog.all().size(), registryPath.isBlank() ? "classpath default" : registryPath);
+            }
+            return;
+        }
+        if (warnedNoFeeds) {
+            warnedNoFeeds = false;
+            log.info("audio capture: {} feed(s) now capturable — resuming", feeds.size());
         }
         for (AudioSource src : feeds) {
             try {
