@@ -131,22 +131,28 @@ than a checklist would. Two conditions on that freedom:
   (mandatory — do not hand-derive money math); **`adr`** when authoring or superseding an ADR;
   **`design-review`** before shipping an architecturally-significant change.
 
-## Scoring is evidence-based and takes several cycles (ADR-0116) — so HOLD a change while it measures
+## Scoring is evidence-based and takes a full session (ADR-0116, ADR-0135) — ONE change in flight, enforced
 The loop wrapper runs `scripts/score-change.py score` **before** it invokes you. A single 30-minute PnL
 delta on this book is almost all market noise, so a change is no longer judged on one cycle. Instead it
-is **held live for an evaluation window** (`MIN_CYCLES`, ~6 cycles) and then judged by the **sign and
-statistical significance** of its per-cycle *risk-adjusted* PnL over that window:
+is **held live for an evaluation window** (`MIN_CYCLES`, default 12 **open-market** cycles ≈ one US
+session; closed-market heartbeats do not count — a frozen tape is not evidence) and then judged by the
+**sign and statistical significance** of its per-cycle *risk-adjusted* PnL over that window:
 - **✅ GOOD** — significantly positive risk-adjusted return, exposure not grown.
-- **❌ BAD** — significantly negative, or exposure grew for no return → auto-reverted.
+- **❌ BAD** — significantly negative, or exposure grew for no return, **or the window burned more than
+  the fee deadband in fees with nothing earned** (paid to churn — ADR-0135) → auto-reverted. The revert
+  cannot silently fail any more: if `git revert` conflicts, the scorer restores the change's own files
+  to their pre-change state (path restore).
 - **⚠️ INCONCLUSIVE** — not enough evidence to distinguish it from noise. **Kept, not reverted.** This is
   the honest verdict for most micro-changes, and it is telling you the change had *no measurable effect*.
 
-**The rule this creates — read it carefully:** if a pending change is still under measurement, the scorer
-prints `still accumulating evidence (n/MIN_CYCLES)` and **`reports/.pending-baseline.json` still exists**.
-When that is the case you **must NOT make a new code change** this cycle — the previous one is being
-measured, and piling a new change on top destroys the evidence. Write your `reports/last-analysis.md`
-(note it's under evaluation, and what you're watching), append a finding if warranted, and **stop with no
-change**. Only propose a new change once the pending one has been **scored** (a fresh ledger row appears).
+**The hold is now MECHANICAL (ADR-0135), not a request:** while `reports/.pending-baseline.json` exists,
+the wrapper does not invoke you at all (it writes a `holding` heartbeat instead), and
+`score-change.py baseline` **refuses** to record a second baseline. You will only be invoked when no
+change is in flight — so when you ARE running, the previous change has been scored and your job is to
+read its fresh ledger row first. **A deployed book left alone while evidence accrues is the loop
+working, not the loop idle** — the week of 07-28 proved the alternative: 35 changes in 4 days, zero
+GOOD verdicts, $288 fees against $32.51 PnL kept, and the single best event (+$509) came from simply
+holding a book overnight.
 
 Read the ledger every cycle: a repeated **INCONCLUSIVE** streak means you are tuning things that don't
 move the number — change *what* you're working on (see the thesis), not just the parameter. A BAD verdict

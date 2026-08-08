@@ -1,6 +1,6 @@
 # ADR-0116: Score a change by evidence over a window, not a single-cycle delta
 
-- **Status:** Proposed
+- **Status:** Proposed — amended by ADR-0135 (hold made mechanical; closed-market heartbeats excluded from the window; MIN_CYCLES 6→12; conflict-proof revert; fee-churn BAD)
 - **Date:** 2026-07-28
 - **Deciders:** Oleg
 - **Tags:** backend, loop, risk, methodology
