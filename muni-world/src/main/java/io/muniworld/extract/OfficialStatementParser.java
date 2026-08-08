@@ -68,7 +68,11 @@ public final class OfficialStatementParser {
         String[] lines = text.split("\\r?\\n");
 
         int[] schedMonthDay = findScheduleMonthDay(text);   // [month, day] or null
-        String base = findBaseCusip(text, fallbackBase);
+        // A base is a CUSIP-6 or it is NOT A BASE. Callers pass "" when they have none (the folder loader
+        // and the upload endpoint both do), and "" is non-null — which used to reach the suffix branch and
+        // emit "" + "AB1" = "AB1" as a security's identity: a fabricated 3-character key, indexed as if it
+        // were real. Normalise here so the only thing that can ever be prefixed is a genuine CUSIP-6.
+        String base = normaliseBase(findBaseCusip(text, fallbackBase));
         String tax = detectTax(text);
         Call call = detectCall(text);
 
@@ -80,6 +84,14 @@ public final class OfficialStatementParser {
             // (e.g. the redemption paragraph has a percent but no CUSIP, so it's never a "failed row").
             String cusip = findCusip(line, base);
             if (cusip == null) {
+                // A row that carries a coupon, a year AND a trailing suffix is a schedule row we simply
+                // cannot KEY, because the document's base CUSIP-6 was never found. Count it as quarantined
+                // instead of skipping it silently: a suffix-style schedule otherwise reports "0 rows, 0
+                // quarantined", which reads as "there was no schedule" rather than "we could not key it".
+                if (base == null && suffixOf(line) != null
+                        && !allMatches(PERCENT, line).isEmpty() && YEAR.matcher(line).find()) {
+                    quarantined++;
+                }
                 continue;
             }
             List<String> pcts = allMatches(PERCENT, line);
@@ -112,7 +124,7 @@ public final class OfficialStatementParser {
 
     // ---- section detectors ----
 
-    private static int[] findScheduleMonthDay(String text) {
+    static int[] findScheduleMonthDay(String text) {
         Matcher m = SCHED_MONTHDAY.matcher(text);
         while (m.find()) {
             Integer mon = monthOf(m.group(1));
@@ -123,7 +135,7 @@ public final class OfficialStatementParser {
         return null;
     }
 
-    private static String findBaseCusip(String text, String fallback) {
+    static String findBaseCusip(String text, String fallback) {
         Matcher m = BASE_CUSIP.matcher(text);
         return m.find() ? m.group(1) : fallback;
     }
@@ -212,20 +224,37 @@ public final class OfficialStatementParser {
         if (last != null) {
             return last;
         }
-        if (base != null) {
-            Matcher suf = Pattern.compile("\\b([0-9A-Z]{3})\\b\\s*$").matcher(line);
-            if (suf.find()) {
-                String s = suf.group(1);
-                boolean hasLetter = s.chars().anyMatch(Character::isLetter);
-                boolean hasDigit = s.chars().anyMatch(Character::isDigit);
-                // a real CUSIP suffix is mixed alnum (e.g. "AB1"); reject all-letter words ("AMT") and
-                // all-digit tails of dollar amounts ("...000") so neither is mistaken for a security.
-                if (hasLetter && hasDigit) {
-                    return base + s;
-                }
+        // Suffix assembly requires a REAL base (CUSIP-6). normaliseBase guarantees that upstream; the shape
+        // is asserted here too, so no future caller can reintroduce a partial key.
+        if (base != null && base.length() == 6) {
+            String s = suffixOf(line);
+            if (s != null) {
+                return base + s;
             }
         }
         return null;
+    }
+
+    /** A CUSIP suffix at end of line, or null. Mixed alnum only (e.g. "AB1") — rejects all-letter words
+     *  ("AMT") and the all-digit tail of a dollar amount ("...000"); neither is a security. */
+    private static String suffixOf(String line) {
+        Matcher suf = Pattern.compile("\\b([0-9A-Z]{3})\\b\\s*$").matcher(line);
+        if (!suf.find()) {
+            return null;
+        }
+        String s = suf.group(1);
+        boolean hasLetter = s.chars().anyMatch(Character::isLetter);
+        boolean hasDigit = s.chars().anyMatch(Character::isDigit);
+        return hasLetter && hasDigit ? s : null;
+    }
+
+    /** A base is a CUSIP-6 or nothing — blank/short/malformed input is NOT a base (see parse()). */
+    private static String normaliseBase(String base) {
+        if (base == null) {
+            return null;
+        }
+        String b = base.strip().toUpperCase(Locale.ROOT);
+        return b.matches("[0-9]{3}[0-9A-Z]{3}") ? b : null;
     }
 
     private static List<String> allMatches(Pattern p, String s) {

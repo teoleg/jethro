@@ -75,6 +75,38 @@ public final class OfficialStatementProbe {
 
         out.put("hasScheduleHeading", SCHEDULE_HEADING.matcher(t).find());
 
+        // How the document WRITES its identifiers — the decisive evidence when full CUSIP-9s are absent.
+        // A real OS commonly prints a base CUSIP-6 once and then only 2–3 char suffixes per maturity row;
+        // whether the parser can assemble those depends on it recognising the base, so report both the
+        // detected base and the raw wording around every "CUSIP" mention.
+        out.put("baseCusipDetected", OfficialStatementParser.findBaseCusip(t, null));
+        int[] md = OfficialStatementParser.findScheduleMonthDay(t);
+        out.put("scheduleMonthDay", md == null ? null : md[0] + "/" + md[1]);
+
+        List<String> mentions = new ArrayList<>();
+        Matcher cm = Pattern.compile("(?i)cusip").matcher(t);
+        while (cm.find() && mentions.size() < 12) {
+            int s = Math.max(0, cm.start() - 60);
+            int e = Math.min(t.length(), cm.end() + 90);
+            mentions.add(t.substring(s, e).replaceAll("\\s+", " ").strip());
+        }
+        out.put("cusipMentions", mentions);
+
+        // The schedule block itself: the lines following the first maturity-schedule heading. This is the
+        // table the parser must read, verbatim and in the order PDFBox emits it.
+        List<String> block = new ArrayList<>();
+        Matcher sh = SCHEDULE_HEADING.matcher(t);
+        if (sh.find()) {
+            String[] after = t.substring(sh.start()).split("\\r?\\n");
+            for (String raw : after) {
+                String line = raw.strip();
+                if (!line.isEmpty() && block.size() < 45) {
+                    block.add(truncate(line));
+                }
+            }
+        }
+        out.put("scheduleBlock", block);
+
         // What the parser actually managed, on this exact text — so the probe and the loader never disagree.
         OfficialStatementParser.Result res = OfficialStatementParser.parse(t, null, null, "");
         out.put("parsedRows", res.rows().size());
@@ -90,12 +122,13 @@ public final class OfficialStatementProbe {
         }
         out.put("firstLines", head);
 
-        out.put("diagnosis", diagnose(sparse, ocrEnabled, pages, cusips.size(), res));
+        out.put("diagnosis", diagnose(sparse, ocrEnabled, pages, cusips.size(), res,
+                (String) out.get("baseCusipDetected")));
         return out;
     }
 
     private static String diagnose(boolean sparse, boolean ocrEnabled, int pages, int cusips,
-                                   OfficialStatementParser.Result res) {
+                                   OfficialStatementParser.Result res, String baseCusip) {
         if (pages == 0) {
             return "PDF has no pages — not a readable PDF.";
         }
@@ -103,7 +136,12 @@ public final class OfficialStatementProbe {
         // heuristic, which is only a <100-chars-per-page rule of thumb. Calling a document "scanned, no
         // text layer" while quoting a CUSIP read out of that very text is a contradiction the reader
         // would (rightly) not trust.
-        if (cusips > 0 && res.rows().isEmpty()) {
+        // Several CUSIPs but no completed rows = the identifiers are there and the failure is geometry.
+        // (Checked before `sparse`: evidence of a working text layer outranks the <100-chars/page rule of
+        // thumb — calling a document "no text layer" while quoting CUSIPs read out of that text is a
+        // contradiction. Checked AFTER the too-few-CUSIPs case below is ruled out by requiring > 1: a
+        // 100-page schedule yielding ONE token is a suffix layout, not a column-split row.)
+        if (cusips > 1 && res.rows().isEmpty()) {
             return "Found " + cusips + " CUSIP(s) — so the text layer DOES work — but completed 0 rows ("
                    + res.quarantined() + " quarantined): each CUSIP's coupon and/or maturity is not on the "
                    + "same line as it. PDFBox emits reading order, not table columns, so a schedule laid "
@@ -116,10 +154,15 @@ public final class OfficialStatementProbe {
                     : "Image-only (scanned) PDF: under 100 characters of text per page, i.e. no usable text "
                       + "layer. Enable OCR (muni.ocr.enabled=true, tesseract installed) and re-load.";
         }
-        if (cusips == 0) {
-            return "Text extracted fine but contains NO full CUSIP-9 tokens. The schedule likely lists CUSIP "
-                   + "suffixes under a stated base CUSIP-6 the parser did not detect, or the maturity "
-                   + "schedule is in a part of the document that did not extract. Inspect firstLines.";
+        if (cusips <= 1) {
+            return "Text extracted fine (" + pages + " pages) but contains " + cusips + " full CUSIP-9 "
+                   + "token(s) — far fewer than a maturity schedule has. The schedule almost certainly "
+                   + "prints a base CUSIP-6 once and only 2–3 character SUFFIXES per row"
+                   + (baseCusip == null
+                      ? ", and no base CUSIP was detected (the parser looks for the literal wording 'Base "
+                        + "CUSIP'/'CUSIP Base')."
+                      : ", base detected: " + baseCusip + ".")
+                   + " Inspect cusipMentions + scheduleBlock to see the document's actual wording.";
         }
         return "Parsed " + res.rows().size() + " row(s) — the text path works on this document.";
     }

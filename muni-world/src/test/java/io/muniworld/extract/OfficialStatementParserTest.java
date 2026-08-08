@@ -67,6 +67,45 @@ class OfficialStatementParserTest {
         assertEquals("100", r2040.get("callPrice"));
     }
 
+    // A real EMMA OS commonly prints the base CUSIP-6 once, in wording this parser does not match, and then
+    // only 2–3 character SUFFIXES per maturity row.
+    private static final String SUFFIX_ONLY_OS = """
+            MATURITY SCHEDULE
+            (Due November 1)
+            Year   Principal   Coupon   Yield   CUSIP No.†
+            2027   $1,000,000   5.000%   3.10%   AB1
+            2028   $1,050,000   5.000%   3.25%   AC9
+
+            † CUSIP numbers are provided by CUSIP Global Services.
+            """;
+
+    @Test
+    void neverEmitsAPartialCusipWhenNoBaseIsKnown() {
+        // The loaders pass "" as the fallback base. "" is non-null, so this used to reach the suffix branch
+        // and emit "" + "AB1" = "AB1" — a FABRICATED 3-character identity, indexed as a real security.
+        OfficialStatementParser.Result res = OfficialStatementParser.parse(SUFFIX_ONLY_OS, "City", null, "");
+
+        assertTrue(res.rows().isEmpty(), "no base CUSIP → no rows; never a partial key");
+        for (Map<String, Object> r : res.rows()) {
+            assertEquals(9, String.valueOf(r.get("cusip")).length(), "a CUSIP is 9 chars or it is not a CUSIP");
+        }
+        assertEquals(2, res.quarantined(),
+                "the two unkeyable schedule rows are QUARANTINED, not silently skipped — otherwise a "
+                + "suffix-style OS reports '0 rows, 0 quarantined', i.e. 'there was no schedule'");
+    }
+
+    @Test
+    void assemblesSuffixesOnlyAgainstARealBase() {
+        // Same document, base supplied by the caller (e.g. the CUSIP-6 of the OS being ingested).
+        OfficialStatementParser.Result res =
+                OfficialStatementParser.parse(SUFFIX_ONLY_OS, "City", null, "649122");
+
+        assertEquals(2, res.rows().size());
+        assertEquals("649122AB1", res.rows().get(0).get("cusip"));
+        assertEquals("2027-11-01", res.rows().get(0).get("maturity"));
+        assertEquals(0, res.quarantined(), "keyable rows are parsed, not quarantined");
+    }
+
     @Test
     void emptyTextYieldsNothing() {
         OfficialStatementParser.Result res = OfficialStatementParser.parse("", "x", null, null);
