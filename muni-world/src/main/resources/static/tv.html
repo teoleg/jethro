@@ -67,10 +67,10 @@
   <div class="section" style="margin-top:22px">
     <h2 style="font-size:16px">TV sources <span id="srcCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
     <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">
-      <b style="color:var(--warn)">These rows do NOT connect to Bloomberg or CNBC.</b> muni-world never fetches a
-      broadcast — it records the audio <b>this machine is already playing</b>. A row is just a label for a host
-      audio input, so nothing is captured unless the channel is playing here (browser, app or HDMI input).
-      Bind a device below and click <b>Bind</b>; it is written to the registry file, no hand-editing, no restart.
+      A feed can be either: a <b>stream URL</b> — ffmpeg pulls the audio straight off the network, headless
+      and unattended, nothing playing on this box (this is what you want for an online channel); or a
+      <b>host audio device</b>, which records what this machine is already playing. Set either below and
+      click <b>Bind</b>; it is saved to the registry file, no hand-editing, no restart.
     </div>
     <div id="deviceNote" style="color:var(--dim);font-size:11.5px;margin-bottom:8px"></div>
     <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
@@ -139,6 +139,23 @@
         ? `<span style="color:var(--warn)">No bindable device: ${esc(d.note)}</span>`
         : `${DEVICES.length} audio input(s) detected via ${esc((d.tools || []).join(", "))}.`;
     } catch (e) { DEVICES = []; note.textContent = "device scan unavailable"; }
+  }
+
+  /** A stream URL is a source string like any other — same bind endpoint, prefixed url:. */
+  async function bindUrl(id) {
+    const box = document.getElementById("url-" + id);
+    const msg = document.getElementById("bindMsg");
+    const u = (box && box.value || "").trim();
+    if (!u) { msg.textContent = "paste a stream URL first."; return; }
+    msg.textContent = "binding " + id + " to the stream…";
+    try {
+      const r = await (await fetch(`/api/muni/audio/sources/${encodeURIComponent(id)}/bind`
+        + `?device=${encodeURIComponent("url:" + u)}&enabled=true`, { method: "POST" })).json();
+      msg.innerHTML = r.ok
+        ? `<span style="color:var(--up)">bound ${esc(id)} to the stream · ${r.capturableFeeds} feed(s) capturable · use <b>▶ Test 8s</b> to pull a sample now</span>`
+        : `<span style="color:var(--down)">${esc(r.error || "bind failed")}</span>`;
+      loadSources(); loadCaptureState();
+    } catch (e) { msg.innerHTML = '<span style="color:var(--down)">bind request failed</span>'; }
   }
 
   async function bindFeed(id) {
@@ -329,14 +346,20 @@
           const test = s.device
             ? `<button class="btn" style="padding:5px 10px;font-size:11px" onclick="testFeed('${esc(s.id)}')">▶ Test 8s</button>`
             : "";
+          const urlRow = `<div style="margin-top:5px;display:flex;gap:6px;align-items:center">
+              <input id="url-${esc(s.id)}" placeholder="or paste a stream URL (https://…m3u8)"
+                     value="${s.device && s.device.toLowerCase().startsWith('url:') ? esc(s.device.slice(4)) : ''}"
+                     style="flex:1;min-width:220px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:5px 7px;font:inherit;font-size:11px">
+              <button class="btn" style="padding:5px 10px;font-size:11px" onclick="bindUrl('${esc(s.id)}')">Use URL</button>
+            </div>`;
           const picker = DEVICES.length
             ? `<select id="dev-${esc(s.id)}" style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:5px 7px;font:inherit;font-size:11px;max-width:260px">
                  <option value="">— pick a device —</option>${opts}</select>
                <button class="btn" style="padding:5px 10px;font-size:11px" onclick="bindFeed('${esc(s.id)}')">Bind</button> ${test}`
-            : (test || '<span style="color:var(--dim);font-size:11px">no device detected on this host</span>');
+            : (test || '<span style="color:var(--dim);font-size:11px">no host audio device — use a stream URL</span>');
           return `<tr><td style="color:var(--txt)">${esc(s.label)}</td><td>${esc(s.publisher)}</td>
-            <td class="mono" style="font-size:11px">${esc(s.device || "—")}</td>
-            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td><td>${picker}</td></tr>`;
+            <td class="mono" style="font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(s.device || "—")}</td>
+            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td><td>${picker}${urlRow}</td></tr>`;
         }).join("") + "</tbody></table>";
     } catch (e) { document.getElementById("sources").textContent = "unavailable"; }
   }

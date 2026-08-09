@@ -47,6 +47,30 @@ class AudioCaptureTest {
     }
 
     @Test
+    void aStreamUrlIsPulledDirectlyAndADeviceIsOpenedAsAFormat() {
+        // The owner's actual requirement: pull audio from an ONLINE source — no browser, no sound card,
+        // no display. A url: source must go straight to ffmpeg's input with NO -f (the demuxer is detected
+        // from the stream) and -vn to drop video; a device source keeps -f <format> -i <name>.
+        var stream = new FfmpegCaptureSource("ffmpeg", "url:https://example.com/live.m3u8", 30)
+                .buildCommand("/tmp/out.wav");
+        assertFalse(stream.contains("-f"), "a URL must not be passed as an ffmpeg input FORMAT");
+        assertEquals("https://example.com/live.m3u8", stream.get(stream.indexOf("-i") + 1));
+        assertTrue(stream.contains("-vn"), "video track dropped");
+
+        var device = new FfmpegCaptureSource("ffmpeg", "pulse:default.monitor", 30)
+                .buildCommand("/tmp/out.wav");
+        assertEquals("pulse", device.get(device.indexOf("-f") + 1));
+        assertEquals("default.monitor", device.get(device.indexOf("-i") + 1));
+
+        // Both must still produce whisper's only readable format.
+        for (var cmd : java.util.List.of(stream, device)) {
+            assertEquals("pcm_s16le", cmd.get(cmd.indexOf("-c:a") + 1));
+            assertEquals("16000", cmd.get(cmd.indexOf("-ar") + 1));
+            assertEquals("1", cmd.get(cmd.indexOf("-ac") + 1));
+        }
+    }
+
+    @Test
     void captureDeclaresTheFormatWhisperCanActuallyRead() {
         // whisper-cli reads 16 kHz mono PCM WAV and bundles no decoder, so the capture stage MUST produce
         // WAV. It once wrote Opus/.ogg, which made every transcription fail while capture looked fine.

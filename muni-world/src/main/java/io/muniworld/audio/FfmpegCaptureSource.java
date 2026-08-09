@@ -35,11 +35,35 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
         this.seconds = seconds;
     }
 
+    /** The exact ffmpeg invocation for this source — package-private so the argument shape is TESTED.
+     *  Wrong ffmpeg arguments have silently broken this pipeline twice (an .ogg container whisper cannot
+     *  read; a device string passed as a format), so the command is asserted rather than assumed. */
+    List<String> buildCommand(String outPath) {
+        int sep = device.indexOf(':');
+        String format = device.substring(0, sep);
+        String name = device.substring(sep + 1);
+        List<String> cmd = new java.util.ArrayList<>(List.of(
+                ffmpegBin, "-hide_banner", "-loglevel", "error", "-y"));
+        if (isUrl()) {
+            cmd.addAll(List.of("-i", device.substring(4), "-t", Integer.toString(seconds), "-vn"));
+        } else {
+            cmd.addAll(List.of("-f", format, "-i", name, "-t", Integer.toString(seconds)));
+        }
+        cmd.addAll(List.of("-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", outPath));
+        return cmd;
+    }
+
+    /** True for a NETWORK stream source ({@code url:https://…}) rather than a host audio device. */
+    private boolean isUrl() {
+        return device.regionMatches(true, 0, "url:", 0, 4);
+    }
+
     @Override
     public byte[] captureChunk() {
         int sep = device.indexOf(':');
         if (sep < 0) {
-            throw new IllegalArgumentException("device must be '<format>:<name>', e.g. alsa:hw:1,0; got " + device);
+            throw new IllegalArgumentException(
+                    "source must be '<format>:<name>' (e.g. alsa:hw:1,0) or 'url:<stream>'; got " + device);
         }
         String format = device.substring(0, sep);   // ffmpeg -f
         String name = device.substring(sep + 1);     // ffmpeg -i
@@ -54,11 +78,18 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
             // "transcription failed for audio-…" — the capture half worked, the ASR half could never
             // succeed, and the chunk artifact is transient anyway (transcribed, then deleted), so the size
             // saving bought nothing. ~32 KB/s here: a 300 s chunk is ~9.6 MB, held only until transcription.
-            List<String> cmd = List.of(ffmpegBin, "-hide_banner", "-loglevel", "error", "-y",
-                    "-f", format, "-i", name, "-t", Integer.toString(seconds),
-                    "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", out.toString());
+            //
+            // Two source kinds, one pipeline:
+            //   url:<stream>       — read the STREAM directly (HLS/DASH/Icecast/…). No browser, no sound
+            //                        card, no display, no PulseAudio: works headless and unattended, which
+            //                        is what "pull audio from an online source" actually needs. `-vn` drops
+            //                        any video track; the demuxer is detected from the stream itself.
+            //   <format>:<name>    — a host audio input (alsa/pulse), for capturing what THIS box plays.
+            List<String> cmd = buildCommand(out.toString());
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
-            if (!p.waitFor(seconds + 30L, TimeUnit.SECONDS)) {
+            // A network stream must also CONNECT and buffer before it records, so it gets more headroom
+            // than a local device (which starts instantly).
+            if (!p.waitFor(seconds + (isUrl() ? 90L : 30L), TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 throw new IOException("ffmpeg capture timed out");
             }
