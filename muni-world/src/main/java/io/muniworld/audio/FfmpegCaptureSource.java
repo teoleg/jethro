@@ -10,16 +10,22 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The Pi-side {@link AudioCaptureConnector.CaptureSource}: records a fixed-duration chunk off an audio input
- * with <b>ffmpeg</b>, into Ogg/Opus (small, speech-friendly). The input is whatever the owner's licensed feed
- * plays into — an ALSA line-in / USB capture dongle, or a PulseAudio {@code .monitor} loopback (ADR-0014).
+ * The Pi-side {@link AudioCaptureConnector.CaptureSource}: records a fixed-duration chunk with <b>ffmpeg</b>
+ * as 16 kHz mono PCM WAV — whisper.cpp's only readable input (ADR-0014).
  *
- * <p>This is not a Spring bean: it's constructed by the capture scheduler with the device + duration for a
- * given feed, so one process can record several feeds. It shells out, so it only runs where ffmpeg + an audio
- * device exist (the Pi) — never in the sandbox or tests, which use a stub {@code CaptureSource} instead.
+ * <p>Three source kinds, one pipeline:
+ * <ul>
+ *   <li>{@code yt:<page>} — a YouTube watch/live page. yt-dlp resolves the CURRENT media URL per capture
+ *       (live CDN URLs expire, so the page is what the registry stores), then it is read as a stream.</li>
+ *   <li>{@code url:<stream>} — a direct HLS/DASH/Icecast URL, read straight off the network. No browser, no
+ *       sound card, no display: this is the headless path and the default.</li>
+ *   <li>{@code <format>:<name>} — a host audio input ({@code pulse:default.monitor}, {@code alsa:hw:1,0}),
+ *       the fallback for recording what THIS machine plays.</li>
+ * </ul>
  *
- * <p>Example device strings: {@code alsa:hw:1,0} (USB capture dongle), {@code pulse:default.monitor}
- * (system-audio loopback). The prefix before {@code :} selects the ffmpeg input format {@code -f}.
+ * <p>This is not a Spring bean: it's constructed by the capture scheduler with the source + duration for a
+ * given feed, so one process can record several feeds. It shells out, so it only runs where ffmpeg exists
+ * (the Pi) — never in the sandbox or tests, which use a stub {@code CaptureSource} instead.
  */
 public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureSource {
 
@@ -31,6 +37,9 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
             "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36");
     private static final String REFERER = System.getenv().getOrDefault("MUNI_STREAM_REFERER",
             "https://www.bloomberg.com/live");
+    /** yt-dlp resolves a watch/live page to the CURRENT media URL. Those URLs expire, so this runs per
+     *  capture rather than being stored anywhere. */
+    private static final String YTDLP = System.getenv().getOrDefault("MUNI_YTDLP_BIN", "yt-dlp");
 
     private final String ffmpegBin;
     private final String device;     // e.g. "alsa:hw:1,0" or "pulse:default.monitor"
@@ -46,6 +55,13 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
      *  Wrong ffmpeg arguments have silently broken this pipeline twice (an .ogg container whisper cannot
      *  read; a device string passed as a format), so the command is asserted rather than assumed. */
     List<String> buildCommand(String outPath) {
+        if (isYtdlp()) {
+            // ffmpeg cannot read a watch page, and "yt" is not an input format. A yt: source MUST be
+            // resolved to a media URL first (captureChunk does that) — reaching here would otherwise build
+            // `-f yt -i https://…`, which fails with an ffmpeg error that names neither cause nor fix.
+            throw new IllegalStateException(
+                    "a 'yt:' source must be resolved by yt-dlp before ffmpeg runs; got " + device);
+        }
         int sep = device.indexOf(':');
         String format = device.substring(0, sep);
         String name = device.substring(sep + 1);
@@ -70,12 +86,62 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
         return device.regionMatches(true, 0, "url:", 0, 4);
     }
 
+    /** True for a page yt-dlp must resolve first ({@code yt:https://youtube.com/watch?v=…}). */
+    private boolean isYtdlp() {
+        return device.regionMatches(true, 0, "yt:", 0, 3);
+    }
+
+    /**
+     * Ask yt-dlp for the current audio URL behind a watch/live page.
+     *
+     * <p>A live stream's media URL is issued by the CDN and EXPIRES, so it must be resolved at capture time
+     * and never stored in the registry — storing one would work once and then fail forever with an opaque
+     * 403. {@code -f bestaudio} keeps the download to the audio rendition; the page URL is all the registry
+     * holds.
+     */
+    private String resolveViaYtdlp() {
+        String page = device.substring(3);
+        try {
+            Process p = new ProcessBuilder(YTDLP, "-f", "bestaudio/best", "-g", "--no-warnings", page)
+                    .redirectErrorStream(true).start();
+            // Wait FIRST, then read: reading to EOF on this thread would block forever on a hung yt-dlp and
+            // make the timeout below unreachable. The output here is a URL or two, far under the pipe
+            // buffer, so nothing can deadlock on an unread pipe.
+            if (!p.waitFor(60, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                throw new IOException("yt-dlp timed out resolving " + page);
+            }
+            String out = new String(p.getInputStream().readAllBytes()).strip();
+            if (p.exitValue() != 0 || out.isBlank()) {
+                throw new IOException("yt-dlp could not resolve " + page + ": " + out);
+            }
+            // -g prints one URL per line (audio first with bestaudio); take the first.
+            String url = out.lines().filter(l -> l.startsWith("http")).findFirst().orElse("");
+            if (url.isBlank()) {
+                throw new IOException("yt-dlp returned no media URL for " + page + ": " + out);
+            }
+            log.info("yt-dlp resolved {} to a live media URL ({} chars)", page, url.length());
+            return url;
+        } catch (IOException e) {
+            throw new RuntimeException("yt-dlp resolve failed for " + page + " — is yt-dlp installed? "
+                    + "(pip install -U yt-dlp). Cause: " + e.getMessage(), e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("yt-dlp resolve interrupted", e);
+        }
+    }
+
     @Override
     public byte[] captureChunk() {
         int sep = device.indexOf(':');
         if (sep < 0) {
             throw new IllegalArgumentException(
-                    "source must be '<format>:<name>' (e.g. alsa:hw:1,0) or 'url:<stream>'; got " + device);
+                    "source must be '<format>:<name>' (e.g. alsa:hw:1,0), 'url:<stream>' or "
+                    + "'yt:<page>'; got " + device);
+        }
+        if (isYtdlp()) {
+            // Resolve the expiring media URL now, then capture it exactly like any other stream.
+            return new FfmpegCaptureSource(ffmpegBin, "url:" + resolveViaYtdlp(), seconds).captureChunk();
         }
         String format = device.substring(0, sep);   // ffmpeg -f
         String name = device.substring(sep + 1);     // ffmpeg -i

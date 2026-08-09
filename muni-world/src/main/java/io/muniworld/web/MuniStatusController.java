@@ -82,7 +82,7 @@ public final class MuniStatusController {
         audio.put("blocker", !captureEnabled
                 ? "capture is OFF (MUNI_AUDIO_CAPTURE=false) — run `svc.sh start tv`"
                 : capturable == 0
-                  ? "no feed is enabled AND bound to a host audio device — edit the TV source registry"
+                  ? "no feed is enabled AND has a source — set one on the TV page (advanced)"
                   : asrBlocker);
         out.put("audio", audio);
         return out;

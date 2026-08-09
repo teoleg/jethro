@@ -71,6 +71,24 @@ class AudioCaptureTest {
     }
 
     @Test
+    void aYouTubePageIsNeverHandedToFfmpegUnresolved() {
+        // A live stream's CDN URL EXPIRES, so the registry stores the watch page and yt-dlp resolves the
+        // current media URL per capture. ffmpeg has no idea what a watch page is: if one ever reached
+        // buildCommand it would emit `-f yt -i https://…` and fail with a message naming neither the cause
+        // nor the fix. Fail here instead, saying exactly what is wrong.
+        var yt = new FfmpegCaptureSource("ffmpeg", "yt:https://www.youtube.com/watch?v=abc123", 30);
+        IllegalStateException e =
+                assertThrows(IllegalStateException.class, () -> yt.buildCommand("/tmp/out.wav"));
+        assertTrue(e.getMessage().contains("yt-dlp"), "the error must name the resolver: " + e.getMessage());
+
+        // Once resolved, it is an ordinary stream source and takes the url: path.
+        var resolved = new FfmpegCaptureSource("ffmpeg", "url:https://cdn.example.com/videoplayback?x=1", 30)
+                .buildCommand("/tmp/out.wav");
+        assertFalse(resolved.contains("-f"), "a resolved media URL is not an ffmpeg input format");
+        assertEquals("https://cdn.example.com/videoplayback?x=1", resolved.get(resolved.indexOf("-i") + 1));
+    }
+
+    @Test
     void captureDeclaresTheFormatWhisperCanActuallyRead() {
         // whisper-cli reads 16 kHz mono PCM WAV and bundles no decoder, so the capture stage MUST produce
         // WAV. It once wrote Opus/.ogg, which made every transcription fail while capture looked fine.

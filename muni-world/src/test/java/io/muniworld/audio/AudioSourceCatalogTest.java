@@ -68,8 +68,11 @@ class AudioSourceCatalogTest {
 
         AudioSourceCatalog cat = new AudioSourceCatalog(csv.toString());
 
-        assertTrue(byId(cat, "tv-bloomberg").device().startsWith("url:"),
-                "an unconfigured row is filled from the shipped template");
+        // The shipped source is an ONLINE one (yt: page or url: stream) — assert the kind, not the exact
+        // URL, so changing which stream ships does not break this contract test.
+        String filled = byId(cat, "tv-bloomberg").device();
+        assertTrue(filled.startsWith("yt:") || filled.startsWith("url:"),
+                "an unconfigured row is filled from the shipped template, with an online source: " + filled);
         assertEquals("pulse:mine.monitor", byId(cat, "tv-mine").device(),
                 "a row the operator configured is left exactly as it is");
     }

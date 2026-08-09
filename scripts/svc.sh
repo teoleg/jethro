@@ -8,7 +8,7 @@
 #   scripts/svc.sh start postgres     # start just Postgres
 #   scripts/svc.sh start muni         # build + start the muni-world service (independent, :8090)
 #   scripts/svc.sh restart muni       # rebuild + restart muni-world
-#   scripts/svc.sh setup tv           # one-time: install whisper.cpp/ffmpeg, fill audio config (Pi)
+#   scripts/svc.sh setup tv           # one-time: install ffmpeg/yt-dlp/whisper.cpp, fill audio config (Pi)
 #   scripts/svc.sh start tv           # turn TV audio capture ON and (re)start muni-world
 #   scripts/svc.sh stop tv            # turn capture OFF (muni-world keeps running)
 #   scripts/svc.sh status tv          # capture flags + recent leads
@@ -119,13 +119,13 @@ muni_start() {
 # So "TV control" = flip that flag durably in local.env, then bounce muni-world to pick it up.
 tv_setup() {
   ensure_env_file
-  echo "==> muni-world audio setup (installs whisper.cpp/ffmpeg, finds the loopback)"
+  echo "==> muni-world audio setup (installs ffmpeg + yt-dlp + whisper.cpp and its model)"
   # pass the env file so the setup script WRITES MUNI_WHISPER_BIN/MODEL into it (no more empty vars)
   MUNI_ENV_FILE="$ENV_FILE" bash muni-world/scripts/setup-audio-pi.sh
   # make sure the registry pointer is set too
   grep -qE "^MUNI_AUDIO_SOURCES_FILE=" "$ENV_FILE" 2>/dev/null || set_env_kv MUNI_AUDIO_SOURCES_FILE local/audio-sources.csv
-  echo "==> whisper paths written to $ENV_FILE. Next: bind a device + enable a feed in"
-  echo "    the UI (TV / Audio page → Bind), then: scripts/svc.sh start tv"
+  echo "==> paths written to $ENV_FILE. Nothing to bind — the registry ships with Bloomberg's"
+  echo "    live stream configured. Next: scripts/svc.sh start tv"
 }
 tv_start() {
   set_env_kv MUNI_AUDIO_CAPTURE true

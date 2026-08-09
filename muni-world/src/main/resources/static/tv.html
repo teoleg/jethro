@@ -66,14 +66,26 @@
   <div class="section" style="margin-top:22px">
     <h2 style="font-size:16px">TV sources <span id="srcCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
     <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">
-      A feed can be either: a <b>stream URL</b> — ffmpeg pulls the audio straight off the network, headless
-      and unattended, nothing playing on this box (this is what you want for an online channel); or a
-      <b>host audio device</b>, which records what this machine is already playing. Set either below and
-      click <b>Bind</b>; it is saved to the registry file, no hand-editing, no restart.
+      Sources ship configured — nothing to paste. The audio is pulled <b>off the network</b>: no TV, no
+      HDMI, no browser, nothing playing on this box. Press <b>▶ Test 8s</b> to record a few seconds now
+      and see what it heard.
     </div>
-    <div id="deviceNote" style="color:var(--dim);font-size:11.5px;margin-bottom:8px"></div>
     <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
     <div id="bindMsg" style="color:var(--dim);font-size:11.5px;margin-top:8px"></div>
+
+    <!-- Changing a source is rare and easy to get wrong, so it lives behind a fold rather than putting a
+         picker and a URL box on every row of the table you actually read. -->
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;color:var(--dim);font-size:12px">Change a source (advanced)</summary>
+      <div style="color:var(--dim);font-size:11.5px;margin:8px 0">
+        A source is one of: <span class="mono">yt:&lt;youtube page&gt;</span> (yt-dlp resolves the current
+        media URL each capture — live URLs expire), <span class="mono">url:&lt;stream&gt;</span> (a direct
+        HLS/DASH URL) or <span class="mono">pulse:&lt;name&gt;</span> (record what THIS machine plays).
+        Saved straight to the registry file — no hand-editing, no restart.
+      </div>
+      <div id="editors"></div>
+      <div id="deviceNote" style="color:var(--dim);font-size:11.5px;margin-top:8px"></div>
+    </details>
   </div>
 
   <div class="section" style="margin-top:28px">
@@ -92,22 +104,21 @@
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
 
-  // The host's real audio inputs, fetched once per refresh so each feed row can offer a picker.
+  // The host's audio inputs — only relevant to the pulse: fallback, so this is listed inside the
+  // advanced fold as a reference, not offered as the main way to configure a feed.
   let DEVICES = [];
   async function loadDevices() {
     const note = document.getElementById("deviceNote");
+    if (!note) { return; }
     try {
       const d = await (await fetch("/api/muni/audio/devices", { cache: "no-store" })).json();
       DEVICES = d.devices || [];
-      note.innerHTML = d.note
-        ? `<span style="color:var(--warn)">No bindable device: ${esc(d.note)}</span>`
-        : `${DEVICES.length} audio input(s) detected via ${esc((d.tools || []).join(", "))}.`;
+      note.innerHTML = DEVICES.length
+        ? "host audio inputs on this box (for the <span class='mono'>pulse:</span> fallback): "
+          + DEVICES.map(x => `<span class="mono">${esc(x.device)}</span>`).join(", ")
+        : "no host audio input on this box — the online sources above do not need one.";
     } catch (e) { DEVICES = []; note.textContent = "device scan unavailable"; }
   }
-
-
-
-
 
 
   // A still of the screen. On failure the <img> errors, so read the reason from /video/status rather
@@ -115,34 +126,21 @@
 
   // Capture a few seconds NOW and show what it heard — proves the device works without waiting a chunk.
 
-  /** Bind a feed to a host audio device chosen from the picker. */
-  async function bindFeed(id) {
-    const sel = document.getElementById("dev-" + id);
+  /** Save the source string for a feed, verbatim — one field, all three source kinds. */
+  async function saveSource(id) {
+    const box = document.getElementById("src-" + id);
     const msg = document.getElementById("bindMsg");
-    if (!sel || !sel.value) { msg.textContent = "pick a device first."; return; }
-    await doBind(id, sel.value, "device");
-  }
-
-  /** Bind a feed to a network STREAM — the headless path: ffmpeg reads the URL directly. */
-  async function bindUrl(id) {
-    const box = document.getElementById("url-" + id);
-    const msg = document.getElementById("bindMsg");
-    const u = (box && box.value || "").trim();
-    if (!u) { msg.textContent = "enter a stream URL first."; return; }
-    await doBind(id, "url:" + u, "stream");
-  }
-
-  async function doBind(id, source, kind) {
-    const msg = document.getElementById("bindMsg");
-    msg.textContent = "binding " + id + " …";
+    const v = (box && box.value || "").trim();
+    if (!v) { msg.textContent = "enter a source first (yt:… / url:… / pulse:…)."; return; }
+    msg.textContent = "saving " + id + " …";
     try {
       const r = await (await fetch(`/api/muni/audio/sources/${encodeURIComponent(id)}/bind`
-        + `?device=${encodeURIComponent(source)}&enabled=true`, { method: "POST" })).json();
+        + `?device=${encodeURIComponent(v)}&enabled=true`, { method: "POST" })).json();
       msg.innerHTML = r.ok
-        ? `<span style="color:var(--up)">bound ${esc(id)} to this ${kind} · ${r.capturableFeeds} feed(s) capturable · hit <b>▶ Test 8s</b> to pull a sample now</span>`
-        : `<span style="color:var(--down)">${esc(r.error || "bind failed")}</span>`;
+        ? `<span style="color:var(--up)">saved ${esc(id)} · ${r.capturableFeeds} feed(s) capturable · hit <b>▶ Test 8s</b> to pull a sample now</span>`
+        : `<span style="color:var(--down)">${esc(r.error || "save failed")}</span>`;
       loadSources(); loadCaptureState();
-    } catch (e) { msg.innerHTML = '<span style="color:var(--down)">bind request failed</span>'; }
+    } catch (e) { msg.innerHTML = '<span style="color:var(--down)">save request failed</span>'; }
   }
 
   /** Pull a few seconds from this feed NOW and show what it heard — proves a URL or device works. */
@@ -174,38 +172,34 @@
       document.getElementById("srcCount").textContent = ss.length ? "· " + cap + " capturable / " + ss.length : "";
       const el = document.getElementById("sources");
       if (!ss.length) { el.textContent = "no feeds registered"; return; }
-      const cols = ["Feed", "Publisher", "Device", "Chunk", "Status", "Bind to a host device"];
+      const cols = ["Feed", "Publisher", "Source", "Chunk", "Status", "Check"];
       el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
         + ss.map(s => {
           const capturable = s.enabled && s.device;
           const status = capturable ? '<span style="color:var(--up)">capturing</span>'
-            : s.enabled ? '<span style="color:var(--warn)">no device bound</span>'
+            : s.enabled ? '<span style="color:var(--warn)">no source set</span>'
             : '<span style="color:var(--dim)">disabled</span>';
-          // Monitor sources first — the loopback of what the machine plays is what captures TV audio.
-          const opts = DEVICES.length
-            ? DEVICES.slice().sort((a, b) => (b.monitor ? 1 : 0) - (a.monitor ? 1 : 0))
-                .map(d => `<option value="${esc(d.device)}"${d.device === s.device ? " selected" : ""}>${esc(d.label)}</option>`).join("")
-            : "";
-          // A bound feed gets a Test button: the loop's chunk is 300s, so without this a fresh binding
-          // gives no feedback for five minutes and a dead device looks identical to silence.
+          // A configured feed gets a Test button: the loop's chunk is minutes long, so without this a
+          // fresh source gives no feedback for a whole cycle and a dead one looks identical to silence.
           const test = s.device
             ? `<button class="btn" style="padding:5px 10px;font-size:11px" onclick="testFeed('${esc(s.id)}')">▶ Test 8s</button>`
-            : "";
-          const urlRow = `<div style="margin-top:5px;display:flex;gap:6px;align-items:center">
-              <input id="url-${esc(s.id)}" placeholder="or paste a stream URL (https://…m3u8)"
-                     value="${s.device && s.device.toLowerCase().startsWith('url:') ? esc(s.device.slice(4)) : ''}"
-                     style="flex:1;min-width:220px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:5px 7px;font:inherit;font-size:11px">
-              <button class="btn" style="padding:5px 10px;font-size:11px" onclick="bindUrl('${esc(s.id)}')">Use URL</button>
-            </div>`;
-          const picker = DEVICES.length
-            ? `<select id="dev-${esc(s.id)}" style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:5px 7px;font:inherit;font-size:11px;max-width:260px">
-                 <option value="">— pick a device —</option>${opts}</select>
-               <button class="btn" style="padding:5px 10px;font-size:11px" onclick="bindFeed('${esc(s.id)}')">Bind</button> ${test}`
-            : (test || '<span style="color:var(--dim);font-size:11px">no host audio device — use a stream URL</span>');
+            : '<span style="color:var(--dim);font-size:11px">set a source below</span>';
           return `<tr><td style="color:var(--txt)">${esc(s.label)}</td><td>${esc(s.publisher)}</td>
-            <td class="mono" style="font-size:11px;max-width:260px;overflow:hidden;text-overflow:ellipsis">${esc(s.device || "—")}</td>
-            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td><td>${picker}${urlRow}</td></tr>`;
+            <td class="mono" style="font-size:11px;max-width:320px;overflow:hidden;text-overflow:ellipsis">${esc(s.device || "—")}</td>
+            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td><td>${test}</td></tr>`;
         }).join("") + "</tbody></table>";
+
+      // The advanced fold: one editable source string per feed, saved verbatim.
+      const ed = document.getElementById("editors");
+      if (ed) {
+        ed.innerHTML = ss.map(s => `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+            <span style="min-width:150px;color:var(--dim);font-size:11.5px">${esc(s.label)}</span>
+            <input id="src-${esc(s.id)}" value="${esc(s.device || "")}"
+                   placeholder="yt:https://… | url:https://…m3u8 | pulse:<sink>.monitor"
+                   style="flex:1;min-width:240px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:5px 7px;font:inherit;font-size:11px">
+            <button class="btn" style="padding:5px 10px;font-size:11px" onclick="saveSource('${esc(s.id)}')">Save</button>
+          </div>`).join("");
+      }
     } catch (e) { document.getElementById("sources").textContent = "unavailable"; }
   }
 
@@ -280,7 +274,7 @@
       el.style.borderLeftColor = "var(--warn)";
       el.innerHTML = `<b style="color:var(--warn)">Not capturing</b> — ${esc(a.blocker)}.`
         + `<div style="margin-top:4px;font-size:11.5px">capture switch: <b>${a.captureEnabled ? "on" : "off"}</b>`
-        + ` · feeds bound to a device: <b>${a.capturableFeeds}/${a.feeds}</b>`
+        + ` · feeds with a source: <b>${a.capturableFeeds}/${a.feeds}</b>`
         + ` · whisper model: <b>${a.whisperModelSet ? "set" : "not set"}</b></div>`;
     } catch (e) { el.textContent = "capture state unavailable — is muni-world up?"; }
   }

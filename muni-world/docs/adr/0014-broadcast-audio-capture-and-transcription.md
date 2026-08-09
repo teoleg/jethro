@@ -59,3 +59,22 @@ scoped deliberately narrow:
   so the pipeline is testable offline (the sandbox has no audio device or whisper binary; the Pi does).
 - Deferred: **video/ticker-OCR** (a second phase), speaker **diarisation** quality, and **live/streaming**
   DRM'd capture (the analog/loopback tap sidesteps DRM and is the sanctioned path).
+
+## Amendment (2026-08-09) — acquisition is ONLINE-first, not a hardware tap
+
+Point 2 above assumed a box already playing the feed. In practice that is the whole cost: it needs a TV, a
+display, a sound server and something playing, and it silently records digital silence when any of those is
+absent — which is exactly what happened (a correct PulseAudio setup with no playback stream). Acquisition is
+therefore inverted; nothing else in this ADR changes.
+
+- **A feed's `device` column is its SOURCE**, one of three kinds:
+  `yt:<page>` (a publisher's own live page — `yt-dlp` resolves the current media URL **per capture**, because
+  live CDN URLs expire and must never be stored), `url:<stream>` (a direct HLS/DASH manifest), or
+  `pulse:<name>`/`alsa:<hw>` (the host tap, now the **fallback**).
+- **The default ships configured** — Bloomberg Television's own live stream — so a fresh install captures
+  with nothing to paste and nothing to bind.
+- **Dependency added:** `yt-dlp` on the capture host (`svc.sh setup tv` installs it; `MUNI_YTDLP_BIN` pins
+  the path, since a background process's PATH may exclude `~/.local/bin`). A missing/stale yt-dlp fails
+  loudly at capture with that named cause, never as silence.
+- **Legal posture unchanged** (point 5): the publisher's own published stream, recorded for private
+  analysis, never redistributed, and subject to that publisher's and platform's terms.
