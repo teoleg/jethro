@@ -33,10 +33,41 @@ public final class AudioSourceCatalog {
 
     public AudioSourceCatalog(@Value("${muni.audio.sources.file:}") String file) {
         this.file = file;
+        seedIfMissing(file);
         this.sources = load(file);
         log.info("AudioSourceCatalog loaded {} feed(s) ({} capturable) from {}",
                 sources.size(), sources.stream().filter(AudioSource::capturable).count(),
                 (file == null || file.isBlank()) ? "classpath default" : file);
+    }
+
+    /**
+     * Create the host registry from the committed default the first time it is needed.
+     *
+     * <p>This is what lets the LIVE registry live OUTSIDE git. Binding a device rewrites this file, so if it
+     * is a tracked file every subsequent {@code git pull} aborts with "local changes would be overwritten" —
+     * the operator's own working configuration fighting the repo on every update. Seeding on first use means
+     * the committed CSV stays a pure template and the working copy is the operator's, untracked.
+     */
+    private static void seedIfMissing(String file) {
+        if (file == null || file.isBlank()) {
+            return;                                   // classpath default, read-only — nothing to seed
+        }
+        Path p = Path.of(file);
+        if (Files.exists(p)) {
+            return;
+        }
+        try (InputStream in = AudioSourceCatalog.class.getResourceAsStream("/seeds/audio-sources.csv")) {
+            if (in == null) {
+                return;
+            }
+            if (p.getParent() != null) {
+                Files.createDirectories(p.getParent());
+            }
+            Files.write(p, in.readAllBytes());
+            log.info("seeded a fresh TV source registry at {} from the committed default", p.toAbsolutePath());
+        } catch (IOException e) {
+            log.warn("could not seed the TV source registry at {}: {}", file, e.toString());
+        }
     }
 
     /** All registered feeds (capturable or not) — for the API/UI. */

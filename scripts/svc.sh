@@ -111,9 +111,9 @@ tv_setup() {
   # pass the env file so the setup script WRITES MUNI_WHISPER_BIN/MODEL into it (no more empty vars)
   MUNI_ENV_FILE="$ENV_FILE" bash muni-world/scripts/setup-audio-pi.sh
   # make sure the registry pointer is set too
-  grep -qE "^MUNI_AUDIO_SOURCES_FILE=" "$ENV_FILE" 2>/dev/null || set_env_kv MUNI_AUDIO_SOURCES_FILE muni-world/seeds/audio-sources.csv
+  grep -qE "^MUNI_AUDIO_SOURCES_FILE=" "$ENV_FILE" 2>/dev/null || set_env_kv MUNI_AUDIO_SOURCES_FILE local/audio-sources.csv
   echo "==> whisper paths written to $ENV_FILE. Next: bind a device + enable a feed in"
-  echo "    muni-world/seeds/audio-sources.csv (the registry), then: scripts/svc.sh start tv"
+  echo "    the UI (TV / Audio page → Bind), then: scripts/svc.sh start tv"
 }
 tv_start() {
   set_env_kv MUNI_AUDIO_CAPTURE true

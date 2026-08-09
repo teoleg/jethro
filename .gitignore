@@ -28,3 +28,6 @@ muni-world/os-inbox/
 # puppeteer-core install for the EMMA render script
 muni-world/scripts/node_modules/
 muni-world/scripts/package-lock.json
+
+# muni-world runtime registry (written by the UI Bind button) — never tracked
+local/
