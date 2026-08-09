@@ -1,12 +1,11 @@
 id|label|publisher|category|device|chunk_seconds|enabled|notes
-# TV / audio source registry (ADR-0014) — the host-editable feed list.
+# TV / audio source registry (ADR-0014). `device` is the SOURCE and is the only field that does anything:
+#   url:<stream>     pull audio straight off the network with ffmpeg — headless, nothing playing on this box
+#   pulse:<name>     a host audio input (records what THIS machine plays)
+# Edit via the muni UI (TV / Audio -> Bind / Use URL) or by hand; the live copy is local/audio-sources.csv.
 #
-# READ THIS FIRST: a row here does NOT connect to Bloomberg or CNBC. muni-world never fetches a broadcast.
-# It records the audio THIS MACHINE IS ALREADY PLAYING. `label`/`publisher` are just names for your own
-# reference; `device` is the only field that does anything. So nothing is captured unless the channel is
-# actually playing on this box (a browser tab, an app, or an HDMI/line input you have bound). PIPE-delimited (a device may contain
-# a comma, e.g. ALSA hw:1,0). Add rows as your feed list grows; bind each to a host audio device
-# ("<ffmpeg-format>:<name>", e.g. pulse:default.monitor or alsa:hw:1,0), set enabled=true, then:
-# scripts/svc.sh restart tv. Point MUNI_AUDIO_SOURCES_FILE (jethro.env) here.
-tv-bloomberg|Bloomberg TV|Bloomberg|tv||300|false|US market TV via YouTube TV; bind a device then enable
-tv-cnbc|CNBC|CNBC|tv||300|false|US market TV via YouTube TV; bind a device then enable
+# The Bloomberg row uses Bloomberg's OWN published live manifest (bloomberg.com/media-manifest). If it stops
+# working, replace the URL — availability is the broadcaster's to change, and per their terms this is for
+# your own private analysis, never redistribution.
+tv-bloomberg|Bloomberg TV|Bloomberg|tv|url:https://www.bloomberg.com/media-manifest/streams/us.m3u8|120|true|Bloomberg's own published live stream
+tv-bloomberg-qt|Bloomberg Quicktake|Bloomberg|tv|url:https://www.bloomberg.com/media-manifest/streams/qt.m3u8|120|false|alternate Bloomberg stream

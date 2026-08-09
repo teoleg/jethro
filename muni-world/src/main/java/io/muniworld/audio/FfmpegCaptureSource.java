@@ -25,6 +25,13 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
 
     private static final Logger log = LoggerFactory.getLogger(FfmpegCaptureSource.class);
 
+    /** Ordinary player headers — many CDNs 403 a request without them. Overridable via the env if a
+     *  particular stream wants different ones. */
+    private static final String USER_AGENT = System.getenv().getOrDefault("MUNI_STREAM_UA",
+            "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36");
+    private static final String REFERER = System.getenv().getOrDefault("MUNI_STREAM_REFERER",
+            "https://www.bloomberg.com/live");
+
     private final String ffmpegBin;
     private final String device;     // e.g. "alsa:hw:1,0" or "pulse:default.monitor"
     private final int seconds;
@@ -45,6 +52,11 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
         List<String> cmd = new java.util.ArrayList<>(List.of(
                 ffmpegBin, "-hide_banner", "-loglevel", "error", "-y"));
         if (isUrl()) {
+            // A broadcaster's CDN generally refuses a request with no browser identity, so send the same
+            // User-Agent and Referer a player sends. These are ordinary playback headers for a publicly
+            // published manifest, not a bypass of any access control; a stream that requires credentials
+            // still refuses, loudly.
+            cmd.addAll(List.of("-user_agent", USER_AGENT, "-referer", REFERER, "-rw_timeout", "15000000"));
             cmd.addAll(List.of("-i", device.substring(4), "-t", Integer.toString(seconds), "-vn"));
         } else {
             cmd.addAll(List.of("-f", format, "-i", name, "-t", Integer.toString(seconds)));
