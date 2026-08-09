@@ -78,6 +78,8 @@ public final class MuniAudioController {
                 return out;
             }
             byte[] wav = transcoder.toWav16kMono(raw);
+            var level = io.muniworld.audio.AudioLevel.of(wav);
+            out.put("level", level);
             var audio = io.muniworld.ingest.RawArtifact.of(
                     "browser-tab", file.getOriginalFilename(), "audio/wav", wav);
             Transcript t = transcriber.transcribe(audio);
@@ -87,8 +89,11 @@ public final class MuniAudioController {
             out.put("leads", leads.detect(t).leads());
             out.put("ok", true);
             if (text.isBlank()) {
-                out.put("note", "no speech recognised in this clip — the tab is shared but silent, or the "
-                        + "'Share tab audio' box was not ticked when sharing.");
+                out.put("note", Boolean.TRUE.equals(level.get("silent"))
+                        ? "the shared tab produced SILENCE — 'Share tab audio' was probably not ticked, or "
+                          + "the tab itself is muted/paused."
+                        : "audible sound (peak " + level.get("peakDbfs") + " dBFS) but no speech recognised "
+                          + "— music or noise rather than speech in this clip.");
             }
         } catch (IOException | RuntimeException e) {
             out.put("ok", false);
@@ -189,6 +194,9 @@ public final class MuniAudioController {
             var connector = new io.muniworld.audio.AudioCaptureConnector("audio-test:" + src.id(), source);
             var audio = connector.fetch().get(0);
             out.put("audioBytes", audio.size());
+            // Measure BEFORE transcribing: a silent capture is a device/routing fact, not an ASR verdict.
+            var level = io.muniworld.audio.AudioLevel.of(audio.body());
+            out.put("level", level);
             Transcript t = transcriber.transcribe(audio);
             String text = t.fullText();
             out.put("segments", t.segments().size());
@@ -196,11 +204,12 @@ public final class MuniAudioController {
             out.put("leads", leads.detect(t).leads());
             out.put("ok", true);
             if (text.isBlank()) {
-                // Captured bytes but no words: the device is readable, it just carried no speech. Say which,
-                // rather than leaving an empty string to be read as failure.
-                out.put("note", "captured " + audio.size() + " bytes but recognised no speech — the device "
-                        + "works; check the TV is actually playing and that this device carries ITS audio "
-                        + "(a .monitor source captures what this machine plays).");
+                // Distinguish "nothing to hear" from "heard sound, no words" — they have different fixes.
+                out.put("note", Boolean.TRUE.equals(level.get("silent"))
+                        ? String.valueOf(level.get("note"))
+                        : "captured audible sound (peak " + level.get("peakDbfs") + " dBFS) but recognised no "
+                          + "speech — the device is RIGHT; this was music/noise, or speech too faint or "
+                          + "unclear for the model.");
             }
         } catch (RuntimeException e) {
             out.put("ok", false);

@@ -35,8 +35,10 @@ public final class AudioDeviceScanner {
 
     private static final Logger log = LoggerFactory.getLogger(AudioDeviceScanner.class);
 
-    /** One bindable input: {@code device} is the registry value verbatim. */
-    public record Device(String device, String label, String kind, boolean monitor) {
+    /** One bindable input: {@code device} is the registry value verbatim. {@code active} = audio is
+     *  flowing through this sink RIGHT NOW (PulseAudio state RUNNING), which is the fastest way to tell
+     *  which monitor carries the thing you are playing. */
+    public record Device(String device, String label, String kind, boolean monitor, boolean active) {
     }
 
     /** What the host offers, plus which tools answered (so "none" can be explained honestly). */
@@ -50,7 +52,9 @@ public final class AudioDeviceScanner {
         String pactl = run("pactl", "list", "sources", "short");
         if (pactl != null) {
             tools.add("pactl");
-            devices.addAll(parsePactl(pactl));
+            // Which sinks are RUNNING (something is playing into them) — so the monitor that actually
+            // carries your audio can be pointed at, instead of guessed from a list of near-identical names.
+            devices.addAll(parsePactl(pactl, runningSinks()));
         }
 
         String arecord = run("arecord", "-l");
@@ -63,6 +67,10 @@ public final class AudioDeviceScanner {
         if (tools.isEmpty()) {
             note = "neither pactl (PulseAudio/PipeWire) nor arecord (ALSA) is installed — no way to enumerate "
                    + "audio inputs on this host. Install pulseaudio-utils or alsa-utils.";
+        } else if (devices.stream().noneMatch(Device::active) && devices.stream().anyMatch(Device::monitor)) {
+            note = "audio inputs found, but NO sink is playing anything right now — every monitor would "
+                   + "record digital silence. Start the channel playing on THIS machine first, then rescan; "
+                   + "the device carrying it will be marked 'AUDIO PLAYING NOW'.";
         } else if (devices.isEmpty()) {
             note = "audio tooling is present (" + String.join(", ", tools) + ") but the host exposes no "
                    + "capture input. On a headless box start a sound server, or plug in a capture device.";
@@ -73,7 +81,7 @@ public final class AudioDeviceScanner {
     }
 
     /** {@code index  NAME  MODULE  SPEC  STATE} — the NAME column is what ffmpeg's pulse input takes. */
-    private static List<Device> parsePactl(String out) {
+    private static List<Device> parsePactl(String out, java.util.Set<String> runningSinks) {
         List<Device> devices = new ArrayList<>();
         for (String line : out.split("\r?\n")) {
             String[] cols = line.strip().split("\\s+");
@@ -82,11 +90,31 @@ public final class AudioDeviceScanner {
             }
             String name = cols[1];
             boolean monitor = name.endsWith(".monitor");
+            // A monitor belongs to the sink whose name it prefixes: "<sink>.monitor".
+            boolean active = monitor
+                    && runningSinks.contains(name.substring(0, name.length() - ".monitor".length()));
             devices.add(new Device("pulse:" + name,
-                    name + (monitor ? "  (system-audio loopback — captures what this machine plays)" : ""),
-                    "pulse", monitor));
+                    name + (monitor ? "  (system-audio loopback — captures what this machine plays)" : "")
+                         + (active ? "  ← AUDIO PLAYING NOW" : ""),
+                    "pulse", monitor, active));
         }
         return devices;
+    }
+
+    /** Sink names PulseAudio reports as RUNNING, i.e. something is actively playing into them. */
+    private java.util.Set<String> runningSinks() {
+        java.util.Set<String> running = new java.util.LinkedHashSet<>();
+        String out = run("pactl", "list", "sinks", "short");
+        if (out == null) {
+            return running;
+        }
+        for (String line : out.split("\r?\n")) {
+            String[] cols = line.strip().split("\\s+");
+            if (cols.length >= 2 && line.contains("RUNNING")) {
+                running.add(cols[1]);
+            }
+        }
+        return running;
     }
 
     /** {@code card 1: Device [USB Audio], device 0: USB Audio [USB Audio]} → {@code alsa:hw:1,0}. */
@@ -96,7 +124,7 @@ public final class AudioDeviceScanner {
                 .matcher(out);
         while (m.find()) {
             String dev = "alsa:hw:" + m.group(1) + "," + m.group(3);
-            devices.add(new Device(dev, m.group(2).strip() + " — " + m.group(4).strip(), "alsa", false));
+            devices.add(new Device(dev, m.group(2).strip() + " — " + m.group(4).strip(), "alsa", false, false));
         }
         return devices;
     }

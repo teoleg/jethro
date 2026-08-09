@@ -54,6 +54,40 @@ class AudioCaptureTest {
         assertEquals("audio/wav", new FfmpegCaptureSource("ffmpeg", "pulse:default.monitor", 5).contentType());
     }
 
+    /** Build a 16-bit mono PCM WAV of `samples`, so the level meter is tested on real bytes. */
+    private static byte[] wav(short[] samples) {
+        int dataLen = samples.length * 2;
+        java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(44 + dataLen).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        b.put("RIFF".getBytes(StandardCharsets.US_ASCII)).putInt(36 + dataLen);
+        b.put("WAVE".getBytes(StandardCharsets.US_ASCII));
+        b.put("fmt ".getBytes(StandardCharsets.US_ASCII)).putInt(16).putShort((short) 1).putShort((short) 1)
+         .putInt(16000).putInt(32000).putShort((short) 2).putShort((short) 16);
+        b.put("data".getBytes(StandardCharsets.US_ASCII)).putInt(dataLen);
+        for (short v : samples) { b.putShort(v); }
+        return b.array();
+    }
+
+    @Test
+    void silenceIsMeasuredAsSilenceNotBlamedOnTheRecogniser() {
+        // A PulseAudio monitor with no active stream returns a FULL-LENGTH run of zeros: the capture looks
+        // perfect (right size, ffmpeg ok, whisper ok) and contains no sound. That must be reported as a
+        // device/routing fact, not as an ASR failure.
+        var silent = AudioLevel.of(wav(new short[16000]));
+        assertEquals(Boolean.TRUE, silent.get("silent"), "all-zero PCM is digital silence");
+        assertEquals("-inf", String.valueOf(silent.get("peakDbfs")));
+        assertTrue(String.valueOf(silent.get("note")).contains("DIGITAL SILENCE"));
+
+        // Real signal: half-scale tone → about -6 dBFS peak, and NOT silent.
+        short[] tone = new short[16000];
+        for (int i = 0; i < tone.length; i++) {
+            tone[i] = (short) (16384 * Math.sin(2 * Math.PI * 440 * i / 16000.0));
+        }
+        var loud = AudioLevel.of(wav(tone));
+        assertEquals(Boolean.FALSE, loud.get("silent"), "a half-scale tone is audible");
+        double peak = Double.parseDouble(String.valueOf(loud.get("peakDbfs")));
+        assertTrue(peak > -7.0 && peak < -5.0, "half scale is about -6 dBFS, got " + peak);
+    }
+
     @Test
     void whisperNonSpeechMarkersAreNotTreatedAsHeardSpeech() throws Exception {
         // whisper emits [BLANK_AUDIO] / [MUSIC] / (silence) when it heard NO speech. Carrying those through
