@@ -176,6 +176,34 @@ public final class AudioDeviceScanner {
         }
     }
 
+    /**
+     * Raw, unabridged audio environment AS THIS PROCESS SEES IT — the end of guessing at sink names.
+     * Returns the verbatim output of the pactl queries plus the identity/env that decide WHICH PulseAudio
+     * daemon those queries reach, so a mismatch between "the TV is playing" and "the capture is silent" can
+     * be read off directly instead of inferred. Read-only.
+     */
+    public Map<String, Object> debug() {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("user", System.getProperty("user.name"));
+        out.put("PULSE_SERVER", System.getenv("PULSE_SERVER"));
+        out.put("XDG_RUNTIME_DIR", System.getenv("XDG_RUNTIME_DIR"));
+        out.put("DISPLAY", System.getenv("DISPLAY"));
+        String uid = orDash(run("id", "-u"));
+        out.put("uid", uid);
+        out.put("pulseSocketExists",
+                !uid.equals("-") && java.nio.file.Files.exists(
+                        java.nio.file.Path.of("/run/user/" + uid.strip() + "/pulse/native")));
+        out.put("pactl_info", orDash(run("pactl", "info")));
+        out.put("pactl_sinks", orDash(run("pactl", "list", "sinks", "short")));
+        out.put("pactl_sources", orDash(run("pactl", "list", "sources", "short")));
+        out.put("pactl_sink_inputs", orDash(run("pactl", "list", "sink-inputs", "short")));
+        return out;
+    }
+
+    private static String orDash(String s) {
+        return s == null || s.isBlank() ? "-" : s.strip();
+    }
+
     /** Diagnostic map for the API. */
     public Map<String, Object> asMap() {
         Scan s = scan();

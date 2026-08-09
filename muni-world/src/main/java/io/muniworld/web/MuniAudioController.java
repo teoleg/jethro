@@ -126,6 +126,13 @@ public final class MuniAudioController {
         }
     }
 
+    /** Raw audio environment as the muni-world PROCESS sees it — which PulseAudio daemon, which sinks,
+     *  and what is playing into it. The one call that settles "playing on screen but silent in capture". */
+    @GetMapping("/api/muni/audio/debug")
+    public java.util.Map<String, Object> audioDebug() {
+        return devices.debug();
+    }
+
     /** The audio inputs THIS host exposes, in the {@code <format>:<name>} form the registry takes. */
     @GetMapping("/api/muni/audio/devices")
     public java.util.Map<String, Object> devices() {
