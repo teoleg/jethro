@@ -24,13 +24,16 @@ public final class MuniStatusController {
     private final boolean flywayEnabled;
     private final boolean captureEnabled;
     private final String whisperModel;
+    private final io.muniworld.audio.WhisperCliTranscriber whisper;
 
     public MuniStatusController(MuniLmdbStore lmdb, MuniBondService bonds,
                                 io.muniworld.audio.AudioSourceCatalog audioSources,
+                                io.muniworld.audio.WhisperCliTranscriber whisper,
                                 @Value("${muni.kafka.enabled}") boolean kafkaEnabled,
                                 @Value("${spring.flyway.enabled}") boolean flywayEnabled,
                                 @Value("${muni.audio.capture.enabled:false}") boolean captureEnabled,
                                 @Value("${muni.audio.whisper.model:}") String whisperModel) {
+        this.whisper = whisper;
         this.lmdb = lmdb;
         this.bonds = bonds;
         this.audioSources = audioSources;
@@ -67,18 +70,20 @@ public final class MuniStatusController {
         // second of audio is captured, and which one is blocking. Reported, never inferred — the capture
         // loop is silent when idle, so without this the UI cannot say why nothing is happening.
         int capturable = audioSources.capturable().size();
+        // The ASR gate is asked of the TRANSCRIBER, which checks the model file and binary actually exist.
+        // A non-blank config value proves nothing: "tiny.en" is a model NAME, not a path, and reporting it
+        // as "model: set" said green while every transcription failed with No such file or directory.
+        String asrBlocker = whisper.blocker();
         Map<String, Object> audio = new LinkedHashMap<>();
         audio.put("captureEnabled", captureEnabled);
         audio.put("feeds", audioSources.all().size());
         audio.put("capturableFeeds", capturable);
-        audio.put("whisperModelSet", !whisperModel.isBlank());
+        audio.put("whisperModelSet", asrBlocker == null);
         audio.put("blocker", !captureEnabled
                 ? "capture is OFF (MUNI_AUDIO_CAPTURE=false) — run `svc.sh start tv`"
                 : capturable == 0
                   ? "no feed is enabled AND bound to a host audio device — edit the TV source registry"
-                  : whisperModel.isBlank()
-                    ? "no whisper model configured (MUNI_WHISPER_MODEL) — run `svc.sh setup tv`"
-                    : null);
+                  : asrBlocker);
         out.put("audio", audio);
         return out;
     }

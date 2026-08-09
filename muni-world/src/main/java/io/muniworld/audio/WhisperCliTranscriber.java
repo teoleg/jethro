@@ -30,8 +30,13 @@ public final class WhisperCliTranscriber implements Transcriber {
 
     private static final Logger log = LoggerFactory.getLogger(WhisperCliTranscriber.class);
 
+    /** Where {@code muni-world/scripts/setup-audio-pi.sh} builds whisper.cpp (its {@code WHISPER_DIR}). */
+    private static final Path WHISPER_DIR = Path.of(System.getProperty("user.home", "/root"), "whisper.cpp");
+
     private final String bin;
     private final String modelPath;
+    private final String configuredBin;
+    private final String configuredModel;
     private final long timeoutSec;
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -39,9 +44,92 @@ public final class WhisperCliTranscriber implements Transcriber {
             @Value("${muni.audio.whisper.bin:whisper-cli}") String bin,
             @Value("${muni.audio.whisper.model:}") String modelPath,
             @Value("${muni.audio.whisper.timeout-sec:600}") long timeoutSec) {
-        this.bin = bin;
-        this.modelPath = modelPath;
+        this.configuredBin = bin == null ? "" : bin.strip();
+        this.configuredModel = modelPath == null ? "" : modelPath.strip();
+        this.bin = resolveBin(this.configuredBin);
+        this.modelPath = resolveModel(this.configuredModel);
         this.timeoutSec = timeoutSec;
+        if (!this.bin.equals(this.configuredBin) || !this.modelPath.equals(this.configuredModel)) {
+            log.info("whisper resolved: bin '{}' -> '{}', model '{}' -> '{}'",
+                    configuredBin, this.bin, configuredModel, this.modelPath);
+        }
+    }
+
+    /**
+     * Turn the configured binary into something executable. A bare name (the shipped default
+     * {@code whisper-cli}) only works if it is on the PATH of the muni-world PROCESS — which it is not when
+     * whisper.cpp was built into {@code ~/whisper.cpp} by our own setup script, the usual case. So: use an
+     * explicit path as given, else search PATH, else fall back to the layout that script produces. Resolution
+     * is logged; nothing is guessed beyond the location we ourselves created.
+     */
+    private static String resolveBin(String configured) {
+        if (configured.isEmpty()) {
+            return configured;
+        }
+        if (configured.contains("/")) {
+            return configured;                       // explicit path — the operator's choice, used verbatim
+        }
+        for (String dir : System.getenv().getOrDefault("PATH", "").split(":")) {
+            if (!dir.isBlank() && Files.isExecutable(Path.of(dir, configured))) {
+                return configured;                   // on PATH — the bare name works
+            }
+        }
+        for (String candidate : new String[] {configured, "whisper-cli", "main"}) {
+            Path p = WHISPER_DIR.resolve("build/bin").resolve(candidate);
+            if (Files.isExecutable(p)) {
+                return p.toString();
+            }
+        }
+        return configured;                           // unresolved — transcribe() reports it precisely
+    }
+
+    /**
+     * Turn the configured model into a real {@code .bin} file. Operators naturally write the model NAME
+     * ({@code tiny.en}, {@code base.en}) because that is what the setup script's WHISPER_MODEL_NAME takes,
+     * but whisper-cli wants the ggml file. Map a bare name onto the file the setup script downloaded.
+     */
+    private static String resolveModel(String configured) {
+        if (configured.isEmpty() || Files.isRegularFile(Path.of(configured))) {
+            return configured;                       // empty (= not configured) or already a real file
+        }
+        if (!configured.contains("/")) {
+            Path models = WHISPER_DIR.resolve("models");
+            for (Path p : new Path[] {models.resolve("ggml-" + configured + ".bin"),
+                                      models.resolve(configured),
+                                      models.resolve(configured + ".bin")}) {
+                if (Files.isRegularFile(p)) {
+                    return p.toString();
+                }
+            }
+        }
+        return configured;                           // unresolved — reported, never silently substituted
+    }
+
+    /** Null when transcription can run; otherwise the single reason it cannot, naming the value in play. */
+    public String blocker() {
+        if (configuredModel.isEmpty()) {
+            return "no whisper model configured (MUNI_WHISPER_MODEL) — run `svc.sh setup tv`";
+        }
+        if (!Files.isRegularFile(Path.of(modelPath))) {
+            return "whisper model file not found: '" + configuredModel + "'"
+                   + (modelPath.equals(configuredModel) ? "" : " (tried '" + modelPath + "')")
+                   + " — MUNI_WHISPER_MODEL must be the PATH to a ggml-*.bin file";
+        }
+        if (bin.contains("/") ? !Files.isExecutable(Path.of(bin)) : !onPath(bin)) {
+            return "whisper binary not found: '" + configuredBin + "'"
+                   + (bin.equals(configuredBin) ? "" : " (tried '" + bin + "')")
+                   + " — set MUNI_WHISPER_BIN to the whisper-cli path";
+        }
+        return null;
+    }
+
+    private static boolean onPath(String name) {
+        for (String dir : System.getenv().getOrDefault("PATH", "").split(":")) {
+            if (!dir.isBlank() && Files.isExecutable(Path.of(dir, name))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
