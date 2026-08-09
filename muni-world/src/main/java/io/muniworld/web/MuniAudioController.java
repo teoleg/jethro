@@ -29,13 +29,47 @@ public final class MuniAudioController {
     private final RecentLeadsStore recent;
     private final AudioSourceCatalog sources;
     private final RecentTranscriptsStore transcripts;
+    private final io.muniworld.audio.AudioDeviceScanner devices;
 
     public MuniAudioController(TranscriptLeadService leads, RecentLeadsStore recent,
-                              AudioSourceCatalog sources, RecentTranscriptsStore transcripts) {
+                              AudioSourceCatalog sources, RecentTranscriptsStore transcripts,
+                              io.muniworld.audio.AudioDeviceScanner devices) {
         this.leads = leads;
         this.recent = recent;
         this.sources = sources;
         this.transcripts = transcripts;
+        this.devices = devices;
+    }
+
+    /** The audio inputs THIS host exposes, in the {@code <format>:<name>} form the registry takes. */
+    @GetMapping("/api/muni/audio/devices")
+    public java.util.Map<String, Object> devices() {
+        return devices.asMap();
+    }
+
+    /**
+     * Bind a feed to a host device and enable it — the registry edit, done from the UI. Persists to the same
+     * host registry file an operator would edit by hand and reloads, so the next capture pass picks it up
+     * with no restart.
+     */
+    @PostMapping("/api/muni/audio/sources/{feedId}/bind")
+    public java.util.Map<String, Object> bind(
+            @org.springframework.web.bind.annotation.PathVariable String feedId,
+            @RequestParam String device,
+            @RequestParam(defaultValue = "true") boolean enabled) {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        try {
+            sources.bind(feedId, device, enabled);
+            out.put("ok", true);
+            out.put("feed", feedId);
+            out.put("device", device);
+            out.put("capturableFeeds", sources.capturable().size());
+            out.put("registry", sources.file());
+        } catch (RuntimeException e) {
+            out.put("ok", false);                     // a failed save must never read as saved
+            out.put("error", e.getMessage());
+        }
+        return out;
     }
 
     /** The raw recent transcripts — "what did it hear", to eyeball against the TV (ADR-0014 validation). */

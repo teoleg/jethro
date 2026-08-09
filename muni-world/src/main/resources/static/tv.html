@@ -61,8 +61,10 @@
 
   <div class="section" style="margin-top:22px">
     <h2 style="font-size:16px">TV sources <span id="srcCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">Registry of audio feeds — a feed captures only when enabled and bound to a host device.</div>
+    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">Registry of audio feeds — a feed captures only when enabled and bound to a host device. Pick a device below and click <b>Bind</b>; it is written to the registry file, no hand-editing and no restart.</div>
+    <div id="deviceNote" style="color:var(--dim);font-size:11.5px;margin-bottom:8px"></div>
     <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
+    <div id="bindMsg" style="color:var(--dim);font-size:11.5px;margin-top:8px"></div>
   </div>
 
   <div class="section" style="margin-top:28px">
@@ -81,6 +83,34 @@
 <script>
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
 
+  // The host's real audio inputs, fetched once per refresh so each feed row can offer a picker.
+  let DEVICES = [];
+  async function loadDevices() {
+    const note = document.getElementById("deviceNote");
+    try {
+      const d = await (await fetch("/api/muni/audio/devices", { cache: "no-store" })).json();
+      DEVICES = d.devices || [];
+      note.innerHTML = d.note
+        ? `<span style="color:var(--warn)">No bindable device: ${esc(d.note)}</span>`
+        : `${DEVICES.length} audio input(s) detected via ${esc((d.tools || []).join(", "))}.`;
+    } catch (e) { DEVICES = []; note.textContent = "device scan unavailable"; }
+  }
+
+  async function bindFeed(id) {
+    const sel = document.getElementById("dev-" + id);
+    const msg = document.getElementById("bindMsg");
+    if (!sel || !sel.value) { msg.textContent = "pick a device first."; return; }
+    msg.textContent = "binding " + id + " …";
+    try {
+      const r = await (await fetch(`/api/muni/audio/sources/${encodeURIComponent(id)}/bind`
+        + `?device=${encodeURIComponent(sel.value)}&enabled=true`, { method: "POST" })).json();
+      msg.innerHTML = r.ok
+        ? `<span style="color:var(--up)">bound ${esc(id)} → ${esc(r.device)} · ${r.capturableFeeds} feed(s) now capturable · saved to ${esc(r.registry)}</span>`
+        : `<span style="color:var(--down)">${esc(r.error || "bind failed")}</span>`;
+      loadSources(); loadCaptureState();
+    } catch (e) { msg.innerHTML = '<span style="color:var(--down)">bind request failed</span>'; }
+  }
+
   async function loadSources() {
     try {
       const ss = await (await fetch("/api/muni/audio/sources", { cache: "no-store" })).json();
@@ -88,16 +118,26 @@
       document.getElementById("srcCount").textContent = ss.length ? "· " + cap + " capturable / " + ss.length : "";
       const el = document.getElementById("sources");
       if (!ss.length) { el.textContent = "no feeds registered"; return; }
-      const cols = ["Feed", "Publisher", "Category", "Device", "Chunk", "Status"];
+      const cols = ["Feed", "Publisher", "Device", "Chunk", "Status", "Bind to a host device"];
       el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
         + ss.map(s => {
           const capturable = s.enabled && s.device;
           const status = capturable ? '<span style="color:var(--up)">capturing</span>'
             : s.enabled ? '<span style="color:var(--warn)">no device bound</span>'
             : '<span style="color:var(--dim)">disabled</span>';
+          // Monitor sources first — the loopback of what the machine plays is what captures TV audio.
+          const opts = DEVICES.length
+            ? DEVICES.slice().sort((a, b) => (b.monitor ? 1 : 0) - (a.monitor ? 1 : 0))
+                .map(d => `<option value="${esc(d.device)}"${d.device === s.device ? " selected" : ""}>${esc(d.label)}</option>`).join("")
+            : "";
+          const picker = DEVICES.length
+            ? `<select id="dev-${esc(s.id)}" style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:5px 7px;font:inherit;font-size:11px;max-width:260px">
+                 <option value="">— pick a device —</option>${opts}</select>
+               <button class="btn" style="padding:5px 10px;font-size:11px" onclick="bindFeed('${esc(s.id)}')">Bind</button>`
+            : '<span style="color:var(--dim);font-size:11px">no device detected on this host</span>';
           return `<tr><td style="color:var(--txt)">${esc(s.label)}</td><td>${esc(s.publisher)}</td>
-            <td>${esc(s.category)}</td><td class="mono" style="font-size:11px">${esc(s.device || "—")}</td>
-            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td></tr>`;
+            <td class="mono" style="font-size:11px">${esc(s.device || "—")}</td>
+            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td><td>${picker}</td></tr>`;
         }).join("") + "</tbody></table>";
     } catch (e) { document.getElementById("sources").textContent = "unavailable"; }
   }
@@ -160,7 +200,9 @@
   }
   loadCaptureState(); setInterval(loadCaptureState, 10000);
 
-  loadSources(); setInterval(loadSources, 30000);
+  // Devices first, so the first render of the feed table already has pickers populated.
+  loadDevices().then(loadSources);
+  setInterval(() => loadDevices().then(loadSources), 30000);
   loadTranscripts(); setInterval(loadTranscripts, 8000);
   loadLeads(); setInterval(loadLeads, 15000);
 </script>
