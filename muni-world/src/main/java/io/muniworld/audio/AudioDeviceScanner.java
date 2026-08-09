@@ -41,8 +41,11 @@ public final class AudioDeviceScanner {
     public record Device(String device, String label, String kind, boolean monitor, boolean active) {
     }
 
-    /** What the host offers, plus which tools answered (so "none" can be explained honestly). */
-    public record Scan(List<Device> devices, List<String> tools, String note) {
+    /** What the host offers, plus which tools answered (so "none" can be explained honestly).
+     *  {@code playbackStreams} = apps currently playing into THIS pulse daemon; {@code pulseServer} = which
+     *  daemon that is. Together they separate "nothing is playing" from "playing, but into another daemon". */
+    public record Scan(List<Device> devices, List<String> tools, String note,
+                       int playbackStreams, String pulseServer) {
     }
 
     public Scan scan() {
@@ -63,8 +66,19 @@ public final class AudioDeviceScanner {
             devices.addAll(parseArecord(arecord));
         }
 
+        int streams = playbackStreams();
+        String pulseServer = System.getenv().getOrDefault("PULSE_SERVER", "(default for this process)");
+
         String note;
-        if (tools.isEmpty()) {
+        if (!devices.isEmpty() && streams == 0 && devices.stream().anyMatch(Device::monitor)) {
+            // The decisive case: monitors exist, nothing is playing into THIS daemon. If the TV is plainly
+            // playing on screen, the daemon is the wrong one — not the sink.
+            note = "this process's PulseAudio (" + pulseServer + ") reports NO application playing audio. "
+                   + "If the channel IS playing on this machine, muni-world is attached to a DIFFERENT "
+                   + "PulseAudio daemon than your desktop (typical when started over SSH) — restart it with "
+                   + "scripts/svc.sh restart muni, which now points at the desktop socket, or use "
+                   + "\"Share TV tab\" above, which bypasses PulseAudio entirely.";
+        } else if (tools.isEmpty()) {
             note = "neither pactl (PulseAudio/PipeWire) nor arecord (ALSA) is installed — no way to enumerate "
                    + "audio inputs on this host. Install pulseaudio-utils or alsa-utils.";
         } else if (devices.stream().noneMatch(Device::active) && devices.stream().anyMatch(Device::monitor)) {
@@ -77,7 +91,7 @@ public final class AudioDeviceScanner {
         } else {
             note = null;
         }
-        return new Scan(devices, tools, note);
+        return new Scan(devices, tools, note, streams, pulseServer);
     }
 
     /** {@code index  NAME  MODULE  SPEC  STATE} — the NAME column is what ffmpeg's pulse input takes. */
@@ -99,6 +113,21 @@ public final class AudioDeviceScanner {
                     "pulse", monitor, active));
         }
         return devices;
+    }
+
+    /** How many applications are currently playing audio into this daemon (pactl sink-inputs). */
+    private int playbackStreams() {
+        String out = run("pactl", "list", "sink-inputs", "short");
+        if (out == null) {
+            return 0;
+        }
+        int n = 0;
+        for (String line : out.split("\r?\n")) {
+            if (!line.isBlank()) {
+                n++;
+            }
+        }
+        return n;
     }
 
     /** Sink names PulseAudio reports as RUNNING, i.e. something is actively playing into them. */
@@ -153,6 +182,8 @@ public final class AudioDeviceScanner {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("devices", s.devices());
         out.put("tools", s.tools());
+        out.put("playbackStreams", s.playbackStreams());
+        out.put("pulseServer", s.pulseServer());
         out.put("note", s.note());
         log.info("audio device scan: {} device(s) via {}", s.devices().size(),
                 s.tools().isEmpty() ? "no tooling" : String.join("+", s.tools()));

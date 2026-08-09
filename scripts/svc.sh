@@ -94,6 +94,18 @@ muni_start() {
   ./gradlew -q :muni-world:bootJar
   mkdir -p logs
   local cap="${MUNI_AUDIO_CAPTURE:-false}"
+  # Point at the DESKTOP session's PulseAudio. Started over SSH, this process has no session bus, so
+  # pactl/ffmpeg autospawn (or attach to) a DIFFERENT pulse daemon than the one the browser plays into:
+  # it then lists the hardware sinks correctly and hears nothing on them forever — a capture that reads
+  # as digital silence while the TV is plainly playing. Same user, so the desktop's socket is ours to use.
+  if [ -z "${PULSE_SERVER:-}" ] && [ -S "/run/user/$(id -u)/pulse/native" ]; then
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    export PULSE_SERVER="unix:/run/user/$(id -u)/pulse/native"
+    echo "==> audio: using the desktop PulseAudio at $PULSE_SERVER"
+  elif [ -z "${PULSE_SERVER:-}" ]; then
+    echo "==> audio: no desktop PulseAudio socket at /run/user/$(id -u)/pulse/native —" \
+         "capture will only see whatever daemon this shell reaches (set PULSE_SERVER to override)"
+  fi
   echo "==> starting muni-world on :$MUNI_PORT (independent; boots offline — PG/Kafka opt-in; TV capture=$cap)"
   # lmdbjava (JNR) needs the NIO opens, same as the jethro app. The MUNI_*/audio env is inherited from
   # local.env (exported above), so the capture loop reads its config with no extra plumbing here.
