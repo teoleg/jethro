@@ -45,11 +45,18 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
         String name = device.substring(sep + 1);     // ffmpeg -i
         Path out = null;
         try {
-            out = Files.createTempFile("muni-capture", ".ogg");
-            // -t <seconds> bounded recording; libopus mono 16k — plenty for speech, tiny artifacts.
+            out = Files.createTempFile("muni-capture", ".wav");
+            // -t <seconds> bounded recording, 16 kHz MONO 16-bit PCM WAV.
+            //
+            // The format is NOT a preference — it is whisper.cpp's input contract: whisper-cli reads 16 kHz
+            // mono PCM WAV and nothing else (it bundles no decoder). This used to write Opus in an .ogg
+            // container ("tiny artifacts"), which whisper cannot open, so EVERY transcription failed with
+            // "transcription failed for audio-…" — the capture half worked, the ASR half could never
+            // succeed, and the chunk artifact is transient anyway (transcribed, then deleted), so the size
+            // saving bought nothing. ~32 KB/s here: a 300 s chunk is ~9.6 MB, held only until transcription.
             List<String> cmd = List.of(ffmpegBin, "-hide_banner", "-loglevel", "error", "-y",
                     "-f", format, "-i", name, "-t", Integer.toString(seconds),
-                    "-ac", "1", "-ar", "16000", "-c:a", "libopus", out.toString());
+                    "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", out.toString());
             Process p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
             if (!p.waitFor(seconds + 30L, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
@@ -76,7 +83,7 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
 
     @Override
     public String contentType() {
-        return "audio/ogg";
+        return "audio/wav";        // matches what captureChunk() writes (16 kHz mono PCM WAV)
     }
 
     @Override

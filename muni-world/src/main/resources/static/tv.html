@@ -138,6 +138,8 @@
     try {
       const ss = await (await fetch("/api/muni/audio/sources", { cache: "no-store" })).json();
       const cap = ss.filter(s => s.enabled && s.device).length;
+      const live = ss.filter(s => s.enabled && s.device);
+      CHUNK_SECS = live.length ? Math.max(...live.map(s => s.chunkSeconds || 0)) : 0;
       document.getElementById("srcCount").textContent = ss.length ? "· " + cap + " capturable / " + ss.length : "";
       const el = document.getElementById("sources");
       if (!ss.length) { el.textContent = "no feeds registered"; return; }
@@ -176,7 +178,7 @@
       document.getElementById("txCount").textContent = ts.length ? "· " + ts.length : "";
       const el = document.getElementById("transcripts");
       if (!ts.length) {
-        el.innerHTML = '<span style="font-size:12.5px">no transcript yet — enable a feed and run <code>svc.sh tv start</code>.</span>';
+        el.innerHTML = '<span style="font-size:12.5px">' + emptyReason("transcript") + '</span>';
         return;
       }
       el.innerHTML = ts.map(e => {
@@ -195,7 +197,7 @@
       document.getElementById("leadCount").textContent = ls.length ? "· " + ls.length : "";
       const el = document.getElementById("leads");
       if (!ls.length) {
-        el.innerHTML = '<span style="font-size:12.5px">no leads yet — the capture loop is off. Enable it where an audio device is bound.</span>';
+        el.innerHTML = '<span style="font-size:12.5px">' + emptyReason("lead") + '</span>';
         return;
       }
       el.innerHTML = ls.map(e => {
@@ -209,11 +211,30 @@
     } catch (e) { document.getElementById("leads").textContent = "unavailable"; }
   }
 
+  // Live capture state, shared by the banner AND the empty states below — so no message can assert
+  // "the capture loop is off" while the loop is in fact running (they used to be hardcoded and did).
+  let AUDIO = {};
+  let CHUNK_SECS = 0;
+
+  /** What an empty transcript/leads list MEANS right now: blocked, or simply not enough elapsed time. */
+  function emptyReason(kind) {
+    if (AUDIO.blocker) {
+      return `not capturing — ${esc(AUDIO.blocker)}.`;
+    }
+    if (AUDIO.captureEnabled && AUDIO.capturableFeeds > 0) {
+      const secs = CHUNK_SECS || 300;
+      return `capturing — no ${kind} yet because the first chunk is still recording `
+        + `(${secs}s per chunk, then transcription). Use <b>▶ Test 8s</b> above for an immediate check.`;
+    }
+    return `no ${kind} yet.`;
+  }
+
   // Which of the three gates (capture switch → a device-bound enabled feed → a whisper model) is blocking.
   async function loadCaptureState() {
     const el = document.getElementById("captureState");
     try {
       const a = (await (await fetch("/api/muni/status", { cache: "no-store" })).json()).audio || {};
+      AUDIO = a;
       if (!a.blocker) {
         el.style.borderLeftColor = "var(--up)";
         el.innerHTML = `<b style="color:var(--up)">Capturing</b> — ${a.capturableFeeds} of ${a.feeds} feed(s) live.`;
@@ -226,13 +247,17 @@
         + ` · whisper model: <b>${a.whisperModelSet ? "set" : "not set"}</b></div>`;
     } catch (e) { el.textContent = "capture state unavailable — is muni-world up?"; }
   }
-  loadCaptureState(); setInterval(loadCaptureState, 10000);
+  // Capture state FIRST, then the panels whose empty message depends on it. Racing them means an empty
+  // list can render before AUDIO is known and fall back to a bare "no lead yet" — losing the very
+  // explanation this page exists to give. Intervals afterwards are independent (AUDIO is populated by then).
+  loadCaptureState().then(() => { loadTranscripts(); loadLeads(); });
+  setInterval(loadCaptureState, 10000);
 
   // Devices first, so the first render of the feed table already has pickers populated.
   loadDevices().then(loadSources);
   setInterval(() => loadDevices().then(loadSources), 30000);
-  loadTranscripts(); setInterval(loadTranscripts, 8000);
-  loadLeads(); setInterval(loadLeads, 15000);
+  setInterval(loadTranscripts, 8000);
+  setInterval(loadLeads, 15000);
 </script>
 </body>
 </html>

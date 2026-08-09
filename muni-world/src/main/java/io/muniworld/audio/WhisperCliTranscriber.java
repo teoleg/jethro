@@ -53,7 +53,9 @@ public final class WhisperCliTranscriber implements Transcriber {
         Path work = null;
         try {
             work = Files.createTempDirectory("muni-asr");
-            Path in = work.resolve("audio");
+            // .wav extension, not a bare "audio": whisper-cli takes 16 kHz mono PCM WAV, and a name that
+            // states the format keeps the failure legible when something upstream hands over another codec.
+            Path in = work.resolve("audio.wav");
             Files.write(in, audio.body());
             String outBase = work.resolve("out").toString();
 
@@ -79,7 +81,12 @@ public final class WhisperCliTranscriber implements Transcriber {
             if (e instanceof InterruptedException) {
                 Thread.currentThread().interrupt();
             }
-            throw new RuntimeException("transcription failed for " + audio.sourceId(), e);
+            // Carry the ROOT CAUSE in the message, not just in the cause chain: callers (the API, the UI)
+            // surface getMessage(), so a bare "transcription failed for audio-test:tv-bloomberg" told the
+            // operator nothing while whisper's own exit code + stderr — the actual diagnosis — were one
+            // unread link away. Include the model/binary in play too, since a wrong path is the usual cause.
+            throw new RuntimeException("transcription failed for " + audio.sourceId()
+                    + " [bin=" + bin + ", model=" + modelPath + "]: " + e.getMessage(), e);
         } finally {
             deleteQuietly(work);
         }
