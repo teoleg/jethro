@@ -80,7 +80,7 @@
 
   <div class="section" style="margin-top:28px">
     <h2 style="font-size:16px">Live transcript <span id="txCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">What the capture loop heard — compare it to what's on the TV.</div>
+    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">What the capture loop heard — compare it to the live broadcast.</div>
     <div id="transcripts" style="color:var(--dim);font-size:13px">loading…</div>
   </div>
 
@@ -99,15 +99,20 @@
       const ss = await (await fetch("/api/muni/audio/sources", { cache: "no-store" })).json();
       const live = ss.filter(s => s.enabled && s.device);
       CHUNK_SECS = live.length ? Math.max(...live.map(s => s.chunkSeconds || 0)) : 0;
-      document.getElementById("srcCount").textContent = ss.length ? "· " + live.length + " / " + ss.length + " live" : "";
+      document.getElementById("srcCount").textContent = ss.length ? "· " + live.length + " configured" : "";
       const el = document.getElementById("sources");
       if (!ss.length) { el.textContent = "no feeds registered"; return; }
       const cols = ["Feed", "Publisher", "Source", "Chunk", "Status"];
       el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
         + ss.map(s => {
-          const status = (s.enabled && s.device) ? '<span style="color:var(--up)">streaming</span>'
-            : s.enabled ? '<span style="color:var(--warn)">no source set</span>'
-            : '<span style="color:var(--dim)">disabled</span>';
+          // A configured row is NOT a streaming row: the loop must also be running. Showing green
+          // "streaming" next to a banner that says "Not capturing" is the page contradicting itself —
+          // exactly what the capture-state banner exists to prevent.
+          const status = !(s.enabled && s.device)
+            ? (s.enabled ? '<span style="color:var(--warn)">no source set</span>'
+                         : '<span style="color:var(--dim)">disabled</span>')
+            : AUDIO.blocker ? '<span style="color:var(--warn)">configured — not streaming</span>'
+            : '<span style="color:var(--up)">streaming</span>';
           return `<tr><td style="color:var(--txt)">${esc(s.label)}</td><td>${esc(s.publisher)}</td>
             <td class="mono" style="font-size:11px;max-width:380px;overflow:hidden;text-overflow:ellipsis">${esc(s.device || "—")}</td>
             <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td></tr>`;
@@ -194,10 +199,8 @@
   // Capture state FIRST, then the panels whose empty message depends on it. Racing them means an empty
   // list can render before AUDIO is known and fall back to a bare "no lead yet" — losing the very
   // explanation this page exists to give. Intervals afterwards are independent (AUDIO is populated by then).
-  loadCaptureState().then(() => { loadTranscripts(); loadLeads(); });
+  loadCaptureState().then(() => { loadSources(); loadTranscripts(); loadLeads(); });
   setInterval(loadCaptureState, 10000);
-
-  loadSources();
   setInterval(loadSources, 30000);
   setInterval(loadTranscripts, 8000);
   setInterval(loadLeads, 15000);
