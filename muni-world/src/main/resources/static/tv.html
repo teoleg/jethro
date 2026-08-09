@@ -57,9 +57,10 @@
   <h1>TV / Audio processing</h1>
   <!-- What this page IS (audio only, leads only). The LIVE state is the banner below — this one must never
        claim capture is or isn't happening, or it contradicts it (it used to say "it does nothing here"). -->
-  <div class="banner">Audio only — there is no video, and the broadcast is never streamed or stored here: a
-    chunk is captured, transcribed locally, and discarded. What you see below is what it <b>heard</b>, as
-    <b>leads to verify</b> — never a number that feeds risk/PnL.</div>
+  <div class="banner">Nothing here is recorded or restreamed: an audio chunk is captured, transcribed
+    locally and discarded, and the screen view is a still grabbed on request. The broadcast itself is never
+    stored or served. What you see is what it <b>heard</b>, as <b>leads to verify</b> — never a number that
+    feeds risk/PnL.</div>
   <!-- The capture loop is SILENT when idle, so state it plainly: is capture on, and if nothing is happening, which gate is blocking. -->
   <div id="captureState" class="banner" style="border-left-color:var(--dim)">checking capture state…</div>
 
@@ -69,6 +70,18 @@
     <div id="deviceNote" style="color:var(--dim);font-size:11.5px;margin-bottom:8px"></div>
     <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
     <div id="bindMsg" style="color:var(--dim);font-size:11.5px;margin-top:8px"></div>
+  </div>
+
+  <!-- The visual half of the ADR-0014 check: a still of what is on screen, beside what the ASR heard. -->
+  <div class="section" style="margin-top:28px">
+    <h2 style="font-size:16px">Screen <span id="screenNote" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">A still of this machine's screen — compare it with the transcript below. Stills only, nothing recorded.</div>
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <button class="btn" style="padding:5px 10px;font-size:11px" onclick="grabFrame()">⟳ Refresh</button>
+      <label style="color:var(--dim);font-size:11.5px"><input type="checkbox" id="autoFrame"> auto-refresh (3s)</label>
+    </div>
+    <img id="screenFrame" alt="" style="max-width:100%;border:1px solid var(--line);border-radius:10px;display:none">
+    <div id="screenErr" style="color:var(--dim);font-size:11.5px"></div>
   </div>
 
   <div class="section" style="margin-top:28px">
@@ -114,6 +127,32 @@
       loadSources(); loadCaptureState();
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">bind request failed</span>'; }
   }
+
+  // A still of the screen. On failure the <img> errors, so read the reason from /video/status rather
+  // than leaving a broken image icon with no explanation.
+  async function grabFrame() {
+    const img = document.getElementById("screenFrame");
+    const err = document.getElementById("screenErr");
+    const note = document.getElementById("screenNote");
+    try {
+      const st = await (await fetch("/api/muni/video/status", { cache: "no-store" })).json();
+      note.textContent = st.device ? "· " + st.device : "";
+      if (st.blocker) {
+        img.style.display = "none";
+        err.innerHTML = `<span style="color:var(--warn)">${esc(st.blocker)}</span>`;
+        return;
+      }
+      // cache-buster: each grab is a fresh frame, never a cached one
+      img.onerror = () => {
+        img.style.display = "none";
+        err.innerHTML = '<span style="color:var(--down)">screen grab failed — the display exists but ffmpeg '
+          + 'could not read it (is the x11grab input right, and does this user own the session?).</span>';
+      };
+      img.onload = () => { img.style.display = "block"; err.textContent = ""; };
+      img.src = "/api/muni/video/frame?t=" + Date.now();
+    } catch (e) { err.textContent = "screen status unavailable"; }
+  }
+  setInterval(() => { if (document.getElementById("autoFrame").checked) grabFrame(); }, 3000);
 
   // Capture a few seconds NOW and show what it heard — proves the device works without waiting a chunk.
   async function testFeed(id) {
@@ -251,6 +290,7 @@
   // list can render before AUDIO is known and fall back to a bare "no lead yet" — losing the very
   // explanation this page exists to give. Intervals afterwards are independent (AUDIO is populated by then).
   loadCaptureState().then(() => { loadTranscripts(); loadLeads(); });
+  grabFrame();
   setInterval(loadCaptureState, 10000);
 
   // Devices first, so the first render of the feed table already has pickers populated.

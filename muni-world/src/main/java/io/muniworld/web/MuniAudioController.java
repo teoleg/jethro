@@ -31,14 +31,17 @@ public final class MuniAudioController {
     private final RecentTranscriptsStore transcripts;
     private final io.muniworld.audio.AudioDeviceScanner devices;
     private final io.muniworld.audio.Transcriber transcriber;
+    private final io.muniworld.audio.ScreenFrameGrabber screen;
     private final String ffmpegBin;
 
     public MuniAudioController(TranscriptLeadService leads, RecentLeadsStore recent,
                               AudioSourceCatalog sources, RecentTranscriptsStore transcripts,
                               io.muniworld.audio.AudioDeviceScanner devices,
                               io.muniworld.audio.Transcriber transcriber,
+                              io.muniworld.audio.ScreenFrameGrabber screen,
                               @org.springframework.beans.factory.annotation.Value("${muni.audio.ffmpeg.bin:ffmpeg}")
                               String ffmpegBin) {
+        this.screen = screen;
         this.leads = leads;
         this.recent = recent;
         this.sources = sources;
@@ -46,6 +49,30 @@ public final class MuniAudioController {
         this.devices = devices;
         this.transcriber = transcriber;
         this.ffmpegBin = ffmpegBin;
+    }
+
+    /** Can this box show its screen, and from which device — so the UI can explain a missing picture. */
+    @GetMapping("/api/muni/video/status")
+    public java.util.Map<String, Object> screenStatus() {
+        return screen.status();
+    }
+
+    /**
+     * One still frame of this machine's screen — the visual half of the ADR-0014 check: see what is on the
+     * TV next to what the ASR heard. A still, never a stream, and nothing is stored.
+     */
+    @GetMapping(value = "/api/muni/video/frame", produces = org.springframework.http.MediaType.IMAGE_JPEG_VALUE)
+    public org.springframework.http.ResponseEntity<byte[]> screenFrame() {
+        try {
+            return org.springframework.http.ResponseEntity.ok()
+                    .cacheControl(org.springframework.http.CacheControl.noStore())
+                    .body(screen.grab());
+        } catch (RuntimeException e) {
+            // 503 + the reason as text: the <img> fails and the page reads the reason from /video/status.
+            return org.springframework.http.ResponseEntity.status(503)
+                    .header("X-Screen-Error", String.valueOf(e.getMessage()).replaceAll("[\\r\\n]+", " "))
+                    .build();
+        }
     }
 
     /** The audio inputs THIS host exposes, in the {@code <format>:<name>} form the registry takes. */

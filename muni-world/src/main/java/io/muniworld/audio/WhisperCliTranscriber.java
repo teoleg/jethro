@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -188,11 +189,34 @@ public final class WhisperCliTranscriber implements Transcriber {
             long from = s.path("offsets").path("from").asLong(0);
             long to = s.path("offsets").path("to").asLong(0);
             String text = s.path("text").asText("").strip();
-            if (!text.isEmpty()) {
+            if (!text.isEmpty() && !isNonSpeechMarker(text)) {
                 out.add(new Transcript.Segment(from, to, null, text));
             }
         }
         return out;
+    }
+
+    /**
+     * True for whisper's own non-speech annotations — {@code [BLANK_AUDIO]}, {@code [MUSIC]},
+     * {@code (silence)} and friends. These are the recogniser SAYING IT HEARD NOTHING, so carrying them
+     * through as segment text would put a fabricated "heard" string in the transcript and in front of the
+     * lead scanner. Dropping them makes silence read as silence: zero segments, which the caller reports
+     * as "captured N bytes but recognised no speech".
+     */
+    private static boolean isNonSpeechMarker(String text) {
+        String t = text.strip();
+        int len = t.length();
+        boolean bracketed = len >= 2
+                && ((t.charAt(0) == '[' && t.charAt(len - 1) == ']')
+                    || (t.charAt(0) == '(' && t.charAt(len - 1) == ')')
+                    || (t.charAt(0) == '*' && t.charAt(len - 1) == '*'));
+        if (!bracketed) {
+            return false;
+        }
+        // Only a WHOLE-segment annotation counts: real speech can contain a bracketed aside, but a segment
+        // that is nothing but one bracket pair is whisper's marker, never words that were spoken.
+        String inner = t.substring(1, len - 1).toLowerCase(Locale.ROOT);
+        return inner.indexOf('[') < 0 && inner.indexOf('(') < 0;
     }
 
     private static void deleteQuietly(Path dir) {

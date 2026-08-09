@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,6 +52,22 @@ class AudioCaptureTest {
         // WAV. It once wrote Opus/.ogg, which made every transcription fail while capture looked fine.
         // contentType() is the declared half of that contract; keep it honest about what ffmpeg writes.
         assertEquals("audio/wav", new FfmpegCaptureSource("ffmpeg", "pulse:default.monitor", 5).contentType());
+    }
+
+    @Test
+    void whisperNonSpeechMarkersAreNotTreatedAsHeardSpeech() throws Exception {
+        // whisper emits [BLANK_AUDIO] / [MUSIC] / (silence) when it heard NO speech. Carrying those through
+        // as segment text puts a fabricated "heard" string in the transcript and in front of the lead
+        // scanner — silence must read as silence (zero segments).
+        var m = WhisperCliTranscriber.class.getDeclaredMethod("isNonSpeechMarker", String.class);
+        m.setAccessible(true);
+        for (String marker : new String[] {"[BLANK_AUDIO]", "[MUSIC]", "(silence)", "*laughs*"}) {
+            assertTrue((Boolean) m.invoke(null, marker), marker + " is a non-speech marker");
+        }
+        for (String speech : new String[] {"The City of New York priced a new issue",
+                                           "Moody's [sic] downgraded the authority"}) {
+            assertFalse((Boolean) m.invoke(null, speech), speech + " is real speech");
+        }
     }
 
     @Test
