@@ -31,24 +31,50 @@ class AudioSourceCatalogTest {
 
         AudioSourceCatalog cat = new AudioSourceCatalog(csv.toString());
 
-        List<AudioSource> all = cat.all();
-        assertEquals(3, all.size(), "header + comment skipped, three feeds parsed");
+        // The catalog also merges any SHIPPED feed the file lacks, so assert on the rows under test by id
+        // rather than by position/count — a new shipped feed must not break this.
+        AudioSource bbg = byId(cat, "tv-bloomberg");
+        AudioSource cnbc = byId(cat, "tv-cnbc");
+        AudioSource yahoo = byId(cat, "tv-yahoo");
 
-        List<AudioSource> capturable = cat.capturable();
-        assertEquals(1, capturable.size(), "only the enabled + device-bound feed is captured");
-        assertEquals("tv-bloomberg", capturable.get(0).id());
-        assertEquals(300, capturable.get(0).chunkSeconds());
+        assertTrue(cat.capturable().stream().anyMatch(f -> f.id().equals("tv-bloomberg")),
+                "enabled + device-bound → captured");
+        assertEquals("pulse:default.monitor", bbg.device(), "an EXISTING binding is never overwritten");
+        assertEquals(300, bbg.chunkSeconds());
 
-        assertFalse(cat.all().get(1).capturable(), "enabled but unbound → not captured, still listed");
-        assertFalse(cat.all().get(2).capturable(), "bound but disabled → not captured, still listed");
-        assertEquals("alsa:hw:1,0", cat.all().get(2).device(), "pipe-delimited: comma in the device survives");
+        assertFalse(cnbc.capturable(), "enabled but unbound → not captured, still listed");
+        assertFalse(yahoo.capturable(), "bound but disabled → not captured, still listed");
+        assertEquals("alsa:hw:1,0", yahoo.device(), "pipe-delimited: comma in the device survives");
     }
 
     @Test
     void missingFileFallsBackToClasspathDefault() {
-        // blank path → the committed classpath catalog (feeds listed, none device-bound by default)
+        // blank path → the committed classpath catalog, read-only (nothing is seeded or merged onto disk)
         AudioSourceCatalog cat = new AudioSourceCatalog("");
-        assertTrue(cat.all().size() >= 2, "the default registry lists the starter feeds");
-        assertTrue(cat.capturable().isEmpty(), "nothing is capturable until a device is bound on the host");
+        assertTrue(cat.all().size() >= 2, "the default registry lists the shipped feeds");
+        assertEquals("", cat.file(), "no host file — the in-jar catalog is never written to");
+    }
+
+    @Test
+    void shippedFeedsFillAnUnconfiguredRowButNeverOverwriteABinding() throws IOException {
+        // The upgrade path that was missing: an EXISTING registry of blank rows never saw a newly shipped
+        // source, so a working stream shipped and the operator still faced an empty list.
+        Path csv = Files.createTempFile("audio-sources", ".csv");
+        Files.writeString(csv, """
+                id|label|publisher|category|device|chunk_seconds|enabled|notes
+                tv-bloomberg|Bloomberg TV|Bloomberg|tv||300|false|unconfigured
+                tv-mine|My Feed|Me|tv|pulse:mine.monitor|60|true|my own binding
+                """);
+
+        AudioSourceCatalog cat = new AudioSourceCatalog(csv.toString());
+
+        assertTrue(byId(cat, "tv-bloomberg").device().startsWith("url:"),
+                "an unconfigured row is filled from the shipped template");
+        assertEquals("pulse:mine.monitor", byId(cat, "tv-mine").device(),
+                "a row the operator configured is left exactly as it is");
+    }
+
+    private static AudioSource byId(AudioSourceCatalog cat, String id) {
+        return cat.all().stream().filter(f -> f.id().equals(id)).findFirst().orElseThrow();
     }
 }

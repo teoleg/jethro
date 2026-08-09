@@ -34,6 +34,7 @@ public final class AudioSourceCatalog {
     public AudioSourceCatalog(@Value("${muni.audio.sources.file:}") String file) {
         this.file = redirectIfTracked(file);
         seedIfMissing(this.file);
+        mergeShippedFeeds(this.file);
         // Load from the REDIRECTED path, not the argument — otherwise the live copy is seeded and then
         // ignored, and the app reads the template it must never touch.
         this.sources = load(this.file);
@@ -96,6 +97,87 @@ public final class AudioSourceCatalog {
             log.info("seeded a fresh TV source registry at {} from the committed default", p.toAbsolutePath());
         } catch (IOException e) {
             log.warn("could not seed the TV source registry at {}: {}", file, e.toString());
+        }
+    }
+
+    /**
+     * Bring a live registry up to date with the shipped template WITHOUT touching the operator's own work.
+     *
+     * <p>Seeding only runs when the file is absent, so an existing install never sees a newly shipped feed —
+     * exactly how a working Bloomberg stream shipped in the template and still left the owner looking at a
+     * registry of blank rows. This fills the gaps and nothing else:
+     * <ul>
+     *   <li>a template row whose id is missing locally is APPENDED;</li>
+     *   <li>a local row with NO source gets the template's source (and its enabled flag/chunk), because an
+     *       unconfigured row has nothing to preserve;</li>
+     *   <li>a local row that already HAS a source is left exactly as it is — a real binding is the
+     *       operator's and is never overwritten.</li>
+     * </ul>
+     */
+    private static void mergeShippedFeeds(String file) {
+        if (file == null || file.isBlank()) {
+            return;
+        }
+        Path p = Path.of(file);
+        String liveCsv = readStatic(p);
+        String tplCsv = readClasspathStatic();
+        if (liveCsv == null || tplCsv == null) {
+            return;
+        }
+        List<AudioSource> live = parse(liveCsv);
+        List<AudioSource> tpl = parse(tplCsv);
+        List<String> lines = new ArrayList<>(List.of(liveCsv.split("\r?\n", -1)));
+        int filled = 0;
+        int added = 0;
+
+        for (AudioSource t : tpl) {
+            AudioSource l = live.stream().filter(x -> x.id().equals(t.id())).findFirst().orElse(null);
+            if (l == null) {
+                lines.add(row(t));
+                added++;
+            } else if ((l.device() == null || l.device().isBlank())
+                    && t.device() != null && !t.device().isBlank()) {
+                for (int i = 0; i < lines.size(); i++) {
+                    String[] f = lines.get(i).strip().split("\\|", 8);
+                    if (f.length >= 7 && f[0].strip().equals(t.id())) {
+                        lines.set(i, row(t));
+                        filled++;
+                        break;
+                    }
+                }
+            }
+        }
+        if (added == 0 && filled == 0) {
+            return;
+        }
+        try {
+            Files.writeString(p, String.join("\n", lines), StandardCharsets.UTF_8);
+            log.info("registry {}: {} shipped feed(s) added, {} unconfigured row(s) filled from the template "
+                    + "(existing bindings untouched)", p.toAbsolutePath(), added, filled);
+        } catch (IOException e) {
+            log.warn("could not merge shipped feeds into {}: {}", p, e.toString());
+        }
+    }
+
+    private static String row(AudioSource s) {
+        return String.join("|", s.id(), s.label(), s.publisher(), s.category(),
+                s.device() == null ? "" : s.device(), Integer.toString(s.chunkSeconds()),
+                Boolean.toString(s.enabled()), "");
+    }
+
+    private static String readStatic(Path p) {
+        try {
+            return Files.exists(p) ? Files.readString(p, StandardCharsets.UTF_8) : null;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    private static String readClasspathStatic() {
+        try (InputStream in = AudioSourceCatalog.class.getResourceAsStream("/seeds/audio-sources.csv")) {
+            return in == null ? null : new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
         }
     }
 

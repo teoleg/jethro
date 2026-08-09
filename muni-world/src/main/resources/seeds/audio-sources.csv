@@ -1,3 +1,11 @@
 id|label|publisher|category|device|chunk_seconds|enabled|notes
-tv-bloomberg|Bloomberg TV|Bloomberg|tv||300|false|US market TV via YouTube TV; bind a host audio device (pulse/alsa) then enable
-tv-cnbc|CNBC|CNBC|tv||300|false|US market TV via YouTube TV; bind a host audio device then enable
+# TV / audio source registry (ADR-0014). `device` is the SOURCE and is the only field that does anything:
+#   url:<stream>     pull audio straight off the network with ffmpeg — headless, nothing playing on this box
+#   pulse:<name>     a host audio input (records what THIS machine plays)
+# Edit via the muni UI (TV / Audio -> Bind / Use URL) or by hand; the live copy is local/audio-sources.csv.
+#
+# The Bloomberg row uses Bloomberg's OWN published live manifest (bloomberg.com/media-manifest). If it stops
+# working, replace the URL — availability is the broadcaster's to change, and per their terms this is for
+# your own private analysis, never redistribution.
+tv-bloomberg|Bloomberg TV|Bloomberg|tv|url:https://www.bloomberg.com/media-manifest/streams/us.m3u8|120|true|Bloomberg's own published live stream
+tv-bloomberg-qt|Bloomberg Quicktake|Bloomberg|tv|url:https://www.bloomberg.com/media-manifest/streams/qt.m3u8|120|false|alternate Bloomberg stream
