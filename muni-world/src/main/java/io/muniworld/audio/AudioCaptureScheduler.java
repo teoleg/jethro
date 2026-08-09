@@ -32,7 +32,6 @@ public final class AudioCaptureScheduler {
     private final RecentLeadsStore store;
     private final RecentTranscriptsStore transcripts;
     private final String ffmpegBin;
-    private final String registryPath;
     private volatile boolean warnedNoFeeds;
 
     public AudioCaptureScheduler(
@@ -41,15 +40,13 @@ public final class AudioCaptureScheduler {
             TranscriptLeadService leadService,
             RecentLeadsStore store,
             RecentTranscriptsStore transcripts,
-            @Value("${muni.audio.ffmpeg.bin:ffmpeg}") String ffmpegBin,
-            @Value("${muni.audio.sources.file:}") String registryPath) {
+            @Value("${muni.audio.ffmpeg.bin:ffmpeg}") String ffmpegBin) {
         this.catalog = catalog;
         this.transcriber = transcriber;
         this.leadService = leadService;
         this.store = store;
         this.transcripts = transcripts;
         this.ffmpegBin = ffmpegBin;
-        this.registryPath = registryPath == null ? "" : registryPath;
         log.info("audio capture ENABLED: {} capturable feed(s) in the registry", catalog.capturable().size());
     }
 
@@ -64,10 +61,8 @@ public final class AudioCaptureScheduler {
             if (!warnedNoFeeds) {
                 warnedNoFeeds = true;
                 log.warn("audio capture is ENABLED but NO feed is capturable: of {} registered feed(s), none "
-                        + "is both enabled=true AND has a source. Edit the registry ({}), set a source "
-                        + "(yt:<page>, url:<stream> or pulse:<name>) and enabled=true on a row, then "
-                        + "`svc.sh restart tv`. Nothing will be captured until then.",
-                        catalog.all().size(), registryPath.isBlank() ? "classpath default" : registryPath);
+                        + "is both enabled=true AND has a source. Fix seeds/audio-sources.csv and rebuild. "
+                        + "Nothing will be captured until then.", catalog.all().size());
             }
             return;
         }
@@ -84,11 +79,20 @@ public final class AudioCaptureScheduler {
                 FfmpegCaptureSource source = new FfmpegCaptureSource(ffmpegBin, src.device(), src.chunkSeconds());
                 AudioCaptureConnector connector = new AudioCaptureConnector("audio:" + src.id(), source);
                 RawArtifact audio = connector.fetch().get(0);
+                // Measure the chunk BEFORE transcribing. A stream that connects but carries no sound
+                // produces a full-length run of zeros: right size, ffmpeg happy, whisper happy, nothing
+                // heard. That is a stream fact, not an ASR verdict, and only the level tells them apart.
+                var level = AudioLevel.of(audio.body());
+                if (Boolean.TRUE.equals(level.get("silent"))) {
+                    log.warn("audio pass [{}]: {} bytes of DIGITAL SILENCE — the stream connected but "
+                            + "carried no sound", src.id(), audio.size());
+                }
                 Transcript t = transcriber.transcribe(audio);
                 transcripts.add(src.label(), t);   // the raw "what did it hear" surface (validation)
                 TranscriptLeadService.Leads leads = leadService.detect(t);
                 store.add(src.label(), leads);
-                log.info("audio pass [{}]: {} segments, {} leads", src.id(), t.segments().size(), leads.leads().size());
+                log.info("audio pass [{}]: peak {} dBFS, {} segments, {} leads",
+                        src.id(), level.get("peakDbfs"), t.segments().size(), leads.leads().size());
                 if (b.waitMs() > 0) {
                     log.info("audio capture [{}] recovered after {} consecutive failure(s)", src.id(), b.failures());
                 }

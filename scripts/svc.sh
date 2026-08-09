@@ -94,18 +94,6 @@ muni_start() {
   ./gradlew -q :muni-world:bootJar
   mkdir -p logs
   local cap="${MUNI_AUDIO_CAPTURE:-false}"
-  # Point at the DESKTOP session's PulseAudio. Started over SSH, this process has no session bus, so
-  # pactl/ffmpeg autospawn (or attach to) a DIFFERENT pulse daemon than the one the browser plays into:
-  # it then lists the hardware sinks correctly and hears nothing on them forever — a capture that reads
-  # as digital silence while the TV is plainly playing. Same user, so the desktop's socket is ours to use.
-  if [ -z "${PULSE_SERVER:-}" ] && [ -S "/run/user/$(id -u)/pulse/native" ]; then
-    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-    export PULSE_SERVER="unix:/run/user/$(id -u)/pulse/native"
-    echo "==> audio: using the desktop PulseAudio at $PULSE_SERVER"
-  elif [ -z "${PULSE_SERVER:-}" ]; then
-    echo "==> audio: no desktop PulseAudio socket at /run/user/$(id -u)/pulse/native —" \
-         "capture will only see whatever daemon this shell reaches (set PULSE_SERVER to override)"
-  fi
   echo "==> starting muni-world on :$MUNI_PORT (independent; boots offline — PG/Kafka opt-in; TV capture=$cap)"
   # lmdbjava (JNR) needs the NIO opens, same as the jethro app. The MUNI_*/audio env is inherited from
   # local.env (exported above), so the capture loop reads its config with no extra plumbing here.
@@ -122,10 +110,8 @@ tv_setup() {
   echo "==> muni-world audio setup (installs ffmpeg + yt-dlp + whisper.cpp and its model)"
   # pass the env file so the setup script WRITES MUNI_WHISPER_BIN/MODEL into it (no more empty vars)
   MUNI_ENV_FILE="$ENV_FILE" bash muni-world/scripts/setup-audio-pi.sh
-  # make sure the registry pointer is set too
-  grep -qE "^MUNI_AUDIO_SOURCES_FILE=" "$ENV_FILE" 2>/dev/null || set_env_kv MUNI_AUDIO_SOURCES_FILE local/audio-sources.csv
-  echo "==> paths written to $ENV_FILE. Nothing to bind — the registry ships with Bloomberg's"
-  echo "    live stream configured. Next: scripts/svc.sh start tv"
+  echo "==> paths written to $ENV_FILE. Nothing to configure — the stream ships with the app."
+  echo "    Next: scripts/svc.sh start tv"
 }
 tv_start() {
   set_env_kv MUNI_AUDIO_CAPTURE true
@@ -134,8 +120,8 @@ tv_start() {
     echo "!!  MUNI_WHISPER_MODEL is empty in $ENV_FILE — run 'scripts/svc.sh setup tv' and set it,"
     echo "!!  or capture will error every cycle (it fails loudly, never invents a transcript)."
   fi
-  echo "==> TV capture ON — bouncing muni-world. Feeds come from the registry"
-  echo "    (${MUNI_AUDIO_SOURCES_FILE:-classpath default}); enable + bind a device there, then 'status tv'."
+  echo "==> TV capture ON — bouncing muni-world. It connects to the configured stream and"
+  echo "    transcribes it chunk by chunk; watch it with 'scripts/svc.sh status tv'."
   muni_stop; muni_start
 }
 tv_stop() {
@@ -146,7 +132,7 @@ tv_stop() {
 }
 tv_status() {
   muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
-  echo "master: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} model=${MUNI_WHISPER_MODEL:-unset} registry=${MUNI_AUDIO_SOURCES_FILE:-classpath default}"
+  echo "master: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} model=${MUNI_WHISPER_MODEL:-unset} yt-dlp=${MUNI_YTDLP_BIN:-yt-dlp}"
   if muni_running; then
     grep -q "audio capture ENABLED" logs/muni-world.log 2>/dev/null \
       && echo "capture loop: ENABLED in the running process" || echo "capture loop: not enabled in the running process"

@@ -47,45 +47,35 @@ class AudioCaptureTest {
     }
 
     @Test
-    void aStreamUrlIsPulledDirectlyAndADeviceIsOpenedAsAFormat() {
-        // The owner's actual requirement: pull audio from an ONLINE source — no browser, no sound card,
-        // no display. A url: source must go straight to ffmpeg's input with NO -f (the demuxer is detected
-        // from the stream) and -vn to drop video; a device source keeps -f <format> -i <name>.
-        var stream = new FfmpegCaptureSource("ffmpeg", "url:https://example.com/live.m3u8", 30)
-                .buildCommand("/tmp/out.wav");
-        assertFalse(stream.contains("-f"), "a URL must not be passed as an ffmpeg input FORMAT");
-        assertEquals("https://example.com/live.m3u8", stream.get(stream.indexOf("-i") + 1));
-        assertTrue(stream.contains("-vn"), "video track dropped");
+    void theStreamIsReadStraightOffTheNetworkInWhispersFormat() {
+        // The owner's requirement: pull audio from an online source — no browser, no sound card, no
+        // display. The URL goes straight to ffmpeg's input with NO -f (the demuxer is detected from the
+        // stream itself) and -vn to drop video.
+        var cmd = new FfmpegCaptureSource("ffmpeg", "url:https://example.com/live.m3u8", 30)
+                .buildCommand("https://example.com/live.m3u8", "/tmp/out.wav");
 
-        var device = new FfmpegCaptureSource("ffmpeg", "pulse:default.monitor", 30)
-                .buildCommand("/tmp/out.wav");
-        assertEquals("pulse", device.get(device.indexOf("-f") + 1));
-        assertEquals("default.monitor", device.get(device.indexOf("-i") + 1));
-
-        // Both must still produce whisper's only readable format.
-        for (var cmd : java.util.List.of(stream, device)) {
-            assertEquals("pcm_s16le", cmd.get(cmd.indexOf("-c:a") + 1));
-            assertEquals("16000", cmd.get(cmd.indexOf("-ar") + 1));
-            assertEquals("1", cmd.get(cmd.indexOf("-ac") + 1));
-        }
+        assertFalse(cmd.contains("-f"), "a URL must not be passed as an ffmpeg input FORMAT");
+        assertEquals("https://example.com/live.m3u8", cmd.get(cmd.indexOf("-i") + 1));
+        assertTrue(cmd.contains("-vn"), "video track dropped");
+        assertEquals("pcm_s16le", cmd.get(cmd.indexOf("-c:a") + 1));
+        assertEquals("16000", cmd.get(cmd.indexOf("-ar") + 1));
+        assertEquals("1", cmd.get(cmd.indexOf("-ac") + 1));
     }
 
     @Test
-    void aYouTubePageIsNeverHandedToFfmpegUnresolved() {
-        // A live stream's CDN URL EXPIRES, so the registry stores the watch page and yt-dlp resolves the
-        // current media URL per capture. ffmpeg has no idea what a watch page is: if one ever reached
-        // buildCommand it would emit `-f yt -i https://…` and fail with a message naming neither the cause
-        // nor the fix. Fail here instead, saying exactly what is wrong.
-        var yt = new FfmpegCaptureSource("ffmpeg", "yt:https://www.youtube.com/watch?v=abc123", 30);
-        IllegalStateException e =
-                assertThrows(IllegalStateException.class, () -> yt.buildCommand("/tmp/out.wav"));
-        assertTrue(e.getMessage().contains("yt-dlp"), "the error must name the resolver: " + e.getMessage());
+    void onlyStreamSourcesAreAccepted() {
+        // Host-device sources (pulse:/alsa:) are GONE: they needed a machine already playing the channel
+        // and recorded a full-length run of zeros when it wasn't. Anything but yt:/url: must fail by name,
+        // not be silently handed to ffmpeg as an input format.
+        var bad = new FfmpegCaptureSource("ffmpeg", "pulse:default.monitor", 30);
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, bad::captureChunk);
+        assertTrue(e.getMessage().contains("yt:") && e.getMessage().contains("url:"),
+                "the error must name the two valid forms: " + e.getMessage());
 
-        // Once resolved, it is an ordinary stream source and takes the url: path.
-        var resolved = new FfmpegCaptureSource("ffmpeg", "url:https://cdn.example.com/videoplayback?x=1", 30)
-                .buildCommand("/tmp/out.wav");
-        assertFalse(resolved.contains("-f"), "a resolved media URL is not an ffmpeg input format");
-        assertEquals("https://cdn.example.com/videoplayback?x=1", resolved.get(resolved.indexOf("-i") + 1));
+        assertTrue(FfmpegCaptureSource.usesYtdlp("yt:https://www.youtube.com/watch?v=abc"),
+                "a yt: source is resolved by yt-dlp before ffmpeg runs");
+        assertFalse(FfmpegCaptureSource.usesYtdlp("url:https://example.com/live.m3u8"),
+                "a direct stream needs no resolver");
     }
 
     @Test

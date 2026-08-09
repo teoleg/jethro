@@ -6,9 +6,9 @@ import java.util.Map;
 /**
  * Measures how loud a captured clip actually is, straight off the PCM samples.
  *
- * <p>This exists because byte count proves nothing. A PulseAudio {@code .monitor} of a sink with no active
- * stream delivers a full-length, perfectly-formed run of ZEROS — so a capture can look completely healthy
- * (right duration, right size, ffmpeg exit 0, whisper exit 0) and contain no sound at all. Whisper then says
+ * <p>This exists because byte count proves nothing. A stream that connects but carries no sound delivers a
+ * full-length, perfectly-formed run of ZEROS — so a capture can look completely healthy (right duration,
+ * right size, ffmpeg exit 0, whisper exit 0) and contain no sound at all. Whisper then says
  * {@code [BLANK_AUDIO]}, which reads as "the ASR failed" when it actually means "there was nothing to hear".
  *
  * <p>Peak and RMS in dBFS separate those two cases as a FACT rather than an inference:

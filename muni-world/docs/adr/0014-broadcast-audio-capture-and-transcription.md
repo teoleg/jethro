@@ -60,21 +60,28 @@ scoped deliberately narrow:
 - Deferred: **video/ticker-OCR** (a second phase), speaker **diarisation** quality, and **live/streaming**
   DRM'd capture (the analog/loopback tap sidesteps DRM and is the sanctioned path).
 
-## Amendment (2026-08-09) — acquisition is ONLINE-first, not a hardware tap
+## Amendment (2026-08-09) — acquisition is a NETWORK STREAM, and only that
 
-Point 2 above assumed a box already playing the feed. In practice that is the whole cost: it needs a TV, a
-display, a sound server and something playing, and it silently records digital silence when any of those is
-absent — which is exactly what happened (a correct PulseAudio setup with no playback stream). Acquisition is
-therefore inverted; nothing else in this ADR changes.
+Point 2 above assumed a box already playing the feed. That is the whole cost: it needs a TV, a display, a
+sound server and something actually playing, and when any of those is missing it records digital silence
+while looking perfectly healthy — which is exactly what happened (a correct PulseAudio setup with no
+playback stream). Acquisition is replaced, not supplemented; nothing else in this ADR changes.
 
-- **A feed's `device` column is its SOURCE**, one of three kinds:
-  `yt:<page>` (a publisher's own live page — `yt-dlp` resolves the current media URL **per capture**, because
-  live CDN URLs expire and must never be stored), `url:<stream>` (a direct HLS/DASH manifest), or
-  `pulse:<name>`/`alsa:<hw>` (the host tap, now the **fallback**).
-- **The default ships configured** — Bloomberg Television's own live stream — so a fresh install captures
-  with nothing to paste and nothing to bind.
+- **A feed's `device` column is its STREAM**, in one of two forms: `yt:<page>` (a publisher's live page —
+  `yt-dlp` resolves the current media URL **per capture**, because live CDN URLs expire and must never be
+  stored) or `url:<stream>` (a direct HLS/DASH manifest). They are the same pipeline; `yt:` is `url:` with a
+  resolve step in front.
+- **The host tap is REMOVED**, not demoted: no `pulse:`/`alsa:` sources, no device scanner, no device
+  picker. Keeping it as a fallback would keep the failure mode (and a second way to configure the same
+  thing) alive for no benefit — the stream path needs no hardware at all.
+- **The registry is read-only config that ships in the jar.** No host copy, no seeding, no merge, no
+  "bind" write path, and no UI that edits it. Each of those caused a failure the owner had to debug: a
+  tracked file that aborted `git pull`, a live copy that ignored a newly shipped stream, and two template
+  copies where editing the wrong one changed nothing. To change a feed: edit the CSV, rebuild.
 - **Dependency added:** `yt-dlp` on the capture host (`svc.sh setup tv` installs it; `MUNI_YTDLP_BIN` pins
-  the path, since a background process's PATH may exclude `~/.local/bin`). A missing/stale yt-dlp fails
-  loudly at capture with that named cause, never as silence.
+  the path, since a background process's PATH may exclude `~/.local/bin`). A missing or stale yt-dlp is
+  reported as a **gate** on the status endpoint, not only as a failed capture.
+- **A failing feed backs off** (30 s doubling to 5 min) instead of retrying at the loop's ~1 s gap: a
+  capture that fails instantly does not pace the loop the way a real one does.
 - **Legal posture unchanged** (point 5): the publisher's own published stream, recorded for private
   analysis, never redistributed, and subject to that publisher's and platform's terms.

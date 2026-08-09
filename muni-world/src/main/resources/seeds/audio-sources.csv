@@ -1,13 +1,16 @@
 id|label|publisher|category|device|chunk_seconds|enabled|notes
-# TV / audio source registry (ADR-0014). `device` is the SOURCE and is the only field that does anything:
-#   yt:<page>      a YouTube watch/live page — yt-dlp resolves the CURRENT media URL each capture (live CDN
-#                  URLs expire, so the page is what is stored, never the resolved URL). Needs yt-dlp.
+# TV / audio feed registry (ADR-0014). Read-only config loaded from the jar: edit this file and rebuild.
+# `device` is the SOURCE and is the only field that does anything. Two forms, one pipeline:
+#   yt:<page>      a live page — yt-dlp resolves the CURRENT media URL each capture (live CDN URLs expire,
+#                  so the page is what is stored, never the resolved URL)
 #   url:<stream>   a direct stream URL (HLS/DASH/Icecast) — ffmpeg reads it straight
-#   pulse:<name>   a host audio input (records what THIS machine plays)
-# Edit via the muni UI (TV / Audio) or by hand; the live copy is local/audio-sources.csv, never the template.
 #
-# Default: Bloomberg's own verified Bloomberg Television YouTube live stream. Recording is for PRIVATE
-# analysis only (transcript-as-lead, never redistributed) and remains subject to Bloomberg's and YouTube's
-# terms — replace the source if that is not the basis you want.
-tv-bloomberg|Bloomberg TV|Bloomberg|tv|yt:https://www.youtube.com/watch?v=iyOq8DhaMYw|120|true|Bloomberg Television official YouTube live
-tv-bloomberg-hls|Bloomberg TV (direct HLS)|Bloomberg|tv|url:https://www.bloomberg.com/media-manifest/streams/us.m3u8|120|false|spare: Bloomberg's own published manifest
+# PROVENANCE of the URL below: supplied by the owner (from a ChatGPT recommendation) as Bloomberg
+# Television's official YouTube live stream. It is NOT verified — the build sandbox cannot reach YouTube,
+# so the first real check happens on the capture host. If Bloomberg ends this particular broadcast the
+# video id dies with it; yt-dlp then fails BY NAME in the log and on the TV page, and the fix is to put the
+# current live page in this row.
+#
+# Recording is for PRIVATE analysis only (transcript-as-lead, never redistributed) and remains subject to
+# Bloomberg's and YouTube's terms.
+tv-bloomberg|Bloomberg TV|Bloomberg|tv|yt:https://www.youtube.com/watch?v=iyOq8DhaMYw|120|true|Bloomberg Television live
