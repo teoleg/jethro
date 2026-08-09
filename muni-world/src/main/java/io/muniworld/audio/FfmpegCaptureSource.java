@@ -121,10 +121,65 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
      * never stored — storing one would work once and then fail forever with an opaque 403.
      */
     private String resolveViaYtdlp(String page) {
+        String last = "";
+        for (String[] extra : RESOLVE_ATTEMPTS) {
+            try {
+                return runYtdlp(page, extra);
+            } catch (IOException e) {
+                last = e.getMessage();
+                if (extra.length > 0) {
+                    log.warn("yt-dlp resolve failed with {} — {}", String.join(" ", extra), last);
+                }
+            }
+        }
+        // yt-dlp RAN and refused, on every client. Its own message is the useful part. "No video formats
+        // found" is nearly always a yt-dlp that predates YouTube's current player, so name the version:
+        // without it the reader cannot tell a stale tool from a dead stream, and they have opposite fixes.
+        throw new RuntimeException("cannot resolve " + page + " — " + last
+                + ". [yt-dlp " + ytdlpVersion() + "] If this says \"No video formats found\", yt-dlp is "
+                + "almost certainly out of date: `python3 -m pip install --user -U yt-dlp` (an apt-installed "
+                + "yt-dlp is usually months stale). If the stream itself is gone, put the current live page "
+                + "in seeds/audio-sources.csv");
+    }
+
+    /**
+     * YouTube serves different player clients, and a yt-dlp release can be broken for one while working on
+     * another. Trying the default first and then a couple of named clients turns a hard failure into a
+     * retry that usually succeeds — this is the same knob the yt-dlp issue tracker hands out, not a bypass
+     * of anything. Empty = whatever the installed yt-dlp picks by default.
+     */
+    private static final List<String[]> RESOLVE_ATTEMPTS = List.of(
+            new String[] {},
+            new String[] {"--extractor-args", "youtube:player_client=tv"},
+            new String[] {"--extractor-args", "youtube:player_client=ios"},
+            new String[] {"--extractor-args", "youtube:player_client=web_safari"});
+
+    /** The installed yt-dlp's version, or "unknown" — for error messages, cached with the presence check. */
+    private static String ytdlpVersion() {
+        try {
+            Process p = new ProcessBuilder(YTDLP, "--version").redirectErrorStream(true).start();
+            if (!p.waitFor(10, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                return "unknown";
+            }
+            String v = new String(p.getInputStream().readAllBytes()).strip();
+            return v.isBlank() ? "unknown" : v;
+        } catch (IOException e) {
+            return "not installed";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "unknown";
+        }
+    }
+
+    /** One resolve attempt. Throws {@link IOException} when yt-dlp runs and refuses. */
+    private String runYtdlp(String page, String[] extra) throws IOException {
+        List<String> cmd = new ArrayList<>(List.of(YTDLP, "-f", "bestaudio/best", "-g", "--no-warnings"));
+        cmd.addAll(List.of(extra));
+        cmd.add(page);
         Process p;
         try {
-            p = new ProcessBuilder(YTDLP, "-f", "bestaudio/best", "-g", "--no-warnings", page)
-                    .redirectErrorStream(true).start();
+            p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
         } catch (IOException e) {
             // ONLY this branch means the binary is missing. Reporting "is yt-dlp installed?" on every
             // failure was misleading: it printed that while yt-dlp was installed, had run, and had given a
@@ -149,14 +204,9 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
             if (url.isBlank()) {
                 throw new IOException("yt-dlp returned no media URL: " + out);
             }
-            log.info("yt-dlp resolved {} to a live media URL", page);
+            log.info("yt-dlp resolved {} to a live media URL{}", page,
+                    extra.length == 0 ? "" : " (" + String.join(" ", extra) + ")");
             return url;
-        } catch (IOException e) {
-            // yt-dlp RAN and refused. Its own message is the useful part — a dead video id, a stream that
-            // has ended, a geo-block. The fix is the source in seeds/audio-sources.csv, not the tooling.
-            throw new RuntimeException("cannot resolve " + page + " — " + e.getMessage()
-                    + ". If that source is gone, put the current live page in seeds/audio-sources.csv "
-                    + "(a channel's /live URL never expires; a video id does)", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("yt-dlp resolve interrupted", e);

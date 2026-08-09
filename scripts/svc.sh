@@ -132,7 +132,10 @@ tv_stop() {
 }
 tv_status() {
   muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
-  echo "master: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} model=${MUNI_WHISPER_MODEL:-unset} yt-dlp=${MUNI_YTDLP_BIN:-yt-dlp}"
+  # Print yt-dlp's VERSION, not just its path: "No video formats found" is nearly always a stale yt-dlp,
+  # and a version is the one fact that separates that from a stream that has genuinely ended.
+  echo "master: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} model=${MUNI_WHISPER_MODEL:-unset}" \
+       "yt-dlp=$("${MUNI_YTDLP_BIN:-yt-dlp}" --version 2>/dev/null || echo 'NOT INSTALLED')"
   if muni_running; then
     grep -q "audio capture ENABLED" logs/muni-world.log 2>/dev/null \
       && echo "capture loop: ENABLED in the running process" || echo "capture loop: not enabled in the running process"
