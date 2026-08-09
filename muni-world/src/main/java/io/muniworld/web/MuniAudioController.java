@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.io.IOException;
 import java.util.List;
 
 /**
@@ -32,20 +31,14 @@ public final class MuniAudioController {
     private final RecentTranscriptsStore transcripts;
     private final io.muniworld.audio.AudioDeviceScanner devices;
     private final io.muniworld.audio.Transcriber transcriber;
-    private final io.muniworld.audio.ScreenFrameGrabber screen;
-    private final io.muniworld.audio.AudioTranscoder transcoder;
     private final String ffmpegBin;
 
     public MuniAudioController(TranscriptLeadService leads, RecentLeadsStore recent,
                               AudioSourceCatalog sources, RecentTranscriptsStore transcripts,
                               io.muniworld.audio.AudioDeviceScanner devices,
                               io.muniworld.audio.Transcriber transcriber,
-                              io.muniworld.audio.ScreenFrameGrabber screen,
-                              io.muniworld.audio.AudioTranscoder transcoder,
                               @org.springframework.beans.factory.annotation.Value("${muni.audio.ffmpeg.bin:ffmpeg}")
                               String ffmpegBin) {
-        this.screen = screen;
-        this.transcoder = transcoder;
         this.leads = leads;
         this.recent = recent;
         this.sources = sources;
@@ -53,77 +46,6 @@ public final class MuniAudioController {
         this.devices = devices;
         this.transcriber = transcriber;
         this.ffmpegBin = ffmpegBin;
-    }
-
-    /**
-     * Transcribe an audio clip recorded by the BROWSER (a shared TV tab via getDisplayMedia), so the text
-     * can be checked against the video the operator is watching in the same page.
-     *
-     * <p>This bypasses the host audio device entirely: the clip comes from the tab itself, so there is no
-     * PulseAudio sink to pick and no way to be listening to the wrong output. The browser sends WebM/Opus,
-     * which whisper cannot read, so it is transcoded to 16 kHz mono WAV first ({@link AudioTranscoder}).
-     * Nothing is stored — the clip is transcribed and dropped, like every other capture here.
-     */
-    @PostMapping("/api/muni/audio/transcribe-clip")
-    public java.util.Map<String, Object> transcribeClip(
-            @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
-        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
-        try {
-            byte[] raw = file.getBytes();
-            out.put("clipBytes", raw.length);
-            if (raw.length == 0) {
-                out.put("ok", false);
-                out.put("error", "empty clip — the shared tab carried no audio "
-                        + "(re-share and tick 'Share tab audio')");
-                return out;
-            }
-            byte[] wav = transcoder.toWav16kMono(raw);
-            var level = io.muniworld.audio.AudioLevel.of(wav);
-            out.put("level", level);
-            var audio = io.muniworld.ingest.RawArtifact.of(
-                    "browser-tab", file.getOriginalFilename(), "audio/wav", wav);
-            Transcript t = transcriber.transcribe(audio);
-            String text = t.fullText();
-            out.put("segments", t.segments().size());
-            out.put("heard", text);
-            out.put("leads", leads.detect(t).leads());
-            out.put("ok", true);
-            if (text.isBlank()) {
-                out.put("note", Boolean.TRUE.equals(level.get("silent"))
-                        ? "the shared tab produced SILENCE — 'Share tab audio' was probably not ticked, or "
-                          + "the tab itself is muted/paused."
-                        : "audible sound (peak " + level.get("peakDbfs") + " dBFS) but no speech recognised "
-                          + "— music or noise rather than speech in this clip.");
-            }
-        } catch (IOException | RuntimeException e) {
-            out.put("ok", false);
-            out.put("error", String.valueOf(e.getMessage()));
-        }
-        return out;
-    }
-
-    /** Can this box show its screen, and from which device — so the UI can explain a missing picture. */
-    @GetMapping("/api/muni/video/status")
-    public java.util.Map<String, Object> screenStatus() {
-        return screen.status();
-    }
-
-    /**
-     * One still frame of this machine's screen — the visual half of the ADR-0014 check: see what is on the
-     * TV next to what the ASR heard. A still, never a stream, and nothing is stored.
-     */
-    @GetMapping(value = "/api/muni/video/frame", produces = org.springframework.http.MediaType.IMAGE_JPEG_VALUE)
-    public org.springframework.http.ResponseEntity<byte[]> screenFrame() {
-        try {
-            return org.springframework.http.ResponseEntity.ok()
-                    .cacheControl(org.springframework.http.CacheControl.noStore())
-                    .body(screen.grab());
-        } catch (RuntimeException e) {
-            // 503 + the reason as text: the <img> fails and the page reads the reason from /video/status.
-            return org.springframework.http.ResponseEntity.status(503)
-                    .header("X-Screen-Error", String.valueOf(e.getMessage()).replaceAll("[\\r\\n]+", " "))
-                    .build();
-        }
     }
 
     /** Raw audio environment as the muni-world PROCESS sees it — which PulseAudio daemon, which sinks,
