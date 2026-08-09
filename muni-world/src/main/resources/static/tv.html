@@ -58,8 +58,7 @@
   <!-- What this page IS (audio only, leads only). The LIVE state is the banner below — this one must never
        claim capture is or isn't happening, or it contradicts it (it used to say "it does nothing here"). -->
   <div class="banner">Nothing here is recorded or restreamed: an audio chunk is captured, transcribed
-    locally and discarded, and the screen view is a still grabbed on request. The broadcast itself is never
-    stored or served. What you see is what it <b>heard</b>, as <b>leads to verify</b> — never a number that
+    locally and discarded. The broadcast itself is never stored or served. What you see is what it <b>heard</b>, as <b>leads to verify</b> — never a number that
     feeds risk/PnL.</div>
   <!-- The capture loop is SILENT when idle, so state it plainly: is capture on, and if nothing is happening, which gate is blocking. -->
   <div id="captureState" class="banner" style="border-left-color:var(--dim)">checking capture state…</div>
@@ -75,41 +74,6 @@
     <div id="deviceNote" style="color:var(--dim);font-size:11.5px;margin-bottom:8px"></div>
     <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
     <div id="bindMsg" style="color:var(--dim);font-size:11.5px;margin-top:8px"></div>
-  </div>
-
-  <!-- Watch + verify: share the TV tab, see it live, and transcribe THAT tab's own audio so the text below
-       provably corresponds to the picture above it (no host sink to pick, so no wrong-output ambiguity). -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:16px">Watch &amp; verify <span id="shareState" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">
-      Share the tab playing the channel — <b>tick “Share tab audio”</b> in the browser dialog. The video plays
-      here and its OWN audio is transcribed every few seconds, so you can read the text against the picture.
-      Nothing is recorded: each clip is transcribed and dropped.
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
-      <button class="btn" id="shareBtn" style="padding:6px 12px;font-size:12px;border-color:var(--brand);color:var(--brand)" onclick="shareTab()">▶ Share TV tab</button>
-      <button class="btn" id="stopShareBtn" style="padding:6px 12px;font-size:12px;display:none" onclick="stopShare()">■ Stop</button>
-      <label style="color:var(--dim);font-size:11.5px">clip
-        <select id="clipSecs" style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:4px 6px;font:inherit;font-size:11px">
-          <option value="8">8s</option><option value="15" selected>15s</option><option value="30">30s</option>
-        </select>
-      </label>
-    </div>
-    <video id="tabVideo" muted autoplay playsinline style="max-width:100%;border:1px solid var(--line);border-radius:10px;display:none;background:#000"></video>
-    <div id="shareErr" style="color:var(--dim);font-size:11.5px;margin-top:6px"></div>
-    <div id="liveText" style="margin-top:10px"></div>
-  </div>
-
-  <!-- Fallback when the browser is not driving: a still of this machine's screen. -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:16px">Screen <span id="screenNote" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">A still of this machine's screen — compare it with the transcript below. Stills only, nothing recorded.</div>
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <button class="btn" style="padding:5px 10px;font-size:11px" onclick="grabFrame()">⟳ Refresh</button>
-      <label style="color:var(--dim);font-size:11.5px"><input type="checkbox" id="autoFrame"> auto-refresh (3s)</label>
-    </div>
-    <img id="screenFrame" alt="" style="max-width:100%;border:1px solid var(--line);border-radius:10px;display:none">
-    <div id="screenErr" style="color:var(--dim);font-size:11.5px"></div>
   </div>
 
   <div class="section" style="margin-top:28px">
@@ -141,182 +105,63 @@
     } catch (e) { DEVICES = []; note.textContent = "device scan unavailable"; }
   }
 
-  /** A stream URL is a source string like any other — same bind endpoint, prefixed url:. */
-  async function bindUrl(id) {
-    const box = document.getElementById("url-" + id);
-    const msg = document.getElementById("bindMsg");
-    const u = (box && box.value || "").trim();
-    if (!u) { msg.textContent = "paste a stream URL first."; return; }
-    msg.textContent = "binding " + id + " to the stream…";
-    try {
-      const r = await (await fetch(`/api/muni/audio/sources/${encodeURIComponent(id)}/bind`
-        + `?device=${encodeURIComponent("url:" + u)}&enabled=true`, { method: "POST" })).json();
-      msg.innerHTML = r.ok
-        ? `<span style="color:var(--up)">bound ${esc(id)} to the stream · ${r.capturableFeeds} feed(s) capturable · use <b>▶ Test 8s</b> to pull a sample now</span>`
-        : `<span style="color:var(--down)">${esc(r.error || "bind failed")}</span>`;
-      loadSources(); loadCaptureState();
-    } catch (e) { msg.innerHTML = '<span style="color:var(--down)">bind request failed</span>'; }
-  }
 
+
+
+
+
+  // A still of the screen. On failure the <img> errors, so read the reason from /video/status rather
+  // than leaving a broken image icon with no explanation.
+
+  // Capture a few seconds NOW and show what it heard — proves the device works without waiting a chunk.
+
+  /** Bind a feed to a host audio device chosen from the picker. */
   async function bindFeed(id) {
     const sel = document.getElementById("dev-" + id);
     const msg = document.getElementById("bindMsg");
     if (!sel || !sel.value) { msg.textContent = "pick a device first."; return; }
+    await doBind(id, sel.value, "device");
+  }
+
+  /** Bind a feed to a network STREAM — the headless path: ffmpeg reads the URL directly. */
+  async function bindUrl(id) {
+    const box = document.getElementById("url-" + id);
+    const msg = document.getElementById("bindMsg");
+    const u = (box && box.value || "").trim();
+    if (!u) { msg.textContent = "enter a stream URL first."; return; }
+    await doBind(id, "url:" + u, "stream");
+  }
+
+  async function doBind(id, source, kind) {
+    const msg = document.getElementById("bindMsg");
     msg.textContent = "binding " + id + " …";
     try {
       const r = await (await fetch(`/api/muni/audio/sources/${encodeURIComponent(id)}/bind`
-        + `?device=${encodeURIComponent(sel.value)}&enabled=true`, { method: "POST" })).json();
+        + `?device=${encodeURIComponent(source)}&enabled=true`, { method: "POST" })).json();
       msg.innerHTML = r.ok
-        ? `<span style="color:var(--up)">bound ${esc(id)} → ${esc(r.device)} · ${r.capturableFeeds} feed(s) now capturable · saved to ${esc(r.registry)}</span>`
+        ? `<span style="color:var(--up)">bound ${esc(id)} to this ${kind} · ${r.capturableFeeds} feed(s) capturable · hit <b>▶ Test 8s</b> to pull a sample now</span>`
         : `<span style="color:var(--down)">${esc(r.error || "bind failed")}</span>`;
       loadSources(); loadCaptureState();
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">bind request failed</span>'; }
   }
 
-  // ---- Watch & verify: getDisplayMedia (no plugin) → live video + this tab's own audio transcribed ----
-  let SHARE = null;          // the MediaStream while sharing
-  let CLIP_TIMER = null;
-
-  /** getDisplayMedia exists only in a secure context — say WHY when it doesn't, don't just hide the button. */
-  function shareUnavailableReason() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      return window.isSecureContext === false
-        ? `this page is not a secure context (${location.protocol}//${location.host}), so the browser blocks `
-          + `tab sharing. Open muni-world as http://localhost:${location.port} on the machine playing the TV, `
-          + `or put it behind HTTPS.`
-        : "this browser does not support getDisplayMedia (tab sharing).";
-    }
-    return null;
-  }
-
-  async function shareTab() {
-    const err = document.getElementById("shareErr");
-    const reason = shareUnavailableReason();
-    if (reason) { err.innerHTML = `<span style="color:var(--warn)">${esc(reason)}</span>`; return; }
-    try {
-      SHARE = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    } catch (e) {
-      err.innerHTML = `<span style="color:var(--dim)">sharing cancelled or denied (${esc(e.name || "")}).</span>`;
-      return;
-    }
-    const video = document.getElementById("tabVideo");
-    video.srcObject = SHARE;
-    video.style.display = "block";
-    document.getElementById("shareBtn").style.display = "none";
-    document.getElementById("stopShareBtn").style.display = "inline-block";
-    // Stopping the share from the browser's own bar must reset this page too.
-    SHARE.getVideoTracks().forEach(t => t.addEventListener("ended", stopShare));
-
-    if (SHARE.getAudioTracks().length === 0) {
-      // The single most common mistake, and silent otherwise: video shares fine, audio never arrives.
-      err.innerHTML = '<span style="color:var(--warn)">Sharing video but NO audio track — re-share and tick '
-        + '“Share tab audio” in the dialog (it appears only when you pick a <b>tab</b>, not a whole screen). '
-        + 'Without it there is nothing to transcribe.</span>';
-      document.getElementById("shareState").textContent = "· video only";
-      return;
-    }
-    err.textContent = "";
-    document.getElementById("shareState").textContent = "· sharing (video + tab audio)";
-    recordClip();
-  }
-
-  function stopShare() {
-    if (CLIP_TIMER) { clearTimeout(CLIP_TIMER); CLIP_TIMER = null; }
-    if (SHARE) { SHARE.getTracks().forEach(t => t.stop()); SHARE = null; }
-    const video = document.getElementById("tabVideo");
-    video.srcObject = null; video.style.display = "none";
-    document.getElementById("shareBtn").style.display = "inline-block";
-    document.getElementById("stopShareBtn").style.display = "none";
-    document.getElementById("shareState").textContent = "";
-  }
-
-  /** Record ONE self-contained clip of the tab audio, post it, show the text, then queue the next. */
-  function recordClip() {
-    if (!SHARE || SHARE.getAudioTracks().length === 0) { return; }
-    const secs = parseInt(document.getElementById("clipSecs").value, 10) || 15;
-    // Audio only, and a full start→stop cycle per clip: a timeslice would yield fragments that are not
-    // independently decodable, which ffmpeg (and therefore whisper) could not read.
-    const rec = new MediaRecorder(new MediaStream(SHARE.getAudioTracks()));
-    const parts = [];
-    rec.ondataavailable = e => { if (e.data && e.data.size) parts.push(e.data); };
-    rec.onstop = async () => {
-      const blob = new Blob(parts, { type: rec.mimeType || "audio/webm" });
-      await sendClip(blob);
-      if (SHARE) { CLIP_TIMER = setTimeout(recordClip, 200); }   // keep going until Stop
-    };
-    rec.start();
-    setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, secs * 1000);
-  }
-
-  async function sendClip(blob) {
-    const box = document.getElementById("liveText");
-    const fd = new FormData();
-    fd.append("file", blob, "clip.webm");
-    try {
-      const r = await (await fetch("/api/muni/audio/transcribe-clip", { method: "POST", body: fd })).json();
-      const at = new Date().toLocaleTimeString();
-      let body;
-      if (!r.ok) {
-        body = `<span style="color:var(--down)">${esc(r.error || "transcribe failed")}</span>`;
-      } else if (r.heard) {
-        const leads = (r.leads || []).map(l => esc(l.match)).join(", ");
-        body = `<span style="color:var(--txt)">${esc(r.heard)}</span>`
-          + (leads ? `<div style="color:var(--brand);font-size:11px;margin-top:2px">leads: ${leads}</div>` : "");
-      } else {
-        body = `<span style="color:var(--warn)">${esc(r.note || "no speech recognised")}</span>`;
-      }
-      box.insertAdjacentHTML("afterbegin",
-        `<div class="issuer"><span style="color:var(--dim);font-size:11px">${at} · ${r.clipBytes || 0} bytes</span>
-         <div style="margin-top:3px;font-size:13px;line-height:1.5">${body}</div></div>`);
-      while (box.children.length > 12) { box.removeChild(box.lastChild); }
-    } catch (e) {
-      box.insertAdjacentHTML("afterbegin",
-        '<div class="issuer" style="color:var(--down);font-size:12px">clip upload failed</div>');
-    }
-  }
-
-  // A still of the screen. On failure the <img> errors, so read the reason from /video/status rather
-  // than leaving a broken image icon with no explanation.
-  async function grabFrame() {
-    const img = document.getElementById("screenFrame");
-    const err = document.getElementById("screenErr");
-    const note = document.getElementById("screenNote");
-    try {
-      const st = await (await fetch("/api/muni/video/status", { cache: "no-store" })).json();
-      note.textContent = st.device ? "· " + st.device : "";
-      if (st.blocker) {
-        img.style.display = "none";
-        err.innerHTML = `<span style="color:var(--warn)">${esc(st.blocker)}</span>`;
-        return;
-      }
-      // cache-buster: each grab is a fresh frame, never a cached one
-      img.onerror = () => {
-        img.style.display = "none";
-        err.innerHTML = '<span style="color:var(--down)">screen grab failed — the display exists but ffmpeg '
-          + 'could not read it (is the x11grab input right, and does this user own the session?).</span>';
-      };
-      img.onload = () => { img.style.display = "block"; err.textContent = ""; };
-      img.src = "/api/muni/video/frame?t=" + Date.now();
-    } catch (e) { err.textContent = "screen status unavailable"; }
-  }
-  setInterval(() => { if (document.getElementById("autoFrame").checked) grabFrame(); }, 3000);
-
-  // Capture a few seconds NOW and show what it heard — proves the device works without waiting a chunk.
+  /** Pull a few seconds from this feed NOW and show what it heard — proves a URL or device works. */
   async function testFeed(id) {
     const msg = document.getElementById("bindMsg");
-    msg.textContent = "capturing 8s from " + id + " and transcribing… (takes a few seconds)";
+    msg.textContent = "pulling 8s from " + id + " and transcribing… (a stream needs a moment to connect)";
     try {
       const r = await (await fetch(`/api/muni/audio/test-capture?feed=${encodeURIComponent(id)}&seconds=8`,
         { method: "POST" })).json();
       if (!r.ok) {
-        msg.innerHTML = `<span style="color:var(--down)">test failed: ${esc(r.error || "")}</span>`;
+        msg.innerHTML = `<span style="color:var(--down)">${esc(r.error || "test failed")}</span>`;
         return;
       }
+      const lvl = r.level || {};
       const heard = r.heard
         ? `<div style="margin-top:4px;color:var(--txt)">“${esc(r.heard)}”</div>`
         : `<div style="margin-top:4px;color:var(--warn)">${esc(r.note || "no speech recognised")}</div>`;
-      msg.innerHTML = `<span style="color:var(--up)">captured ${r.audioBytes} bytes from `
-        + `${esc(r.device)} · ${r.segments} segment(s) · ${(r.leads || []).length} lead(s)</span>${heard}`;
+      msg.innerHTML = `<span style="color:var(--up)">${r.audioBytes} bytes · peak ${esc(String(lvl.peakDbfs))} dBFS `
+        + `· ${r.segments} segment(s) · ${(r.leads || []).length} lead(s)</span>${heard}`;
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">test request failed</span>'; }
   }
 
@@ -443,11 +288,6 @@
   // list can render before AUDIO is known and fall back to a bare "no lead yet" — losing the very
   // explanation this page exists to give. Intervals afterwards are independent (AUDIO is populated by then).
   loadCaptureState().then(() => { loadTranscripts(); loadLeads(); });
-  grabFrame();
-  (() => {   // state the sharing precondition up front rather than only on click
-    const r = shareUnavailableReason();
-    if (r) { document.getElementById("shareErr").innerHTML = '<span style="color:var(--warn)">' + esc(r) + '</span>'; }
-  })();
   setInterval(loadCaptureState, 10000);
 
   // Devices first, so the first render of the feed table already has pickers populated.
