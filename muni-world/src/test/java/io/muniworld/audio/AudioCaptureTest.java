@@ -89,6 +89,33 @@ class AudioCaptureTest {
     }
 
     @Test
+    void aFailingFeedBacksOffInsteadOfRetryingEverySecond() {
+        // The loop's gap is ~1s because a real capture BLOCKS for its chunk and paces the loop itself. A
+        // failure that returns immediately (missing yt-dlp, dead URL) does not pace anything, so without a
+        // backoff the same warning printed once per second forever and buried the rest of the log.
+        var b = new AudioCaptureScheduler.Backoff();
+        long t0 = 1_000_000L;
+        assertTrue(b.due(t0), "a feed with no failures is due immediately");
+
+        b.fail(t0);
+        assertEquals(30_000L, b.waitMs(), "first failure waits 30s");
+        assertFalse(b.due(t0 + 29_999L), "not retried before the backoff elapses");
+        assertTrue(b.due(t0 + 30_000L), "retried once it does");
+
+        b.fail(t0 + 30_000L);
+        assertEquals(60_000L, b.waitMs(), "backoff doubles");
+        for (int i = 0; i < 10; i++) {
+            b.fail(t0);
+        }
+        assertEquals(300_000L, b.waitMs(), "capped at 5 minutes — a broken feed is retried, never abandoned");
+
+        b.reset();
+        assertEquals(0L, b.waitMs(), "a success clears the backoff");
+        assertEquals(0, b.failures());
+        assertTrue(b.due(t0));
+    }
+
+    @Test
     void captureDeclaresTheFormatWhisperCanActuallyRead() {
         // whisper-cli reads 16 kHz mono PCM WAV and bundles no decoder, so the capture stage MUST produce
         // WAV. It once wrote Opus/.ogg, which made every transcription fail while capture looked fine.

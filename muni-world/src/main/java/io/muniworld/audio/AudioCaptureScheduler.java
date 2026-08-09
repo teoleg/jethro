@@ -64,9 +64,9 @@ public final class AudioCaptureScheduler {
             if (!warnedNoFeeds) {
                 warnedNoFeeds = true;
                 log.warn("audio capture is ENABLED but NO feed is capturable: of {} registered feed(s), none "
-                        + "is both enabled=true AND bound to a host audio device. Edit the registry ({}), "
-                        + "set a device (e.g. pulse:default.monitor or alsa:hw:1,0) and enabled=true on a "
-                        + "row, then `svc.sh restart tv`. Nothing will be captured until then.",
+                        + "is both enabled=true AND has a source. Edit the registry ({}), set a source "
+                        + "(yt:<page>, url:<stream> or pulse:<name>) and enabled=true on a row, then "
+                        + "`svc.sh restart tv`. Nothing will be captured until then.",
                         catalog.all().size(), registryPath.isBlank() ? "classpath default" : registryPath);
             }
             return;
@@ -76,6 +76,10 @@ public final class AudioCaptureScheduler {
             log.info("audio capture: {} feed(s) now capturable — resuming", feeds.size());
         }
         for (AudioSource src : feeds) {
+            Backoff b = backoff.computeIfAbsent(src.id(), k -> new Backoff());
+            if (!b.due(System.currentTimeMillis())) {
+                continue;                       // still cooling off from a failure — not due yet
+            }
             try {
                 FfmpegCaptureSource source = new FfmpegCaptureSource(ffmpegBin, src.device(), src.chunkSeconds());
                 AudioCaptureConnector connector = new AudioCaptureConnector("audio:" + src.id(), source);
@@ -85,10 +89,57 @@ public final class AudioCaptureScheduler {
                 TranscriptLeadService.Leads leads = leadService.detect(t);
                 store.add(src.label(), leads);
                 log.info("audio pass [{}]: {} segments, {} leads", src.id(), t.segments().size(), leads.leads().size());
+                if (b.waitMs() > 0) {
+                    log.info("audio capture [{}] recovered after {} consecutive failure(s)", src.id(), b.failures());
+                }
+                b.reset();
             } catch (RuntimeException e) {
-                // one bad feed never kills the loop or the other feeds — log and continue
-                log.warn("audio capture pass failed for {}: {}", src.id(), e.toString());
+                // One bad feed never kills the loop or the other feeds. But a failure that returns
+                // IMMEDIATELY (a missing binary, a dead URL) does not pace the loop the way a real capture
+                // does, so without a backoff this retried and logged the same line every gap-ms — a
+                // once-per-second wall of identical warnings that buries anything else in the log. Back off
+                // per feed, and log only the attempts that actually run.
+                b.fail(System.currentTimeMillis());
+                log.warn("audio capture pass failed for {}: {} — retrying in {}s", src.id(), e.toString(),
+                        b.waitMs() / 1000);
             }
+        }
+    }
+
+    /** Per-feed failure state: exponential backoff from {@link #MIN_BACKOFF_MS}, capped at {@link #MAX_BACKOFF_MS}. */
+    private static final long MIN_BACKOFF_MS = 30_000;
+    private static final long MAX_BACKOFF_MS = 300_000;
+
+    private final java.util.Map<String, Backoff> backoff = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Package-private and clock-injected so the retry schedule is TESTED, not assumed. */
+    static final class Backoff {
+        private long waitMs;
+        private long nextAttemptAt;
+        private int failures;
+
+        boolean due(long now) {
+            return now >= nextAttemptAt;
+        }
+
+        void fail(long now) {
+            failures++;
+            waitMs = waitMs == 0 ? MIN_BACKOFF_MS : Math.min(waitMs * 2, MAX_BACKOFF_MS);
+            nextAttemptAt = now + waitMs;
+        }
+
+        void reset() {
+            waitMs = 0;
+            nextAttemptAt = 0;
+            failures = 0;
+        }
+
+        long waitMs() {
+            return waitMs;
+        }
+
+        int failures() {
+            return failures;
         }
     }
 }

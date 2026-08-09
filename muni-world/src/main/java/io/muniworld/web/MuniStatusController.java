@@ -79,11 +79,18 @@ public final class MuniStatusController {
         audio.put("feeds", audioSources.all().size());
         audio.put("capturableFeeds", capturable);
         audio.put("whisperModelSet", asrBlocker == null);
+        // A yt: source needs yt-dlp on THIS host. Without this check a missing binary shows only as a
+        // failed capture in the log while the page reports every gate green — so name it as a gate.
+        String toolBlocker = audioSources.capturable().stream()
+                .anyMatch(s -> io.muniworld.audio.FfmpegCaptureSource.usesYtdlp(s.device()))
+                ? io.muniworld.audio.FfmpegCaptureSource.ytdlpBlocker()
+                : null;
+        audio.put("ytdlpReady", toolBlocker == null);
         audio.put("blocker", !captureEnabled
                 ? "capture is OFF (MUNI_AUDIO_CAPTURE=false) — run `svc.sh start tv`"
                 : capturable == 0
                   ? "no feed is enabled AND has a source — set one on the TV page (advanced)"
-                  : asrBlocker);
+                  : toolBlocker != null ? toolBlocker : asrBlocker);
         out.put("audio", audio);
         return out;
     }

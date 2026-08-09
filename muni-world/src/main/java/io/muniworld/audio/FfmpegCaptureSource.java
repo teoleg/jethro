@@ -81,6 +81,47 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
         return cmd;
     }
 
+    /** True when {@code source} needs yt-dlp before ffmpeg can read it. */
+    public static boolean usesYtdlp(String source) {
+        return source != null && source.regionMatches(true, 0, "yt:", 0, 3);
+    }
+
+    /**
+     * Null when yt-dlp is runnable, else WHY it is not — so a missing tool is named as a gate on the status
+     * page instead of only surfacing as a failed capture. Cached: the status endpoint is polled every few
+     * seconds and this forks a process.
+     */
+    public static String ytdlpBlocker() {
+        long now = System.currentTimeMillis();
+        if (now - ytdlpCheckedAt < YTDLP_RECHECK_MS) {
+            return ytdlpBlocker;
+        }
+        String reason;
+        try {
+            Process p = new ProcessBuilder(YTDLP, "--version").redirectErrorStream(true).start();
+            if (!p.waitFor(10, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                reason = "yt-dlp did not respond to --version";
+            } else {
+                reason = p.exitValue() == 0 ? null : "yt-dlp exited " + p.exitValue() + " for --version";
+            }
+        } catch (IOException e) {
+            reason = "yt-dlp is NOT installed on this host (or not on this process's PATH) — run "
+                    + "`scripts/svc.sh setup tv`, or `python3 -m pip install --user -U yt-dlp` and set "
+                    + "MUNI_YTDLP_BIN to its absolute path in local.env";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            reason = "interrupted while checking yt-dlp";
+        }
+        ytdlpBlocker = reason;
+        ytdlpCheckedAt = now;
+        return reason;
+    }
+
+    private static final long YTDLP_RECHECK_MS = 60_000;
+    private static volatile String ytdlpBlocker;
+    private static volatile long ytdlpCheckedAt;
+
     /** True for a NETWORK stream source ({@code url:https://…}) rather than a host audio device. */
     private boolean isUrl() {
         return device.regionMatches(true, 0, "url:", 0, 4);

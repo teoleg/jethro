@@ -273,6 +273,7 @@
       el.innerHTML = `<b style="color:var(--warn)">Not capturing</b> — ${esc(a.blocker)}.`
         + `<div style="margin-top:4px;font-size:11.5px">capture switch: <b>${a.captureEnabled ? "on" : "off"}</b>`
         + ` · feeds with a source: <b>${a.capturableFeeds}/${a.feeds}</b>`
+        + ` · yt-dlp: <b>${a.ytdlpReady ? "ready" : "missing"}</b>`
         + ` · whisper model: <b>${a.whisperModelSet ? "set" : "not set"}</b></div>`;
     } catch (e) { el.textContent = "capture state unavailable — is muni-world up?"; }
   }
