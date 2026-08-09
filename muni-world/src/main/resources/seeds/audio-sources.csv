@@ -5,12 +5,14 @@ id|label|publisher|category|device|chunk_seconds|enabled|notes
 #                  so the page is what is stored, never the resolved URL)
 #   url:<stream>   a direct stream URL (HLS/DASH/Icecast) — ffmpeg reads it straight
 #
-# PROVENANCE of the URL below: supplied by the owner (from a ChatGPT recommendation) as Bloomberg
-# Television's official YouTube live stream. It is NOT verified — the build sandbox cannot reach YouTube,
-# so the first real check happens on the capture host. If Bloomberg ends this particular broadcast the
-# video id dies with it; yt-dlp then fails BY NAME in the log and on the TV page, and the fix is to put the
-# current live page in this row.
+# USE A CHANNEL'S /live URL, NEVER A VIDEO ID. A watch?v=<id> URL points at ONE broadcast and dies with it
+# ("This live stream recording is not available") — that is exactly how the first attempt here failed. A
+# channel's /live endpoint resolves to whatever that channel is streaming NOW, so it does not perish.
+#
+# PROVENANCE: https://www.youtube.com/@markets is Bloomberg Television's official YouTube channel and
+# /@markets/live is its live endpoint ("Bloomberg Business News Live") — confirmed by web search, not
+# fetched: the build sandbox cannot reach YouTube, so the first real resolve happens on the capture host.
 #
 # Recording is for PRIVATE analysis only (transcript-as-lead, never redistributed) and remains subject to
 # Bloomberg's and YouTube's terms.
-tv-bloomberg|Bloomberg TV|Bloomberg|tv|yt:https://www.youtube.com/watch?v=iyOq8DhaMYw|120|true|Bloomberg Television live
+tv-bloomberg|Bloomberg TV|Bloomberg|tv|yt:https://www.youtube.com/@markets/live|120|true|Bloomberg Television live

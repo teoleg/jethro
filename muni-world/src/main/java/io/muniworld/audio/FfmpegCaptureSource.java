@@ -121,9 +121,20 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
      * never stored — storing one would work once and then fail forever with an opaque 403.
      */
     private String resolveViaYtdlp(String page) {
+        Process p;
         try {
-            Process p = new ProcessBuilder(YTDLP, "-f", "bestaudio/best", "-g", "--no-warnings", page)
+            p = new ProcessBuilder(YTDLP, "-f", "bestaudio/best", "-g", "--no-warnings", page)
                     .redirectErrorStream(true).start();
+        } catch (IOException e) {
+            // ONLY this branch means the binary is missing. Reporting "is yt-dlp installed?" on every
+            // failure was misleading: it printed that while yt-dlp was installed, had run, and had given a
+            // perfectly clear answer ("This live stream recording is not available") — sending the reader
+            // after the wrong problem.
+            throw new RuntimeException("cannot run yt-dlp (" + YTDLP + ") — install it with "
+                    + "`python3 -m pip install --user -U yt-dlp` and set MUNI_YTDLP_BIN to its absolute "
+                    + "path. Cause: " + e.getMessage(), e);
+        }
+        try {
             // Wait FIRST, then read: reading to EOF on this thread would block forever on a hung yt-dlp and
             // make the timeout below unreachable. The output is a URL or two, far under the pipe buffer.
             if (!p.waitFor(60, TimeUnit.SECONDS)) {
@@ -132,17 +143,20 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
             }
             String out = new String(p.getInputStream().readAllBytes()).strip();
             if (p.exitValue() != 0 || out.isBlank()) {
-                throw new IOException("yt-dlp could not resolve " + page + ": " + out);
+                throw new IOException("yt-dlp says: " + out.lines().reduce((a, x) -> x).orElse("(no output)"));
             }
             String url = out.lines().filter(l -> l.startsWith("http")).findFirst().orElse("");
             if (url.isBlank()) {
-                throw new IOException("yt-dlp returned no media URL for " + page + ": " + out);
+                throw new IOException("yt-dlp returned no media URL: " + out);
             }
             log.info("yt-dlp resolved {} to a live media URL", page);
             return url;
         } catch (IOException e) {
-            throw new RuntimeException("yt-dlp resolve failed for " + page + " — is yt-dlp installed? "
-                    + "(pip install -U yt-dlp). Cause: " + e.getMessage(), e);
+            // yt-dlp RAN and refused. Its own message is the useful part — a dead video id, a stream that
+            // has ended, a geo-block. The fix is the source in seeds/audio-sources.csv, not the tooling.
+            throw new RuntimeException("cannot resolve " + page + " — " + e.getMessage()
+                    + ". If that source is gone, put the current live page in seeds/audio-sources.csv "
+                    + "(a channel's /live URL never expires; a video id does)", e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("yt-dlp resolve interrupted", e);
