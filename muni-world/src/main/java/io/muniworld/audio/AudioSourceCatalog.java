@@ -32,12 +32,41 @@ public final class AudioSourceCatalog {
     private volatile List<AudioSource> sources;
 
     public AudioSourceCatalog(@Value("${muni.audio.sources.file:}") String file) {
-        this.file = file;
-        seedIfMissing(file);
-        this.sources = load(file);
+        this.file = redirectIfTracked(file);
+        seedIfMissing(this.file);
+        // Load from the REDIRECTED path, not the argument — otherwise the live copy is seeded and then
+        // ignored, and the app reads the template it must never touch.
+        this.sources = load(this.file);
         log.info("AudioSourceCatalog loaded {} feed(s) ({} capturable) from {}",
                 sources.size(), sources.stream().filter(AudioSource::capturable).count(),
-                (file == null || file.isBlank()) ? "classpath default" : file);
+                (this.file == null || this.file.isBlank()) ? "classpath default" : this.file);
+    }
+
+    /**
+     * Never write to the COMMITTED template, whatever the config says.
+     *
+     * <p>Binding a device rewrites the registry. If that registry is the tracked
+     * {@code muni-world/seeds/audio-sources.csv}, every later {@code git pull} aborts with "your local
+     * changes would be overwritten" — which happened twice to the owner, because an older local.env still
+     * pointed there and no amount of fixing the default reaches a machine that already has the old value.
+     * So the redirect happens in CODE: a configured path that IS the template silently becomes the
+     * untracked local copy, seeded from it.
+     */
+    private static String redirectIfTracked(String file) {
+        if (file == null || file.isBlank()) {
+            return file;
+        }
+        Path p = Path.of(file).normalize();
+        boolean isTemplate = p.endsWith(Path.of("muni-world", "seeds", "audio-sources.csv"))
+                || p.endsWith(Path.of("seeds", "audio-sources.csv"));
+        if (!isTemplate) {
+            return file;
+        }
+        String live = "local/audio-sources.csv";
+        log.warn("registry {} is the COMMITTED template and would collide with every git pull — using {} "
+                + "instead (seeded from the template). Update MUNI_AUDIO_SOURCES_FILE to silence this.",
+                file, live);
+        return live;
     }
 
     /**
