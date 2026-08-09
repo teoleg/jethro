@@ -55,7 +55,11 @@
 <main>
   <div class="kicker">Broadcast soft-signal</div>
   <h1>TV / Audio processing</h1>
-  <div class="banner">Work in progress — local ASR of a licensed broadcast feed produces <b>leads to verify</b>, never a number that feeds risk/PnL. Capture runs only where an audio device is bound (the Pi); it does nothing here.</div>
+  <!-- What this page IS (audio only, leads only). The LIVE state is the banner below — this one must never
+       claim capture is or isn't happening, or it contradicts it (it used to say "it does nothing here"). -->
+  <div class="banner">Audio only — there is no video, and the broadcast is never streamed or stored here: a
+    chunk is captured, transcribed locally, and discarded. What you see below is what it <b>heard</b>, as
+    <b>leads to verify</b> — never a number that feeds risk/PnL.</div>
   <!-- The capture loop is SILENT when idle, so state it plainly: is capture on, and if nothing is happening, which gate is blocking. -->
   <div id="captureState" class="banner" style="border-left-color:var(--dim)">checking capture state…</div>
 
@@ -111,6 +115,25 @@
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">bind request failed</span>'; }
   }
 
+  // Capture a few seconds NOW and show what it heard — proves the device works without waiting a chunk.
+  async function testFeed(id) {
+    const msg = document.getElementById("bindMsg");
+    msg.textContent = "capturing 8s from " + id + " and transcribing… (takes a few seconds)";
+    try {
+      const r = await (await fetch(`/api/muni/audio/test-capture?feed=${encodeURIComponent(id)}&seconds=8`,
+        { method: "POST" })).json();
+      if (!r.ok) {
+        msg.innerHTML = `<span style="color:var(--down)">test failed: ${esc(r.error || "")}</span>`;
+        return;
+      }
+      const heard = r.heard
+        ? `<div style="margin-top:4px;color:var(--txt)">“${esc(r.heard)}”</div>`
+        : `<div style="margin-top:4px;color:var(--warn)">${esc(r.note || "no speech recognised")}</div>`;
+      msg.innerHTML = `<span style="color:var(--up)">captured ${r.audioBytes} bytes from `
+        + `${esc(r.device)} · ${r.segments} segment(s) · ${(r.leads || []).length} lead(s)</span>${heard}`;
+    } catch (e) { msg.innerHTML = '<span style="color:var(--down)">test request failed</span>'; }
+  }
+
   async function loadSources() {
     try {
       const ss = await (await fetch("/api/muni/audio/sources", { cache: "no-store" })).json();
@@ -130,11 +153,16 @@
             ? DEVICES.slice().sort((a, b) => (b.monitor ? 1 : 0) - (a.monitor ? 1 : 0))
                 .map(d => `<option value="${esc(d.device)}"${d.device === s.device ? " selected" : ""}>${esc(d.label)}</option>`).join("")
             : "";
+          // A bound feed gets a Test button: the loop's chunk is 300s, so without this a fresh binding
+          // gives no feedback for five minutes and a dead device looks identical to silence.
+          const test = s.device
+            ? `<button class="btn" style="padding:5px 10px;font-size:11px" onclick="testFeed('${esc(s.id)}')">▶ Test 8s</button>`
+            : "";
           const picker = DEVICES.length
             ? `<select id="dev-${esc(s.id)}" style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:7px;padding:5px 7px;font:inherit;font-size:11px;max-width:260px">
                  <option value="">— pick a device —</option>${opts}</select>
-               <button class="btn" style="padding:5px 10px;font-size:11px" onclick="bindFeed('${esc(s.id)}')">Bind</button>`
-            : '<span style="color:var(--dim);font-size:11px">no device detected on this host</span>';
+               <button class="btn" style="padding:5px 10px;font-size:11px" onclick="bindFeed('${esc(s.id)}')">Bind</button> ${test}`
+            : (test || '<span style="color:var(--dim);font-size:11px">no device detected on this host</span>');
           return `<tr><td style="color:var(--txt)">${esc(s.label)}</td><td>${esc(s.publisher)}</td>
             <td class="mono" style="font-size:11px">${esc(s.device || "—")}</td>
             <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td><td>${picker}</td></tr>`;

@@ -30,15 +30,22 @@ public final class MuniAudioController {
     private final AudioSourceCatalog sources;
     private final RecentTranscriptsStore transcripts;
     private final io.muniworld.audio.AudioDeviceScanner devices;
+    private final io.muniworld.audio.Transcriber transcriber;
+    private final String ffmpegBin;
 
     public MuniAudioController(TranscriptLeadService leads, RecentLeadsStore recent,
                               AudioSourceCatalog sources, RecentTranscriptsStore transcripts,
-                              io.muniworld.audio.AudioDeviceScanner devices) {
+                              io.muniworld.audio.AudioDeviceScanner devices,
+                              io.muniworld.audio.Transcriber transcriber,
+                              @org.springframework.beans.factory.annotation.Value("${muni.audio.ffmpeg.bin:ffmpeg}")
+                              String ffmpegBin) {
         this.leads = leads;
         this.recent = recent;
         this.sources = sources;
         this.transcripts = transcripts;
         this.devices = devices;
+        this.transcriber = transcriber;
+        this.ffmpegBin = ffmpegBin;
     }
 
     /** The audio inputs THIS host exposes, in the {@code <format>:<name>} form the registry takes. */
@@ -68,6 +75,63 @@ public final class MuniAudioController {
         } catch (RuntimeException e) {
             out.put("ok", false);                     // a failed save must never read as saved
             out.put("error", e.getMessage());
+        }
+        return out;
+    }
+
+    /**
+     * Capture a SHORT sample from a bound feed right now, transcribe it, and return what it heard — the
+     * one-click "is this actually working?" check.
+     *
+     * <p>Feeds run on a 300-second chunk, so after binding a device the first scheduled transcript is five
+     * minutes away and a misconfigured device is indistinguishable from silence for that whole time. This
+     * takes the same path the loop takes (same ffmpeg device string, same transcriber) over a few seconds,
+     * so a broken device or a missing model fails HERE, loudly, with the reason.
+     *
+     * <p>Blocks for roughly {@code seconds} plus transcription time. It stores nothing: this is a probe, not
+     * a capture pass — the loop remains the only thing that records leads.
+     */
+    @PostMapping("/api/muni/audio/test-capture")
+    public java.util.Map<String, Object> testCapture(
+            @RequestParam String feed,
+            @RequestParam(defaultValue = "8") int seconds) {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("feed", feed);
+        AudioSource src = sources.all().stream().filter(s -> s.id().equals(feed)).findFirst().orElse(null);
+        if (src == null) {
+            out.put("ok", false);
+            out.put("error", "no feed '" + feed + "' in the registry");
+            return out;
+        }
+        if (src.device() == null || src.device().isBlank()) {
+            out.put("ok", false);
+            out.put("error", "feed '" + feed + "' has no device bound — pick one and Bind first");
+            return out;
+        }
+        int secs = Math.min(Math.max(seconds, 1), 30);      // a probe, not a recording session
+        out.put("device", src.device());
+        out.put("seconds", secs);
+        try {
+            var source = new io.muniworld.audio.FfmpegCaptureSource(ffmpegBin, src.device(), secs);
+            var connector = new io.muniworld.audio.AudioCaptureConnector("audio-test:" + src.id(), source);
+            var audio = connector.fetch().get(0);
+            out.put("audioBytes", audio.size());
+            Transcript t = transcriber.transcribe(audio);
+            String text = t.fullText();
+            out.put("segments", t.segments().size());
+            out.put("heard", text);
+            out.put("leads", leads.detect(t).leads());
+            out.put("ok", true);
+            if (text.isBlank()) {
+                // Captured bytes but no words: the device is readable, it just carried no speech. Say which,
+                // rather than leaving an empty string to be read as failure.
+                out.put("note", "captured " + audio.size() + " bytes but recognised no speech — the device "
+                        + "works; check the TV is actually playing and that this device carries ITS audio "
+                        + "(a .monitor source captures what this machine plays).");
+            }
+        } catch (RuntimeException e) {
+            out.put("ok", false);
+            out.put("error", String.valueOf(e.getMessage()));
         }
         return out;
     }
