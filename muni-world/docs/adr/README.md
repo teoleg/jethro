@@ -23,6 +23,7 @@ gets an ADR here **before** implementation; accepted ADRs are settled and supers
 | [0013](0013-lmdb-btree-search-index.md) | LMDB B-tree search-index layer (derived, ordered-key search) | Accepted |
 | [0014](0014-broadcast-audio-capture-and-transcription.md) | Broadcast-audio capture and transcription as a soft-signal source | Accepted |
 | [0015](0015-emma-official-statement-term-extraction.md) | EMMA Official Statement term extraction — the flagship data pipeline | Accepted |
+| [0016](0016-fund-holdings-nport-cusip-source.md) | SEC N-PORT fund holdings as the bulk CUSIP source | Accepted |
 
 ## Reading order
 

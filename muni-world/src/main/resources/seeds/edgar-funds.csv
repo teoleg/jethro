@@ -1,0 +1,13 @@
+cik|expect_name|label|enabled
+# EDGAR fund registry (ADR-0016) — read-only config loaded from the jar: edit this file and rebuild.
+# Each enabled row's latest NPORT-P filing (the fund's complete quarterly portfolio, a public SEC record)
+# is fetched daily and its municipal-debt holdings upserted as terms-only bonds.
+#
+# expect_name is the SAFETY GATE: the registrant name EDGAR itself reports for the CIK must contain this
+# string (case-insensitive) or the fund is REFUSED — so a mistyped CIK cannot silently pollute the master.
+#
+# PROVENANCE: CIK 788599 appears in EDGAR's own archives as the registrant filing for the Vanguard New
+# York municipal funds (established by web search over sec.gov archive URLs; the name gate verifies it
+# against EDGAR itself on first fetch). The build sandbox cannot reach sec.gov, so the first live fetch
+# happens on the capture host and fails loudly if the CIK or gate is wrong.
+788599|new york|Vanguard NY municipal funds|true

@@ -25,14 +25,17 @@ public final class MuniStatusController {
     private final boolean captureEnabled;
     private final String whisperModel;
     private final io.muniworld.audio.WhisperCliTranscriber whisper;
+    private final io.muniworld.ingest.EdgarFundHoldingsScheduler fundHoldings;
 
     public MuniStatusController(MuniLmdbStore lmdb, MuniBondService bonds,
                                 io.muniworld.audio.AudioSourceCatalog audioSources,
                                 io.muniworld.audio.WhisperCliTranscriber whisper,
+                                io.muniworld.ingest.EdgarFundHoldingsScheduler fundHoldings,
                                 @Value("${muni.kafka.enabled}") boolean kafkaEnabled,
                                 @Value("${spring.flyway.enabled}") boolean flywayEnabled,
                                 @Value("${muni.audio.capture.enabled:false}") boolean captureEnabled,
                                 @Value("${muni.audio.whisper.model:}") String whisperModel) {
+        this.fundHoldings = fundHoldings;
         this.whisper = whisper;
         this.lmdb = lmdb;
         this.bonds = bonds;
@@ -65,6 +68,10 @@ public final class MuniStatusController {
         counts.put("lmdbSecurities", lmdbRows);
         counts.put("dbSecurities", dbRows.isPresent() ? dbRows.getAsLong() : null);
         out.put("counts", counts);
+
+        // ADR-0016 fund-holdings ingest: which funds fed the CUSIP universe and what the last pass did —
+        // reported verbatim, so a refused CIK or an unreachable EDGAR is readable here, not only in logs.
+        out.put("funds", fundHoldings.summary());
 
         // TV/audio capture (ADR-0014): report the three gates that must ALL be satisfied before a single
         // second of audio is captured, and which one is blocking. Reported, never inferred — the capture
