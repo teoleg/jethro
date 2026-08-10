@@ -57,6 +57,7 @@ public final class EdgarFundHoldingsScheduler {
         // results are kept for phase 2, because the cross-fund detail (held-by-N-funds, total par, the
         // par-weighted valuation) only exists ACROSS funds and must be computed after all have landed.
         List<EdgarNportConnector.Result> results = new ArrayList<>();
+        List<EdgarFundCatalog.Fund> resultFunds = new ArrayList<>();
         for (EdgarFundCatalog.Fund fund : catalog.enabled()) {
             try {
                 EdgarNportConnector.Result r = connector.loadLatest(fund);
@@ -78,6 +79,7 @@ public final class EdgarFundHoldingsScheduler {
                     }
                 }
                 results.add(r);
+                resultFunds.add(fund);
                 String note = rejected == 0 ? ""
                         : "; " + rejected + " REJECTED on write (first: " + firstRejection + ")";
                 synchronized (lastResult) {
@@ -99,6 +101,71 @@ public final class EdgarFundHoldingsScheduler {
             }
         }
         writeCrossFundDetail(results);
+        // The current cycle is also a HISTORY point: write each fund's dated valuations so the series
+        // keeps extending quarter by quarter after the one-time backfill.
+        for (int i = 0; i < results.size(); i++) {
+            repo.upsertValuations(historyRows(resultFunds.get(i).cik(), results.get(i).periodEnd(),
+                    results.get(i).holdings()));
+        }
+        backfillHistory();
+    }
+
+    /**
+     * The ONE-TIME history walk (ADR-0016 amendment 2): EDGAR still serves every N-PORT ever filed, so
+     * each fund's full filing history is fetched once — years of quarterly, fund-attested valuations per
+     * held CUSIP, the free lawful form of the "delayed historical price" vendors sell live. Marked done
+     * per fund in muni.ingest_state so it never re-runs; ~30-60 filings per registrant at a polite 500ms
+     * pace, so a full backfill is minutes, once.
+     */
+    private void backfillHistory() {
+        for (EdgarFundCatalog.Fund fund : catalog.enabled()) {
+            String stateKey = "nport-backfill:" + fund.cik();
+            if (repo.state(stateKey).isPresent() || !repo.available()) {
+                continue;   // done before, or no DB to record into — retry on a later pass
+            }
+            try {
+                List<EdgarNportConnector.FilingRef> refs = connector.allNportFilings(fund);
+                int rows = 0;
+                for (EdgarNportConnector.FilingRef ref : refs) {
+                    try {
+                        EdgarNportConnector.Parsed parsed = connector.loadFiling(fund, ref);
+                        rows += repo.upsertValuations(
+                                historyRows(fund.cik(), parsed.periodEnd(), parsed.holdings()));
+                    } catch (RuntimeException e) {
+                        // one unreadable old filing is logged and skipped — history keeps its gaps honest
+                        log.warn("history backfill: filing {} of {} unreadable: {}",
+                                ref.accession(), fund.label(), e.toString());
+                    }
+                    Thread.sleep(500);
+                }
+                repo.setState(stateKey, "filings=" + refs.size() + " rows=" + rows
+                        + " at=" + Instant.now());
+                log.info("history backfill DONE for {}: {} filing(s), {} valuation row(s)",
+                        fund.label(), refs.size(), rows);
+                synchronized (lastResult) {
+                    lastResult.merge(fund.label(), "", (cur, x) -> cur
+                            + " · history backfilled: " + refs.size() + " filing(s)");
+                }
+            } catch (Exception e) {
+                log.warn("history backfill failed for {} (will retry next pass): {}",
+                        fund.label(), e.toString());
+            }
+        }
+    }
+
+    /** Filing holdings → history rows {cusip, asOf, cik, par, valUsd}. Empty when the period is unknown. */
+    static List<Object[]> historyRows(String cik, java.time.LocalDate periodEnd,
+                                      List<EdgarNportConnector.Holding> holdings) {
+        List<Object[]> rows = new ArrayList<>();
+        if (periodEnd == null) {
+            return rows;    // an undated valuation is not a history point — omitted, never guessed
+        }
+        for (EdgarNportConnector.Holding h : holdings) {
+            if (h.parHeld() != null && h.valUsd() != null && h.parHeld().signum() > 0) {
+                rows.add(new Object[] {h.bond().cusip(), periodEnd, cik, h.parHeld(), h.valUsd()});
+            }
+        }
+        return rows;
     }
 
     /**

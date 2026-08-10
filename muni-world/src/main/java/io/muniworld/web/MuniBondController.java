@@ -68,6 +68,15 @@ public final class MuniBondController {
                 .orElseGet(() -> org.springframework.http.ResponseEntity.notFound().build());
     }
 
+    /**
+     * A CUSIP's quarterly valuation history — dated, fund-attested marks from every N-PORT on EDGAR,
+     * par-weighted across the funds that held it each period. Oldest first; empty when none filed.
+     */
+    @GetMapping("/api/muni/bonds/{cusip}/valuations")
+    public List<io.muniworld.bond.SecurityRepository.ValuationPoint> valuations(@PathVariable String cusip) {
+        return bonds.valuationSeries(cusip.toUpperCase(java.util.Locale.ROOT));
+    }
+
     /** Index a bond (the loader/connector seam; also lets tools push a bond in). */
     @PostMapping("/api/muni/bonds")
     public Map<String, Object> index(@RequestBody Bond bond) {

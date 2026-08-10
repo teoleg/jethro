@@ -8,6 +8,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -154,6 +156,22 @@ class EdgarNportTest {
         assertNull(EdgarFundHoldingsScheduler.valPer100(new BigDecimal("100"), BigDecimal.ZERO),
                 "no reported par means no valuation, not an exception");
         assertNull(EdgarFundHoldingsScheduler.valPer100(null, null));
+    }
+
+    @Test
+    void historyRowsAreDatedByThePeriodOrOmittedEntirely() {
+        // A history point is (cusip, periodEnd, cik, par, valUSD). No period date -> NO rows: an undated
+        // valuation is not history, and guessing a date would invent data. Par-less holdings are skipped.
+        var p = assertDoesNotThrow(() ->
+                EdgarNportConnector.parseHoldings(XML.getBytes(StandardCharsets.UTF_8)));
+
+        var rows = EdgarFundHoldingsScheduler.historyRows("788599", p.periodEnd(), p.holdings());
+        assertEquals(1, rows.size());
+        assertArrayEquals(new Object[] {"TEST00019", java.time.LocalDate.of(2026, 6, 30), "788599",
+                new BigDecimal("1000000.00"), new BigDecimal("1012500.00")}, rows.get(0));
+
+        assertTrue(EdgarFundHoldingsScheduler.historyRows("788599", null, p.holdings()).isEmpty(),
+                "no period date -> no history rows, never a guessed date");
     }
 
     @Test

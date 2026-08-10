@@ -188,6 +188,43 @@ public final class EdgarNportConnector {
         return out;
     }
 
+    /** One historical NPORT-P filing reference — enough to fetch and parse it later, one at a time. */
+    public record FilingRef(String accession, String primaryDocument, String filingDate) {
+    }
+
+    /**
+     * EVERY NPORT-P the registrant has on file (newest first) — the input to the one-time history
+     * backfill. EDGAR keeps all of them (the form began mid-2019), so this is years of quarterly,
+     * fund-attested valuations per held CUSIP: the free, lawful "delayed historical price" the market
+     * data vendors sell in realtime. The submissions JSON's recent window holds up to 1000 filings,
+     * which covers these registrants' full N-PORT era.
+     */
+    public List<FilingRef> allNportFilings(EdgarFundCatalog.Fund fund) throws Exception {
+        String cik10 = String.format("%010d", Long.parseLong(fund.cik()));
+        RawArtifact subs = http.fetch("edgar-nport:" + fund.cik(),
+                "https://data.sec.gov/submissions/CIK" + cik10 + ".json");
+        JsonNode root = json.readTree(subs.body());
+        requireNameMatches(root.path("name").asText(""), fund.expectName(), fund.cik());
+        JsonNode recent = root.path("filings").path("recent");
+        List<FilingRef> out = new ArrayList<>();
+        JsonNode forms = recent.path("form");
+        for (int i = 0; i < forms.size(); i++) {
+            if ("NPORT-P".equalsIgnoreCase(forms.get(i).asText())) {
+                out.add(new FilingRef(recent.path("accessionNumber").get(i).asText(),
+                        recent.path("primaryDocument").get(i).asText("primary_doc.xml"),
+                        recent.path("filingDate").get(i).asText()));
+            }
+        }
+        return out;
+    }
+
+    /** Fetch + parse one historical filing. The caller paces and aggregates. */
+    public Parsed loadFiling(EdgarFundCatalog.Fund fund, FilingRef ref) throws Exception {
+        RawArtifact filing = fetchExplaining("edgar-nport:" + fund.cik(),
+                archiveUrl(fund.cik(), ref.accession(), ref.primaryDocument()));
+        return parseHoldings(filing.body());
+    }
+
     private static List<String> texts(JsonNode arr) {
         List<String> out = new ArrayList<>(arr.size());
         for (JsonNode n : arr) {
@@ -209,7 +246,7 @@ public final class EdgarNportConnector {
         }
     }
 
-    record Parsed(List<Holding> holdings, LocalDate periodEnd, int skippedNonMuni, int quarantined) {
+    public record Parsed(List<Holding> holdings, LocalDate periodEnd, int skippedNonMuni, int quarantined) {
     }
 
     /**

@@ -119,7 +119,7 @@
     <div id="bondDetail"></div>
   </div>
 
-  <div class="foot">muni-world runs as a separate process · <b>UI build B7</b> (filing detail: valuation as-of, default/arrears flags, fund ownership)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B8</b> (quarterly valuation HISTORY per CUSIP from EDGAR's full N-PORT archive)</div>
 </main>
 
 <script>
@@ -280,13 +280,46 @@
             ${f("Accrued", num(r.accrued, 4))}
           </div>
         </div>
+        <div id="valHist" style="margin-top:12px;color:var(--dim);font-size:12px">loading valuation history…</div>
         ${priced ? "" : `<div style="color:var(--warn);font-size:11.5px;margin-top:10px">
           Economics are blank because this bond has <b>no current price</b>. The filing valuation above
           is what funds carried it at on the filings' period date — a labeled, dated fact, deliberately
           NOT fed into yields/duration. Those compute the moment a real price source covers this CUSIP —
           never from a stale or invented mark.</div>`}
       </div>`;
+      loadValuationHistory(cusip);
     } catch (e) { el.innerHTML = `<div class="card" style="margin-top:12px">detail unavailable</div>`; }
+  }
+
+  /** The quarterly valuation series — dated fund-attested marks from EDGAR's full N-PORT history. */
+  async function loadValuationHistory(cusip) {
+    const el = document.getElementById("valHist");
+    if (!el) { return; }
+    try {
+      const vs = await (await fetch(`/api/muni/bonds/${encodeURIComponent(cusip)}/valuations`, { cache: "no-store" })).json();
+      if (!vs.length) {
+        el.textContent = "no valuation history yet — the one-time EDGAR backfill runs after the daily pass "
+          + "(minutes per fund); quarterly points appear here as filings are walked.";
+        return;
+      }
+      el.innerHTML = `<div style="color:var(--txt);font-size:12.5px;font-weight:600;margin-bottom:4px">
+          Valuation history <span style="color:var(--dim);font-weight:400">· ${vs.length} quarter(s), par-weighted across funds — filing marks, not live prices</span></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>As of</th><th>Val /100</th><th>Δ vs prior</th><th>Par held</th><th>Funds</th>
+        </tr></thead><tbody>`
+        + vs.map((v, i) => {
+          const prev = i > 0 ? vs[i - 1].valPer100 : null;
+          const d = prev == null ? null : (v.valPer100 - prev);
+          const dTxt = d == null ? "—"
+            : `<span style="color:${d >= 0 ? "var(--up)" : "var(--down)"}">${d >= 0 ? "+" : ""}${Number(d).toFixed(3)}</span>`;
+          return `<tr><td class="mono">${esc(v.asOf)}</td>
+            <td class="mono" style="color:var(--txt)">${Number(v.valPer100).toFixed(3)}</td>
+            <td class="mono">${dTxt}</td>
+            <td class="mono">${Number(v.heldPar).toLocaleString()}</td>
+            <td class="mono">${v.funds}</td></tr>`;
+        }).reverse().join("")
+        + "</tbody></table></div>";
+    } catch (e) { el.textContent = "valuation history unavailable"; }
   }
 
   // Render the loading PROCESS — one line per file, so the load is observable, not a black box.

@@ -63,3 +63,15 @@ states. The rest is fund-attested fact and is now kept (V3 columns), per CUSIP:
 - **Filing valuation:** par-weighted `sum(valUSD)/sum(par)×100`, as-of the filings' `repPdDate`. This
   retires the deferred-register row per its own trigger. It is displayed as a labeled, dated fact and is
   deliberately **not** fed into yields/duration — decision 3 stands: analytics wait for a current price.
+
+## Amendment 2 (2026-08-10) — the quarterly valuation HISTORY in EDGAR's archive
+
+EDGAR serves **every** N-PORT ever filed (the form began mid-2019), so the latest-cycle ingest was
+reading one page of a multi-year book. A one-time backfill per fund walks the full filing list
+(~30–60 filings per registrant, paced at 500 ms) and lands `muni.valuation_history` rows —
+`(cusip, period_end, cik, par, valUSD)`, provenance per fund, idempotent — and each daily pass appends
+the current cycle, so the series keeps growing. The read side par-weights across funds per period in
+exact NUMERIC. This is the free, lawful form of "delayed historical prices": dated, fund-attested
+quarterly marks, shown per CUSIP with Δ vs prior quarter. Still never fed into yields/duration, and
+nothing is interpolated between quarters. Backfill completion is recorded in `muni.ingest_state` so it
+runs once, and an unreadable old filing is skipped and logged — history keeps its gaps honest.

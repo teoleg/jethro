@@ -136,6 +136,87 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
         }
     }
 
+    /** One dated valuation point for a CUSIP, already par-weighted across the funds that filed it. */
+    public record ValuationPoint(LocalDate asOf, java.math.BigDecimal valPer100,
+                                 java.math.BigDecimal heldPar, int funds) {
+    }
+
+    /** Batch-write one fund's filing valuations: rows of {cusip, asOf, cik, par, valUsd}. Idempotent. */
+    public int upsertValuations(List<Object[]> rows) {
+        if (!available() || rows.isEmpty()) {
+            return 0;
+        }
+        try {
+            jdbc.batchUpdate("""
+                    INSERT INTO muni.valuation_history (cusip, as_of, cik, par, val_usd)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT (cusip, as_of, cik) DO UPDATE SET par = EXCLUDED.par,
+                      val_usd = EXCLUDED.val_usd""", rows);
+            return rows.size();
+        } catch (DataAccessException e) {
+            healthy = false;
+            warnOnce(e);
+            return 0;
+        }
+    }
+
+    /**
+     * A CUSIP's valuation series, par-weighted across funds per period — exact NUMERIC arithmetic in SQL
+     * (invariant 1), oldest first. Periods where no fund reported par are omitted rather than invented.
+     */
+    public List<ValuationPoint> valuationSeries(String cusip) {
+        if (!available()) {
+            return List.of();
+        }
+        try {
+            return jdbc.query("""
+                    SELECT as_of, ROUND(SUM(val_usd) * 100 / SUM(par), 6) AS val_per100,
+                           SUM(par) AS held_par, COUNT(DISTINCT cik) AS funds
+                    FROM muni.valuation_history
+                    WHERE cusip = ? AND par IS NOT NULL AND par > 0 AND val_usd IS NOT NULL
+                    GROUP BY as_of ORDER BY as_of""",
+                    (rs, i) -> new ValuationPoint(rs.getObject("as_of", LocalDate.class),
+                            rs.getBigDecimal("val_per100"), rs.getBigDecimal("held_par"),
+                            rs.getInt("funds")),
+                    cusip);
+        } catch (DataAccessException e) {
+            healthy = false;
+            return List.of();
+        }
+    }
+
+    /** Read a one-time-job marker ({@code muni.ingest_state}); empty when unset or the DB is off. */
+    public java.util.Optional<String> state(String key) {
+        if (!available()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            List<String> v = jdbc.query("SELECT value FROM muni.ingest_state WHERE key = ?",
+                    (rs, i) -> rs.getString(1), key);
+            return v.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(v.get(0));
+        } catch (DataAccessException e) {
+            healthy = false;
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** Set a one-time-job marker. Returns false (and the job will re-run later) when the DB is off. */
+    public boolean setState(String key, String value) {
+        if (!available()) {
+            return false;
+        }
+        try {
+            jdbc.update("""
+                    INSERT INTO muni.ingest_state (key, value, updated_at) VALUES (?, ?, now())
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()""",
+                    key, value);
+            return true;
+        } catch (DataAccessException e) {
+            healthy = false;
+            return false;
+        }
+    }
+
     /** Persist one bond's terms. Returns true if it landed in Postgres; false (no-op) when the DB is off. */
     public boolean upsert(Bond b, String sourceId) {
         if (!available()) {

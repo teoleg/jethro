@@ -115,6 +115,11 @@ public final class MuniBondService {
         };
     }
 
+    /** A CUSIP's quarterly valuation series (par-weighted across funds) — see the repository. */
+    public List<SecurityRepository.ValuationPoint> valuationSeries(String cusip) {
+        return repo.valuationSeries(cusip);
+    }
+
     /** Row count in Postgres, or {@code empty} when the DB isn't reachable (Flyway off / DB down). */
     public java.util.OptionalLong dbCount() {
         return repo.count();
