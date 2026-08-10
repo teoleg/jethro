@@ -5869,3 +5869,49 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Cost side, restated:** `totalFees` **$488.284665** of `firmTotal` **-$1,188.68635665** = **41.1%** (ALPHA
   alone **$465.190115** of **-$949.70770444** = **49.0%**), over **$5,716,068.55** LIVE turnover and **3,319**
   fills, against LIVE hit rates **0.490 / 0.501 / 0.498** on n = 14,672 / 14,395 / 13,471.
+
+## 2026-08-10 19:00Z — ADR-0145 verified; the same one-sided threshold existed on the other side of flat
+
+- **Rule 490 — a metric that clears its MDE but fails its sample gate on the short window is verified on
+  the long one, and you say both numbers.** `scripts/reversal-rate.py` reads **0.0421 (4 of 95 pairs)**
+  over the newest six reports — below ADR-0145's pre-stated MDE of 0.080, but under the ≥150-pair gate, so
+  NO VERDICT. Over the full post-deploy series it reads **0.0659 (11 of 167)**: same direction, gate met,
+  and it is also the window the scorer graded (13 cycles). The change thinned its own per-report fill
+  count, which is exactly what the *pooled* gate was written for. Report both readings, never just the one
+  that passes. ADR-0145 ✅ VERIFIED; fees fell from 41.1% of the loss to **25.4%**
+  (`totalFees $94.669275` on `firmTotal -$372.57213777`).
+- **Rule 491 — when you fix an asymmetric threshold on one side, immediately ask whether the SAME
+  asymmetry exists on the other side of the same discontinuity.** Rule 484 said "look for the mirror
+  question". It had a second mirror and I did not look for it. ADR-0145 fixed *closing at no conviction*;
+  what it exposed is *closing too slowly at full conviction*. Two of six planned names are held on the
+  opposite side of flat from their own target: **MSFT `f=-7.568314`, target `-47.677599`, held +5, routed
+  `-0.041494`**; **WMT `f=-7.312571`, target `-364.857367`, held +31, routed `-0.257260`**. Those are
+  exactly `a × held` for `a = 1 - e^(-30/3600) = 0.008298707`.
+- **Rule 492 — a derived rate is an argument about ONE direction; check which one before reusing it.**
+  ADR-0080's `a` is derived so a position lives the horizon its expectancy was *measured* over — an
+  argument about putting risk ON. Nothing derives it for carrying a position the live forecast contradicts,
+  which earns the negative of the view every cycle. Reusing an acquisition rate as a liquidation rate is a
+  category error, and it cost an hour to shed 63% of a holding the desk decided against on cycle one.
+- **Rule 493 — when an ADR states an invariant, grep the code path that runs AFTER it before believing
+  it.** ADR-0132 claims "the clamp resolves the destination to flat, so `|held + delta'| = 0`". False as
+  implemented: `onTargetSide` runs inside `bufferedDelta`, and ADR-0107's rating branch fires on the very
+  next statement under precisely the same condition (held one side of flat, aim the other — which IS the
+  wrong-side case), multiplying the resolution by `a`. Three neighbouring controls each stop one step
+  short of covering it (ADR-0102 bounds the aim not the position; ADR-0145's `ConvictionHold` runs
+  downstream and can only shrink; ADR-0118 runs only where `mayIncrease` is false and `fusion_targets`
+  reports `"edgeGate": null`). A defect can live in the *composition* of correct rules.
+- **Rule 494 — "the book is under-deployed" is not automatically a defect to attack.** The desk holds
+  **16.0%** of its own intent ($36,697 held against $228,774 intended, over the names the report carries).
+  That is ADR-0080's τ = 1 hour against a faster-moving target, working as specified. Logged as must-fix #3
+  and explicitly NOT actioned: with no source measuring positive edge, deploying more capital scales the
+  loss. Fix costs paid regardless of edge first.
+- **Rule 495 — re-measure "no edge" every cycle with the t-statistic, not the hit rate.** This session:
+  **not one source reaches |t| = 1.5 at any horizon.** trend 3600s **-5.65 bps, t=-1.35** (n=87);
+  xsreversion 3600s **-2.97 bps, t=-0.65**, cohort-clustered **t=-2.21** (significantly *anti*-predictive);
+  reversion 3600s **+3.99 bps, t=+0.86** (n=76); every 225s series inside ±0.28 bps on n>1,200. The
+  combiner has already floored the losers (xsreversion 0.25, trend 0.285) and lifted reversion to 1.98 —
+  which is the proof that re-weighting cannot manufacture edge, not an argument to re-weight again.
+- **Attribution — this window's -$123.42 PnL and +$18,992.85 gross are credited to NOTHING.** No logic
+  deployed this cycle or last (`git log`: `docs/`, `chore(status)`, ledger only); `uptimeSeconds` **21580**
+  at a 19:00:02Z stamp derives a JVM start of **13:00:22Z**, one continuous process. ADR-0145 earns the
+  reversal rate and the fee share — both measured on its own mechanism — and nothing else.

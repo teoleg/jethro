@@ -80,6 +80,16 @@ import java.util.Map;
  * the destination is held to the side of flat the target is on, which is the same bound ADR-0102 puts on
  * the intent.
  *
+ * <p><b>And so is the SPEED it gets there (ADR-0147).</b> Bounding the destination at flat says where a
+ * wrong-side holding must end up; ADR-0107 still worked it at the ADR-0080 acquisition fraction, which
+ * on the shipped configuration is 0.83% of it per cycle — so ADR-0132's stated destination was reached
+ * only asymptotically, over hours, while the view that condemned the position was live the whole time.
+ * That rate is derived for putting risk ON (hold a position one measurement horizon); nothing derives it
+ * for carrying a position the desk's own forecast says is backwards. See {@link #convictedWrongSide}:
+ * where the opposing view clears the ADR-0059 floor — the same strength that would have let it open the
+ * opposite position — the unwind is not rated and resolves to flat this cycle; where it does not, every
+ * path is byte-identical to ADR-0107's, so the wobble-crossing ADR-0090 removed stays removed.
+ *
  * <p><b>What it can never do.</b> It never widens a trade the desk was not already going to make in the
  * same direction on the same aim path, it never moves the aim past the target, and it never buffers an
  * exit: a flat target (the ADR-0086 chandelier cut, the ADR-0065 orphan unwind, the ADR-0027 breaker
@@ -206,8 +216,12 @@ public final class PositionBuffer {
             BigDecimal target = t.targetQty() == null ? BigDecimal.ZERO : t.targetQty();
             BigDecimal aim = nextAim(t.instrument(), target, held, rate);
             double width = widthFor(t.instrument(), gate, edgeBps);
+            // ADR-0147: the combined forecast and the ADR-0059 floor go in with the rate, so a holding
+            // the current view contradicts AT CONVICTION resolves to flat rather than e-folding toward
+            // it at the desk's acquisition rate.
             BigDecimal delta = bufferedDelta(aim, held,
-                    band(target, t.combinedForecast(), held, width, typicalForecast), target, rate);
+                    band(target, t.combinedForecast(), held, width, typicalForecast), target, rate,
+                    t.combinedForecast(), minForecastToRoute);
             if (!mayIncrease(gate, stopArmed, t.instrument())) {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
@@ -696,17 +710,38 @@ public final class PositionBuffer {
      * The part that would OPEN on the aim's own side is left alone: that side is on the aim path and is
      * already rated by it.
      *
+     * <p><b>Unless the opposing view carries conviction (ADR-0147).</b> The rating above discriminates
+     * by nothing: it charges the same ADR-0080 fraction to a forecast that has merely wobbled across the
+     * holding and to one that says, at full strength, that the holding is the wrong way round. Those are
+     * not the same trade. ADR-0145 gave the desk the test that tells them apart — {@code
+     * min-forecast-to-route}, the strength at which a view is allowed to put risk ON — and the mirror
+     * question here is exactly that one: a view strong enough to open the OPPOSITE position is strong
+     * enough to close this one. Where it clears the floor the unwind is <b>not</b> rated and the
+     * wrong-side holding resolves to flat this cycle; where it does not, every path below is
+     * byte-identical to ADR-0107's. See {@link #convictedWrongSide}.
+     *
      * <p>Strictly one-way. {@code |edge| ≤ |gap|} and the rate is in [0, 1], so the order returned is
      * never larger, and never of a different sign, than the one this method returned before — it can
      * only ever trade LESS. It never opens a position the desk was not already opening, and it can
      * never slow a cut a risk control ordered, because such a cut arrives with a flat target and
-     * returns above.
+     * returns above. ADR-0147 only ever un-rates the part of the move that REDUCES the holding, so it
+     * too can never open, enlarge or flip a position — its destination is bounded by flat.
      *
      * @param target the planner's target for this name — flat means a control ordered the exit
      * @param adjustmentRate the ADR-0080 derived partial-adjustment fraction for this cycle
      */
     static BigDecimal bufferedDelta(BigDecimal aim, BigDecimal held, BigDecimal band, BigDecimal target,
                                     double adjustmentRate) {
+        return bufferedDelta(aim, held, band, target, adjustmentRate, 0.0, 0.0);
+    }
+
+    /**
+     * As above, with the ADR-0147 conviction test wired: {@code forecast} is this cycle's combined
+     * forecast for the name and {@code minForecastToRoute} the ADR-0059 floor. A floor at or below zero
+     * is the floor switched off, which restores ADR-0107's rating on every path.
+     */
+    static BigDecimal bufferedDelta(BigDecimal aim, BigDecimal held, BigDecimal band, BigDecimal target,
+                                    double adjustmentRate, double forecast, double minForecastToRoute) {
         BigDecimal gap = aim.subtract(held).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
         if (target.signum() == 0) {
             return gap; // a control ordered the exit — worked in full (ADR-0090/0086/0065)
@@ -722,12 +757,71 @@ public final class PositionBuffer {
         if (held.signum() == 0 || aim.signum() == held.signum()) {
             return edge; // the aim moved by a rated step on its own side — ADR-0094, unchanged
         }
-        // The intent crossed flat in one step: rate the half of the move that unwinds the holding.
+        // The intent crossed flat in one step: rate the half of the move that unwinds the holding —
+        // unless the view that opposes the holding would have been allowed to open it (ADR-0147).
         BigDecimal unwind = TargetPlanner.reduceOnly(edge, held);
-        double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
+        double rate = convictedWrongSide(aim, held, target, forecast, minForecastToRoute)
+                ? 1.0
+                : Math.max(0.0, Math.min(1.0, adjustmentRate));
         return edge.subtract(unwind)
                 .add(unwind.multiply(BigDecimal.valueOf(rate)))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+    }
+
+    /**
+     * ADR-0147 — is the desk holding a position its CURRENT view contradicts, at a strength that view
+     * would have been allowed to open the opposite of?
+     *
+     * <pre>
+     *   aim on the target's side (or flat)   the ADR-0102 interval holds — there IS a current view
+     *   held on the other side of flat       the holding contradicts it
+     *   |forecast| ≥ min-forecast-to-route   that view carries ADR-0059 conviction
+     * </pre>
+     *
+     * <h3>What it changes and why</h3>
+     * ADR-0107 rates the unwind of a wrong-side holding at the ADR-0080 fraction {@code a = 1 −
+     * e^(−c/h)}. That fraction is the desk's ACQUISITION rate, derived so a position lives exactly the
+     * horizon its source's expectancy was measured over — a dimensional argument about how fast to put
+     * risk ON. There is no such argument for how fast to take OFF a position the desk's own live
+     * forecast says is backwards: that holding earns the negative of the view for as long as it is
+     * carried, and every cycle of {@code (1−a)} is another cycle of it. Read off the live book at a
+     * 30-second cycle against a 3600-second evidence horizon, {@code a = 0.008299} — so the desk sold
+     * {@code 0.041494} of a five-share holding whose own forecast read {@code −7.568}, and would have
+     * needed a full hour to shed 63% of it.
+     *
+     * <h3>Why this is not ADR-0090's mistake again</h3>
+     * ADR-0090/0107 narrowed "work every reduction in full" because a mean-reverting forecast crosses
+     * the held position many times inside one horizon, and liquidating on each crossing pays a round
+     * trip per wobble. That failure mode is a forecast at or near ZERO — the combiner saying it has no
+     * view — and this predicate excludes it by construction: the crossing must arrive with {@code |f|}
+     * at or above the same floor an ENTRY must clear, which is the Schmitt trigger ADR-0145 established
+     * (enter on conviction, exit on conviction, do nothing in between) applied to the one case ADR-0145
+     * left rated. A wobble across flat carries {@code |f| ≈ 0}, fails the test, and is worked at exactly
+     * today's rate. ADR-0145's own {@link ConvictionHold} then runs downstream on this delta and agrees:
+     * above the floor it passes it untouched, below the floor it caps it at the control-authored part.
+     *
+     * <h3>What it can never do</h3>
+     * It changes one dimensionless rate, applied only to {@link TargetPlanner#reduceOnly}'s projection
+     * of the move — the part that shrinks {@code |held|} and no more. So the destination is bounded by
+     * flat: it never opens a position, never enlarges one, never flips one onto a new side, and never
+     * touches an increase, a same-side rebalance, or the {@code target == 0} exit branch above. It sits
+     * above the deterministic floor — the ADR-0064 edge gate, the ADR-0126 σ-cold veto, the pre-trade
+     * guardrail and the firm drawdown breaker all still have the last word on what routes.
+     *
+     * <p>It introduces <b>no number</b>: the threshold is {@code jethro.fusion.min-forecast-to-route},
+     * the ADR-0059 floor the desk already applies to entries and, since ADR-0145, to forecast-authored
+     * exits. Setting that floor to zero disables this with it (invariant 7 / ADR-0016). Exact decimal on
+     * every quantity (invariant 1); the only doubles are the dimensionless forecast and floor.
+     */
+    static boolean convictedWrongSide(BigDecimal aim, BigDecimal held, BigDecimal target,
+                                      double forecast, double minForecastToRoute) {
+        if (!(minForecastToRoute > 0.0) || !(Math.abs(forecast) >= minForecastToRoute)) {
+            return false; // no conviction floor, or a view too weak to have opened the opposite position
+        }
+        if (target.signum() == 0 || held.signum() == 0 || held.signum() == target.signum()) {
+            return false; // a control ordered the exit, nothing held, or the holding is on the view's side
+        }
+        return aim.signum() == 0 || aim.signum() == target.signum(); // ADR-0102's interval holds
     }
 
     /**

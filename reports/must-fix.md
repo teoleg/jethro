@@ -15,6 +15,108 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-10 19:00Z (**CHANGE SHIPPED — ADR-0147.** Item #1 — the round-trip churn this register has carried for five cycles — is **CLOSED**: ADR-0145's pre-stated VERIFY-BY is met, by the committed script, on a pooled sample that clears its own gate. What the fixed exit leg exposes is the *mirror* asymmetry, and it is not a new diagnosis — it is the same one-sided-threshold defect on the other side of flat: a holding the desk's own live view **contradicts** is shed at the rate derived for *acquiring* risk, 0.83% of it per cycle. Two of this cycle's six planned names are in that state at forecasts 51% above the conviction floor, and their routed quantities match `a × held` to the last digit.)
+
+### Step 0 — `4e1ed98a3` (ADR-0145, the conviction floor on the exit): ✅ **VERIFIED (closed)**
+
+Scored ⚠️ INCONCLUSIVE and kept (ledger commit `57a353b`; risk-adj return/cycle +0.000856 over 13 cycles,
+t = +0.68 against a 1.5 hurdle) — which grades the *money*, not the *defect*. The defect verdict is the
+register's job and it passes on its own pre-stated terms:
+
+| | value | source |
+|---|---|---|
+| ALPHA same-name direction-reversal rate, pooled over the full post-deploy series | **0.0659** (11 of 167 pairs) | `scripts/reversal-rate.py` |
+| …over the newest six reports alone | **0.0421** (4 of 95 pairs) | same script, `--window 6` |
+| baseline stated before the change | **0.1975** (32 of 162 pairs) | ADR-0145 |
+| MDE stated before the change | **below ~0.080** | ADR-0145 |
+| pooled sample gate stated before the change | **≥ 150 pairs** — met at 167 | ADR-0145 |
+
+The six-report sub-window is *lower* still but sits under the gate (95 pairs → the script prints NO
+VERDICT), so the verdict is taken on the full post-deploy series, which is also the window the scorer
+graded. Both readings agree in direction and both clear the MDE; the change thinned its own per-report
+fill count, which is exactly the case the pooled gate was written for. Deployment is confirmed
+independently: `ops_jvm.uptimeSeconds` **21580** against a report stamp of **2026-08-10T19:00:02Z**
+derives a JVM start of **13:00:22Z**, days after `4e1ed98a3` was committed, and the running book's
+`recent_orders` contains **one** `fusion reduce` order in 60 (at `forecast=1.7556`) against 57 `fusion
+entry` — where the pre-change window was a wall of sub-floor reduces.
+
+Corroboration, secondary and not the verdict: `/api/attribution` `totalFees` **$94.669275** against
+`firmTotal` **-$372.57213777** = **25.4%**, where the four windows before the change read 41.1 / 47.8 /
+46.6 / 46%. Read across a session reset, so directional only.
+
+### Open items, re-ranked
+
+**#1 — ✅ CAUSE FOUND AND FIXED THIS CYCLE (ADR-0147). Now awaiting its verification window.** The desk
+holds positions its own live forecast contradicts, and sheds them at the rate derived for *acquiring*
+risk — 0.83% of the holding per cycle, an hour to shed 63% of it.
+
+Read live this cycle from `fusion_targets`, with `a = 1 − e^(−30/3600) = 0.008298707` (30 s planner
+cycle, 3600 s evidence horizon):
+
+| name | forecast | target | held | aim | deltaQty routed | `a × held` |
+|---|---|---|---|---|---|---|
+| MSFT | **−7.568314** | −47.677599 | **+5** | −2.026033 | **−0.041494** | 0.041494 |
+| WMT | **−7.312571** | −364.857367 | **+31** | −13.663345 | **−0.257260** | 0.257260 |
+
+Both forecasts are 46–51% **above** the `min-forecast-to-route` floor of 5.0 the desk would need to
+*open* those shorts. The routed quantities are not an approximation of the mechanism — they are it.
+
+**The cause.** `PositionBuffer.bufferedDelta` applies ADR-0132's `onTargetSide` (which resolves a
+wrong-side destination to flat) and then, on the very next statement, ADR-0107's rating branch — whose
+firing condition (`held` one side of flat, `aim` the other) **is** the wrong-side case. So ADR-0132's
+stated guarantee, `|held + delta'| = 0`, is multiplied by `a` on the way out and delivers 0.83% of its
+own destination per cycle. Every neighbouring control stops one step short of this: ADR-0102 bounds the
+aim, not the position; ADR-0145's `ConvictionHold` runs downstream and can only make an order *smaller*;
+ADR-0118's full resolution runs only where `mayIncrease` is false, and `fusion_targets` reports
+`"edgeGate": null` (off under ADR-0122), so that branch is not on the live path.
+
+**Shipped: ADR-0147** — the wrong-side unwind is not rated when the opposing view clears the ADR-0059
+floor, i.e. when it is strong enough to have opened the reverse position. Below the floor every path is
+byte-identical, so the ADR-0090 wobble-crossing stays removed. No number introduced: the threshold is
+`min-forecast-to-route`, the same one ADR-0059 and ADR-0145 already use.
+
+> **VERIFY-BY, computed by committed code and never by hand** (invariant 7 / ADR-0016). Metric: the
+> **convicted-wrong-side share of held notional** — across the planned names the report carries, the
+> fraction of held notional sitting on the opposite side of flat from its own target at `|f| ≥ 5.0`. It
+> is a *proportion measured inside the window*, the property that let ADR-0145's metric survive the drift
+> test every churn-rate candidate failed (Rule 489). Run
+> `python3 scripts/wrong-side-share.py --dispersion logs/jethro-report-*.zip`.
+> **Baseline ("before"), by that script over the nine 2026-08-10 reports carrying a book: 0.2698**
+> (`56,283.94 / 208,628.65`).
+> **Dispersion on that same no-deploy series: mean 0.2791, sd 0.2459, CV 0.88, range 0.0000–0.7240,
+> n = 9.**
+> ⇒ **minimum detectable effect, stated in advance and not to be moved: the pooled share must fall below
+> 0.1058** (two standard errors of the mean below baseline). The `√n` reduction is an **assumption,
+> stated as one** — nine reports from a single session cannot measure the pooled noise floor directly,
+> and that is the honest limit of this baseline. The mechanism predicts far more than the MDE: a
+> convicted-wrong-side name is resolved to flat in a single cycle, so the residual should be only names
+> that turned wrong-side inside the snapshot cycle.
+> **Sample gate: pooled held notional ≥ 6,035.85** (the thinnest single report in the baseline window);
+> under it the script exits 2 and prints NO VERDICT, which is never a pass.
+> **Guards, both required:** ADR-0145's reversal rate must not rise back above its **0.080** MDE
+> (`scripts/reversal-rate.py` — this change moves risk faster, so re-churn is the thing to watch), and
+> `firmTotal` must not deteriorate.
+
+**#2 — (unchanged, still open, and now the standing priority once #1 is verified) No source has
+demonstrated positive out-of-sample edge.** Re-measured this cycle on the current session's telemetry:
+**not one source reaches |t| = 1.5 at any horizon.** `signals_telemetry`, `avgReturnBps` over
+`stdReturnBps/√n` — trend 3600s **−5.65 bps, t = −1.35** on n = 87; xsreversion 3600s **−2.97 bps,
+t = −0.65** on n = 95 (cohort-clustered t = **−2.21**, i.e. significantly *anti*-predictive); reversion
+3600s **+3.99 bps, t = +0.86** on n = 76; every 225 s series inside ±0.28 bps on n > 1,200. LIVE hit
+rates **0.473 / 0.526 / 0.498**. The fusion weights have already pushed the two negative sources to their
+floor (xsreversion **0.25**, trend **0.285**) and reversion to **1.98**, so this is not fixable by
+re-weighting — it needs a genuinely new predictor through the ADR-0049 OOS gate. Held below #1 because
+ADR-0147 removes a cost paid *regardless* of whether any edge exists.
+
+**#3 — (new, logged not acted on) The desk holds 16.0% of its own intended book.** Across the six planned
+names the report carries, intended gross is **$228,774** against held gross **$36,697**. That is the
+ADR-0080 rate working as designed (τ = 1 hour against a target that moves faster), not a defect — logged
+here because it bounds how much any signal can earn, and because it is the natural place to look next if
+#2 ever produces a source with measured edge. **Do not attack it before #2**: deploying more capital into
+sources measured at zero edge scales the loss, not the PnL.
+
+---
+
 ## Verification block — 2026-08-07 19:30Z (**CHANGE SHIPPED — ADR-0145.** `3c43242ba` has been **scored** (❌ BAD, ledger commit `fcacfc8`), `reports/.pending-baseline.json` is gone and `scripts/score-change.py score` prints "no pending change to score", so the ADR-0116 freeze that blocked the last two cycles is lifted. Item #1's VERIFY-BY was drift-tested last cycle and survived; this cycle it is also **reproducible by code** — `scripts/reversal-rate.py` computes it from `recent_orders`, so the register never has to author it. The three cycles before this one confirmed item #1's *mechanism* but never found its **cause**; this cycle did, and it is not band width. It is that the ADR-0059 conviction floor in `FusionLifecycle.tick` is applied only to `!reducing`: **a name may be opened only at `|f| ≥ 5.0` and closed at nothing at all.**)
 
 ### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED (closed)** / 🔴 **its ❌ BAD verdict is NOT to be acted on**

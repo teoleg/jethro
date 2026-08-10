@@ -940,4 +940,103 @@ class PositionBufferTest {
         assertThat(held.targets().get(1).deltaQty())
                 .isEqualByComparingTo(unheld.targets().get(1).deltaQty());
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0147 — a wrong-side holding resolves to flat at conviction instead of e-folding toward it.
+    //
+    // Worked example, read off the live 2026-08-10T19:00Z fusion_targets record for MSFT (every value
+    // below is the app's own, none is authored):
+    //
+    //   forecast −7.568313987311638, target −47.677599, held +5, aim −2.026033
+    //   a       = 1 − e^(−30/3600)                    = 0.008298707…   (30 s cycle, 3600 s horizon)
+    //   gap     = −2.026033 − 5                       = −7.026033
+    //   |gap| <= band                                 ⇒ edge = 0
+    //   onTargetSide: dest = 5 + 0 = +5, target < 0   ⇒ edge = −5.000000            (ADR-0132)
+    //   unwind  = reduceOnly(−5, +5)                  = −5.000000
+    //   ADR-0107: delta = 0 + (−5.000000 x a)         = −0.041494  ← the live deltaQty, to the digit
+    //   ADR-0147: |−7.568| >= 5.0 ⇒ rate 1            = −5.000000  ← flat this cycle
+    // ---------------------------------------------------------------------------------------------
+
+    private static final double FLOOR = 5.0; // the shipped jethro.fusion.min-forecast-to-route
+
+    /** The defect, reproduced exactly: 0.83% of a wrong-side holding per cycle, for as long as it takes. */
+    @Test
+    void theAcquisitionRateAppliedToAWrongSideUnwindReproducesTheLiveDelta() {
+        assertThat(PositionBuffer.bufferedDelta(new BigDecimal("-2.026033"), new BigDecimal("5"),
+                new BigDecimal("62.999999"), new BigDecimal("-47.677599"), HOUR_RATE))
+                .isEqualByComparingTo(new BigDecimal("-0.041494"));
+    }
+
+    /** And with the ADR-0059 floor wired, the same cycle resolves the holding to flat instead. */
+    @Test
+    void aWrongSideHoldingResolvesToFlatWhenTheOpposingViewCarriesConviction() {
+        assertThat(PositionBuffer.bufferedDelta(new BigDecimal("-2.026033"), new BigDecimal("5"),
+                new BigDecimal("62.999999"), new BigDecimal("-47.677599"), HOUR_RATE,
+                -7.568313987311638, FLOOR))
+                .isEqualByComparingTo(new BigDecimal("-5.000000"));
+    }
+
+    /**
+     * The case ADR-0090/0107 exist for, and the one this must not disturb: the forecast has merely
+     * wobbled across the holding, so it carries no conviction and the unwind is rated exactly as today.
+     */
+    @Test
+    void aWobbleAcrossTheHoldingIsStillRatedAtTheAdjustmentFraction() {
+        assertThat(PositionBuffer.bufferedDelta(new BigDecimal("-2.026033"), new BigDecimal("5"),
+                new BigDecimal("62.999999"), new BigDecimal("-47.677599"), HOUR_RATE, -0.288, FLOOR))
+                .isEqualByComparingTo(new BigDecimal("-0.041494"));
+    }
+
+    /** End to end through the buffer, with the ADR-0145 hold also wired: the routed order is the whole 5. */
+    @Test
+    void theWrongSideNameIsFlattenedThroughApplyAndTheAimIsReSeededToFlat() {
+        var plan = List.of(target("MSFT", -7.568313987311638, "-47.677599", "5"),
+                target("PG", 9.23744318596965, "326.373565", "11"));
+        var applied = new PositionBuffer(0.10).apply(plan, null, HOUR_RATE, null,
+                id -> "MSFT".equals(id) ? new BigDecimal("-47.677599") : new BigDecimal("326.373565"),
+                FLOOR);
+        assertThat(applied.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-5.000000"));
+        assertThat(applied.aims().get("MSFT")).isEqualByComparingTo(BigDecimal.ZERO);
+        // The name whose holding is on its view's own side is untouched — same-side rebalances are
+        // byte-identical, so this can only ever act on the wrong-side case.
+        var unheld = new PositionBuffer(0.10).apply(plan, null, HOUR_RATE);
+        assertThat(applied.targets().get(1).deltaQty())
+                .isEqualByComparingTo(unheld.targets().get(1).deltaQty());
+    }
+
+    /** Strictly one-way: it resolves to flat and no further — never through it, never onto a new side. */
+    @Test
+    void itNeverTradesPastFlat() {
+        BigDecimal delta = PositionBuffer.bufferedDelta(new BigDecimal("-2.026033"), new BigDecimal("5"),
+                new BigDecimal("62.999999"), new BigDecimal("-47.677599"), HOUR_RATE,
+                -7.568313987311638, FLOOR);
+        assertThat(new BigDecimal("5").add(delta)).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    /** The predicate fires only where a live, convicted view contradicts a holding — nowhere else. */
+    @Test
+    void theConvictionTestFiresOnlyOnAConvictedWrongSideHolding() {
+        BigDecimal aim = new BigDecimal("-2.026033");
+        BigDecimal target = new BigDecimal("-47.677599");
+        assertThat(PositionBuffer.convictedWrongSide(aim, new BigDecimal("5"), target, -7.5684, FLOOR))
+                .isTrue();
+        // holding already on the view's side — an ordinary rebalance
+        assertThat(PositionBuffer.convictedWrongSide(aim, new BigDecimal("-5"), target, -7.5684, FLOOR))
+                .isFalse();
+        // no conviction
+        assertThat(PositionBuffer.convictedWrongSide(aim, new BigDecimal("5"), target, -4.9999, FLOOR))
+                .isFalse();
+        // a control ordered the exit — that branch never reaches the rating at all
+        assertThat(PositionBuffer.convictedWrongSide(aim, new BigDecimal("5"), BigDecimal.ZERO, -7.5684, FLOOR))
+                .isFalse();
+        // nothing held
+        assertThat(PositionBuffer.convictedWrongSide(aim, BigDecimal.ZERO, target, -7.5684, FLOOR))
+                .isFalse();
+        // the floor switched off disables ADR-0147 with ADR-0059 and ADR-0145
+        assertThat(PositionBuffer.convictedWrongSide(aim, new BigDecimal("5"), target, -7.5684, 0.0))
+                .isFalse();
+        // an aim ADR-0102 could not have produced — on neither flat nor the target's side
+        assertThat(PositionBuffer.convictedWrongSide(new BigDecimal("2"), new BigDecimal("5"), target,
+                -7.5684, FLOOR)).isFalse();
+    }
 }
