@@ -97,6 +97,21 @@ class EdgarNportTest {
     }
 
     @Test
+    void theRawXmlIsFetchedNotEdgarsXslViewerPath() {
+        // EDGAR reports primaryDocument for an XML form as its XSL VIEWER path, which serves a rendered
+        // page rather than the XML — every fund failed on exactly that URL. Only the basename is used.
+        assertEquals("https://www.sec.gov/Archives/edgar/data/788599/000078859926000082/primary_doc.xml",
+                EdgarNportConnector.archiveUrl("788599", "0000788599-26-000082",
+                        "xslFormNPORT-P_X01/primary_doc.xml"));
+
+        // A plain document name is unaffected, and a missing one falls back to the conventional name.
+        assertEquals("https://www.sec.gov/Archives/edgar/data/718581/000003540226004120/primary_doc.xml",
+                EdgarNportConnector.archiveUrl("718581", "0000035402-26-004120", "primary_doc.xml"));
+        assertTrue(EdgarNportConnector.archiveUrl("818850", "0000818850-26-000014", "")
+                .endsWith("/primary_doc.xml"));
+    }
+
+    @Test
     void fundRegistryParsesAndSkipsMalformedRows() {
         List<EdgarFundCatalog.Fund> funds = EdgarFundCatalog.parse("""
                 cik|expect_name|label|enabled

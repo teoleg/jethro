@@ -63,13 +63,26 @@ public final class EdgarFundHoldingsScheduler {
                 }
             } catch (Exception e) {
                 // Loud, named, and non-fatal: the next fund still runs, the next day retries.
+                // Include the ROOT cause: the fetcher's own message is only "fetch failed: <url>" and the
+                // HTTP status lives in its cause, so without this the page said nothing about WHY (a 404
+                // from the XSL viewer path read identically to a network outage).
                 synchronized (lastResult) {
-                    lastResult.put(fund.label(), "FAILED — " + e.getMessage());
+                    lastResult.put(fund.label(), "FAILED — " + rootMessage(e));
                 }
                 log.warn("EDGAR fund ingest failed for {} (CIK {}): {}",
                         fund.label(), fund.cik(), e.toString());
             }
         }
+    }
+
+    /** The message plus its root cause, so an HTTP status reaches the page instead of dying in the chain. */
+    private static String rootMessage(Throwable e) {
+        Throwable root = e;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        return root == e ? String.valueOf(e.getMessage())
+                : e.getMessage() + " (" + root.getClass().getSimpleName() + ": " + root.getMessage() + ")";
     }
 
     /** For the status endpoint: the flag, the last run time, and each fund's outcome verbatim. */

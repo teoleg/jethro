@@ -85,9 +85,7 @@ public final class EdgarNportConnector {
         for (int idx : cycle) {
             String accession = recent.path("accessionNumber").get(idx).asText();
             String primaryDoc = recent.path("primaryDocument").get(idx).asText("primary_doc.xml");
-            String url = "https://www.sec.gov/Archives/edgar/data/" + Long.parseLong(fund.cik()) + "/"
-                    + accession.replace("-", "") + "/" + primaryDoc;
-            RawArtifact filing = http.fetch(sourceId, url);
+            RawArtifact filing = http.fetch(sourceId, archiveUrl(fund.cik(), accession, primaryDoc));
             Parsed p = parseHoldings(filing.body());
             bonds.addAll(p.bonds());
             skipped += p.skippedNonMuni();
@@ -98,6 +96,21 @@ public final class EdgarNportConnector {
             Thread.sleep(400);      // politeness — far under EDGAR's 10 req/s, deliberately
         }
         return new Result(registrant, cycle.size(), dates.get(cycle.get(0)), bonds, skipped, quarantined);
+    }
+
+    /**
+     * The archive URL of a filing's RAW document.
+     *
+     * <p>EDGAR reports {@code primaryDocument} for an XML form as its <b>XSL viewer</b> path —
+     * {@code xslFormNPORT-P_X01/primary_doc.xml} — which serves a browser-rendered page, not the XML the
+     * parser needs. The raw document sits at the accession root under the same file name, so only the
+     * basename is used. (Learned: every fund failed fetching the viewer path.)
+     */
+    static String archiveUrl(String cik, String accession, String primaryDocument) {
+        String file = primaryDocument == null || primaryDocument.isBlank() ? "primary_doc.xml"
+                : primaryDocument.substring(primaryDocument.lastIndexOf('/') + 1);
+        return "https://www.sec.gov/Archives/edgar/data/" + Long.parseLong(cik) + "/"
+                + accession.replace("-", "") + "/" + file;
     }
 
     /** One quarterly cycle: series file within days of each other, quarters are ~91 days apart. */
