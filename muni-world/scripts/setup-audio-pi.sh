@@ -59,6 +59,20 @@ if command -v apt-get >/dev/null && dpkg -s yt-dlp >/dev/null 2>&1; then
   echo "!!  current one, but 'sudo apt remove -y yt-dlp' avoids any confusion."
 fi
 
+say "2b/5  Installing Deno (yt-dlp's JavaScript runtime for YouTube)"
+# Current yt-dlp warns: "YouTube extraction without a JS runtime has been deprecated, and some formats may
+# be missing" — and the audio-only renditions are precisely what goes missing, so `-f bestaudio` fails with
+# "Requested format is not available". Deno is the runtime yt-dlp enables by default.
+# Without it capture still works (it falls back to the combined video+audio rendition and drops the video),
+# it just pulls more bandwidth than it needs.
+DENO_BIN="$HOME/.deno/bin/deno"
+if [ ! -x "$DENO_BIN" ] && ! command -v deno >/dev/null; then
+  curl -fsSL https://deno.land/install.sh | sh -s -- -y >/dev/null 2>&1 || \
+    echo "!!  Deno install failed — capture will fall back to the video+audio rendition (still works)."
+fi
+[ -x "$DENO_BIN" ] || DENO_BIN="$(command -v deno || true)"
+[ -n "$DENO_BIN" ] && echo "deno: $DENO_BIN ($("$DENO_BIN" --version 2>/dev/null | head -1))"
+
 say "3/5  Building whisper.cpp in $WHISPER_DIR"
 if [ ! -d "$WHISPER_DIR" ]; then
   git clone https://github.com/ggerganov/whisper.cpp "$WHISPER_DIR"
@@ -92,7 +106,8 @@ if [ -n "${MUNI_ENV_FILE:-}" ]; then
   set_kv MUNI_WHISPER_BIN "$WHISPER_BIN"
   set_kv MUNI_WHISPER_MODEL "$MODEL_PATH"
   [ -x "$YTDLP_BIN" ] && set_kv MUNI_YTDLP_BIN "$YTDLP_BIN"
-  say "wrote MUNI_WHISPER_BIN, MUNI_WHISPER_MODEL and MUNI_YTDLP_BIN into $MUNI_ENV_FILE"
+  [ -n "${DENO_BIN:-}" ] && set_kv MUNI_JS_RUNTIME "$DENO_BIN"
+  say "wrote the whisper, yt-dlp and JS-runtime paths into $MUNI_ENV_FILE"
 fi
 
 cat <<EOF

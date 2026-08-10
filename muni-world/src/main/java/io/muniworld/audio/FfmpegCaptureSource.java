@@ -42,6 +42,28 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
             "https://www.bloomberg.com/live");
     private static final String YTDLP = System.getenv().getOrDefault("MUNI_YTDLP_BIN", "yt-dlp");
 
+    /**
+     * Current yt-dlp needs a JAVASCRIPT RUNTIME to extract YouTube ("YouTube extraction without a JS
+     * runtime has been deprecated, and some formats may be missing" — and audio-only formats are exactly
+     * what goes missing). Deno is the one it enables by default, but a background service's PATH usually
+     * excludes {@code ~/.deno/bin}, so the path is resolved here and passed explicitly.
+     */
+    private static final String JS_RUNTIME = resolveJsRuntime();
+
+    private static String resolveJsRuntime() {
+        String configured = System.getenv("MUNI_JS_RUNTIME");
+        if (configured != null && !configured.isBlank()) {
+            return configured.strip();
+        }
+        for (String candidate : List.of(System.getProperty("user.home", "") + "/.deno/bin/deno",
+                "/usr/local/bin/deno", "/usr/bin/deno")) {
+            if (Files.isExecutable(Path.of(candidate))) {
+                return candidate;
+            }
+        }
+        return "";      // maybe already on PATH — let yt-dlp find it itself
+    }
+
     private final String ffmpegBin;
     private final String source;     // "yt:<page>" or "url:<stream>"
     private final int seconds;
@@ -183,6 +205,33 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
             new String[] {"--extractor-args", "youtube:player_client=ios"},
             new String[] {"--extractor-args", "youtube:player_client=web_safari"});
 
+    /**
+     * Does the installed yt-dlp accept {@code --js-runtimes}? Older releases do not, and passing an unknown
+     * option makes EVERY attempt fail on argument parsing — a self-inflicted outage worse than the problem
+     * the flag solves. Asked once of {@code --help}, then cached.
+     */
+    private static synchronized boolean supportsJsRuntimes() {
+        if (jsRuntimesSupported == null) {
+            jsRuntimesSupported = false;
+            try {
+                Process p = new ProcessBuilder(YTDLP, "--help").redirectErrorStream(true).start();
+                String help = new String(p.getInputStream().readAllBytes());
+                p.waitFor(20, TimeUnit.SECONDS);
+                jsRuntimesSupported = help.contains("--js-runtimes");
+            } catch (IOException e) {
+                jsRuntimesSupported = false;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            log.info("yt-dlp JS runtime: {}", !jsRuntimesSupported ? "option unsupported by this yt-dlp"
+                    : JS_RUNTIME.isBlank() ? "none found — YouTube may expose no audio-only format"
+                    : JS_RUNTIME);
+        }
+        return jsRuntimesSupported;
+    }
+
+    private static volatile Boolean jsRuntimesSupported;
+
     /** The installed yt-dlp's version, or "unknown" — for error messages, cached with the presence check. */
     private static String ytdlpVersion() {
         try {
@@ -203,7 +252,14 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
 
     /** One resolve attempt. Throws {@link IOException} when yt-dlp runs and refuses. */
     private String runYtdlp(String page, String[] extra) throws IOException {
+        // bestaudio/best, never bare bestaudio: without a JS runtime YouTube exposes no audio-only
+        // rendition for a live stream, and `-f bestaudio` then fails outright with "Requested format is
+        // not available". The `/best` fallback takes the combined HLS rendition instead and ffmpeg's -vn
+        // drops the video — more bandwidth, but it works with no runtime at all.
         List<String> cmd = new ArrayList<>(List.of(YTDLP, "-f", "bestaudio/best", "-g", "--no-warnings"));
+        if (!JS_RUNTIME.isBlank() && supportsJsRuntimes()) {
+            cmd.addAll(List.of("--js-runtimes", "deno:" + JS_RUNTIME));
+        }
         cmd.addAll(List.of(extra));
         cmd.add(page);
         Process p;
