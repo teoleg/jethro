@@ -82,6 +82,21 @@ class EdgarNportTest {
     }
 
     @Test
+    void theWholeLatestQuarterlyCycleIsIngestedNotJustOneSeries() {
+        // A registrant TRUST holds several series (money market + long-term + …) and each files its own
+        // NPORT-P days apart. Taking only the newest filing captures ONE series and silently drops the
+        // rest — the window must collect the whole latest cycle while excluding the previous quarter.
+        List<String> forms = List.of("NPORT-P", "N-CEN", "NPORT-P", "NPORT-P", "NPORT-P");
+        List<String> dates = List.of("2026-05-28", "2026-05-01", "2026-05-27", "2026-02-25", "2026-02-24");
+
+        var idx = EdgarNportConnector.latestCycleIndexes(forms, dates);
+
+        assertEquals(List.of(0, 2), idx, "both series in the May cycle; February's cycle and the N-CEN excluded");
+        assertEquals(List.of(), EdgarNportConnector.latestCycleIndexes(List.of("N-CSR"), List.of("2026-01-01")),
+                "no NPORT-P at all → empty, and the caller refuses loudly");
+    }
+
+    @Test
     void fundRegistryParsesAndSkipsMalformedRows() {
         List<EdgarFundCatalog.Fund> funds = EdgarFundCatalog.parse("""
                 cik|expect_name|label|enabled

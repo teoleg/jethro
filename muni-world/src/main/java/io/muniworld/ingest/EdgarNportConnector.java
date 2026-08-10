@@ -48,11 +48,19 @@ public final class EdgarNportConnector {
     }
 
     /** One fund's ingest result — everything the status page needs to say what happened. */
-    public record Result(String registrant, String accession, String filingDate,
+    public record Result(String registrant, int filings, String newestFilingDate,
                          List<Bond> bonds, int skippedNonMuni, int quarantined) {
     }
 
-    /** Fetch + gate + parse the latest N-PORT for {@code fund}. Throws with a named reason on any refusal. */
+    /**
+     * Fetch + gate + parse the latest N-PORT cycle for {@code fund}. Throws with a named reason on refusal.
+     *
+     * <p><b>Cycle, not single filing:</b> a registrant TRUST holds several series (Vanguard's NY registrant
+     * is the money-market fund AND the long-term fund), and each series files its own NPORT-P. Taking only
+     * the newest filing captures one series and silently drops the rest — so every NPORT-P filed within
+     * {@link #CYCLE_WINDOW_DAYS} of the newest is ingested, which is exactly one quarterly cycle across all
+     * series. Upserts are idempotent, so overlap costs nothing.
+     */
     public Result loadLatest(EdgarFundCatalog.Fund fund) throws Exception {
         String cik10 = String.format("%010d", Long.parseLong(fund.cik()));
         String sourceId = "edgar-nport:" + fund.cik();
@@ -63,30 +71,72 @@ public final class EdgarNportConnector {
         requireNameMatches(registrant, fund.expectName(), fund.cik());
 
         JsonNode recent = root.path("filings").path("recent");
-        JsonNode forms = recent.path("form");
-        int idx = -1;
-        for (int i = 0; i < forms.size(); i++) {
-            if ("NPORT-P".equalsIgnoreCase(forms.get(i).asText())) {
-                idx = i;
-                break;      // EDGAR lists newest first
-            }
-        }
-        if (idx < 0) {
+        List<String> forms = texts(recent.path("form"));
+        List<String> dates = texts(recent.path("filingDate"));
+        List<Integer> cycle = latestCycleIndexes(forms, dates);
+        if (cycle.isEmpty()) {
             throw new IllegalStateException("no NPORT-P filing listed for CIK " + fund.cik()
                     + " (" + registrant + ") — is this actually a registered fund?");
         }
-        String accession = recent.path("accessionNumber").get(idx).asText();
-        String filingDate = recent.path("filingDate").get(idx).asText();
-        String primaryDoc = recent.path("primaryDocument").get(idx).asText("primary_doc.xml");
 
-        String url = "https://www.sec.gov/Archives/edgar/data/" + Long.parseLong(fund.cik()) + "/"
-                + accession.replace("-", "") + "/" + primaryDoc;
-        RawArtifact filing = http.fetch(sourceId, url);
+        List<Bond> bonds = new ArrayList<>();
+        int skipped = 0;
+        int quarantined = 0;
+        for (int idx : cycle) {
+            String accession = recent.path("accessionNumber").get(idx).asText();
+            String primaryDoc = recent.path("primaryDocument").get(idx).asText("primary_doc.xml");
+            String url = "https://www.sec.gov/Archives/edgar/data/" + Long.parseLong(fund.cik()) + "/"
+                    + accession.replace("-", "") + "/" + primaryDoc;
+            RawArtifact filing = http.fetch(sourceId, url);
+            Parsed p = parseHoldings(filing.body());
+            bonds.addAll(p.bonds());
+            skipped += p.skippedNonMuni();
+            quarantined += p.quarantined();
+            log.info("N-PORT {} ({}, filed {}): {} muni bond(s), {} non-muni skipped, {} quarantined",
+                    accession, registrant, dates.get(idx), p.bonds().size(), p.skippedNonMuni(),
+                    p.quarantined());
+            Thread.sleep(400);      // politeness — far under EDGAR's 10 req/s, deliberately
+        }
+        return new Result(registrant, cycle.size(), dates.get(cycle.get(0)), bonds, skipped, quarantined);
+    }
 
-        Parsed p = parseHoldings(filing.body());
-        log.info("N-PORT {} ({}, filed {}): {} muni bond(s), {} non-muni skipped, {} quarantined",
-                accession, registrant, filingDate, p.bonds().size(), p.skippedNonMuni(), p.quarantined());
-        return new Result(registrant, accession, filingDate, p.bonds(), p.skippedNonMuni(), p.quarantined());
+    /** One quarterly cycle: series file within days of each other, quarters are ~91 days apart. */
+    static final int CYCLE_WINDOW_DAYS = 45;
+
+    /**
+     * Indexes of every NPORT-P filed within {@link #CYCLE_WINDOW_DAYS} of the newest one — the latest
+     * quarterly cycle across ALL of a registrant's series, without dragging in the previous quarter.
+     * Package-private and pure so the windowing is TESTED.
+     */
+    static List<Integer> latestCycleIndexes(List<String> forms, List<String> dates) {
+        LocalDate newest = null;
+        for (int i = 0; i < forms.size(); i++) {
+            if ("NPORT-P".equalsIgnoreCase(forms.get(i))) {
+                LocalDate d = LocalDate.parse(dates.get(i));
+                if (newest == null || d.isAfter(newest)) {
+                    newest = d;
+                }
+            }
+        }
+        if (newest == null) {
+            return List.of();
+        }
+        List<Integer> out = new ArrayList<>();
+        for (int i = 0; i < forms.size(); i++) {
+            if ("NPORT-P".equalsIgnoreCase(forms.get(i))
+                    && !LocalDate.parse(dates.get(i)).isBefore(newest.minusDays(CYCLE_WINDOW_DAYS))) {
+                out.add(i);
+            }
+        }
+        return out;
+    }
+
+    private static List<String> texts(JsonNode arr) {
+        List<String> out = new ArrayList<>(arr.size());
+        for (JsonNode n : arr) {
+            out.add(n.asText());
+        }
+        return out;
     }
 
     /**

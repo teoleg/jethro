@@ -57,8 +57,9 @@ public final class EdgarFundHoldingsScheduler {
                 }
                 synchronized (lastResult) {
                     lastResult.put(fund.label(), "ok — " + r.bonds().size() + " muni bond(s) from "
-                            + r.registrant() + " (filed " + r.filingDate() + ", " + r.skippedNonMuni()
-                            + " non-muni skipped, " + r.quarantined() + " quarantined)");
+                            + r.registrant() + " (" + r.filings() + " filing(s), newest "
+                            + r.newestFilingDate() + "; " + r.skippedNonMuni() + " non-muni skipped, "
+                            + r.quarantined() + " quarantined)");
                 }
             } catch (Exception e) {
                 // Loud, named, and non-fatal: the next fund still runs, the next day retries.
