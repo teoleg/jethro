@@ -27,14 +27,21 @@ class EdgarNportTest {
     private static final String XML = """
             <?xml version="1.0" encoding="UTF-8"?>
             <edgarSubmission xmlns="http://www.sec.gov/edgar/nport">
-              <formData><invstOrSecs>
+              <formData>
+              <genInfo><repPdDate>2026-06-30</repPdDate></genInfo>
+              <invstOrSecs>
                 <invstOrSec>
                   <name>SYNTHETIC NY DORMITORY AUTH REV</name>
                   <cusip>TEST00019</cusip>
+                  <balance>1000000.00</balance>
+                  <units>PA</units>
+                  <curCd>USD</curCd>
+                  <valUSD>1012500.00</valUSD>
                   <assetCat>DBT</assetCat>
                   <issuerCat>MUN</issuerCat>
                   <debtSec><maturityDt>2045-03-15</maturityDt>
-                    <couponKind>Fixed</couponKind><annualizedRt>5.12500000</annualizedRt></debtSec>
+                    <couponKind>Fixed</couponKind><annualizedRt>5.12500000</annualizedRt>
+                    <isDefault>N</isDefault><areIntrstPmntsInArrs>N</areIntrstPmntsInArrs></debtSec>
                 </invstOrSec>
                 <invstOrSec>
                   <name>SYNTHETIC EQUITY CO</name>
@@ -57,13 +64,23 @@ class EdgarNportTest {
     void onlyCompleteMuniDebtBecomesABond() throws Exception {
         var p = EdgarNportConnector.parseHoldings(XML.getBytes(StandardCharsets.UTF_8));
 
-        assertEquals(1, p.bonds().size(), "one complete muni row");
-        Bond b = p.bonds().get(0);
+        assertEquals(1, p.holdings().size(), "one complete muni row");
+        var h = p.holdings().get(0);
+        Bond b = h.bond();
         assertEquals("TEST00019", b.cusip());
         assertEquals("SYNTHETIC NY DORMITORY AUTH REV", b.issuer());
         assertEquals(new BigDecimal("5.125000"), b.coupon(), "exact decimal at the schema's 6dp");
         assertEquals(LocalDate.of(2045, 3, 15), b.maturity());
         assertNull(b.price(), "N-PORT valuation is NOT a current mark — no price is derived");
+
+        // The fund-attested DETAIL beside the terms (ADR-0016 amendment): coupon kind, the two credit
+        // facts, par held and the fund's USD valuation, plus the filings' period date.
+        assertEquals("Fixed", h.couponKind());
+        assertFalse(h.inDefault());
+        assertFalse(h.intArrears());
+        assertEquals(new BigDecimal("1000000.00"), h.parHeld());
+        assertEquals(new BigDecimal("1012500.00"), h.valUsd());
+        assertEquals(java.time.LocalDate.of(2026, 6, 30), p.periodEnd());
 
         assertEquals(1, p.skippedNonMuni(), "the equity row is skipped, not force-fit");
         assertEquals(1, p.quarantined(), "the cusip-less muni row is quarantined, not invented");
@@ -80,9 +97,9 @@ class EdgarNportTest {
 
         var p = EdgarNportConnector.parseHoldings(xml.getBytes(StandardCharsets.UTF_8));
 
-        assertEquals(1, p.bonds().size(), "the bond lands rather than blowing up the fund");
-        assertEquals(new BigDecimal("3.750000"), p.bonds().get(0).coupon());
-        assertEquals(6, p.bonds().get(0).coupon().scale(), "exactly the scale the index key requires");
+        assertEquals(1, p.holdings().size(), "the bond lands rather than blowing up the fund");
+        assertEquals(new BigDecimal("3.750000"), p.holdings().get(0).bond().coupon());
+        assertEquals(6, p.holdings().get(0).bond().coupon().scale(), "exactly the scale the index key requires");
     }
 
     @Test
@@ -125,6 +142,18 @@ class EdgarNportTest {
                 EdgarNportConnector.archiveUrl("718581", "0000035402-26-004120", "primary_doc.xml"));
         assertTrue(EdgarNportConnector.archiveUrl("818850", "0000818850-26-000014", "")
                 .endsWith("/primary_doc.xml"));
+    }
+
+    @Test
+    void theFilingValuationIsParWeightedExactDecimal() {
+        // Worked example (finance rule): fund A holds 1,000,000 par valued $1,012,500; fund B holds
+        // 500,000 par valued $505,000. Combined: (1,012,500 + 505,000) / 1,500,000 x 100 = 101.166667
+        // at the schema's 6dp. Never floating point, never a division by zero.
+        assertEquals(new BigDecimal("101.166667"), EdgarFundHoldingsScheduler.valPer100(
+                new BigDecimal("1517500.00"), new BigDecimal("1500000.00")));
+        assertNull(EdgarFundHoldingsScheduler.valPer100(new BigDecimal("100"), BigDecimal.ZERO),
+                "no reported par means no valuation, not an exception");
+        assertNull(EdgarFundHoldingsScheduler.valPer100(null, null));
     }
 
     @Test

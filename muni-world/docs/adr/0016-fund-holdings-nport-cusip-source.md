@@ -49,3 +49,17 @@ N-PORT is therefore a lawful bulk list of real NY muni CUSIPs.
   dataset (ADR-0008 posture, unchanged).
 - The SEC asks that the declared User-Agent identify the requester; `MUNI_HTTP_UA` should carry a contact
   address on the capture host.
+
+## Amendment (2026-08-10) — the filing detail beside the terms
+
+The first ingest took only cusip/issuer/coupon/maturity and discarded the rest of what each holding
+states. The rest is fund-attested fact and is now kept (V3 columns), per CUSIP:
+
+- **Credit facts:** `isDefault` and `areIntrstPmntsInArrs` — N-PORT requires funds to disclose both.
+  Flags OR across funds: one fund attesting default is a fact about the issue.
+- **Coupon kind** (Fixed/Floating/Zero), verbatim.
+- **Ownership:** how many registered funds held the CUSIP in the latest cycle, and their total par
+  (kept only where the filing states balance is par, `units=PA`, in USD — never converted by guesswork).
+- **Filing valuation:** par-weighted `sum(valUSD)/sum(par)×100`, as-of the filings' `repPdDate`. This
+  retires the deferred-register row per its own trigger. It is displayed as a labeled, dated fact and is
+  deliberately **not** fed into yields/duration — decision 3 stands: analytics wait for a current price.

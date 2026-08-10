@@ -95,7 +95,8 @@ public final class MuniBondService {
         }
         java.util.OptionalLong total = repo.countMatching(query);   // one count query, not two
         out.put("total", total.isPresent() ? total.getAsLong() : null);
-        out.put("rows", repo.page(query, column, asc, limit, offset).stream().map(this::toRow).toList());
+        out.put("rows", repo.page(query, column, asc, limit, offset).stream()
+                .map(r -> toRow(r.bond(), r.detail())).toList());
         return out;
     }
 
@@ -125,6 +126,12 @@ public final class MuniBondService {
     }
 
     public Optional<BondRow> get(String cusip) {
+        // Postgres carries the filing detail (V3 columns) the LMDB json predates, so prefer it; the
+        // index remains the offline fallback with terms-only rows.
+        Optional<SecurityRepository.Row> pg = repo.findDetailed(cusip);
+        if (pg.isPresent()) {
+            return pg.map(r -> toRow(r.bond(), r.detail()));
+        }
         return index.get(cusip).map(this::toBond).map(this::toRow);
     }
 
@@ -154,8 +161,13 @@ public final class MuniBondService {
         }
     }
 
-    /** Compute the display row (indicators as of today's settlement). */
+    /** Terms-only row (LMDB fallback / OS loads) — no filing detail attached. */
     public BondRow toRow(Bond b) {
+        return toRow(b, null);
+    }
+
+    /** Compute the display row (indicators as of today's settlement), carrying the filing detail. */
+    public BondRow toRow(Bond b, SecurityRepository.Detail d) {
         double coupon = b.coupon().doubleValue();
         LocalDate settle = LocalDate.now();
         String call = b.callDate() == null ? "—"
@@ -169,13 +181,24 @@ public final class MuniBondService {
         String asOf = q.map(x -> x.asOf().toString()).orElse(null);
         String pxSource = q.map(PriceQuote::source).orElse(b.price() == null ? null : "ingest");
 
+        // Filing detail is display fact, never an analytics input: the valuation is as-of a filing
+        // period, so yields/duration still wait for a REAL current price (ADR-0016 discipline).
+        Double valPer100 = d == null || d.valPer100() == null ? null : d.valPer100().doubleValue();
+        String valAsOf = d == null || d.valAsOf() == null ? null : d.valAsOf().toString();
+        String couponKind = d == null ? null : d.couponKind();
+        Boolean inDefault = d == null ? null : d.inDefault();
+        Boolean intArrears = d == null ? null : d.intArrears();
+        Integer heldFunds = d == null ? null : d.heldFunds();
+        Double heldPar = d == null || d.heldPar() == null ? null : d.heldPar().doubleValue();
+
         if (px == null) {
             double nan = Double.NaN;
             return new BondRow(
                     b.cusip(), b.issuer(), coupon, b.maturity().toString(), nan,
                     nan, nan, nan, nan, nan,
                     r(BondMath.accrued(coupon, settle, b.maturity()), 3),
-                    b.taxStatus(), call, b.rating(), null, null);
+                    b.taxStatus(), call, b.rating(), null, null,
+                    couponKind, inDefault, intArrears, heldFunds, heldPar, valPer100, valAsOf);
         }
         double price = px.doubleValue();
         double callPrice = b.callPrice() == null ? 0.0 : b.callPrice().doubleValue();
@@ -187,7 +210,8 @@ public final class MuniBondService {
                 r(BondMath.modDuration(coupon, settle, b.maturity(), price), 2),
                 r(BondMath.convexity(coupon, settle, b.maturity(), price), 2),
                 r(BondMath.accrued(coupon, settle, b.maturity()), 3),
-                b.taxStatus(), call, b.rating(), asOf, pxSource);
+                b.taxStatus(), call, b.rating(), asOf, pxSource,
+                couponKind, inDefault, intArrears, heldFunds, heldPar, valPer100, valAsOf);
     }
 
     private static double r(double v, int dp) {

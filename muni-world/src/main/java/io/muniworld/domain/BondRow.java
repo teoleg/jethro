@@ -21,5 +21,13 @@ public record BondRow(
         String call,
         String rating,
         String priceAsOf,     // date the current price is as-of (null = terms-only, blank economics)
-        String priceSource) { // provenance of the price, e.g. msrb-rtrs (null when unpriced)
+        String priceSource,   // provenance of the price, e.g. msrb-rtrs (null when unpriced)
+        // ADR-0016 filing detail — fund-attested fact from N-PORT, display only (never an analytics input):
+        String couponKind,    // Fixed / Floating / Zero, verbatim from the filing
+        Boolean inDefault,    // the issue is in default (a fund attested it)
+        Boolean intArrears,   // interest payments are in arrears
+        Integer heldFunds,    // how many registered funds held it last ingested cycle
+        Double heldPar,       // total par those funds held (USD issues)
+        Double valPer100,     // par-weighted FILING valuation per 100 — as-of valAsOf, never a live mark
+        String valAsOf) {     // the filings' reporting-period date
 }

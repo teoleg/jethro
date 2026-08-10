@@ -54,6 +54,17 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
             rs.getString("rating"),
             rs.getString("geo_fips"));
 
+    private static final RowMapper<Row> DETAILED = (rs, i) -> new Row(
+            ROW.mapRow(rs, i),
+            new Detail(
+                    rs.getString("coupon_kind"),
+                    rs.getObject("in_default", Boolean.class),
+                    rs.getObject("intr_arrears", Boolean.class),
+                    rs.getObject("held_funds", Integer.class),
+                    rs.getBigDecimal("held_par"),
+                    rs.getBigDecimal("val_per100"),
+                    rs.getObject("val_as_of", LocalDate.class)));
+
     // When the DB is down, every JDBC call blocks on Hikari's connection-timeout. Loading N bonds must not pay
     // that N times, nor must the 5s status poll pay it each tick. So health is CACHED: probe at most once per
     // RECHECK_MS, and skip the DB entirely (instantly) while it's known-down. Starts pessimistic (unhealthy)
@@ -87,6 +98,39 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
             jdbc.queryForObject("SELECT count(*) FROM muni.security", Long.class);
             return true;
         } catch (DataAccessException e) {
+            warnOnce(e);
+            return false;
+        }
+    }
+
+    /** Fund-attested filing detail beside a bond's terms (V3 columns) — see {@code Detail}. */
+    public record Detail(String couponKind, Boolean inDefault, Boolean intArrears,
+                         Integer heldFunds, java.math.BigDecimal heldPar,
+                         java.math.BigDecimal valPer100, LocalDate valAsOf) {
+    }
+
+    /** A bond with its filing detail, as one read. Detail fields are null where nothing was filed. */
+    public record Row(Bond bond, Detail detail) {
+    }
+
+    /**
+     * Write the ADR-0016 filing detail for a CUSIP (the bond row must already exist — this is the second
+     * half of an ingest write, never a row creator). Best-effort like every DB call here.
+     */
+    public boolean updateDetail(String cusip, Detail d) {
+        if (!available()) {
+            return false;
+        }
+        try {
+            jdbc.update("""
+                    UPDATE muni.security SET coupon_kind = ?, in_default = ?, intr_arrears = ?,
+                      held_funds = ?, held_par = ?, val_per100 = ?, val_as_of = ?, updated_at = now()
+                    WHERE cusip = ?""",
+                    d.couponKind(), d.inDefault(), d.intArrears(), d.heldFunds(), d.heldPar(),
+                    d.valPer100(), d.valAsOf(), cusip);
+            return true;
+        } catch (DataAccessException e) {
+            healthy = false;
             warnOnce(e);
             return false;
         }
@@ -130,7 +174,7 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
      * UI to slice it there is the thing that makes a bond browser unusable. The sort column is chosen from
      * a fixed map — never interpolated from the request — so this cannot become a SQL-injection seam.
      */
-    public List<Bond> page(String query, String sortColumn, boolean asc, int limit, int offset) {
+    public List<Row> page(String query, String sortColumn, boolean asc, int limit, int offset) {
         if (!available()) {
             return List.of();
         }
@@ -139,13 +183,27 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
                 + " ORDER BY " + sortColumn + (asc ? " ASC" : " DESC") + " NULLS LAST LIMIT ? OFFSET ?";
         try {
             if (where.isEmpty()) {
-                return jdbc.query(sql, ROW, limit, offset);
+                return jdbc.query(sql, DETAILED, limit, offset);
             }
             String like = "%" + query.strip() + "%";
-            return jdbc.query(sql, ROW, like, like, limit, offset);
+            return jdbc.query(sql, DETAILED, like, like, limit, offset);
         } catch (DataAccessException e) {
             healthy = false;
             return List.of();
+        }
+    }
+
+    /** One bond with its filing detail — the detail view's read. Empty when absent or the DB is off. */
+    public java.util.Optional<Row> findDetailed(String cusip) {
+        if (!available()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            List<Row> rows = jdbc.query("SELECT * FROM muni.security WHERE cusip = ?", DETAILED, cusip);
+            return rows.isEmpty() ? java.util.Optional.empty() : java.util.Optional.of(rows.get(0));
+        } catch (DataAccessException e) {
+            healthy = false;
+            return java.util.Optional.empty();
         }
     }
 

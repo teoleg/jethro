@@ -1,7 +1,7 @@
 package io.muniworld.ingest;
 
 import io.muniworld.bond.MuniBondService;
-import io.muniworld.domain.Bond;
+import io.muniworld.bond.SecurityRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -9,7 +9,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -29,16 +31,18 @@ public final class EdgarFundHoldingsScheduler {
     private final EdgarFundCatalog catalog;
     private final EdgarNportConnector connector;
     private final MuniBondService bonds;
+    private final SecurityRepository repo;
     private final boolean enabled;
     private final Map<String, String> lastResult = new LinkedHashMap<>();   // fund label → outcome line
     private volatile String lastRun = "";
 
     public EdgarFundHoldingsScheduler(EdgarFundCatalog catalog, EdgarNportConnector connector,
-                                      MuniBondService bonds,
+                                      MuniBondService bonds, SecurityRepository repo,
                                       @Value("${muni.funds.enabled:true}") boolean enabled) {
         this.catalog = catalog;
         this.connector = connector;
         this.bonds = bonds;
+        this.repo = repo;
         this.enabled = enabled;
     }
 
@@ -49,6 +53,10 @@ public final class EdgarFundHoldingsScheduler {
             return;
         }
         lastRun = Instant.now().toString();
+        // Phase 1 — fetch + store terms per fund, failures isolated per fund and per bond. Successful
+        // results are kept for phase 2, because the cross-fund detail (held-by-N-funds, total par, the
+        // par-weighted valuation) only exists ACROSS funds and must be computed after all have landed.
+        List<EdgarNportConnector.Result> results = new ArrayList<>();
         for (EdgarFundCatalog.Fund fund : catalog.enabled()) {
             try {
                 EdgarNportConnector.Result r = connector.loadLatest(fund);
@@ -58,17 +66,18 @@ public final class EdgarFundHoldingsScheduler {
                 int stored = 0;
                 int rejected = 0;
                 String firstRejection = null;
-                for (Bond b : r.bonds()) {
+                for (EdgarNportConnector.Holding h : r.holdings()) {
                     try {
-                        bonds.index(b);
+                        bonds.index(h.bond());
                         stored++;
                     } catch (RuntimeException e) {
                         rejected++;
                         if (firstRejection == null) {
-                            firstRejection = b.cusip() + ": " + rootMessage(e);
+                            firstRejection = h.bond().cusip() + ": " + rootMessage(e);
                         }
                     }
                 }
+                results.add(r);
                 String note = rejected == 0 ? ""
                         : "; " + rejected + " REJECTED on write (first: " + firstRejection + ")";
                 synchronized (lastResult) {
@@ -89,6 +98,65 @@ public final class EdgarFundHoldingsScheduler {
                         fund.label(), fund.cik(), e.toString());
             }
         }
+        writeCrossFundDetail(results);
+    }
+
+    /**
+     * Phase 2 — the detail one filing cannot state alone. Per CUSIP across every fund that reported this
+     * pass: how many funds hold it, their total par, and the par-weighted filing valuation
+     * {@code sum(valUSD) / sum(par) × 100} as-of the filings' period date. Worked example:
+     * fund A holds 1,000,000 par valued $1,012,500; fund B holds 500,000 par valued $505,000 →
+     * (1,012,500 + 505,000) / 1,500,000 × 100 = 101.166667. The credit flags OR across funds — one fund
+     * attesting default is a fact about the issue. Reflects only funds that SUCCEEDED this pass.
+     */
+    private void writeCrossFundDetail(List<EdgarNportConnector.Result> results) {
+        record Agg(java.util.Set<Integer> funds, java.math.BigDecimal[] parVal, boolean[] flags,
+                   String[] kind, java.time.LocalDate[] asOf) {
+        }
+        Map<String, Agg> byCusip = new LinkedHashMap<>();
+        for (int f = 0; f < results.size(); f++) {
+            EdgarNportConnector.Result r = results.get(f);
+            for (EdgarNportConnector.Holding h : r.holdings()) {
+                Agg a = byCusip.computeIfAbsent(h.bond().cusip(), k -> new Agg(new java.util.HashSet<>(),
+                        new java.math.BigDecimal[] {java.math.BigDecimal.ZERO, java.math.BigDecimal.ZERO},
+                        new boolean[2], new String[1], new java.time.LocalDate[1]));
+                a.funds().add(f);
+                if (h.parHeld() != null && h.valUsd() != null && h.parHeld().signum() > 0) {
+                    a.parVal()[0] = a.parVal()[0].add(h.parHeld());
+                    a.parVal()[1] = a.parVal()[1].add(h.valUsd());
+                }
+                a.flags()[0] |= h.inDefault();
+                a.flags()[1] |= h.intArrears();
+                if (a.kind()[0] == null && !h.couponKind().isBlank()) {
+                    a.kind()[0] = h.couponKind();
+                }
+                if (r.periodEnd() != null
+                        && (a.asOf()[0] == null || r.periodEnd().isAfter(a.asOf()[0]))) {
+                    a.asOf()[0] = r.periodEnd();
+                }
+            }
+        }
+        int written = 0;
+        for (Map.Entry<String, Agg> e : byCusip.entrySet()) {
+            Agg a = e.getValue();
+            java.math.BigDecimal par = a.parVal()[0];
+            java.math.BigDecimal valPer100 = valPer100(a.parVal()[1], par);
+            boolean ok = repo.updateDetail(e.getKey(), new SecurityRepository.Detail(
+                    a.kind()[0], a.flags()[0], a.flags()[1], a.funds().size(),
+                    par.signum() > 0 ? par : null, valPer100, a.asOf()[0]));
+            if (ok) {
+                written++;
+            }
+        }
+        log.info("cross-fund detail: {} of {} CUSIP(s) updated", written, byCusip.size());
+    }
+
+    /** {@code sum(valUSD)/sum(par) × 100} as an exact decimal at the schema's 6dp (invariant 1) — the
+     *  par-weighted filing valuation. Null when no par was reported (never a division by zero). */
+    static java.math.BigDecimal valPer100(java.math.BigDecimal sumVal, java.math.BigDecimal sumPar) {
+        return sumPar == null || sumPar.signum() <= 0 || sumVal == null ? null
+                : sumVal.multiply(new java.math.BigDecimal(100))
+                        .divide(sumPar, 6, java.math.RoundingMode.HALF_UP);
     }
 
     /** The message plus its root cause, so an HTTP status reaches the page instead of dying in the chain. */

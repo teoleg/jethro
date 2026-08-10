@@ -47,9 +47,19 @@ public final class EdgarNportConnector {
         this.json = json;
     }
 
+    /**
+     * One holding as the filing states it: the canonical bond terms plus the fund-attested detail — how
+     * much par this fund held, what it valued the position at (USD), the coupon kind, and the two credit
+     * facts N-PORT requires funds to disclose (default / interest in arrears).
+     */
+    public record Holding(Bond bond, String couponKind, boolean inDefault, boolean intArrears,
+                          BigDecimal parHeld, BigDecimal valUsd) {
+    }
+
     /** One fund's ingest result — everything the status page needs to say what happened. */
     public record Result(String registrant, int filings, String newestFilingDate,
-                         List<Bond> bonds, int skippedNonMuni, int quarantined) {
+                         List<Holding> holdings, LocalDate periodEnd,
+                         int skippedNonMuni, int quarantined) {
     }
 
     /**
@@ -79,7 +89,8 @@ public final class EdgarNportConnector {
                     + " (" + registrant + ") — is this actually a registered fund?");
         }
 
-        List<Bond> bonds = new ArrayList<>();
+        List<Holding> holdings = new ArrayList<>();
+        LocalDate periodEnd = null;
         int skipped = 0;
         int quarantined = 0;
         for (int idx : cycle) {
@@ -87,15 +98,19 @@ public final class EdgarNportConnector {
             String primaryDoc = recent.path("primaryDocument").get(idx).asText("primary_doc.xml");
             RawArtifact filing = fetchExplaining(sourceId, archiveUrl(fund.cik(), accession, primaryDoc));
             Parsed p = parseHoldings(filing.body());
-            bonds.addAll(p.bonds());
+            holdings.addAll(p.holdings());
+            if (p.periodEnd() != null && (periodEnd == null || p.periodEnd().isAfter(periodEnd))) {
+                periodEnd = p.periodEnd();
+            }
             skipped += p.skippedNonMuni();
             quarantined += p.quarantined();
-            log.info("N-PORT {} ({}, filed {}): {} muni bond(s), {} non-muni skipped, {} quarantined",
-                    accession, registrant, dates.get(idx), p.bonds().size(), p.skippedNonMuni(),
+            log.info("N-PORT {} ({}, filed {}): {} muni holding(s), {} non-muni skipped, {} quarantined",
+                    accession, registrant, dates.get(idx), p.holdings().size(), p.skippedNonMuni(),
                     p.quarantined());
             Thread.sleep(400);      // politeness — far under EDGAR's 10 req/s, deliberately
         }
-        return new Result(registrant, cycle.size(), dates.get(cycle.get(0)), bonds, skipped, quarantined);
+        return new Result(registrant, cycle.size(), dates.get(cycle.get(0)), holdings, periodEnd,
+                skipped, quarantined);
     }
 
     /**
@@ -194,7 +209,7 @@ public final class EdgarNportConnector {
         }
     }
 
-    record Parsed(List<Bond> bonds, int skippedNonMuni, int quarantined) {
+    record Parsed(List<Holding> holdings, LocalDate periodEnd, int skippedNonMuni, int quarantined) {
     }
 
     /**
@@ -214,8 +229,19 @@ public final class EdgarNportConnector {
         f.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
         Document doc = f.newDocumentBuilder().parse(new ByteArrayInputStream(xml));
 
+        // The filings' reporting-period date — what a valuation is "as of". NOT the fetch or filing date.
+        LocalDate periodEnd = null;
+        NodeList pd = doc.getElementsByTagNameNS("*", "repPdDate");
+        if (pd.getLength() > 0) {
+            try {
+                periodEnd = LocalDate.parse(pd.item(0).getTextContent().strip());
+            } catch (RuntimeException ignored) {
+                // absent/odd period date just means no valuation as-of — never a reason to drop terms
+            }
+        }
+
         NodeList secs = doc.getElementsByTagNameNS("*", "invstOrSec");
-        List<Bond> bonds = new ArrayList<>();
+        List<Holding> holdings = new ArrayList<>();
         int skippedNonMuni = 0;
         int quarantined = 0;
         for (int i = 0; i < secs.getLength(); i++) {
@@ -242,13 +268,32 @@ public final class EdgarNportConnector {
                 // the scaled-long index key rejects anything finer than 6dp exactly, so an unrounded
                 // rate aborted the whole fund. 6dp is lossless for a real coupon (quoted to 3-4dp).
                 BigDecimal coupon = new BigDecimal(rate).setScale(6, java.math.RoundingMode.HALF_UP);
-                bonds.add(new Bond(cusip, name, coupon,
-                        LocalDate.parse(maturity), null, null, null, null, null, null, null));
+                Bond bond = new Bond(cusip, name, coupon,
+                        LocalDate.parse(maturity), null, null, null, null, null, null, null);
+
+                // The fund-attested DETAIL beside the terms. Par/value only when the filing states the
+                // balance IS par ("PA") in USD — anything else is left null, never converted by guesswork.
+                boolean parUnits = "PA".equalsIgnoreCase(text(sec, "units"))
+                        && (text(sec, "curCd").isBlank() || "USD".equalsIgnoreCase(text(sec, "curCd")));
+                BigDecimal par = parUnits ? decimalOrNull(text(sec, "balance")) : null;
+                BigDecimal val = parUnits ? decimalOrNull(text(sec, "valUSD")) : null;
+                holdings.add(new Holding(bond, text(sec, "couponKind"),
+                        "Y".equalsIgnoreCase(text(sec, "isDefault")),
+                        "Y".equalsIgnoreCase(text(sec, "areIntrstPmntsInArrs")),
+                        par, val));
             } catch (RuntimeException e) {
                 quarantined++;   // unparseable date/rate — same treatment
             }
         }
-        return new Parsed(bonds, skippedNonMuni, quarantined);
+        return new Parsed(holdings, periodEnd, skippedNonMuni, quarantined);
+    }
+
+    private static BigDecimal decimalOrNull(String s) {
+        try {
+            return s == null || s.isBlank() ? null : new BigDecimal(s);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /** First matching descendant's text, namespace-agnostic; empty string when absent. */
