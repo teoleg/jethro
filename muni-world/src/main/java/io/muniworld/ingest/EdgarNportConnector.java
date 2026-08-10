@@ -85,7 +85,7 @@ public final class EdgarNportConnector {
         for (int idx : cycle) {
             String accession = recent.path("accessionNumber").get(idx).asText();
             String primaryDoc = recent.path("primaryDocument").get(idx).asText("primary_doc.xml");
-            RawArtifact filing = http.fetch(sourceId, archiveUrl(fund.cik(), accession, primaryDoc));
+            RawArtifact filing = fetchExplaining(sourceId, archiveUrl(fund.cik(), accession, primaryDoc));
             Parsed p = parseHoldings(filing.body());
             bonds.addAll(p.bonds());
             skipped += p.skippedNonMuni();
@@ -96,6 +96,35 @@ public final class EdgarNportConnector {
             Thread.sleep(400);      // politeness — far under EDGAR's 10 req/s, deliberately
         }
         return new Result(registrant, cycle.size(), dates.get(cycle.get(0)), bonds, skipped, quarantined);
+    }
+
+    /**
+     * Fetch, translating the SEC's one predictable rejection into its actual cause.
+     *
+     * <p>A 403 from sec.gov almost always means the request declared no contact address — the fair-access
+     * policy requires one. Without this the page reports "HTTP 403", which reads like a block or an
+     * outage and sends the reader looking in the wrong place entirely.
+     */
+    private RawArtifact fetchExplaining(String sourceId, String url) {
+        try {
+            return http.fetch(sourceId, url);
+        } catch (RuntimeException e) {
+            String msg = String.valueOf(e.getMessage()) + " " + rootText(e);
+            if (msg.contains("HTTP 403")) {
+                throw new IllegalStateException("sec.gov refused the request (HTTP 403). The SEC requires "
+                        + "a contact address in the User-Agent — set MUNI_CONTACT_EMAIL=you@example.com in "
+                        + "local.env and restart. URL: " + url, e);
+            }
+            throw e;
+        }
+    }
+
+    private static String rootText(Throwable e) {
+        Throwable r = e;
+        while (r.getCause() != null && r.getCause() != r) {
+            r = r.getCause();
+        }
+        return String.valueOf(r.getMessage());
     }
 
     /**
