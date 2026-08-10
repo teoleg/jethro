@@ -87,9 +87,14 @@
     <details class="card" style="margin-top:12px">
       <summary style="cursor:pointer;font-size:13px;color:var(--dim)">Load an Official Statement PDF (deep terms for one issue)</summary>
       <div style="color:var(--dim);font-size:12px;margin:10px 0 12px">
-        <b>1.</b> Put OS PDFs in <span class="mono" style="color:var(--txt)">os-inbox/</span>
-        (also scanned on a schedule). &nbsp;<b>2.</b> Click <b>Load</b>. Each file is parsed, saved to the
-        DB + index, then moved to <span class="mono">os-inbox/processed/</span>.
+        <b>Which PDF?</b> Only the one titled <b style="color:var(--txt)">“Official Statement”</b> (the
+        final OS for that series) — it holds the call schedule, original issue prices and tax status.
+        Skip annual reports, ACFRs, event notices and amendments; they carry none of that. The fastest
+        route: select a bond below → click <b>“open this CUSIP on EMMA”</b> in its detail panel → EMMA’s
+        page for that exact security links its OS → download it.<br><br>
+        <b>1.</b> Put the OS PDF in <span class="mono" style="color:var(--txt)">os-inbox/</span>
+        (also scanned on a schedule). &nbsp;<b>2.</b> Click <b>Load</b>. The parser reads the maturity
+        schedule and lands EVERY CUSIP in that series — one OS typically covers dozens of your bonds.
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn" style="border-color:var(--brand);color:var(--brand)" onclick="loadFromFolder()">⤓ Load OS PDFs from folder</button>
@@ -129,7 +134,7 @@
     </div>
   </div>
 
-  <div class="foot">muni-world runs as a separate process · <b>UI build B9</b> (master–detail: slim finder list left, full bond detail + history right)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B10</b> (per-CUSIP EMMA document link; which-PDF guidance at the load fold)</div>
 </main>
 
 <script>
@@ -285,6 +290,8 @@
             ${f("Held by funds", r.heldFunds ?? "—")}
             ${f("Par held (USD)", r.heldPar == null ? "—" : Number(r.heldPar).toLocaleString())}
             ${f("Filing valuation /100", r.valPer100 == null ? "—" : num(r.valPer100, 3) + " · as-of " + esc(r.valAsOf))}
+            ${f("Documents", `<a href="https://emma.msrb.org/Security/Details/${encodeURIComponent(r.cusip)}"
+                target="_blank" rel="noopener" style="color:var(--brand);text-decoration:underline">open this CUSIP on EMMA ↗</a>`)}
           </div>
           <div>
             ${f("Price (clean /100)", priced ? num(r.price, 3) : "—")}
