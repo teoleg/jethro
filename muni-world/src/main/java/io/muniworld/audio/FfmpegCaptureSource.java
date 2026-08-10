@@ -252,11 +252,15 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
 
     /** One resolve attempt. Throws {@link IOException} when yt-dlp runs and refuses. */
     private String runYtdlp(String page, String[] extra) throws IOException {
-        // bestaudio/best, never bare bestaudio: without a JS runtime YouTube exposes no audio-only
-        // rendition for a live stream, and `-f bestaudio` then fails outright with "Requested format is
-        // not available". The `/best` fallback takes the combined HLS rendition instead and ffmpeg's -vn
-        // drops the video — more bandwidth, but it works with no runtime at all.
-        List<String> cmd = new ArrayList<>(List.of(YTDLP, "-f", "bestaudio/best", "-g", "--no-warnings"));
+        // "bestaudio/worst", and both halves are deliberate:
+        //   bestaudio — the audio-only rendition, what we actually want (~128 kbps).
+        //   /worst    — the fallback when there is none (no JS runtime → YouTube hides audio-only
+        //               formats, and a bare `-f bestaudio` then fails with "Requested format is not
+        //               available"). Fall back to the SMALLEST combined rendition, never the largest:
+        //               the video is discarded by -vn either way, so `/best` would drag ~50 MB of 1080p
+        //               (itag 96) down a home connection every 120 s chunk to keep ~2 MB of speech.
+        //               Low-bitrate AAC is still far more than 16 kHz mono ASR needs.
+        List<String> cmd = new ArrayList<>(List.of(YTDLP, "-f", "bestaudio/worst", "-g", "--no-warnings"));
         if (!JS_RUNTIME.isBlank() && supportsJsRuntimes()) {
             cmd.addAll(List.of("--js-runtimes", "deno:" + JS_RUNTIME));
         }
