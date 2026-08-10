@@ -100,17 +100,26 @@
       <div id="loadResults" style="margin-top:8px"></div>
     </details>
 
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:18px">
-      <input id="q" placeholder="filter loaded bonds: CUSIP-6 issuer prefix (e.g. 649122) or FIPS (e.g. 36)"
-             style="flex:1;min-width:260px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;font:inherit">
-      <button class="btn" onclick="search('issuer')">By issuer</button>
-      <button class="btn" onclick="search('geo')">By geography</button>
-      <button class="btn" onclick="loadRecent()">Show recent</button>
+    <h2 style="font-size:16px;margin-top:26px">Browse the universe
+      <span id="pageInfo" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+      <input id="q" placeholder="search CUSIP or issuer name (e.g. 649122 · DORMITORY · NEW YORK CITY)"
+             style="flex:1;min-width:280px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;font:inherit">
+      <button class="btn" onclick="go(0)">Search</button>
+      <select id="size" onchange="go(0)"
+              style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px;font:inherit;font-size:12px">
+        <option value="50">50 / page</option><option value="100">100 / page</option>
+        <option value="250">250 / page</option>
+      </select>
+      <button class="btn" onclick="go(PAGE - 1)">‹ Prev</button>
+      <button class="btn" onclick="go(PAGE + 1)">Next ›</button>
     </div>
-    <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:10px">loading bonds…</div></div>
+    <div style="color:var(--dim);font-size:11px;margin-top:6px">Click a column header to sort · click a row for full detail</div>
+    <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:8px">loading bonds…</div></div>
+    <div id="bondDetail"></div>
   </div>
 
-  <div class="foot">muni-world runs as a separate process · <b>UI build B5</b> (universe = automatic fund filings; OS PDFs folded; TV/audio on its own page)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B6</b> (bond browser: DB-side search/sort/paging + per-CUSIP detail)</div>
 </main>
 
 <script>
@@ -165,17 +174,32 @@
     }).join("") + `<div style="font-size:10.5px;margin-top:5px">last pass: ${esc(String(f.lastRun))}</div>`;
   }
 
+  // --- the bond browser: server-side page/sort/filter, so thousands of securities stay navigable ---
+  let PAGE = 0, SORT = "updated_at", ASC = false, TOTAL = null;
+
+  // sort key → column label. The key is what the API takes; the DB maps it through a whitelist.
+  const SORTABLE = { cusip: "CUSIP", issuer: "Issuer", coupon: "Cpn", maturity: "Maturity" };
+
+  function sortBy(key) {
+    ASC = (SORT === key) ? !ASC : true;   // same header toggles direction; a new one starts ascending
+    SORT = key;
+    go(0);
+  }
+
   function renderBonds(rows) {
     const el = document.getElementById("bondTable");
     if (!rows || !rows.length) {
-      el.innerHTML = "no bonds yet — the universe loads automatically from the fund filings above "
-        + "(first pass ~30s after start; check the per-fund status). An Official Statement PDF can also "
-        + "be loaded from the folded section. Nothing here is illustrative.";
+      el.innerHTML = TOTAL === 0
+        ? "no bond matches that search. Clear the box to see the whole universe."
+        : "no bonds yet — the universe loads automatically from the fund filings above (first pass ~30s "
+          + "after start; check the per-fund status). Nothing here is illustrative.";
       return;
     }
-    const cols = ["CUSIP", "Issuer", "Cpn", "Maturity", "Price", "Cur Yld", "YTM", "YTW", "Mod Dur", "Cvx", "Tax", "Rating", "Call"];
-    el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
-      + rows.map(r => `<tr>
+    const head = ["cusip", "issuer", "coupon", "maturity"].map(k =>
+        `<th style="cursor:pointer" onclick="sortBy('${k}')">${SORTABLE[k]}${SORT === k ? (ASC ? " ▲" : " ▼") : ""}</th>`).join("")
+      + ["Price", "Cur Yld", "YTM", "YTW", "Mod Dur", "Cvx", "Tax", "Rating", "Call"].map(h => `<th>${h}</th>`).join("");
+    el.innerHTML = '<table class="tbl"><thead><tr>' + head + "</tr></thead><tbody>"
+      + rows.map(r => `<tr style="cursor:pointer" onclick="showDetail('${esc(r.cusip)}')">
           <td class="mono" style="color:var(--txt)">${esc(r.cusip)}</td><td>${esc(r.issuer)}</td>
           <td class="mono">${num(r.coupon, 3)}</td><td class="mono">${esc(r.maturity)}</td>
           <td class="mono">${num(r.price, 2)}${r.priceAsOf ? `<div style="font-size:9px;color:var(--dim)" title="${esc(r.priceSource)}">${esc(r.priceAsOf)}</div>` : ""}</td><td class="mono">${num(r.currentYield, 3)}</td>
@@ -186,13 +210,73 @@
         </tr>`).join("") + "</tbody></table>";
   }
 
-  async function search(kind) {
+  /** Fetch and render page n. The only path that loads the table — search, sort and paging all land here. */
+  async function go(n) {
+    const size = parseInt(document.getElementById("size").value, 10) || 50;
     const q = document.getElementById("q").value.trim();
-    if (!q) { document.getElementById("bondTable").textContent = "enter a CUSIP-6 issuer prefix or a FIPS code to filter the loaded bonds."; return; }
-    const path = kind === "geo" ? "/api/muni/bonds/geo/" : "/api/muni/bonds/issuer/";
+    const want = Math.max(0, n);
+    const info = document.getElementById("pageInfo");
     try {
-      renderBonds(await (await fetch(path + encodeURIComponent(q))).json());
-    } catch (e) { document.getElementById("bondTable").textContent = "source unreachable — could not query the bond index."; }
+      const r = await (await fetch(`/api/muni/bonds?q=${encodeURIComponent(q)}&sort=${SORT}`
+        + `&asc=${ASC}&page=${want}&size=${size}`, { cache: "no-store" })).json();
+      TOTAL = r.total;
+      // Don't advance past the end: asking for page 99 of 3 must not blank the table.
+      if (r.total != null && want * size >= r.total && want > 0) { return go(Math.floor((r.total - 1) / size)); }
+      PAGE = r.page;
+      renderBonds(r.rows);
+      const from = r.total ? PAGE * size + 1 : 0;
+      const to = Math.min((PAGE + 1) * size, r.total == null ? (r.rows || []).length : r.total);
+      info.textContent = r.note ? "· " + r.note
+        : (r.total == null ? "" : `· ${from}–${to} of ${r.total.toLocaleString()}${q ? " matching" : ""}`);
+    } catch (e) {
+      document.getElementById("bondTable").textContent = "could not read the bond store.";
+    }
+  }
+
+  /** Everything stored about one bond, plus WHY the economics are blank when they are. */
+  async function showDetail(cusip) {
+    const el = document.getElementById("bondDetail");
+    el.innerHTML = `<div class="card" style="margin-top:12px">loading ${esc(cusip)}…</div>`;
+    try {
+      const resp = await fetch("/api/muni/bonds/" + encodeURIComponent(cusip), { cache: "no-store" });
+      if (!resp.ok) { el.innerHTML = `<div class="card" style="margin-top:12px">no stored detail for ${esc(cusip)}</div>`; return; }
+      const r = await resp.json();
+      const priced = r.price != null && !isNaN(r.price);
+      const f = (label, v) => `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)">
+          <span style="min-width:150px;color:var(--dim);font-size:11.5px">${label}</span>
+          <span class="mono" style="color:var(--txt);font-size:12px">${v}</span></div>`;
+      el.innerHTML = `<div class="card" style="margin-top:12px">
+        <h2 style="font-size:15px;display:flex;gap:10px;align-items:baseline">
+          <span class="mono">${esc(r.cusip)}</span>
+          <span style="font-weight:400;font-size:13px;color:var(--dim)">${esc(r.issuer)}</span>
+          <span class="spacer" style="flex:1"></span>
+          <button class="btn" onclick="document.getElementById('bondDetail').innerHTML=''">close</button></h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:0 26px;margin-top:8px">
+          <div>
+            ${f("Coupon", num(r.coupon, 6) + " %")}
+            ${f("Maturity", esc(r.maturity))}
+            ${f("Call", esc(r.call))}
+            ${f("Tax status", esc(r.taxStatus) || "—")}
+            ${f("Rating", esc(r.rating) || "—")}
+          </div>
+          <div>
+            ${f("Price (clean /100)", priced ? num(r.price, 3) : "—")}
+            ${f("Price as of", esc(r.priceAsOf) || "—")}
+            ${f("Price source", esc(r.priceSource) || "—")}
+            ${f("Current yield", num(r.currentYield, 3))}
+            ${f("YTM", num(r.ytm, 3))}
+            ${f("Yield to worst", num(r.ytw, 3))}
+            ${f("Mod. duration", num(r.modDuration, 3))}
+            ${f("Convexity", num(r.convexity, 3))}
+            ${f("Accrued", num(r.accrued, 4))}
+          </div>
+        </div>
+        ${priced ? "" : `<div style="color:var(--warn);font-size:11.5px;margin-top:10px">
+          Economics are blank because this bond has <b>no current price</b>. Terms come from an SEC fund
+          filing (CUSIP, issuer, coupon, maturity); yields and duration compute the moment a real price
+          source covers this CUSIP — never from an invented mark.</div>`}
+      </div>`;
+    } catch (e) { el.innerHTML = `<div class="card" style="margin-top:12px">detail unavailable</div>`; }
   }
 
   // Render the loading PROCESS — one line per file, so the load is observable, not a black box.
@@ -250,16 +334,9 @@
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">upload error</span>'; }
   }
 
-  // Show the most-recently-loaded bonds (DB when up, else the index) — the result of loading, visible on open.
-  async function loadRecent() {
-    try {
-      renderBonds(await (await fetch("/api/muni/bonds/recent?limit=100", { cache: "no-store" })).json());
-    } catch (e) { document.getElementById("bondTable").textContent = "could not read the bond store."; }
-  }
-
-  document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") search("issuer"); });
+  document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") go(0); });
   refreshStore(); setInterval(refreshStore, 5000);
-  loadRecent();
+  go(0);
 </script>
 </body>
 </html>

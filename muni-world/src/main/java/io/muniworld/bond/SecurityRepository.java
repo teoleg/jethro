@@ -123,6 +123,50 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
         }
     }
 
+    /**
+     * A page of bonds for the browser: optional text filter, whitelisted sort, LIMIT/OFFSET.
+     *
+     * <p>Paging is done in SQL, not in Java: with thousands of securities, shipping the whole table to the
+     * UI to slice it there is the thing that makes a bond browser unusable. The sort column is chosen from
+     * a fixed map — never interpolated from the request — so this cannot become a SQL-injection seam.
+     */
+    public List<Bond> page(String query, String sortColumn, boolean asc, int limit, int offset) {
+        if (!available()) {
+            return List.of();
+        }
+        String where = query == null || query.isBlank() ? "" : " WHERE cusip ILIKE ? OR issuer ILIKE ? ";
+        String sql = "SELECT * FROM muni.security" + where
+                + " ORDER BY " + sortColumn + (asc ? " ASC" : " DESC") + " NULLS LAST LIMIT ? OFFSET ?";
+        try {
+            if (where.isEmpty()) {
+                return jdbc.query(sql, ROW, limit, offset);
+            }
+            String like = "%" + query.strip() + "%";
+            return jdbc.query(sql, ROW, like, like, limit, offset);
+        } catch (DataAccessException e) {
+            healthy = false;
+            return List.of();
+        }
+    }
+
+    /** How many bonds match {@code query} — the page count the UI shows, not an estimate. */
+    public OptionalLong countMatching(String query) {
+        if (!available()) {
+            return OptionalLong.empty();
+        }
+        try {
+            Long n = query == null || query.isBlank()
+                    ? jdbc.queryForObject("SELECT count(*) FROM muni.security", Long.class)
+                    : jdbc.queryForObject(
+                            "SELECT count(*) FROM muni.security WHERE cusip ILIKE ? OR issuer ILIKE ?",
+                            Long.class, "%" + query.strip() + "%", "%" + query.strip() + "%");
+            return n == null ? OptionalLong.empty() : OptionalLong.of(n);
+        } catch (DataAccessException e) {
+            healthy = false;
+            return OptionalLong.empty();
+        }
+    }
+
     /** The most-recently-loaded bonds (system-of-record view), newest first. Empty when the DB isn't reachable. */
     public List<Bond> recent(int limit) {
         if (!available()) {

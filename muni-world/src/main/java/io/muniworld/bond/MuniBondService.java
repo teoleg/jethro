@@ -69,6 +69,51 @@ public final class MuniBondService {
         return out;
     }
 
+    /**
+     * A page of the bond universe for the browser: text filter, sort, paging — all done in the DB.
+     *
+     * <p>The sort key is mapped through a fixed whitelist here, so no request text ever reaches SQL.
+     * Returns the rows AND the total match count, because a pager without a total is a pager you cannot
+     * navigate. Postgres only: the LMDB index has no ordering by these columns, and reporting a partial
+     * result as if it were the universe would be worse than saying the DB is down.
+     */
+    public java.util.Map<String, Object> page(String query, String sort, boolean asc, int page, int size) {
+        String column = sortColumn(sort);
+        int limit = Math.min(Math.max(size, 1), 500);      // a page, not a table dump
+        int offset = Math.max(page, 0) * limit;
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("page", Math.max(page, 0));
+        out.put("size", limit);
+        out.put("sort", sort == null ? "updated_at" : sort);
+        out.put("asc", asc);
+        if (!repo.available()) {
+            out.put("total", null);
+            out.put("rows", List.of());
+            out.put("note", "Postgres is not reachable — the bond browser reads the system of record. "
+                    + "The LMDB index still holds " + indexCount() + " securities.");
+            return out;
+        }
+        java.util.OptionalLong total = repo.countMatching(query);   // one count query, not two
+        out.put("total", total.isPresent() ? total.getAsLong() : null);
+        out.put("rows", repo.page(query, column, asc, limit, offset).stream().map(this::toRow).toList());
+        return out;
+    }
+
+    /**
+     * Request sort key → real column name, from a CLOSED set. The sort key is the one piece of the browse
+     * request that reaches SQL as an identifier (it cannot be a bind parameter), so anything unrecognised
+     * falls back to the default rather than being passed through — the injection seam is closed here.
+     */
+    static String sortColumn(String sort) {
+        return switch (sort == null ? "" : sort) {
+            case "cusip" -> "cusip";
+            case "issuer" -> "issuer";
+            case "coupon" -> "coupon";
+            case "maturity" -> "maturity_date";
+            default -> "updated_at";
+        };
+    }
+
     /** Row count in Postgres, or {@code empty} when the DB isn't reachable (Flyway off / DB down). */
     public java.util.OptionalLong dbCount() {
         return repo.count();

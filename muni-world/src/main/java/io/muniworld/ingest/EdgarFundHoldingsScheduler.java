@@ -52,14 +52,30 @@ public final class EdgarFundHoldingsScheduler {
         for (EdgarFundCatalog.Fund fund : catalog.enabled()) {
             try {
                 EdgarNportConnector.Result r = connector.loadLatest(fund);
+                // ONE bad bond must not cost the whole fund. This threw out of the loop and Franklin's
+                // entire portfolio was lost to a single unroundable coupon — exactly the force-fit-or-
+                // drop-everything failure ADR-0011 quarantine exists to prevent. Count and carry on.
+                int stored = 0;
+                int rejected = 0;
+                String firstRejection = null;
                 for (Bond b : r.bonds()) {
-                    bonds.index(b);
+                    try {
+                        bonds.index(b);
+                        stored++;
+                    } catch (RuntimeException e) {
+                        rejected++;
+                        if (firstRejection == null) {
+                            firstRejection = b.cusip() + ": " + rootMessage(e);
+                        }
+                    }
                 }
+                String note = rejected == 0 ? ""
+                        : "; " + rejected + " REJECTED on write (first: " + firstRejection + ")";
                 synchronized (lastResult) {
-                    lastResult.put(fund.label(), "ok — " + r.bonds().size() + " muni bond(s) from "
+                    lastResult.put(fund.label(), "ok — " + stored + " muni bond(s) from "
                             + r.registrant() + " (" + r.filings() + " filing(s), newest "
                             + r.newestFilingDate() + "; " + r.skippedNonMuni() + " non-muni skipped, "
-                            + r.quarantined() + " quarantined)");
+                            + r.quarantined() + " quarantined" + note + ")");
                 }
             } catch (Exception e) {
                 // Loud, named, and non-fatal: the next fund still runs, the next day retries.

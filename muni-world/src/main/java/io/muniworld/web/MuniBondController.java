@@ -46,6 +46,28 @@ public final class MuniBondController {
         return bonds.recent(Math.min(Math.max(limit, 1), 500));
     }
 
+    /**
+     * The bond BROWSER: one page of the universe, filtered and sorted in the DB.
+     * {@code {page,size,sort,asc,total,rows}} — the total is what makes the pager navigable.
+     */
+    @GetMapping("/api/muni/bonds")
+    public Map<String, Object> page(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "") String q,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "updated_at") String sort,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean asc,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0") int page,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "50") int size) {
+        return bonds.page(q, sort, asc, page, size);
+    }
+
+    /** One bond, everything stored about it — the detail view behind a row click. */
+    @GetMapping("/api/muni/bonds/{cusip}")
+    public org.springframework.http.ResponseEntity<BondRow> one(@PathVariable String cusip) {
+        return bonds.get(cusip.toUpperCase(java.util.Locale.ROOT))
+                .map(org.springframework.http.ResponseEntity::ok)
+                .orElseGet(() -> org.springframework.http.ResponseEntity.notFound().build());
+    }
+
     /** Index a bond (the loader/connector seam; also lets tools push a bond in). */
     @PostMapping("/api/muni/bonds")
     public Map<String, Object> index(@RequestBody Bond bond) {

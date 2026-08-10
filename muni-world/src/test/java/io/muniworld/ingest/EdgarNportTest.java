@@ -61,12 +61,28 @@ class EdgarNportTest {
         Bond b = p.bonds().get(0);
         assertEquals("TEST00019", b.cusip());
         assertEquals("SYNTHETIC NY DORMITORY AUTH REV", b.issuer());
-        assertEquals(new BigDecimal("5.125"), b.coupon(), "rate lands as an exact decimal, zeros stripped");
+        assertEquals(new BigDecimal("5.125000"), b.coupon(), "exact decimal at the schema's 6dp");
         assertEquals(LocalDate.of(2045, 3, 15), b.maturity());
         assertNull(b.price(), "N-PORT valuation is NOT a current mark — no price is derived");
 
         assertEquals(1, p.skippedNonMuni(), "the equity row is skipped, not force-fit");
         assertEquals(1, p.quarantined(), "the cusip-less muni row is quarantined, not invented");
+    }
+
+    @Test
+    void aFilersFloatNoiseInTheRateDoesNotAbortTheFund() throws Exception {
+        // Real filings carry computed rates like 3.7500000000000004 — noise from the FILER's arithmetic.
+        // The scaled-long index key takes 6dp exactly and threw "Rounding necessary" on anything finer,
+        // which aborted the whole fund: Franklin's entire portfolio was lost to one bond. Round at the
+        // schema's 6dp (lossless for a real coupon, which is quoted to 3-4dp) so the row simply lands.
+        String xml = XML.replace("<annualizedRt>5.12500000</annualizedRt>",
+                                 "<annualizedRt>3.7500000000000004</annualizedRt>");
+
+        var p = EdgarNportConnector.parseHoldings(xml.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(1, p.bonds().size(), "the bond lands rather than blowing up the fund");
+        assertEquals(new BigDecimal("3.750000"), p.bonds().get(0).coupon());
+        assertEquals(6, p.bonds().get(0).coupon().scale(), "exactly the scale the index key requires");
     }
 
     @Test

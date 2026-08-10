@@ -237,7 +237,12 @@ public final class EdgarNportConnector {
                 continue;
             }
             try {
-                bonds.add(new Bond(cusip, name, new BigDecimal(rate).stripTrailingZeros(),
+                // Round the rate to the canonical 6dp of muni.security.coupon (ADR-0006 schema). Filers
+                // emit computed rates like 3.7500000000000004 — float noise from THEIR arithmetic — and
+                // the scaled-long index key rejects anything finer than 6dp exactly, so an unrounded
+                // rate aborted the whole fund. 6dp is lossless for a real coupon (quoted to 3-4dp).
+                BigDecimal coupon = new BigDecimal(rate).setScale(6, java.math.RoundingMode.HALF_UP);
+                bonds.add(new Bond(cusip, name, coupon,
                         LocalDate.parse(maturity), null, null, null, null, null, null, null));
             } catch (RuntimeException e) {
                 quarantined++;   // unparseable date/rate — same treatment
