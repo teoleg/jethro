@@ -73,8 +73,10 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
             if (!p.waitFor(10, TimeUnit.SECONDS)) {
                 p.destroyForcibly();
                 reason = "yt-dlp did not respond to --version";
+            } else if (p.exitValue() != 0) {
+                reason = "yt-dlp exited " + p.exitValue() + " for --version";
             } else {
-                reason = p.exitValue() == 0 ? null : "yt-dlp exited " + p.exitValue() + " for --version";
+                reason = staleReason(new String(p.getInputStream().readAllBytes()).strip());
             }
         } catch (IOException e) {
             reason = "yt-dlp is NOT installed on this host (or not on this process's PATH) — run "
@@ -92,6 +94,33 @@ public final class FfmpegCaptureSource implements AudioCaptureConnector.CaptureS
     private static final long YTDLP_RECHECK_MS = 60_000;
     private static volatile String ytdlpBlocker;
     private static volatile long ytdlpCheckedAt;
+
+    /**
+     * An INSTALLED yt-dlp can still be useless: YouTube changes its player continuously, and a yt-dlp that
+     * predates the current one fails every extraction with "No video formats found". The Pi had 2023.03.04
+     * from apt — three years stale — and reported "ready" while nothing could ever resolve.
+     *
+     * <p>yt-dlp versions are dates ({@code YYYY.MM.DD}), so staleness is measured against TODAY rather than
+     * a hardcoded floor that would itself rot. A year behind is the threshold: recent enough to avoid false
+     * alarms, old enough that YouTube extraction is unreliable. Returns null when the version looks current
+     * or cannot be parsed — never block on a version string we do not understand.
+     */
+    static String staleReason(String version) {
+        java.util.regex.Matcher m =
+                java.util.regex.Pattern.compile("^(\\d{4})\\.(\\d{2})\\.(\\d{2})").matcher(version);
+        if (!m.find()) {
+            return null;
+        }
+        java.time.LocalDate released = java.time.LocalDate.of(
+                Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)), Integer.parseInt(m.group(3)));
+        if (!released.isBefore(java.time.LocalDate.now().minusYears(1))) {
+            return null;
+        }
+        return "yt-dlp is " + version + " — over a year old, and YouTube extraction breaks well before "
+                + "that ('No video formats found'). apt's package is stale by years; install the current "
+                + "one: `python3 -m pip install --user -U yt-dlp` (or the standalone binary from "
+                + "github.com/yt-dlp/yt-dlp/releases) and point MUNI_YTDLP_BIN at it";
+    }
 
     /**
      * The exact ffmpeg invocation for a resolved stream URL — package-private so the argument shape is

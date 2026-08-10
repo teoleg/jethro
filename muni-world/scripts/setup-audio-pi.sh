@@ -26,17 +26,37 @@ say "1/5  Installing ffmpeg + build tools (needs sudo)"
 sudo apt-get update -y
 sudo apt-get install -y ffmpeg git build-essential cmake pulseaudio-utils curl python3 python3-pip
 
-say "2/5  Installing yt-dlp (resolves the live stream URL each capture)"
-# Prefer pip: the apt package is usually months old, and a stale yt-dlp is the single most common reason
-# a YouTube live page stops resolving. --user keeps it out of the system python.
+say "2/5  Installing a CURRENT yt-dlp (resolves the live stream URL each capture)"
+# NEVER apt. Debian shipped 2023.03.04 here, which fails EVERY YouTube extraction with "No video formats
+# found" — YouTube changes its player far faster than the distro package. Install from pip (or the
+# standalone binary), into ~/.local/bin, and use that ABSOLUTE path so an old /usr/bin/yt-dlp cannot win
+# on PATH.
+mkdir -p "$HOME/.local/bin"
+YTDLP_BIN="$HOME/.local/bin/yt-dlp"
 python3 -m pip install --user --upgrade yt-dlp 2>/dev/null \
-  || python3 -m pip install --user --upgrade --break-system-packages yt-dlp \
-  || sudo apt-get install -y yt-dlp
-YTDLP_BIN="$(command -v yt-dlp || echo "$HOME/.local/bin/yt-dlp")"
-if [ -x "$YTDLP_BIN" ]; then
-  echo "yt-dlp: $YTDLP_BIN ($("$YTDLP_BIN" --version 2>/dev/null || echo 'version unknown'))"
+  || python3 -m pip install --user --upgrade --break-system-packages yt-dlp 2>/dev/null \
+  || {
+    echo "pip install failed — falling back to yt-dlp's standalone binary"
+    curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "$YTDLP_BIN"
+    chmod a+rx "$YTDLP_BIN"
+  }
+[ -x "$YTDLP_BIN" ] || YTDLP_BIN="$(command -v yt-dlp || true)"
+
+YTDLP_VERSION="$([ -n "$YTDLP_BIN" ] && "$YTDLP_BIN" --version 2>/dev/null || true)"
+if [ -z "$YTDLP_VERSION" ]; then
+  echo "!!  yt-dlp did not install — capture will fail loudly until it does."
 else
-  echo "!!  yt-dlp did not install — the yt: source kind will fail loudly until it does."
+  echo "yt-dlp: $YTDLP_BIN ($YTDLP_VERSION)"
+  # A yt-dlp older than a year cannot extract from YouTube. Say so HERE rather than letting it surface
+  # as an opaque capture failure an hour later.
+  if [ "$(printf '%s\n' "$YTDLP_VERSION" | cut -d. -f1)" -lt "$(($(date +%Y) - 1))" ] 2>/dev/null; then
+    echo "!!  that version is over a year old and will fail every YouTube extraction."
+    echo "!!  Remove the distro package (sudo apt remove -y yt-dlp) so this one is the only yt-dlp."
+  fi
+fi
+if command -v apt-get >/dev/null && dpkg -s yt-dlp >/dev/null 2>&1; then
+  echo "!!  an APT yt-dlp is also installed and is probably years stale. MUNI_YTDLP_BIN below pins the"
+  echo "!!  current one, but 'sudo apt remove -y yt-dlp' avoids any confusion."
 fi
 
 say "3/5  Building whisper.cpp in $WHISPER_DIR"

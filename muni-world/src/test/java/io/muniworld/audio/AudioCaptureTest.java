@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -103,6 +104,25 @@ class AudioCaptureTest {
         assertEquals(0L, b.waitMs(), "a success clears the backoff");
         assertEquals(0, b.failures());
         assertTrue(b.due(t0));
+    }
+
+    @Test
+    void anAncientYtdlpIsReportedAsStaleRatherThanReady() {
+        // An INSTALLED yt-dlp can still be useless: the Pi had apt's 2023.03.04, which failed every
+        // extraction with "No video formats found" while the status page happily said yt-dlp was ready.
+        // Staleness is measured against TODAY so the rule cannot rot into a stale constant itself.
+        java.time.LocalDate today = java.time.LocalDate.now();
+        String ancient = today.minusYears(3).toString().replace('-', '.');
+        assertTrue(String.valueOf(FfmpegCaptureSource.staleReason(ancient)).contains("over a year old"),
+                "a three-year-old yt-dlp must be reported as stale");
+
+        // Current, and just inside the threshold: not a blocker.
+        assertNull(FfmpegCaptureSource.staleReason(today.toString().replace('-', '.')));
+        assertNull(FfmpegCaptureSource.staleReason(today.minusMonths(11).toString().replace('-', '.')));
+
+        // An unparseable version is never a blocker — do not gate on a string we do not understand.
+        assertNull(FfmpegCaptureSource.staleReason("nightly"));
+        assertNull(FfmpegCaptureSource.staleReason(""));
     }
 
     @Test
