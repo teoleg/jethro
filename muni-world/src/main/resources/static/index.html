@@ -44,6 +44,9 @@
   .tbl th:nth-child(-n+2), .tbl td:nth-child(-n+2) { text-align:left; }
   .tbl th { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:500; }
   .tbl tbody tr:hover { background:var(--surface-2); }
+  .tbl tbody tr.sel { background:var(--surface-2); box-shadow:inset 2px 0 0 var(--brand); }
+  .browse { display:grid; grid-template-columns:minmax(300px,5fr) 7fr; gap:16px; align-items:start; }
+  @media (max-width:900px) { .browse { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -102,24 +105,31 @@
 
     <h2 style="font-size:16px;margin-top:26px">Browse the universe
       <span id="pageInfo" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
-      <input id="q" placeholder="search CUSIP or issuer name (e.g. 649122 · DORMITORY · NEW YORK CITY)"
-             style="flex:1;min-width:280px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;font:inherit">
-      <button class="btn" onclick="go(0)">Search</button>
-      <select id="size" onchange="go(0)"
-              style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px;font:inherit;font-size:12px">
-        <option value="50">50 / page</option><option value="100">100 / page</option>
-        <option value="250">250 / page</option>
-      </select>
-      <button class="btn" onclick="go(PAGE - 1)">‹ Prev</button>
-      <button class="btn" onclick="go(PAGE + 1)">Next ›</button>
+    <!-- Master–detail: the slim list on the left is for FINDING a bond; everything known about the
+         selected one lives on the right, always visible — no scrolling under a giant table. -->
+    <div class="browse" style="margin-top:8px">
+      <div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <input id="q" placeholder="search CUSIP or issuer"
+                 style="flex:1;min-width:170px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px">
+          <button class="btn" onclick="go(0)">Search</button>
+        </div>
+        <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:8px">loading bonds…</div></div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:8px">
+          <button class="btn" onclick="go(PAGE - 1)">‹ Prev</button>
+          <button class="btn" onclick="go(PAGE + 1)">Next ›</button>
+          <select id="size" onchange="go(0)"
+                  style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:8px;font:inherit;font-size:12px">
+            <option value="50">50 / page</option><option value="100">100 / page</option>
+            <option value="250">250 / page</option>
+          </select>
+        </div>
+      </div>
+      <div id="bondDetail"><div class="card" style="color:var(--dim);font-size:13px">select a bond on the left — its full detail and quarterly valuation history render here.</div></div>
     </div>
-    <div style="color:var(--dim);font-size:11px;margin-top:6px">Click a column header to sort · click a row for full detail</div>
-    <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:8px">loading bonds…</div></div>
-    <div id="bondDetail"></div>
   </div>
 
-  <div class="foot">muni-world runs as a separate process · <b>UI build B8</b> (quarterly valuation HISTORY per CUSIP from EDGAR's full N-PORT archive)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B9</b> (master–detail: slim finder list left, full bond detail + history right)</div>
 </main>
 
 <script>
@@ -178,7 +188,7 @@
   let PAGE = 0, SORT = "updated_at", ASC = false, TOTAL = null;
 
   // sort key → column label. The key is what the API takes; the DB maps it through a whitelist.
-  const SORTABLE = { cusip: "CUSIP", issuer: "Issuer", coupon: "Cpn", maturity: "Maturity" };
+  const SORTABLE = { cusip: "CUSIP", issuer: "Issuer", maturity: "Maturity" };
 
   function sortBy(key) {
     ASC = (SORT === key) ? !ASC : true;   // same header toggles direction; a new one starts ascending
@@ -195,22 +205,30 @@
           + "after start; check the per-fund status). Nothing here is illustrative.";
       return;
     }
-    const head = ["cusip", "issuer", "coupon", "maturity"].map(k =>
-        `<th style="cursor:pointer" onclick="sortBy('${k}')">${SORTABLE[k]}${SORT === k ? (ASC ? " ▲" : " ▼") : ""}</th>`).join("")
-      + ["Price", "Val (filing)", "Cur Yld", "YTM", "YTW", "Mod Dur", "Cvx", "Funds", "Call"].map(h => `<th>${h}</th>`).join("");
+    // Slim finder columns only — everything else lives in the detail panel on the right. The credit
+    // badges stay: a default must be visible from the LIST, not only after a click.
+    const head = ["cusip", "issuer", "maturity"].map(k =>
+        `<th style="cursor:pointer" onclick="sortBy('${k}')">${SORTABLE[k]}${SORT === k ? (ASC ? " ▲" : " ▼") : ""}</th>`).join("");
     el.innerHTML = '<table class="tbl"><thead><tr>' + head + "</tr></thead><tbody>"
-      + rows.map(r => `<tr style="cursor:pointer" onclick="showDetail('${esc(r.cusip)}')">
+      + rows.map(r => `<tr id="row-${esc(r.cusip)}" style="cursor:pointer" onclick="showDetail('${esc(r.cusip)}')">
           <td class="mono" style="color:var(--txt)">${esc(r.cusip)}</td>
-          <td>${esc(r.issuer)}${r.inDefault ? ' <b style="color:var(--down);font-size:10px">IN DEFAULT</b>' : ''}${r.intArrears ? ' <b style="color:var(--warn);font-size:10px">ARREARS</b>' : ''}</td>
-          <td class="mono">${num(r.coupon, 3)}</td><td class="mono">${esc(r.maturity)}</td>
-          <td class="mono">${num(r.price, 2)}${r.priceAsOf ? `<div style="font-size:9px;color:var(--dim)" title="${esc(r.priceSource)}">${esc(r.priceAsOf)}</div>` : ""}</td>
-          <td class="mono">${num(r.valPer100, 2)}${r.valAsOf ? `<div style="font-size:9px;color:var(--dim)">${esc(r.valAsOf)}</div>` : ""}</td>
-          <td class="mono">${num(r.currentYield, 3)}</td>
-          <td class="mono">${num(r.ytm, 3)}</td><td class="mono" style="color:var(--brand)">${num(r.ytw, 3)}</td>
-          <td class="mono">${num(r.modDuration, 2)}</td><td class="mono">${num(r.convexity, 2)}</td>
-          <td class="mono">${r.heldFunds ?? "—"}</td>
-          <td class="mono" style="font-size:11px;color:var(--dim)">${esc(r.call)}</td>
+          <td style="white-space:normal">${esc(r.issuer)}${r.inDefault ? ' <b style="color:var(--down);font-size:10px">IN DEFAULT</b>' : ''}${r.intArrears ? ' <b style="color:var(--warn);font-size:10px">ARREARS</b>' : ''}</td>
+          <td class="mono">${esc(r.maturity)}</td>
         </tr>`).join("") + "</tbody></table>";
+    // Keep the panel in step with the list: restore the highlight, or select the first row so the
+    // right panel is never a stale bond from a previous page.
+    if (SELECTED && rows.some(r => r.cusip === SELECTED)) {
+      markSelected(SELECTED);
+    } else if (rows.length) {
+      showDetail(rows[0].cusip);
+    }
+  }
+
+  let SELECTED = null;
+  function markSelected(cusip) {
+    document.querySelectorAll(".tbl tr.sel").forEach(t => t.classList.remove("sel"));
+    const row = document.getElementById("row-" + cusip);
+    if (row) { row.classList.add("sel"); }
   }
 
   /** Fetch and render page n. The only path that loads the table — search, sort and paging all land here. */
@@ -238,23 +256,23 @@
 
   /** Everything stored about one bond, plus WHY the economics are blank when they are. */
   async function showDetail(cusip) {
+    SELECTED = cusip;
+    markSelected(cusip);
     const el = document.getElementById("bondDetail");
-    el.innerHTML = `<div class="card" style="margin-top:12px">loading ${esc(cusip)}…</div>`;
+    el.innerHTML = `<div class="card">loading ${esc(cusip)}…</div>`;
     try {
       const resp = await fetch("/api/muni/bonds/" + encodeURIComponent(cusip), { cache: "no-store" });
-      if (!resp.ok) { el.innerHTML = `<div class="card" style="margin-top:12px">no stored detail for ${esc(cusip)}</div>`; return; }
+      if (!resp.ok) { el.innerHTML = `<div class="card">no stored detail for ${esc(cusip)}</div>`; return; }
       const r = await resp.json();
       const priced = r.price != null && !isNaN(r.price);
       const f = (label, v) => `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)">
           <span style="min-width:150px;color:var(--dim);font-size:11.5px">${label}</span>
           <span class="mono" style="color:var(--txt);font-size:12px">${v}</span></div>`;
-      el.innerHTML = `<div class="card" style="margin-top:12px">
-        <h2 style="font-size:15px;display:flex;gap:10px;align-items:baseline">
+      el.innerHTML = `<div class="card">
+        <h2 style="font-size:15px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
           <span class="mono">${esc(r.cusip)}</span>
-          <span style="font-weight:400;font-size:13px;color:var(--dim)">${esc(r.issuer)}</span>
-          <span class="spacer" style="flex:1"></span>
-          <button class="btn" onclick="document.getElementById('bondDetail').innerHTML=''">close</button></h2>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:0 26px;margin-top:8px">
+          <span style="font-weight:400;font-size:13px;color:var(--dim)">${esc(r.issuer)}</span></h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 26px;margin-top:8px">
           <div>
             ${f("Coupon", num(r.coupon, 6) + " %")}
             ${f("Maturity", esc(r.maturity))}
@@ -288,7 +306,7 @@
           never from a stale or invented mark.</div>`}
       </div>`;
       loadValuationHistory(cusip);
-    } catch (e) { el.innerHTML = `<div class="card" style="margin-top:12px">detail unavailable</div>`; }
+    } catch (e) { el.innerHTML = `<div class="card">detail unavailable</div>`; }
   }
 
   /** The quarterly valuation series — dated fund-attested marks from EDGAR's full N-PORT history. */
