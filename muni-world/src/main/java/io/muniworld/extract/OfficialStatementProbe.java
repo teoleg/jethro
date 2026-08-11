@@ -5,6 +5,7 @@ import io.muniworld.pdf.OcrText;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -38,6 +39,40 @@ public final class OfficialStatementProbe {
             "(?i)(maturity schedule|maturities|due\\s+[A-Z][a-z]+\\s+\\d{1,2})");
 
     private OfficialStatementProbe() {
+    }
+
+    /**
+     * What KIND of document this is, judged by its own words. EMMA hosts an issuer's whole disclosure
+     * history — Official Statements, annual reports, event notices — and only the OS carries bond terms.
+     * Telling someone "no CUSIPs found, this is typical of a preliminary OS" about a State Comptroller's
+     * annual financial report is a confident answer to the wrong question.
+     *
+     * <p>The cover page decides: an Official Statement declares itself on page one. Only if the head of
+     * the document makes no such declaration do the whole-text markers get a say — an OS frequently
+     * carries an annual report as an APPENDIX, and that must not flip its identity.
+     */
+    static String documentType(String text) {
+        String t = text == null ? "" : text.toUpperCase(Locale.ROOT);
+        String head = t.length() > 8000 ? t.substring(0, 8000) : t;
+        if (head.contains("OFFICIAL STATEMENT") || head.contains("NEW ISSUE")
+                || head.contains("MATURITY SCHEDULE") || head.contains("BOND COUNSEL")
+                || head.contains("REMARKETING")) {
+            return "official statement";
+        }
+        if (t.contains("BASIC FINANCIAL STATEMENTS") || t.contains("ANNUAL FINANCIAL REPORT")
+                || t.contains("ANNUAL COMPREHENSIVE FINANCIAL REPORT")
+                || t.contains("COMPREHENSIVE ANNUAL FINANCIAL REPORT")
+                || (t.contains("DISCUSSION AND ANALYSIS") && t.contains("STATEMENT OF NET POSITION"))
+                || t.contains("INDEPENDENT AUDITOR")) {
+            return "annual financial report (ACFR)";
+        }
+        if (t.contains("MATERIAL EVENT NOTICE") || t.contains("NOTICE OF EVENT")) {
+            return "event notice";
+        }
+        if (t.contains("CONTINUING DISCLOSURE")) {
+            return "continuing disclosure filing";
+        }
+        return "unknown";
     }
 
     /** Diagnose {@code text} extracted from a {@code pages}-page OS. Pure — no I/O, no model. */
@@ -137,14 +172,17 @@ public final class OfficialStatementProbe {
         }
         out.put("scheduleRowSample", rowish);
 
+        String docType = documentType(t);
+        out.put("documentType", docType);
+
         out.put("diagnosis", diagnose(sparse, ocrEnabled, pages, cusips.size(), res,
-                (String) out.get("baseCusipDetected"), mentions.size(), rowish.size()));
+                (String) out.get("baseCusipDetected"), mentions.size(), rowish.size(), docType));
         return out;
     }
 
     private static String diagnose(boolean sparse, boolean ocrEnabled, int pages, int cusips,
                                    OfficialStatementParser.Result res, String baseCusip,
-                                   int cusipMentions, int rowishLines) {
+                                   int cusipMentions, int rowishLines, String docType) {
         if (pages == 0) {
             return "PDF has no pages — not a readable PDF.";
         }
@@ -162,6 +200,16 @@ public final class OfficialStatementProbe {
                    + res.quarantined() + " quarantined): each CUSIP's coupon and/or maturity is not on the "
                    + "same line as it. PDFBox emits reading order, not table columns, so a schedule laid "
                    + "out in columns arrives one cell per line. Inspect cusipLines / firstLines.";
+        }
+        // WRONG DOCUMENT. Ahead of every other explanation, because no amount of parser work will find
+        // bond terms in a document that has none — and the fix is to fetch a different file, not to
+        // change anything here.
+        if (res.rows().isEmpty() && !"official statement".equals(docType) && !"unknown".equals(docType)) {
+            return "This is an " + docType + ", NOT an Official Statement — it carries no maturity "
+                   + "schedule and no bond terms, so there is nothing here to load. EMMA hosts an "
+                   + "issuer's whole disclosure history and only the OS has the terms. Fix: open a bond "
+                   + "you hold in the browser, use its 'open this CUSIP on EMMA' link, and take the "
+                   + "document whose type is Official Statement.";
         }
         if (sparse) {
             return ocrEnabled

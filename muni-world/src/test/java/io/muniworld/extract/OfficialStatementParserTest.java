@@ -78,6 +78,42 @@ class OfficialStatementParserTest {
      *       five-number, always-decimal row shape matched none of it.</li>
      * </ul>
      */
+    /**
+     * The owner's fifth document: New York State's ACFR (the Comptroller's annual financial report). The
+     * probe answered "no CUSIPs — typical of a PRELIMINARY Official Statement or a small competitive
+     * deal", which is a confident answer to a question nobody asked: this is not an Official Statement at
+     * all. EMMA hosts an issuer's entire disclosure history and only the OS carries bond terms, so the
+     * document TYPE must be named before anything else — no parser work will find bonds in a document
+     * that has none.
+     */
+    @Test
+    void anAnnualFinancialReportIsNamedAsTheWrongDocument() {
+        String acfr = """
+                STATE OF NEW YORK
+                Basic Financial Statements and Other Supplementary Information
+                for Fiscal Year Ended March 31, 2023
+                THOMAS P. DiNAPOLI, STATE COMPTROLLER
+                Independent Auditors' Report ....... 7
+                Management's Discussion and Analysis (unaudited) ....... 11
+                Statement of Net Position ....... 28
+                """;
+
+        assertEquals("annual financial report (ACFR)", OfficialStatementProbe.documentType(acfr));
+        String diagnosis = String.valueOf(OfficialStatementProbe.probe(acfr, 1, false).get("diagnosis"));
+        assertTrue(diagnosis.contains("NOT an Official Statement"), diagnosis);
+        assertFalse(diagnosis.contains("PRELIMINARY"), "the old wrong explanation is gone: " + diagnosis);
+
+        // An OS that CARRIES an annual report as an appendix is still an Official Statement — the cover
+        // page decides, or a real OS would be rejected for quoting the very document it appends.
+        String osWithAppendix = """
+                NEW ISSUE - BOOK-ENTRY ONLY
+                OFFICIAL STATEMENT dated July 16, 2026
+                MATURITY SCHEDULE
+                APPENDIX B - Basic Financial Statements and Independent Auditors' Report
+                """;
+        assertEquals("official statement", OfficialStatementProbe.documentType(osWithAppendix));
+    }
+
     @Test
     void readsAFootnotedBaseCusipAndDecimallessRateAndPriceColumns() {
         String os = """
