@@ -1,0 +1,56 @@
+{
+  "after": {
+    "at": "2026-08-11T18:30:06Z",
+    "fees": "267.633319",
+    "gross": "86189.66980000",
+    "net": "-19980.44980000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "86189.66980000",
+      "hedgePnl": "-59.84525822",
+      "netExposure": "-19980.44980000",
+      "realizedPnl": "-937.36577609",
+      "strategyAlpha": "-961.30751379",
+      "totalFees": "267.633319",
+      "totalPnl": "-1021.15277201",
+      "unrealizedPnl": "-83.78699592"
+    },
+    "total_pnl": "-1021.15277201"
+  },
+  "before": {
+    "at": "2026-08-10T19:21:59Z",
+    "gross": "121090.31346250",
+    "net": "5453.72346250",
+    "total_pnl": "-365.42318287"
+  },
+  "commit": "bc2a4dbf394d31da66568bc6ed0ccdf1d4802f8f",
+  "delta": {
+    "gross": "-34900.64366250",
+    "net": "-25434.17326250",
+    "total_pnl": "-655.72958914"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "feeDeadbandUsd": "25",
+    "grossFloorUsd": "1000",
+    "minCycles": 12,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.000683 over 13 cycles, t=-4.02 (hurdle 1.5); gross 121,090\u219286,190; fees +$163.78 \u2014 fee churn with nothing earned (ADR-0146)",
+  "revert": true,
+  "revertApplied": true,
+  "revertMethod": "git-revert",
+  "scoredAt": "2026-08-11T18:30:06Z",
+  "summary": "the ADR-0080 acquisition rate no longer governs the unwind of a position the desk's own live forecast contradicts \u2014 where the opposing view clears the ADR-0059 conviction floor the holding resolves to flat this cycle, and below the floor every path is unchanged (ADR-0147)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "fee_burn": "163.779727",
+    "grew": false,
+    "gross_end": 86189.6698,
+    "gross_start": 121090.3134625,
+    "mean_ret_per_cycle": -0.00068308,
+    "n": 13,
+    "scale": 73842.7,
+    "t": -4.022
+  }
+}
