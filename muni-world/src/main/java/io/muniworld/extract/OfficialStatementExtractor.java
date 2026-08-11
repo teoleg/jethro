@@ -32,6 +32,7 @@ public final class OfficialStatementExtractor {
     private final boolean ocrEnabled;
     private final OcrText ocr;
     private final double assistedThreshold;
+    private final String inboxDir;
 
     public OfficialStatementExtractor(
             IngestService ingest,
@@ -39,7 +40,9 @@ public final class OfficialStatementExtractor {
             @Value("${muni.ocr.enabled:false}") boolean ocrEnabled,
             @Value("${muni.ocr.bin:tesseract}") String tesseractBin,
             @Value("${muni.ocr.dpi:300}") int dpi,
-            @Value("${muni.extract.assisted-threshold:0.5}") double assistedThreshold) {
+            @Value("${muni.extract.assisted-threshold:0.5}") double assistedThreshold,
+            @Value("${muni.os.inbox.dir:os-inbox}") String inboxDir) {
+        this.inboxDir = inboxDir;
         this.ingest = ingest;
         this.assisted = assisted;
         this.ocrEnabled = ocrEnabled;
@@ -50,7 +53,8 @@ public final class OfficialStatementExtractor {
     /** The observable extraction record: what was read, how, indexed, quarantined, and parse confidence. */
     public record Summary(String sourceId, String sha256, int pages, String method, int rowsParsed,
                           int assisted, int indexed, int quarantined, double confidence,
-                          boolean ok, String error) {
+                          boolean ok, String error,
+                          Map<String, Object> probe, String keptAt) {
     }
 
     /** Extract a landed OS PDF into terms and index them. {@code issuer}/{@code geoFips}/{@code base} tag the OS. */
@@ -94,22 +98,42 @@ public final class OfficialStatementExtractor {
             log.info("OS extract {} [{}]: {} pages, {} rows ({} assisted), {} indexed, {} quarantined (conf {})",
                     osPdf.sourceId(), method, pages, rows.size(), assistedCount, ing.indexed(), quarantined,
                     res.confidence());
+            Map<String, Object> probe = null;
+            String keptAt = null;
             if (ing.indexed() == 0) {
-                // Nothing landed. Say why in the same breath, so a silent no-op never looks like a load:
-                // an image-only OS needs OCR (muni.ocr.enabled), a text OS that yields no rows is a parser
-                // gap. /api/muni/debug/os-probe reports the evidence for either.
-                log.warn("OS extract {}: NO bonds indexed — {} chars of text over {} pages{}, {} row(s) "
-                                + "quarantined. Probe it with POST /api/muni/debug/os-probe (file=@the.pdf) to "
-                                + "see whether it is a scanned PDF (needs muni.ocr.enabled=true + tesseract) or "
-                                + "a schedule layout the parser does not read yet.",
+                // Nothing landed. A failed extraction must carry its own evidence — the upload's bytes may
+                // live on ANOTHER machine (a browser upload), so telling the owner to re-POST the file for
+                // a probe is a dead end. Probe NOW, return the evidence in the response, and KEEP the PDF
+                // on this host so the parser gap can be fixed against the real document later.
+                probe = OfficialStatementProbe.probe(text, pages, ocrEnabled);
+                keptAt = keepFailed(osPdf);
+                log.warn("OS extract {}: NO bonds indexed — {} chars over {} pages{}, {} quarantined. "
+                                + "Probe evidence attached to the response; document kept at {}.",
                         osPdf.sourceId(), text.length(), pages,
                         OcrText.isSparse(text, pages) ? " (under 100 chars/page — likely image-only)" : "",
-                        quarantined);
+                        quarantined, keptAt == null ? "(could not save)" : keptAt);
             }
             return new Summary(osPdf.sourceId(), osPdf.sha256(), pages, method, rows.size(),
-                    assistedCount, ing.indexed(), quarantined, res.confidence(), true, null);
+                    assistedCount, ing.indexed(), quarantined, res.confidence(), true, null, probe, keptAt);
         } catch (Exception e) {
-            return new Summary(osPdf.sourceId(), osPdf.sha256(), 0, "error", 0, 0, 0, 0, 0.0, false, e.getMessage());
+            return new Summary(osPdf.sourceId(), osPdf.sha256(), 0, "error", 0, 0, 0, 0, 0.0, false,
+                    e.getMessage(), null, null);
+        }
+    }
+
+    /** Keep a zero-yield document under {@code os-inbox/failed/} for a later parser fix. Best-effort. */
+    private String keepFailed(RawArtifact osPdf) {
+        try {
+            java.nio.file.Path dir = java.nio.file.Path.of(inboxDir, "failed");
+            java.nio.file.Files.createDirectories(dir);
+            String name = java.nio.file.Path.of(
+                    osPdf.sourceId().replaceFirst("^(upload:|file:)", "")).getFileName().toString();
+            java.nio.file.Path out = dir.resolve(name.isBlank() ? osPdf.sha256() + ".pdf" : name);
+            java.nio.file.Files.write(out, osPdf.body());
+            return out.toString();
+        } catch (Exception e) {
+            log.warn("could not keep failed OS: {}", e.toString());
+            return null;
         }
     }
 }

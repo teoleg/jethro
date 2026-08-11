@@ -348,6 +348,15 @@
   }
 
   // Render the loading PROCESS — one line per file, so the load is observable, not a black box.
+  /** The probe evidence for a zero-yield OS, rendered copyable — the parser gap's raw material. */
+  function probeBlock(s) {
+    if (!s.probe) { return ""; }
+    const p = s.probe;
+    const kept = s.keptAt ? `<div style="color:var(--dim)">document kept on the server at <span class="mono">${esc(s.keptAt)}</span></div>` : "";
+    return `<details style="margin:4px 0 8px 16px"><summary style="cursor:pointer;color:var(--warn);font-size:11.5px">why 0 bonds? — evidence (paste this to Claude)</summary>
+      <pre style="white-space:pre-wrap;background:#0c1512;border:1px solid var(--line-2);border-radius:8px;padding:8px;font-size:10.5px;color:var(--dim);max-height:300px;overflow:auto">${esc(JSON.stringify(p, null, 1))}</pre>${kept}</details>`;
+  }
+
   function renderLoadResults(list) {
     const el = document.getElementById("loadResults");
     if (!list || !list.length) { el.innerHTML = ""; return; }
@@ -361,6 +370,7 @@
         <span class="mono" style="color:var(--txt);font-size:12px">${esc(name)}</span>
         <span style="color:var(--dim);font-size:11.5px">${detail}</span></div>`;
     }).join("");
+    el.innerHTML += list.filter(s => s.probe).map(probeBlock).join("");
   }
 
   // ONE button: load every OS PDF in the well-defined folder → extract → DB + index → table.
