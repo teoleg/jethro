@@ -226,4 +226,99 @@ class HorizonLadderTest {
         assertEquals(0.0082987074, TargetPlanner.adjustmentRateFor(30, 3600), 1e-9);
         assertEquals(0.1248266808, TargetPlanner.adjustmentRateFor(30, 225), 1e-9);
     }
+
+    // ---- ADR-0148: the weighting rung is the best-DETERMINED one ---------------------------------
+
+    @Test
+    void theWeightingRungIsTheOneWithTheMostIndependentCohorts() {
+        var ladder = ladder(
+                3600, List.of(rung("trend", 240, -3.0, 17, 11.0, 3600)),
+                225, List.of(rung("trend", 3202, 0.5, 173, 3.2, 225)));
+        var selected = ladder.get(3600);
+        var weighting = HorizonLadder.weightingStats(ladder, selected);
+        assertEquals(225L, weighting.get(0).horizonSeconds(),
+                "whose view counts is a directional question — it is answered on the most-replicated rung");
+    }
+
+    @Test
+    void tiedCohortCountsBreakTowardTheLongerHorizonAsEverywhereElse() {
+        var ladder = ladder(
+                3600, List.of(rung("trend", 100, 1.0, 40, 5.0, 3600)),
+                225, List.of(rung("trend", 900, 1.0, 40, 5.0, 225)));
+        assertEquals(3600L, HorizonLadder.weightingStats(ladder, ladder.get(225)).get(0).horizonSeconds());
+    }
+
+    @Test
+    void aRungWithNoStandardErrorOfItsOwnCannotWinOnCohortCount() {
+        // A single cross-section is one draw however wide (ADR-0077), so a rung of one-cohort readings
+        // contributes no evidence and must not displace a rung that can actually support a t-statistic.
+        var ladder = ladder(
+                3600, List.of(rung("trend", 240, -3.0, 17, 11.0, 3600)),
+                225, List.of(rung("trend", 9999, 0.5, 1, 3.2, 225)));
+        assertEquals(3600L, HorizonLadder.weightingStats(ladder, ladder.get(3600)).get(0).horizonSeconds());
+    }
+
+    @Test
+    void withNoLadderAtAllTheSelectedRungStandsByteForByte() {
+        var selected = List.of(rung("trend", 240, -3.0, 17, 11.0, 3600));
+        assertEquals(selected, HorizonLadder.weightingStats(null, selected));
+        assertEquals(selected, HorizonLadder.weightingStats(Map.of(), selected));
+        assertEquals(selected, HorizonLadder.weightingStats(Map.of(3600, List.of()), selected));
+    }
+
+    /**
+     * The worked example this change exists for — the desk's OWN live telemetry on 2026-08-11, every
+     * figure read from that run's {@code signals_telemetry} and reproduced here to the digit.
+     *
+     * <p>At the base 3600 s rung the five readings rest on 5–17 cohorts and NOT ONE of them is
+     * significant, yet their ranking is what set the live weight vector. At the 225 s rung the same
+     * sources carry 5–173 cohorts, and the ranking is very nearly inverted:
+     *
+     * <pre>
+     *   source        3600 s: mean bps / cohorts →   t        225 s: mean bps / cohorts →   t
+     *   trend           −3.1970 / 17            → −1.157        +0.5626 / 173           → +2.318
+     *   reversion       +1.8534 / 15            → +0.933        −0.4166 / 161           → −1.666
+     *   xsreversion     +1.8218 / 11            → +0.737        −0.2475 / 173           → −0.957
+     * </pre>
+     * Live, the desk therefore held its only positive large-sample source at the 0.25 floor and let the
+     * two measured-negative ones steer at ~1.2 — it was trading AGAINST its own best measurement. The
+     * assertions below are the exact weights each rung produces, so the inversion is a fact of the code
+     * and not a narrative.
+     */
+    @Test
+    void theLiveInversionTheChangeFixes() {
+        var p = new TelemetryWeights.Params(20.0, 0.25, 3.0);
+        var slow = List.of(
+                rung("momentum", 37, 8.907500039682539, 6, 15.861919225934964, 3600),
+                rung("reversion", 221, 1.8534239995742232, 15, 7.694708339082848, 3600),
+                rung("social", 16, 11.699066420000001, 5, 19.61020839239835, 3600),
+                rung("trend", 240, -3.1970467775587132, 17, 11.392266749170606, 3600),
+                rung("xsreversion", 214, 1.8217915834928233, 11, 8.194446924978743, 3600));
+        var fast = List.of(
+                rung("momentum", 70, 0.7658192839803314, 12, 6.642058039876793, 225),
+                rung("reversion", 2957, -0.41663262448092314, 161, 3.1724418763212565, 225),
+                rung("social", 16, 7.76605068, 5, 14.186033904679068, 225),
+                rung("trend", 3202, 0.5625529304740415, 173, 3.192485512477213, 225),
+                rung("xsreversion", 3271, -0.24754898223101465, 173, 3.403756164741451, 225));
+
+        // What the live desk did: weights off the base rung, trend pinned at the floor and out-voted.
+        var before = TelemetryWeights.compute(slow, p);
+        assertEquals(0.25, before.get("trend"), 1e-9, "the only large-sample positive source, at the floor");
+        assertTrue(before.get("reversion") > 1.2, "a measured-negative source steering the book");
+        assertTrue(before.get("xsreversion") > 1.1, "and the second one alongside it");
+
+        // What ADR-0148 does: the same statistic on the rung that can actually distinguish.
+        var ladder = ladder(3600, slow, 225, fast);
+        var after = TelemetryWeights.compute(HorizonLadder.weightingStats(ladder, slow), p);
+        assertTrue(after.get("trend") > 1.9, "trend now carries the conviction its measurement earned");
+        assertEquals(0.25, after.get("reversion"), 1e-9, "and the measured-negative sources fall to the floor");
+        assertTrue(after.get("xsreversion") < 0.4);
+        assertTrue(after.get("trend") > 5.0 * after.get("reversion"),
+                "the ranking is inverted relative to what the desk traded on");
+
+        // The combiner normalises by Σweights, so this ROTATES conviction and cannot scale the book:
+        // every source keeps a strictly positive weight, so the ADR-0076 breadth count is unchanged.
+        assertEquals(before.size(), after.size());
+        after.values().forEach(w -> assertTrue(w > 0, "no source is stood down by this change"));
+    }
 }

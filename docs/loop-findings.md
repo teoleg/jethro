@@ -5869,3 +5869,47 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Cost side, restated:** `totalFees` **$488.284665** of `firmTotal` **-$1,188.68635665** = **41.1%** (ALPHA
   alone **$465.190115** of **-$949.70770444** = **49.0%**), over **$5,716,068.55** LIVE turnover and **3,319**
   fills, against LIVE hit rates **0.490 / 0.501 / 0.498** on n = 14,672 / 14,395 / 13,471.
+
+## 2026-08-11 18:30Z — a signal finally has edge, and the desk was voting against it
+
+- **Rule 490 — when the ledger is a wall of INCONCLUSIVE, re-read the telemetry before re-reading the
+  code: the data changes.** For weeks every LIVE 225s hit rate sat at 0.490/0.501/0.498 — no source
+  predicted anything, and every finding since 07-28 was written under that premise. This run they have
+  **separated**: `trend` **0.542** (n=3,202), `reversion` **0.467** (n=2,957), `xsreversion` **0.462**
+  (n=3,271). Cluster-robust on cohorts: trend **+0.5626 bps, t=+2.32 / 173 cohorts**; reversion
+  **−0.4166, t=−1.67 / 161**; xsreversion **−0.2475, t=−0.96 / 173**. One positive source, two measured
+  LOSING. The standing priority's question — "does ANY signal predict returns here?" — now answers YES,
+  and the job flips from "find edge" to "let it size".
+- **Rule 491 — the desk was weighting them backwards, and the proof is that the live weight vector
+  reproduces from the WRONG rung to five decimals.** Live `fusion_targets`: `trend 0.25` (the floor),
+  `reversion 1.2026`, `xsreversion 1.1279`, `momentum 1.2438`, `social 1.1769`. Running the 3600s
+  telemetry through `TelemetryWeights`' own arithmetic (Φ(t), Bühlmann shrink, clamp) yields
+  1.2437/1.2025/1.1770/1.1280/0.2488→0.25 — an exact match. Never argue a weighting defect from the
+  narrative when you can re-derive the live vector from the candidate inputs; one of them matches.
+- **Rule 492 — a fallback rule chosen for safety can be the WORST choice available.** `HorizonLadder`
+  rule 3 says "if no rung opens, the base rung stands". The base is the LONGEST rung, which in a rolling
+  window is by construction the one with the FEWEST independent cohorts (5–17 per source vs 44–173 lower
+  down). `edge-gate.enabled=false` and nothing clears anyway, so this is the *normal* state, not an edge
+  case: the desk's entire conviction vector was a ranking of five statistics **none of which is
+  significant**, and it landed inverted relative to the rung it actually trades at.
+- **Rule 493 — separate the COST question from the DIRECTIONAL question on the horizon axis too.**
+  `TelemetryWeights` already separates them on the cost axis (weights are gross of cost because "cost
+  decides whether to trade at all, not whose view counts"). The same split applies to the rung: the
+  gate's rung is a cost choice and rightly sets the holding period; whose view counts is directional and
+  belongs on the most-replicated measurement. ADR-0082's "don't buy significance by shortening the
+  horizon" warning does NOT transfer — it is about a cost term that doesn't shrink with the horizon,
+  while `Φ(avgReturn/stdError)` is dimensionless and does not inflate.
+- **Rule 494 — an outcome-blind selection criterion owes no multiplicity haircut.** Cohort count is
+  measurement geometry — it cannot be moved by the sign or size of the returns — so picking a rung by it
+  peeks at no result. Contrast the gate's search over p-values, which ADR-0082 correctly pays for with
+  Bonferroni. Knowing which searches are free and which are not is what keeps the α honest.
+- **The cost of the inversion, from this window's own `contributions`:** MCD — trend **+10.97** at weight
+  0.25, outvoted by reversion (−20.0) and xsreversion (−13.86) at ~1.15 → combined −13.25 → **short 260**.
+  NVDA — trend **−10.60** → **long 183**. Systematically the wrong side of the only source with evidence.
+- **Attribution — this window's −$63.44 PnL and +$19,741.41 gross are credited to NOTHING.** No logic
+  deployed (`git log`: a revert of the already-BAD ADR-0147, plus `chore(status)`); `uptimeSeconds`
+  **60917** at an 18:30:01Z stamp is one continuous JVM. Fees **$267.63** are now only **26.4%** of the
+  cumulative loss — the majority of this loss is **directional**, which is what Rule 491 explains.
+- **✅ Closed: the ADR-0143 revert path works.** `bc2a4dbf3`'s auto-revert landed cleanly at `fdc948f`
+  (ADR file, `PositionBuffer` change and `wrong-side-share.py` all gone, tree clean) after failing on the
+  nine prior BAD verdicts. Stop carrying it.

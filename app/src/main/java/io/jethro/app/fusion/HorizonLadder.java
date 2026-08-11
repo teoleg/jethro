@@ -79,11 +79,74 @@ public final class HorizonLadder {
     }
 
     /**
+     * The rung the COMBINATION WEIGHTS are estimated over (ADR-0148) — the one whose measurement is
+     * best determined, i.e. the most independent cohorts (ADR-0077) summed across sources; ties break
+     * toward the longer horizon, as everywhere else in this class.
+     *
+     * <p><b>Why this is a different question from {@link #select}.</b> The gate asks a COST question —
+     * over what period does expectancy beat a round trip — and the answer sets the desk's holding
+     * period, so the gate's rung is rightly chosen by cost-adjusted significance. The weights ask a
+     * different question, and {@link TelemetryWeights} already says so in the one place it matters:
+     * they are computed GROSS of execution cost, because cost decides whether to trade at all and not
+     * whose view counts. Whose view counts is a purely DIRECTIONAL question, and the honest rung for a
+     * directional question is the one the desk has the most independent draws of.
+     *
+     * <p><b>This is not the "buy significance by shortening the horizon" error {@link #rungs} warns
+     * about.</b> That error is real for the GATE, whose comparison subtracts a round-trip cost that
+     * does not shrink with the horizon — so a short rung flatters nothing there and the warning stands
+     * unchanged. It does not apply here, because the weighting statistic is {@code Φ(avgReturn/stdError)},
+     * which is dimensionless: shortening the horizon shrinks the numerator and the standard error
+     * together, so a shorter rung does not mechanically inflate {@code t}. What it does supply is more
+     * independent cohorts, and therefore a better-determined {@code t}. That is strictly more evidence
+     * about the same directional question, not an easier test of a different one.
+     *
+     * <p><b>And the criterion is outcome-blind, so no multiplicity haircut is owed.</b> Cohort count is
+     * fixed by measurement geometry — how many independent cross-sections a rung resolved in the rolling
+     * window — and cannot be moved by the sign or the size of the returns measured. Unlike the gate's
+     * search over p-values (which ADR-0082 pays for with Bonferroni), choosing a rung this way peeks at
+     * no result, so it cannot manufacture significance. It also cannot scale the book: the combiner
+     * normalises by Σweights, so this can only ROTATE conviction between sources.
+     *
+     * <p>Falls back to {@code selected} when no rung reports a cohort at all — with nothing measured
+     * there is no better-determined rung, and the pre-ADR-0148 behaviour stands byte for byte.
+     */
+    public static List<SignalScoring.Stats> weightingStats(Map<Integer, List<SignalScoring.Stats>> byHorizon,
+                                                           List<SignalScoring.Stats> selected) {
+        List<SignalScoring.Stats> fallback = selected == null ? List.of() : selected;
+        if (byHorizon == null || byHorizon.isEmpty()) {
+            return fallback;
+        }
+        List<SignalScoring.Stats> best = null;
+        long bestCohorts = 0;
+        long bestHorizon = -1;
+        for (var rung : byHorizon.entrySet()) {
+            List<SignalScoring.Stats> stats = rung.getValue();
+            if (stats == null || stats.isEmpty()) {
+                continue;
+            }
+            long horizon = rung.getKey() == null ? 0L : rung.getKey();
+            long cohorts = 0;
+            for (SignalScoring.Stats s : stats) {
+                // Only a rung that can actually support a standard error counts toward its own
+                // evidence: a single cross-section, however wide, is one draw (ADR-0077).
+                if (s != null && s.cohorts() > 1) {
+                    cohorts += s.cohorts();
+                }
+            }
+            if (cohorts > bestCohorts || (cohorts == bestCohorts && cohorts > 0 && horizon > bestHorizon)) {
+                bestCohorts = cohorts;
+                bestHorizon = horizon;
+                best = stats;
+            }
+        }
+        return best == null ? fallback : List.copyOf(best);
+    }
+
+    /**
      * The chosen rung and the gate decision made on it.
      *
      * @param decision  the edge-gate verdict at {@code horizonSeconds} — what the rest of the desk acts on
-     * @param stats     that rung's per-source telemetry, so weights are estimated over the same period
-     *                  the gate judged and the desk holds
+     * @param stats     that rung's per-source telemetry — the period the gate judged and the desk holds
      * @param rungs     how many rungs were searched — the multiplicity the α was already divided by
      * @param evidenced true when some rung cleared; false means nothing did and the base rung stands
      */
