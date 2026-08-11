@@ -190,7 +190,7 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
      * already carry a call date (i.e. an Official Statement has been read for them).
      */
     public record CoverageRow(String cusip6, String issuer, int bonds, java.math.BigDecimal heldPar,
-                              int withCall, String sampleCusip) {
+                              int withCall, int fromOs, String sampleCusip) {
     }
 
     /**
@@ -198,10 +198,13 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
      * actually need?". Every bond from one issuer shares its CUSIP-6, and one Official Statement covers a
      * whole series, so this ranks where a single download buys the most coverage.
      */
-    public List<CoverageRow> coverage(int limit) {
+    public List<CoverageRow> coverage(int limit, boolean includeDone) {
         if (!available()) {
             return List.of();
         }
+        // HAVING count(source_id) = 0 drops the issuers whose Official Statement has already been read,
+        // so the list is a TO-DO list rather than a ledger of everything.
+        String having = includeDone ? "" : " HAVING count(source_id) = 0";
         try {
             return jdbc.query("""
                     SELECT substring(cusip, 1, 6) AS cusip6,
@@ -209,14 +212,15 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
                            count(*)::int          AS bonds,
                            sum(held_par)          AS held_par,
                            count(call_date)::int  AS with_call,
+                           count(source_id)::int  AS from_os,
                            min(cusip)             AS sample_cusip
                     FROM muni.security
-                    GROUP BY substring(cusip, 1, 6)
+                    GROUP BY substring(cusip, 1, 6)""" + having + """
                     ORDER BY count(*) DESC
                     LIMIT ?""",
                     (rs, i) -> new CoverageRow(rs.getString("cusip6"), rs.getString("issuer"),
                             rs.getInt("bonds"), rs.getBigDecimal("held_par"), rs.getInt("with_call"),
-                            rs.getString("sample_cusip")),
+                            rs.getInt("from_os"), rs.getString("sample_cusip")),
                     limit);
         } catch (DataAccessException e) {
             healthy = false;
@@ -231,13 +235,43 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
         }
         try {
             return java.util.Optional.ofNullable(jdbc.queryForObject("""
-                    SELECT count(*)::int, count(DISTINCT substring(cusip, 1, 6))::int,
-                           count(call_date)::int
+                    SELECT count(*)::int,
+                           count(DISTINCT substring(cusip, 1, 6))::int,
+                           count(call_date)::int,
+                           count(source_id)::int,
+                           count(DISTINCT substring(cusip, 1, 6))
+                             FILTER (WHERE source_id IS NOT NULL)::int
                     FROM muni.security""",
-                    (rs, i) -> new int[] {rs.getInt(1), rs.getInt(2), rs.getInt(3)}));
+                    (rs, i) -> new int[] {rs.getInt(1), rs.getInt(2), rs.getInt(3),
+                                          rs.getInt(4), rs.getInt(5)}));
         } catch (DataAccessException e) {
             healthy = false;
             return java.util.Optional.empty();
+        }
+    }
+
+    /**
+     * Stamp the artifact an Official Statement's rows came from (ADR-0005 provenance handle). This is what
+     * makes "we have already read this issuer's OS" a FACT rather than an inference: call dates cannot
+     * carry that meaning, because plenty of serial bonds are genuinely non-callable and would look
+     * forever-uncovered. Batched; best-effort like every DB call here.
+     */
+    public int markSourced(List<String> cusips, String sourceId) {
+        if (!available() || cusips.isEmpty() || sourceId == null || sourceId.isBlank()) {
+            return 0;
+        }
+        try {
+            List<Object[]> args = new java.util.ArrayList<>(cusips.size());
+            for (String c : cusips) {
+                args.add(new Object[] {sourceId, c});
+            }
+            jdbc.batchUpdate("UPDATE muni.security SET source_id = ?, updated_at = now() WHERE cusip = ?",
+                    args);
+            return cusips.size();
+        } catch (DataAccessException e) {
+            healthy = false;
+            warnOnce(e);
+            return 0;
         }
     }
 

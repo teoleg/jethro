@@ -33,6 +33,7 @@ public final class OfficialStatementExtractor {
     private final OcrText ocr;
     private final double assistedThreshold;
     private final String inboxDir;
+    private final io.muniworld.bond.SecurityRepository securities;
 
     public OfficialStatementExtractor(
             IngestService ingest,
@@ -41,8 +42,10 @@ public final class OfficialStatementExtractor {
             @Value("${muni.ocr.bin:tesseract}") String tesseractBin,
             @Value("${muni.ocr.dpi:300}") int dpi,
             @Value("${muni.extract.assisted-threshold:0.5}") double assistedThreshold,
-            @Value("${muni.os.inbox.dir:os-inbox}") String inboxDir) {
+            @Value("${muni.os.inbox.dir:os-inbox}") String inboxDir,
+            io.muniworld.bond.SecurityRepository securities) {
         this.inboxDir = inboxDir;
+        this.securities = securities;
         this.ingest = ingest;
         this.assisted = assisted;
         this.ocrEnabled = ocrEnabled;
@@ -91,6 +94,20 @@ public final class OfficialStatementExtractor {
             int assistedCount = rows.size() - res.rows().size();
 
             IngestService.Summary ing = ingest.indexRows(rows, OfficialStatementParser.FIELD_MAP);
+            // Record WHICH document these bonds came from (ADR-0005 provenance). Beyond provenance this
+            // is the signal the coverage plan needs: "this issuer's OS has been read" is a fact about the
+            // document, and cannot be inferred from call dates — plenty of serial bonds are genuinely
+            // non-callable and would otherwise look uncovered forever.
+            if (ing.indexed() > 0) {
+                List<String> landed = new ArrayList<>();
+                for (Map<String, Object> r : rows) {
+                    Object c = r.get("cusip");
+                    if (c != null) {
+                        landed.add(String.valueOf(c));
+                    }
+                }
+                securities.markSourced(landed, osPdf.sourceId());
+            }
             int quarantined = res.quarantined() + ing.skipped();
             // 8 placeholders, 8 args — `pages` used to be missing, which shifted every value one slot left
             // and printed a literal "(conf {})". A log that misreports the extraction is worse than no log:

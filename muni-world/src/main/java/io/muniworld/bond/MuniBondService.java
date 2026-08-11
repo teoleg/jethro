@@ -44,7 +44,10 @@ public final class MuniBondService {
      * index still lands.
      */
     public void index(Bond b) {
-        repo.upsert(b, null);   // system of record (best-effort; no-ops when the DB is off) — source_id TODO (deferred-register)
+        // System of record, best-effort (no-ops when the DB is off). source_id is stamped separately by
+        // the OS extractor once its rows land — it is a fact about the DOCUMENT, and the N-PORT path that
+        // also calls this has no document behind it.
+        repo.upsert(b, null);
         try {
             long couponScaled = MuniKeys.couponScaled(b.coupon());
             index.indexSecurity(b.cusip(), b.maturity(), couponScaled, b.geoFips(),
@@ -125,14 +128,22 @@ public final class MuniBondService {
      * documents do I need?" is answered from the data instead of feared. One document covers a whole
      * series, so the top rows are where a single download buys the most.
      */
-    public java.util.Map<String, Object> coverage(int limit) {
+    public java.util.Map<String, Object> coverage(int limit, boolean includeDone) {
         java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
         var totals = repo.coverageTotals();
         out.put("bonds", totals.map(t -> t[0]).orElse(null));
         out.put("issuers", totals.map(t -> t[1]).orElse(null));
         out.put("withCall", totals.map(t -> t[2]).orElse(null));
-        out.put("rows", repo.coverage(Math.min(Math.max(limit, 1), 200)));
+        out.put("fromOs", totals.map(t -> t[3]).orElse(null));
+        out.put("issuersDone", totals.map(t -> t[4]).orElse(null));
+        out.put("includeDone", includeDone);
+        out.put("rows", repo.coverage(Math.min(Math.max(limit, 1), 200), includeDone));
         return out;
+    }
+
+    /** Stamp the OS artifact these CUSIPs were read from — the "we have this issuer's document" fact. */
+    public int markSourced(java.util.List<String> cusips, String sourceId) {
+        return repo.markSourced(cusips, sourceId);
     }
 
     /** Row count in Postgres, or {@code empty} when the DB isn't reachable (Flyway off / DB down). */

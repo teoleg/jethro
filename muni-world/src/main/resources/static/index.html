@@ -141,7 +141,7 @@
     </div>
   </div>
 
-  <div class="foot">muni-world runs as a separate process · <b>UI build B11</b> (coverage plan: which OS documents to fetch next, ranked by bonds covered)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B12</b> (coverage plan hides issuers whose OS is loaded — a to-do list that shrinks)</div>
 </main>
 
 <script>
@@ -201,41 +201,60 @@
    * whole series, so this ranks where one download buys the most call-schedule coverage — the honest
    * answer to "that's 5,000 documents" (it is not: it is a few dozen, and the top ten carry most of it).
    */
+  let COVERAGE_ALL = false;   // false = TO-DO only (issuers whose OS is already read are hidden)
+
+  function toggleCoverageDone() {
+    COVERAGE_ALL = !COVERAGE_ALL;
+    loadCoverage();
+  }
+
   async function loadCoverage() {
     const el = document.getElementById("coverage");
     if (!el) { return; }
     try {
-      const c = await (await fetch("/api/muni/bonds/coverage?limit=25", { cache: "no-store" })).json();
+      const c = await (await fetch(`/api/muni/bonds/coverage?limit=25&includeDone=${COVERAGE_ALL}`,
+        { cache: "no-store" })).json();
       const rows = c.rows || [];
-      if (!rows.length) { el.textContent = c.bonds == null ? "Postgres not reachable." : "no bonds yet."; return; }
-      const done = c.withCall || 0;
-      const pct = c.bonds ? Math.round(done * 1000 / c.bonds) / 10 : 0;
-      // Cumulative share: how much of the book the first N issuers cover.
+      const doneIssuers = c.issuersDone || 0;
+      const doneBonds = c.fromOs || 0;
+      const toggle = `<button class="btn" style="padding:5px 10px;font-size:11px" onclick="toggleCoverageDone()">`
+        + (COVERAGE_ALL ? "hide the ones already loaded" : `show all (incl. ${doneIssuers} done)`) + `</button>`;
+
+      if (!rows.length) {
+        el.innerHTML = c.bonds == null ? "Postgres not reachable."
+          : `<b style="color:var(--up)">Nothing left in the top ${25}</b> — every issuer shown here already
+             has its Official Statement loaded (${doneIssuers} issuer(s), ${doneBonds.toLocaleString()}
+             bonds carry OS terms). ${toggle}`;
+        return;
+      }
       let run = 0;
       const body = rows.map(r => {
         run += r.bonds;
         const cum = c.bonds ? Math.round(run * 1000 / c.bonds) / 10 : 0;
-        const cov = r.bonds ? Math.round(r.withCall * 100 / r.bonds) : 0;
-        return `<tr>
+        const loaded = r.fromOs > 0;
+        return `<tr style="${loaded ? "opacity:.55" : ""}">
           <td class="mono">${esc(r.cusip6)}</td>
-          <td style="white-space:normal">${esc(r.issuer)}</td>
+          <td style="white-space:normal">${esc(r.issuer)}${loaded ? ' <b style="color:var(--up);font-size:10px">OS LOADED</b>' : ''}</td>
           <td class="mono">${r.bonds}</td>
           <td class="mono">${r.heldPar == null ? "—" : Number(r.heldPar).toLocaleString()}</td>
-          <td class="mono" style="color:${cov > 0 ? "var(--up)" : "var(--dim)"}">${cov}%</td>
+          <td class="mono" style="color:${r.withCall > 0 ? "var(--up)" : "var(--dim)"}">${r.withCall}</td>
           <td class="mono">${cum}%</td>
           <td><a href="https://emma.msrb.org/Security/Details/${encodeURIComponent(r.sampleCusip)}"
                  target="_blank" rel="noopener" style="color:var(--brand);text-decoration:underline">find OS ↗</a></td>
         </tr>`;
       }).join("");
+      const pct = c.bonds ? Math.round(doneBonds * 1000 / c.bonds) / 10 : 0;
       el.innerHTML = `<div style="margin-bottom:8px">
-          <b style="color:var(--txt)">${Number(c.bonds).toLocaleString()} bonds</b> come from just
-          <b style="color:var(--txt)">${c.issuers}</b> issuers — and one Official Statement covers an
-          entire series (the Omaha OS landed 42 bonds from one PDF). Call schedules present so far:
-          <b style="color:${done ? "var(--up)" : "var(--warn)"}">${done.toLocaleString()} / ${Number(c.bonds).toLocaleString()} (${pct}%)</b>.
-          Work down this list — the <b>cum %</b> column is the share of the book covered once you reach that row.
+          <b style="color:var(--txt)">${Number(c.bonds).toLocaleString()} bonds</b> from
+          <b style="color:var(--txt)">${c.issuers}</b> issuers — one Official Statement covers a whole
+          series (the Omaha OS landed 42 bonds from one PDF).
+          Loaded so far: <b style="color:${doneBonds ? "var(--up)" : "var(--warn)"}">${doneIssuers} issuer(s),
+          ${doneBonds.toLocaleString()} bonds (${pct}%)</b>.
+          ${COVERAGE_ALL ? "Showing everything." : "Issuers already loaded are hidden — this is your to-do list."}
+          ${toggle}
         </div>
         <div style="overflow-x:auto"><table class="tbl"><thead><tr>
-          <th>CUSIP-6</th><th>Issuer</th><th>Bonds</th><th>Par held</th><th>Has call</th><th>Cum %</th><th>Document</th>
+          <th>CUSIP-6</th><th>Issuer</th><th>Bonds</th><th>Par held</th><th>With call</th><th>Cum %</th><th>Document</th>
         </tr></thead><tbody>${body}</tbody></table></div>`;
     } catch (e) { el.textContent = "coverage unavailable"; }
   }
@@ -439,6 +458,7 @@
         : `<span style="color:var(--warn)">no PDFs in os-inbox/ — drop Official Statement PDFs there, then load.</span>`;
       await refreshStore();
       go(0);   // refresh the browser list in place (loadRecent was removed with the old table)
+      loadCoverage();   // a just-loaded issuer drops off the to-do list straight away
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">load failed — is muni-world up?</span>'; }
   }
 
@@ -460,6 +480,7 @@
         : `<span style="color:var(--down)">failed: ${esc(s.error || "extraction error")}</span>`;
       await refreshStore();
       go(0);   // refresh the browser list in place (loadRecent was removed with the old table)
+      loadCoverage();   // a just-loaded issuer drops off the to-do list straight away
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">upload error</span>'; }
   }
 
