@@ -86,6 +86,42 @@ class OfficialStatementParserTest {
      * document TYPE must be named before anything else — no parser work will find bonds in a document
      * that has none.
      */
+    /**
+     * MTA Dedicated Tax Fund Bonds, Series 2022A — the right issuer, the right document type, the schedule
+     * plainly present, and it loaded NOTHING over a single character: the base CUSIP is printed as
+     * "(59260X)†" where Omaha printed "(681725)*", and the header pattern demanded an asterisk. Footnote
+     * markers vary by document; the CUSIP-proximity guard is what makes a parenthesised token safe to
+     * read, not the marker.
+     */
+    @Test
+    void readsABaseCusipMarkedWithADaggerNotAnAsterisk() {
+        String os = """
+                Dated: Date of Delivery Due: November 15, as shown on inside cover page
+                Dedicated Tax Fund Bonds, Series 2022A
+                Maturity Principal Interest CUSIP Number
+                (November 15) Amount Rate Yield* (59260X)†
+                2032 $11,015,000 5.00% 1.95% AH1
+                2033 11,565,000 5.00 2.00 AJ7
+                2038 14,760,000 4.00 2.31 AP3
+                """;
+
+        var res = OfficialStatementParser.parse(os, "Metropolitan Transportation Authority", "36", "");
+
+        assertEquals(3, res.rows().size(), "every schedule row lands once the base is recognised");
+        var byCusip = new java.util.HashMap<String, java.util.Map<String, Object>>();
+        res.rows().forEach(r -> byCusip.put(String.valueOf(r.get("cusip")), r));
+
+        var first = byCusip.get("59260XAH1");
+        assertNotNull(first, "base (59260X) from the dagger-marked header + suffix AH1");
+        assertEquals("5.00", first.get("coupon"));
+        assertEquals("2032-11-15", first.get("maturity"));
+        assertEquals("1.95", first.get("reofferingYield"), "the header names a Yield column");
+
+        // A later maturity with a different coupon — proves rows are read individually, not from the first.
+        assertEquals("4.00", byCusip.get("59260XAP3").get("coupon"));
+        assertEquals("2038-11-15", byCusip.get("59260XAP3").get("maturity"));
+    }
+
     @Test
     void anAnnualFinancialReportIsNamedAsTheWrongDocument() {
         String acfr = """

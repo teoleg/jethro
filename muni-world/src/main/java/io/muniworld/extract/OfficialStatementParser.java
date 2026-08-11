@@ -56,9 +56,12 @@ public final class OfficialStatementParser {
             "(?:Base\\s*CUSIP|CUSIP\\s*Base)\\s*(?:\\u00ae|\\u2122)?\\s*(?:\\(\\d{1,2}\\)|\\*|\\u2020)?"
             + "\\s*(?:Nos?\\.?|Number)?\\s*[:.\\-]?\\s*([0-9]{3}[0-9A-Z]{3})", Pattern.CASE_INSENSITIVE);
     // The far commoner real-world form: the schedule's CUSIP column header carries the base in parentheses
-    // with a footnote marker — "... Yield Price (681725)*". Accepted only when the word CUSIP appears close
-    // by, so an ordinary parenthesised token can never be mistaken for a security's identity.
-    private static final Pattern BASE_CUSIP_HEADER = Pattern.compile("\\(([0-9]{3}[0-9A-Z]{3})\\)\\s*\\*");
+    // with a footnote marker — "... Yield Price (681725)*" (Omaha), "... Yield* (59260X)†" (MTA). The
+    // MARKER VARIES: asterisk, dagger, double dagger, or none at all. Requiring an asterisk cost a whole
+    // MTA schedule over one character, so the marker is optional and the CUSIP-proximity check below is
+    // what keeps an ordinary parenthesised token from being read as a security's identity.
+    private static final Pattern BASE_CUSIP_HEADER = Pattern.compile(
+            "\\(([0-9]{3}[0-9A-Z]{3})\\)\\s*[*\u2020\u2021]?");
     /** One serial-maturity entry: year, principal, coupon, yield, price, CUSIP suffix. A schedule line
      *  routinely carries TWO of these side by side (the OS prints the table in two columns), so this is
      *  matched repeatedly per line rather than once. %-signs and the yield-to-call dagger are optional
