@@ -120,6 +120,21 @@ public final class MuniBondService {
         return repo.valuationSeries(cusip);
     }
 
+    /**
+     * Document coverage: the universe grouped by issuer, biggest first, plus totals — so "how many OS
+     * documents do I need?" is answered from the data instead of feared. One document covers a whole
+     * series, so the top rows are where a single download buys the most.
+     */
+    public java.util.Map<String, Object> coverage(int limit) {
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        var totals = repo.coverageTotals();
+        out.put("bonds", totals.map(t -> t[0]).orElse(null));
+        out.put("issuers", totals.map(t -> t[1]).orElse(null));
+        out.put("withCall", totals.map(t -> t[2]).orElse(null));
+        out.put("rows", repo.coverage(Math.min(Math.max(limit, 1), 200)));
+        return out;
+    }
+
     /** Row count in Postgres, or {@code empty} when the DB isn't reachable (Flyway off / DB down). */
     public java.util.OptionalLong dbCount() {
         return repo.count();

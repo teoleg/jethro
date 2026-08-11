@@ -77,6 +77,13 @@ public final class MuniBondController {
         return bonds.valuationSeries(cusip.toUpperCase(java.util.Locale.ROOT));
     }
 
+    /** Which Official Statements to fetch next: the universe by issuer, biggest first, plus totals. */
+    @GetMapping("/api/muni/bonds/coverage")
+    public Map<String, Object> coverage(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "25") int limit) {
+        return bonds.coverage(limit);
+    }
+
     /** Index a bond (the loader/connector seam; also lets tools push a bond in). */
     @PostMapping("/api/muni/bonds")
     public Map<String, Object> index(@RequestBody Bond bond) {

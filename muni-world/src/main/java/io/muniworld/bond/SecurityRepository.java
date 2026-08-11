@@ -185,6 +185,62 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
         }
     }
 
+    /**
+     * One issuer's document-coverage line: how many of its bonds are held, how much par, and how many
+     * already carry a call date (i.e. an Official Statement has been read for them).
+     */
+    public record CoverageRow(String cusip6, String issuer, int bonds, java.math.BigDecimal heldPar,
+                              int withCall, String sampleCusip) {
+    }
+
+    /**
+     * The universe grouped by ISSUER (CUSIP-6), biggest first — the answer to "how many documents do I
+     * actually need?". Every bond from one issuer shares its CUSIP-6, and one Official Statement covers a
+     * whole series, so this ranks where a single download buys the most coverage.
+     */
+    public List<CoverageRow> coverage(int limit) {
+        if (!available()) {
+            return List.of();
+        }
+        try {
+            return jdbc.query("""
+                    SELECT substring(cusip, 1, 6) AS cusip6,
+                           max(issuer)            AS issuer,
+                           count(*)::int          AS bonds,
+                           sum(held_par)          AS held_par,
+                           count(call_date)::int  AS with_call,
+                           min(cusip)             AS sample_cusip
+                    FROM muni.security
+                    GROUP BY substring(cusip, 1, 6)
+                    ORDER BY count(*) DESC
+                    LIMIT ?""",
+                    (rs, i) -> new CoverageRow(rs.getString("cusip6"), rs.getString("issuer"),
+                            rs.getInt("bonds"), rs.getBigDecimal("held_par"), rs.getInt("with_call"),
+                            rs.getString("sample_cusip")),
+                    limit);
+        } catch (DataAccessException e) {
+            healthy = false;
+            return List.of();
+        }
+    }
+
+    /** Universe-wide totals: bonds, distinct issuers, and how many bonds already have a call date. */
+    public java.util.Optional<int[]> coverageTotals() {
+        if (!available()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.ofNullable(jdbc.queryForObject("""
+                    SELECT count(*)::int, count(DISTINCT substring(cusip, 1, 6))::int,
+                           count(call_date)::int
+                    FROM muni.security""",
+                    (rs, i) -> new int[] {rs.getInt(1), rs.getInt(2), rs.getInt(3)}));
+        } catch (DataAccessException e) {
+            healthy = false;
+            return java.util.Optional.empty();
+        }
+    }
+
     /** Read a one-time-job marker ({@code muni.ingest_state}); empty when unset or the DB is off. */
     public java.util.Optional<String> state(String key) {
         if (!available()) {
