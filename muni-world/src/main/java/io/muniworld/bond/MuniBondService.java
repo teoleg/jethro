@@ -175,8 +175,12 @@ public final class MuniBondService {
     public BondRow toRow(Bond b, SecurityRepository.Detail d) {
         double coupon = b.coupon().doubleValue();
         LocalDate settle = LocalDate.now();
+        // A call with no stated price used to display "@100" — an invented money number wearing the
+        // clothes of a document fact. An OS footnote often gives the call DATE and no redemption price;
+        // say so rather than assuming par.
         String call = b.callDate() == null ? "—"
-                : b.callDate() + " @" + (b.callPrice() == null ? "100" : b.callPrice().toPlainString());
+                : b.callDate() + (b.callPrice() == null ? " @price not stated"
+                                                        : " @" + b.callPrice().toPlainString());
 
         // Current price: the price store (ADR-0015 — MSRB trade prints etc.) is the market authority; fall
         // back to a price carried on the bond itself (e.g. a direct/CSV ingest). OS-terms bonds have neither

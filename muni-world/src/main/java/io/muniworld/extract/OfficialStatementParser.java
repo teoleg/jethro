@@ -47,6 +47,29 @@ public final class OfficialStatementParser {
             "(?:\\(|Due |maturing )\\s*([A-Z][a-z]+)\\s+(\\d{1,2})", Pattern.CASE_INSENSITIVE);
     private static final Pattern BASE_CUSIP = Pattern.compile(
             "(?:Base\\s*CUSIP|CUSIP\\s*Base)[^0-9A-Z]{0,4}([0-9]{3}[0-9A-Z]{3})", Pattern.CASE_INSENSITIVE);
+    // The far commoner real-world form: the schedule's CUSIP column header carries the base in parentheses
+    // with a footnote marker — "... Yield Price (681725)*". Accepted only when the word CUSIP appears close
+    // by, so an ordinary parenthesised token can never be mistaken for a security's identity.
+    private static final Pattern BASE_CUSIP_HEADER = Pattern.compile("\\(([0-9]{3}[0-9A-Z]{3})\\)\\s*\\*");
+    /** One serial-maturity entry: year, principal, coupon, yield, price, CUSIP suffix. A schedule line
+     *  routinely carries TWO of these side by side (the OS prints the table in two columns), so this is
+     *  matched repeatedly per line rather than once. %-signs and the yield-to-call dagger are optional
+     *  because the OS prints them on the first row of a column and omits them after. */
+    private static final Pattern ENTRY = Pattern.compile(
+            "((?:19|20)\\d{2})\\s+\\$?\\s*([\\d,]{3,})\\s+(\\d{1,2}\\.\\d{1,3})\\s*%?"
+            + "\\s+(\\d{1,2}\\.\\d{1,3})\\s*%?\\s*[\u2020\u2021*]?\\s+(\\d{2,3}\\.\\d{1,3})\\s*%?"
+            + "\\s+([0-9A-Z]{2,3})(?![0-9A-Z])");
+    /** A term bond, printed as prose under the serial table with its own full base+suffix CUSIP. */
+    private static final Pattern TERM_BOND = Pattern.compile(
+            "\\$([\\d,]+)\\s+(\\d{1,2}\\.\\d{1,3})\\s*%?\\s+Term\\s+Bonds?\\s+due\\s+"
+            + "([A-Z][a-z]+\\s+\\d{1,2},\\s*\\d{4}).{0,120}?CUSIP\\s*Number\\s*\\*?\\s*"
+            + "([0-9]{3}[0-9A-Z]{3})\\s+([0-9A-Z]{2,3})(?![0-9A-Z])", Pattern.CASE_INSENSITIVE);
+    /** "†Yield to first optional call date of December 15, 2036." — the call DATE stated without a price. */
+    private static final Pattern FIRST_OPTIONAL_CALL = Pattern.compile(
+            "first\\s+optional\\s+(?:call|redemption)\\s+date\\s+of\\s+([A-Z][a-z]+\\s+\\d{1,2},\\s*\\d{4})",
+            Pattern.CASE_INSENSITIVE);
+    /** Series section headings that state the tax treatment of the maturities that follow them. */
+    private static final Pattern SERIES_HEADING = Pattern.compile("\\((Non-AMT|AMT)\\)", Pattern.CASE_INSENSITIVE);
     // optional-redemption: "... on or after <date> ... at <price>%" and a "maturing on or after <date>" gate
     private static final Pattern CALL_ON_OR_AFTER = Pattern.compile(
             "on or after\\s+([A-Z][a-z]+\\s+\\d{1,2},\\s*\\d{4})", Pattern.CASE_INSENSITIVE);
@@ -78,8 +101,37 @@ public final class OfficialStatementParser {
 
         List<Map<String, Object>> rows = new ArrayList<>();
         int quarantined = 0;
+        String seriesTax = null;        // set by a "(AMT)" / "(Non-AMT)" heading as the scan walks the doc
         for (String raw : lines) {
             String line = raw.strip();
+
+            // A series heading states the tax treatment of the maturities BELOW it. One OS routinely
+            // prices two series together (an AMT and a Non-AMT tranche), so a single document-level tax
+            // status would mislabel half the bonds. Read it from the heading instead of averaging.
+            Matcher sh = SERIES_HEADING.matcher(line);
+            if (sh.find() && line.length() < 120) {
+                seriesTax = sh.group(1).equalsIgnoreCase("AMT") ? "AMT" : "tax-exempt";
+            }
+            String rowTax = seriesTax != null ? seriesTax : tax;
+
+            // COLUMNAR SERIAL MATURITIES. The schedule is printed as two side-by-side columns, so one
+            // text line carries TWO bonds: "2027 $2,395,000 5.000% 2.930% 102.777% NM5 2037 ... NX1".
+            // Reading one CUSIP per line (the old behaviour) dropped half the schedule and mis-paired the
+            // other half's coupon, so every entry on the line is matched.
+            List<Map<String, Object>> entries = parseEntries(line, base, schedMonthDay, issuer, geoFips,
+                    rowTax, call);
+            if (!entries.isEmpty()) {
+                rows.addAll(entries);
+                continue;
+            }
+
+            // TERM BONDS, printed as prose beneath the serial table with a full base+suffix CUSIP.
+            List<Map<String, Object>> terms = parseTermBonds(line, issuer, geoFips, rowTax, call);
+            if (!terms.isEmpty()) {
+                rows.addAll(terms);
+                continue;
+            }
+
             // A bond row is gated on a CUSIP — that's what distinguishes a schedule row from prose/headers
             // (e.g. the redemption paragraph has a percent but no CUSIP, so it's never a "failed row").
             String cusip = findCusip(line, base);
@@ -104,7 +156,7 @@ public final class OfficialStatementParser {
                 r.put("issuer", issuer);
                 r.put("coupon", coupon);
                 r.put("maturity", maturity.toString());
-                r.put("tax", tax);
+                r.put("tax", rowTax);
                 r.put("geoFips", geoFips);
                 if (pcts.size() > 1) {
                     r.put("reofferingYield", pcts.get(1));   // captured, NOT emitted as price (terms-only)
@@ -122,6 +174,100 @@ public final class OfficialStatementParser {
         return new Result(rows, quarantined, confidence);
     }
 
+
+    /**
+     * Every serial-maturity entry on one schedule line. Requires a real base CUSIP-6: the schedule prints
+     * only 2–3 character suffixes, and a suffix alone is not a security's identity (ADR-0011 — a partial
+     * key is never fabricated into a whole one).
+     */
+    private static List<Map<String, Object>> parseEntries(String line, String base, int[] schedMonthDay,
+                                                          String issuer, String geoFips, String tax,
+                                                          Call call) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        if (base == null || base.length() != 6) {
+            return out;
+        }
+        Matcher m = ENTRY.matcher(line);
+        while (m.find()) {
+            String suffix = m.group(6);
+            if (!isSuffix(suffix)) {
+                continue;                 // all-letters or all-digits is a word or a number, not a CUSIP
+            }
+            LocalDate maturity = schedMonthDay == null ? null
+                    : safeDate(Integer.parseInt(m.group(1)), schedMonthDay[0], schedMonthDay[1]);
+            if (maturity == null) {
+                continue;                 // no schedule month/day header → the date would be a guess
+            }
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("cusip", base + suffix);
+            r.put("issuer", issuer);
+            r.put("coupon", m.group(3));
+            r.put("maturity", maturity.toString());
+            r.put("tax", tax);
+            r.put("geoFips", geoFips);
+            r.put("reofferingYield", m.group(4));   // captured, NOT emitted as price (terms-only)
+            applyCall(r, maturity, call);
+            out.add(r);
+        }
+        return out;
+    }
+
+    /** Term bonds printed as prose: "$35,925,000 5.500% Term Bond due December 15, 2051, ... 681725 PH4". */
+    private static List<Map<String, Object>> parseTermBonds(String line, String issuer, String geoFips,
+                                                            String tax, Call call) {
+        List<Map<String, Object>> out = new ArrayList<>();
+        Matcher m = TERM_BOND.matcher(line);
+        while (m.find()) {
+            if (!isSuffix(m.group(5))) {
+                continue;
+            }
+            LocalDate maturity = parseLongDate(m.group(3));
+            if (maturity == null) {
+                continue;
+            }
+            Map<String, Object> r = new LinkedHashMap<>();
+            r.put("cusip", m.group(4) + m.group(5));
+            r.put("issuer", issuer);
+            r.put("coupon", m.group(2));
+            r.put("maturity", maturity.toString());
+            r.put("tax", tax);
+            r.put("geoFips", geoFips);
+            applyCall(r, maturity, call);
+            out.add(r);
+        }
+        return out;
+    }
+
+    /**
+     * Attach the optional call to a row when this maturity is actually callable.
+     *
+     * <p>A bond maturing on or before the first call date cannot be called — it has already matured. That
+     * single rule reproduces the OS's own dagger marks exactly (in the Omaha 2026 schedule the daggered
+     * yields are precisely the 2037+ maturities against a 2036-12-15 call), so the callability comes from
+     * the document's stated dates rather than from reading a footnote symbol.
+     *
+     * <p>The call PRICE is only written when the document states one. A first-optional-call sentence gives
+     * a date and no price; assuming par there would be inventing a money number (ADR-0015).
+     */
+    private static void applyCall(Map<String, Object> row, LocalDate maturity, Call call) {
+        if (call == null || !maturity.isAfter(call.date())) {
+            return;
+        }
+        if (call.callableFromMaturity() != null && maturity.isBefore(call.callableFromMaturity())) {
+            return;
+        }
+        row.put("callDate", call.date().toString());
+        if (call.price() != null) {
+            row.put("callPrice", call.price());
+        }
+    }
+
+    /** A CUSIP suffix is mixed alphanumeric — "NM5" yes, "AMT" no, "000" no. */
+    private static boolean isSuffix(String s) {
+        return s != null && s.chars().anyMatch(Character::isLetter)
+                && s.chars().anyMatch(Character::isDigit);
+    }
+
     // ---- section detectors ----
 
     static int[] findScheduleMonthDay(String text) {
@@ -137,7 +283,20 @@ public final class OfficialStatementParser {
 
     static String findBaseCusip(String text, String fallback) {
         Matcher m = BASE_CUSIP.matcher(text);
-        return m.find() ? m.group(1) : fallback;
+        if (m.find()) {
+            return m.group(1);
+        }
+        // "... Yield Price (681725)*" — the base sits in the CUSIP column header. Require the word CUSIP
+        // within 400 chars before it: the header line itself often wraps, so same-line matching misses it,
+        // but an unrelated parenthesised token is never that close to a CUSIP heading.
+        Matcher h = BASE_CUSIP_HEADER.matcher(text);
+        while (h.find()) {
+            String before = text.substring(Math.max(0, h.start() - 400), h.start());
+            if (before.toUpperCase(Locale.ROOT).contains("CUSIP")) {
+                return h.group(1);
+            }
+        }
+        return fallback;
     }
 
     private static String detectTax(String text) {
@@ -179,10 +338,20 @@ public final class OfficialStatementParser {
             }
         }
         String callPrice = price.find() ? price.group(1) : null;
-        if (callDate == null || callPrice == null || callableFrom == null) {
-            return null;                                     // any piece missing → no guessed call
+        if (callDate != null && callPrice != null && callableFrom != null) {
+            return new Call(callDate, callPrice, callableFrom);
         }
-        return new Call(callDate, callPrice, callableFrom);
+        // Commoner form: the schedule's own footnote — "†Yield to first optional call date of December 15,
+        // 2036." That states the DATE with no price, which is still the option's most important term. Emit
+        // it with a null price rather than discarding a real call (or inventing par for it).
+        Matcher first = FIRST_OPTIONAL_CALL.matcher(text);
+        if (first.find()) {
+            LocalDate d = parseLongDate(first.group(1));
+            if (d != null) {
+                return new Call(d, callPrice, null);
+            }
+        }
+        return null;                                         // nothing stated → no guessed call
     }
 
     // ---- field parsers ----

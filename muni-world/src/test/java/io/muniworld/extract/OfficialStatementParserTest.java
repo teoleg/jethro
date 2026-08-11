@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,6 +43,74 @@ class OfficialStatementParserTest {
             In the opinion of Bond Counsel, interest on the Bonds is excluded from gross income for federal
             income tax purposes.
             """;
+
+    /**
+     * The real-world layout that yielded ZERO bonds from a 280-page OS (Omaha Airport Authority, Series
+     * 2026A/B — the owner's first live document). Three things defeated the parser at once, and each is
+     * asserted here verbatim from that document's own text:
+     *
+     * <ul>
+     *   <li>the schedule prints CUSIP <b>suffixes</b> under a base stated as "(681725)*" in the column
+     *       header — not the literal wording "Base CUSIP" the parser looked for;</li>
+     *   <li>the table is <b>two columns side by side</b>, so one text line carries TWO bonds;</li>
+     *   <li>two series with different tax treatment (AMT / Non-AMT) are priced in one document.</li>
+     * </ul>
+     */
+    @Test
+    void readsATwoColumnSuffixScheduleWithPerSeriesTax() {
+        String os = """
+                MATURITY SCHEDULE
+                $162,270,000
+                Airport Facilities Revenue Bonds (AMT), Series 2026A
+                Maturity Principal Interest   CUSIP Maturity Principal Interest   CUSIP
+                (December 15) Amount Rate Yield Price (681725)* (December 15) Amount Rate Yield Price (681725)*
+                2027 $2,395,000 5.000% 2.930% 102.777% NM5 2037 $3,900,000 5.000% 3.860%† 109.670% NX1
+                2028 2,520,000 5.000 3.020 104.511 NN3 2038 4,100,000 5.000 3.950† 108.866 NY9
+                $35,925,000 5.500% Term Bond due December 15, 2051, Yield 4.650%† Price 106.930%, CUSIP Number* 681725 PH4
+                †Yield to first optional call date of December 15, 2036.
+                $45,525,000
+                Airport Facilities Revenue Bonds (Non-AMT), Series 2026B
+                (December 15) Amount Rate Yield Price (681725)* (December 15) Amount Rate Yield Price (681725)*
+                2029 $   780,000 5.000% 2.720% 107.313% PK7 2038 $1,205,000 5.000% 3.590%† 112.125% PU5
+                """;
+
+        var res = OfficialStatementParser.parse(os, "Airport Authority of the City of Omaha", "31", "");
+
+        // 2 lines x 2 columns for series A + 1 term bond + 1 line x 2 columns for series B = 7 bonds.
+        assertEquals(7, res.rows().size(), "both columns of every schedule line, plus the term bond");
+
+        var byCusip = new java.util.HashMap<String, java.util.Map<String, Object>>();
+        res.rows().forEach(r -> byCusip.put(String.valueOf(r.get("cusip")), r));
+
+        // Base CUSIP-6 from the "(681725)*" header, assembled with each row's suffix.
+        var first = byCusip.get("681725NM5");
+        assertNotNull(first, "the base from the parenthesised header + the row's suffix");
+        assertEquals("5.000", first.get("coupon"));
+        assertEquals("2027-12-15", first.get("maturity"), "bare year + the schedule's (December 15) header");
+        assertEquals("2.930", first.get("reofferingYield"), "reoffering yield captured, never emitted as price");
+        assertNull(first.get("price"), "terms only — an OS states no CURRENT price");
+
+        // The SECOND bond on the same physical line — the half the old parser silently dropped.
+        var second = byCusip.get("681725NX1");
+        assertNotNull(second, "the right-hand column of the same line is a bond too");
+        assertEquals("2037-12-15", second.get("maturity"));
+
+        // Term bond, printed as prose with its own full base+suffix.
+        var term = byCusip.get("681725PH4");
+        assertNotNull(term);
+        assertEquals("5.500", term.get("coupon"));
+        assertEquals("2051-12-15", term.get("maturity"));
+
+        // Per-series tax read from the headings — one document, two treatments, neither guessed.
+        assertEquals("AMT", first.get("tax"), "Series 2026A is the AMT tranche");
+        assertEquals("tax-exempt", byCusip.get("681725PK7").get("tax"), "Series 2026B is Non-AMT");
+
+        // The call: date from the footnote, applied ONLY to maturities after it, and NO price invented —
+        // the sentence states a date and no redemption price.
+        assertEquals("2036-12-15", second.get("callDate"), "a 2037 maturity is callable at the 2036 call");
+        assertNull(second.get("callPrice"), "no price is stated, so none is written — never assumed par");
+        assertNull(first.get("callDate"), "a 2027 maturity matures before the call — not callable");
+    }
 
     @Test
     void extractsTermsCallAndTaxButNoPrice() {
