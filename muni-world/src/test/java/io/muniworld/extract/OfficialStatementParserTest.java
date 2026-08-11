@@ -65,6 +65,58 @@ class OfficialStatementParserTest {
      * wording that does not exist. A diagnosis that confidently describes something absent is worse than
      * none.
      */
+    /**
+     * NYC Transitional Finance Authority, Fiscal 2023 Series B/C — a top NY issuer whose OS defeated the
+     * parser twice over, both verbatim from that document:
+     *
+     * <ul>
+     *   <li>the base is printed as <b>"Base CUSIP(1): 64971X"</b>. The footnote marker "(1)" contains a
+     *       DIGIT, and the separator class between the words and the number excluded digits, so the match
+     *       died at the "1" and the document reported "no base CUSIP detected" while printing one;</li>
+     *   <li>coupons print as <b>"5 %"</b> and prices as <b>"100%"</b> — no decimals — and the tax-exempt
+     *       subseries has a Yield column where the taxable subseries has a Price column. A fixed
+     *       five-number, always-decimal row shape matched none of it.</li>
+     * </ul>
+     */
+    @Test
+    void readsAFootnotedBaseCusipAndDecimallessRateAndPriceColumns() {
+        String os = """
+                Dated: Date of Delivery    Due: November 1, as shown on the inside cover pages
+                $829,230,000 Subseries B-1 Tax-Exempt Bonds Base CUSIP(1): 64971X
+                Due Principal Interest CUSIP(1)
+                November 1, Amount Rate Yield Suffix
+                2023 $28,190,000 5 % 2.27% Z43 2024 57,000,000 5 % 2.35% Z50
+                $29,255,000 Subseries B-2 Taxable Bonds Base CUSIP(1): 64971X
+                Due Principal Interest CUSIP(1)
+                November 1, Amount Rate Price Suffix
+                2023 $29,255,000 3.4% 100% Y69
+                """;
+
+        var res = OfficialStatementParser.parse(os, "New York City Transitional Finance Authority", "36", "");
+
+        assertEquals(3, res.rows().size(), "both columns of the tax-exempt line, plus the taxable row");
+        var byCusip = new java.util.HashMap<String, java.util.Map<String, Object>>();
+        res.rows().forEach(r -> byCusip.put(String.valueOf(r.get("cusip")), r));
+
+        // The footnoted base, assembled with each row's suffix.
+        var b1 = byCusip.get("64971XZ43");
+        assertNotNull(b1, "base from \"Base CUSIP(1): 64971X\" + suffix Z43");
+        assertEquals("5", b1.get("coupon"), "a coupon printed as \"5 %\" is still a coupon");
+        assertEquals("2023-11-01", b1.get("maturity"), "bare year + the schedule's November 1 header");
+        assertEquals("2.27", b1.get("reofferingYield"), "this subseries prints a Yield column");
+        assertNull(b1.get("reofferingPrice"));
+
+        assertNotNull(byCusip.get("64971XZ50"), "the second entry on the same physical line");
+
+        // The taxable subseries prints PRICE where the tax-exempt one prints yield. Reading the header
+        // keeps a price from being recorded as a yield.
+        var b2 = byCusip.get("64971XY69");
+        assertNotNull(b2);
+        assertEquals("3.4", b2.get("coupon"));
+        assertEquals("100", b2.get("reofferingPrice"), "the header says Price, so it is recorded as price");
+        assertNull(b2.get("reofferingYield"));
+    }
+
     @Test
     void aDocumentWithNoCusipsIsDiagnosedAsUnkeyableNotAsASuffixLayout() {
         String os = """
