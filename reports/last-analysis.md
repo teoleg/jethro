@@ -1,82 +1,61 @@
-# Last analysis — 2026-08-10 19:00Z
+# Shipped ADR-0145: the desk could be OPENED only at full conviction but CLOSED at none — that asymmetry is the round-trip machine paying half our loss in fees.
 
-**The churn fix from last cycle is VERIFIED and closes; the mirror defect it exposed — the desk sheds a
-position its own live view contradicts at 0.83% per cycle — is fixed this cycle (ADR-0147).**
+## Situation (live, read from this run's report — never authored)
 
-## Situation, in plain numbers
+1. **Money.** Total PnL **-$1,188.69**, down **$176.69** since last run and **$163.82** over the last three.
+   The book is bleeding, and it is UNDERWATER.
+2. **Risk.** Gross **$41,355.64** = **2.8%** of the $1,500,000 firm cap, **$1,458,644** of headroom; net
+   **-$25,490.04** = **2.5%** of the $1,000,000 net cap. Gross rose **+$29,438.14** this window. That is not
+   danger — it is a book coming off dormant into an almost entirely unused budget (ADR-0132). VaR95 **$714.07**,
+   ES95 **$961.45**, breaker not halted.
+3. **Cause.** The change under measurement, `3c43242ba`, was **scored this cycle: ❌ BAD**, and its auto-revert
+   failed on a git conflict. **I did not complete that revert, deliberately** — `3c43242ba` *is* the revert of
+   ADR-0144, which the scorer graded ❌ BAD one window earlier. Reverting it would put the condemned ADR-0144
+   code back in the running book. Two mutually exclusive changes cannot both be reverted, and re-instating a
+   reverted idea is the one thing the contract forbids. Recorded in `reports/must-fix.md`.
+4. **Danger.** No. Bleeding, yes — but at 2.8% of the gross cap with the breaker cold, this is the DORMANT-side
+   failure (unused budget), not the near-the-cap one. De-risking would be the wrong move.
+5. **Change vs market.** Nothing deployed in the last two cycles (`git log` shows only `docs/` and
+   `chore(status)`); `uptimeSeconds` **10452** at a 19:30:01Z stamp derives a JVM start of **16:35:49Z**, one
+   continuous process across five verifications. **So the entire window's PnL and exposure move is market and
+   pre-existing logic — none of it is creditable or blameable on a change.**
 
-**Money.** Total PnL is **-$372.57**, down **$123.42** on the last run and **$186.94** across the last
-three. The book is bleeding, steadily, and the owner's target (+1% every 3 iterations) reads
-**-12.07%**. UNDERWATER.
+## What I found, and why it is different from the last four cycles
 
-**Risk.** Gross **$104,241.68** — **6.9%** of the $1.5M firm cap, **$1,395,758** of headroom; net
-**$31,749.88**, **3.2%** of the net cap. Gross rose **$18,992.85** this run. That is not a danger state,
-it is the ADR-0132 deploy mandate working; the drawdown breaker is nowhere near.
+Four cycles have confirmed item #1's *mechanism* — "the fusion target tracks a ~90-second mean-reverting
+forecast 1:1" — without ever finding its **cause**. The cost is not in dispute: `totalFees` **$488.284665**
+against `firmTotal` **-$1,188.68635665** is **41.1%** of the whole cumulative loss (**49.0%** on ALPHA alone,
+$465.190115 of -$949.70770444), across **$5,716,068.55** of LIVE turnover and **3,319** fills — while the three
+large-n LIVE hit rates sit at **0.490 / 0.501 / 0.498**. Half the loss is paid in fees to trade a coin flip.
 
-**Danger.** No. Bleeding *without* being near the cap or the breaker is a PnL problem, not a de-risking
-one, so the answer is to fix what is losing — not to cut size.
+The cause is one line of `FusionLifecycle.tick`: the ADR-0059 conviction floor is applied **only to
+`!reducing`**. A name may be **opened** only at `|f| ≥ 5.0` and **closed at nothing at all**. Because
+`TargetPlanner.targetQuantity` is *linear* in the forecast, a forecast that merely **decays** toward zero
+collapses the target and unwinds the whole position — at a strength that would not have been allowed to open a
+single share of it. Read from this window's own FILLED LIVE ALPHA orders: **AMZN `BUY 34` at f=+9.25 (18:54:25),
+`SELL 26` at f=+0.0688 (18:59:59)** — the forecast never changed *sign*; 82% sold back five minutes later.
+**BAC `SELL 156` at f=−7.38 → `BUY 1`×4 at f≈+0.002…+0.10 → `BUY 115` at f=−0.288**, inside four minutes.
+`f ≈ 0` is the combiner saying it has *no view*. No view is a reason to **hold**, not to liquidate.
 
-**Cause.** Last cycle's change (`4e1ed98a3`, ADR-0145) scored ⚠️ INCONCLUSIVE and was kept. Its *defect*
-verdict is ✅ VERIFIED on its own pre-stated terms: `scripts/reversal-rate.py` puts the ALPHA same-name
-reversal rate at **0.0659** (11 of 167 pairs) against a baseline of **0.1975** (32 of 162) and a
-pre-stated MDE of **<0.080**, clearing the ≥150-pair gate. Fees are now **25.4%** of the loss
-(`totalFees $94.669275` on `firmTotal -$372.57213777`) where the four windows before it read 41–48%. The
-round-trip machine is off.
+## The change
 
-## Order-level post-mortem, and market vs change
+**ADR-0145 — apply the conviction floor to the EXIT as well as the entry.** A Schmitt trigger: enter on
+conviction, exit on conviction, do nothing in between. It gates **only** the reduction the *forecast* authored;
+a reduction a *risk control* authored always routes in full, separated exactly by capturing the planner's
+target before any control runs. It introduces **no number** — the threshold is
+`jethro.fusion.min-forecast-to-route` itself. A flat target returns before any of it, so the ADR-0086
+chandelier cut, the ADR-0065 unwind and the ADR-0027 breaker keep exact semantics; the whole deterministic
+floor is untouched. Deliberately **not** ADR-0133, which widened the *band* and was scored ❌ BAD — a wider
+band vetoes weak-conviction *names*; this filters weak-conviction *exits*.
 
-This window's 60 orders are **57 `fusion entry — target increase`, 1 `fusion reduce`, 2 hedge** — the
-round-trip signature is gone from the tape, which is the direct corroboration of the verdict above. But
-36 of those 60 were CANCELLED by the ADR-0084 re-plan, and the per-name order sizes climb monotonically
-each 30 s tick (BAC 5 → 7 → 10 → 12 → 18 → 21 → 23), which is unfilled intent accumulating, not churn.
+The honest risk: losers are held longer. That is what the ADR-0086 trailing σ cut exists for, and it is exempt
+here — so this moves the exit decision **from the forecast to the risk sensor**, which is the owner's stated
+thesis. Expect gross to RISE; that is the ADR-0132 intent at 2.8% of the cap, not a relaxed limit.
 
-**Attribution, honestly:** no logic was deployed this cycle or last (`git log` shows only `docs/`,
-`chore(status)` and the ledger since `4e1ed98a3`), and `ops_jvm.uptimeSeconds` **21580** against a
-19:00:02Z stamp puts JVM start at **13:00:22Z** — one continuous process. So **the -$123.42 and the
-+$18,992.85 of gross belong to the market and to a book still building toward targets set days ago, not
-to any change.** ADR-0145 gets credit for the reversal rate and for the fee share, both of which are
-measured on its own mechanism; it gets no credit or blame for the PnL move, which cannot be separated
-from the tape here and which the scorer already priced as insignificant (t = +0.68 over 13 cycles).
+## How it gets graded
 
-## What the telemetry actually showed, and what I changed
-
-With the exit leg fixed, `fusion_targets` states the mirror defect without ambiguity. **Two of the six
-planned names are held on the opposite side of flat from their own target**, at forecasts far above the
-conviction floor — MSFT `f = -7.568314`, target `-47.677599`, **held +5**, routing **-0.041494**; WMT
-`f = -7.312571`, target `-364.857367`, **held +31**, routing **-0.257260**. Those quantities are exactly
-`a × held` for the ADR-0080 rate `a = 1 - e^(-30/3600) = 0.008298707`. The desk decided against these
-positions and is taking an hour to shed 63% of each.
-
-The cause is a composition bug, not a missing rule. `PositionBuffer.bufferedDelta` applies ADR-0132's
-`onTargetSide` — which resolves a wrong-side destination to flat and whose ADR *claims*
-`|held + delta'| = 0` — and then, on the next statement, applies ADR-0107's rating, whose firing
-condition **is** the wrong-side case. ADR-0132 therefore delivers 0.83% of its own stated destination per
-cycle. ADR-0145's `ConvictionHold` runs downstream and can only shrink an order, so it cannot restore it;
-ADR-0118's full resolution runs only under a shut edge gate, and `fusion_targets` reports
-`"edgeGate": null`.
-
-**ADR-0147 (shipped):** the unwind of a wrong-side holding is not rated by the ADR-0080 *acquisition*
-fraction when the opposing view clears `min-forecast-to-route` — the same strength that would have been
-required to open the reverse position. Below the floor every path is byte-identical, so the ADR-0090
-wobble-crossing ADR-0145 just removed stays removed. It is the mirror of ADR-0145 and completes one
-Schmitt trigger: enter on conviction, exit on conviction, do nothing in between. No number is introduced.
-Cutting this is the one cut CLAUDE.md licenses — dead exposure — and it *unblocks* deployment, since
-ADR-0102 pins the aim to flat while the holding is on the wrong side; once flat the desk builds the
-position it actually wants (MSFT `-47.677599`, WMT `-364.857367`).
-
-## What I checked and did not act on
-
-**No source has positive out-of-sample edge, and it is not close.** Not one reaches |t| = 1.5 at any
-horizon: trend 3600s **-5.65 bps, t = -1.35** (n=87); xsreversion 3600s **-2.97 bps, t = -0.65**, cohort-
-clustered **-2.21** — significantly *anti*-predictive; reversion 3600s **+3.99 bps, t = +0.86** (n=76);
-every 225 s series inside ±0.28 bps on n > 1,200. The combiner has already floored the two negative
-sources (xsreversion 0.25, trend 0.285) and lifted reversion to 1.98, so re-weighting cannot create edge
-— that is must-fix #2 and it needs a new predictor through the ADR-0049 gate, not a dial. I also logged
-but did not attack the fact that the desk holds **16.0%** of its intended book ($36,697 of $228,774
-across the names shown): that is the ADR-0080 rate behaving as specified, and deploying more capital into
-zero-edge sources scales the loss, not the PnL. Fixing a cost paid *regardless* of edge comes first.
-
-**Verification next run:** `scripts/wrong-side-share.py` (committed with the change) — the convicted-
-wrong-side share of held notional must fall below **0.1058** from a baseline of **0.2698**, on a pooled
-held-notional gate of **6,035.85**, with ADR-0145's reversal rate not rising back above **0.080**.
-`./gradlew -Pci test` green.
+`scripts/reversal-rate.py` (new, committed) computes the register's proof metric from `recent_orders` so the
+loop never authors it: the ALPHA same-name direction-reversal rate, pooled over the full 6-report window.
+Baseline **0.1975 (32 of 162 pairs)**; it must fall **below ~0.080** against a measured no-deploy noise floor
+of mean 0.190 / sd 0.055; pooled sample gate **≥150 pairs** or NO VERDICT. Guards: gross must not fall and
+`firmTotal` must not deteriorate. `./gradlew -Pci test` green.
