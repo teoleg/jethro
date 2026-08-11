@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -56,6 +57,43 @@ class OfficialStatementParserTest {
      *   <li>two series with different tax treatment (AMT / Non-AMT) are priced in one document.</li>
      * </ul>
      */
+    /**
+     * A document that names NO CUSIPs must be diagnosed as exactly that. The owner's second live OS (Albany
+     * County GO, 2018) contains the word "CUSIP" zero times — typical of a preliminary OS or a small
+     * competitive deal where CUSIPs are assigned at award. The probe used to answer "the schedule almost
+     * certainly prints a base CUSIP-6 once and only suffixes per row", sending the reader hunting for
+     * wording that does not exist. A diagnosis that confidently describes something absent is worse than
+     * none.
+     */
+    @Test
+    void aDocumentWithNoCusipsIsDiagnosedAsUnkeyableNotAsASuffixLayout() {
+        String os = """
+                COUNTY OF ALBANY NEW YORK
+                $140,740,000 VARIOUS PURPOSES SERIAL BONDS - 2018
+                Date of Issue: Date of Delivery    Maturity Date: April 1, 2019-2029
+                2019 $9,655,000 5.000 1.750
+                2020 10,000,000 5.000 1.860
+                The Bonds are general obligations of the County.
+                """;
+
+        // ONE page: the fixture is a page of real text. Declaring 47 pages would make it read as
+        // image-only (under 100 chars/page), and the scanned-PDF diagnosis correctly outranks this one.
+        var d = OfficialStatementProbe.probe(os, 1, false);
+
+        assertEquals(0, d.get("fullCusipsFound"));
+        String diagnosis = String.valueOf(d.get("diagnosis"));
+        assertTrue(diagnosis.contains("does not contain the word CUSIP"),
+                "the absence of identifiers is the finding: " + diagnosis);
+        assertFalse(diagnosis.contains("base CUSIP-6 once"),
+                "must not describe a suffix layout that is not there: " + diagnosis);
+        assertTrue(diagnosis.contains("EMMA"), "and must say what to do instead: " + diagnosis);
+
+        // The schedule rows ARE present in the text — that distinction is the evidence, so it is reported.
+        @SuppressWarnings("unchecked")
+        List<String> rowish = (List<String>) d.get("scheduleRowSample");
+        assertEquals(2, rowish.size(), "year + amount + rate lines are found even with no CUSIP");
+    }
+
     @Test
     void readsATwoColumnSuffixScheduleWithPerSeriesTax() {
         String os = """

@@ -31,6 +31,9 @@ import java.util.regex.Pattern;
 public final class OfficialStatementProbe {
 
     private static final Pattern FULL_CUSIP = Pattern.compile("\\b([0-9]{3}[0-9A-Z]{5}[0-9])\\b");
+    /** A line shaped like a schedule row — a year, a dollar-ish amount and a rate — identifiers aside. */
+    private static final Pattern SCHEDULE_ROWISH = Pattern.compile(
+            "(?:19|20)\\d{2}\\s+\\$?\\s*[\\d,]{4,}\\s+\\d{1,2}\\.\\d{1,3}");
     private static final Pattern SCHEDULE_HEADING = Pattern.compile(
             "(?i)(maturity schedule|maturities|due\\s+[A-Z][a-z]+\\s+\\d{1,2})");
 
@@ -122,13 +125,26 @@ public final class OfficialStatementProbe {
         }
         out.put("firstLines", head);
 
+        // Lines that LOOK like schedule rows regardless of identifiers: a year, a dollar amount and a
+        // rate. When a document names no CUSIPs at all, this is the evidence that says whether the table
+        // is present-but-unkeyable or simply absent from the extracted text.
+        List<String> rowish = new ArrayList<>();
+        for (String raw : lines) {
+            String line = raw.strip();
+            if (rowish.size() < 12 && SCHEDULE_ROWISH.matcher(line).find()) {
+                rowish.add(truncate(line));
+            }
+        }
+        out.put("scheduleRowSample", rowish);
+
         out.put("diagnosis", diagnose(sparse, ocrEnabled, pages, cusips.size(), res,
-                (String) out.get("baseCusipDetected")));
+                (String) out.get("baseCusipDetected"), mentions.size(), rowish.size()));
         return out;
     }
 
     private static String diagnose(boolean sparse, boolean ocrEnabled, int pages, int cusips,
-                                   OfficialStatementParser.Result res, String baseCusip) {
+                                   OfficialStatementParser.Result res, String baseCusip,
+                                   int cusipMentions, int rowishLines) {
         if (pages == 0) {
             return "PDF has no pages — not a readable PDF.";
         }
@@ -153,6 +169,24 @@ public final class OfficialStatementProbe {
                       + "text; check tesseract is installed and muni.ocr.dpi is adequate."
                     : "Image-only (scanned) PDF: under 100 characters of text per page, i.e. no usable text "
                       + "layer. Enable OCR (muni.ocr.enabled=true, tesseract installed) and re-load.";
+        }
+        // NO CUSIP ANYWHERE. Not a parser gap and not a layout — the document simply does not name the
+        // securities. Common in preliminary OSs and small competitive GO deals, where CUSIPs are assigned
+        // at award. Nothing can key these rows, and inventing an identifier is the one thing never done
+        // (ADR-0011). Diagnosing this as "suffixes under a base" — as this probe used to — sent the reader
+        // hunting for wording that is not there.
+        if (cusipMentions == 0 && cusips == 0) {
+            return "This document does not contain the word CUSIP anywhere, and no CUSIP tokens"
+                   + (rowishLines > 0
+                      ? " — but " + rowishLines + " line(s) do look like schedule rows (year + amount + "
+                        + "rate), so the maturity table IS in the text, just with no identifiers."
+                      : ", and no schedule-shaped rows either (the table may be on a cover page image or "
+                        + "an appendix this text does not include).")
+                   + " Bonds cannot be keyed without a CUSIP and one is never invented, so nothing can be "
+                   + "loaded from it. This is typical of a PRELIMINARY Official Statement or a small "
+                   + "competitive deal where CUSIPs are assigned at award. Fix: open a bond you actually "
+                   + "hold in the browser and use its 'open this CUSIP on EMMA' link — that lands on the "
+                   + "FINAL OS for a security you own, which always names its CUSIPs.";
         }
         if (cusips <= 1) {
             return "Text extracted fine (" + pages + " pages) but contains " + cusips + " full CUSIP-9 "
