@@ -90,6 +90,22 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
         return healthy;
     }
 
+    /**
+     * Handle a failed query. A {@link org.springframework.jdbc.BadSqlGrammarException} means the SQL is
+     * WRONG, not that the database is gone — flipping the health flag for it made one coding mistake
+     * masquerade as an outage and silently degrade every other read for the next probe window. Log it
+     * loudly and leave health alone; anything else is treated as a connectivity problem as before.
+     */
+    private void queryFailed(String what, DataAccessException e) {
+        if (e instanceof org.springframework.jdbc.BadSqlGrammarException) {
+            log.error("BUG: malformed SQL in {} — this is a code defect, not a DB outage: {}", what,
+                    e.getMessage());
+            return;
+        }
+        healthy = false;
+        warnOnce(e);
+    }
+
     private boolean probe() {
         if (jdbc == null) {
             return false;   // no JdbcTemplate wired (e.g. a unit test) → DB path is a no-op, index still runs
@@ -202,31 +218,44 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
         if (!available()) {
             return List.of();
         }
-        // HAVING count(source_id) = 0 drops the issuers whose Official Statement has already been read,
-        // so the list is a TO-DO list rather than a ledger of everything.
-        String having = includeDone ? "" : " HAVING count(source_id) = 0";
         try {
-            return jdbc.query("""
-                    SELECT substring(cusip, 1, 6) AS cusip6,
-                           max(issuer)            AS issuer,
-                           count(*)::int          AS bonds,
-                           sum(held_par)          AS held_par,
-                           count(call_date)::int  AS with_call,
-                           count(source_id)::int  AS from_os,
-                           min(cusip)             AS sample_cusip
-                    FROM muni.security
-                    GROUP BY substring(cusip, 1, 6)""" + having + """
-                    ORDER BY count(*) DESC
-                    LIMIT ?""",
+            return jdbc.query(coverageSql(includeDone),
                     (rs, i) -> new CoverageRow(rs.getString("cusip6"), rs.getString("issuer"),
                             rs.getInt("bonds"), rs.getBigDecimal("held_par"), rs.getInt("with_call"),
                             rs.getInt("from_os"), rs.getString("sample_cusip")),
                     limit);
         } catch (DataAccessException e) {
-            healthy = false;
+            queryFailed("coverage()", e);
             return List.of();
         }
     }
+
+    /**
+     * The coverage statement. Package-private so its SHAPE can be tested without a database — this query
+     * shipped as "...count(source_id) = 0ORDER BY count(*) DESC" because two Java text blocks were glued
+     * together with no separator. It threw on every call, returned an empty list, and left the owner
+     * looking at an empty plan while every bond sat untouched in the table. Concatenated SQL carries its
+     * own newlines now, and the test asserts they are there.
+     *
+     * <p>{@code HAVING count(source_id) = 0} keeps only issuers whose Official Statement has NOT been
+     * read, which is what makes the plan a to-do list rather than a ledger.
+     */
+    static String coverageSql(boolean includeDone) {
+        return """
+                SELECT substring(cusip, 1, 6) AS cusip6,
+                       max(issuer)            AS issuer,
+                       count(*)::int          AS bonds,
+                       sum(held_par)          AS held_par,
+                       count(call_date)::int  AS with_call,
+                       count(source_id)::int  AS from_os,
+                       min(cusip)             AS sample_cusip
+                FROM muni.security
+                GROUP BY substring(cusip, 1, 6)
+                """
+                + (includeDone ? "" : "HAVING count(source_id) = 0\n")
+                + "ORDER BY count(*) DESC\nLIMIT ?";
+    }
+
 
     /** Universe-wide totals: bonds, distinct issuers, and how many bonds already have a call date. */
     public java.util.Optional<int[]> coverageTotals() {
@@ -239,13 +268,13 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
                            count(DISTINCT substring(cusip, 1, 6))::int,
                            count(call_date)::int,
                            count(source_id)::int,
-                           count(DISTINCT substring(cusip, 1, 6))
-                             FILTER (WHERE source_id IS NOT NULL)::int
+                           (count(DISTINCT substring(cusip, 1, 6))
+                             FILTER (WHERE source_id IS NOT NULL))::int
                     FROM muni.security""",
                     (rs, i) -> new int[] {rs.getInt(1), rs.getInt(2), rs.getInt(3),
                                           rs.getInt(4), rs.getInt(5)}));
         } catch (DataAccessException e) {
-            healthy = false;
+            queryFailed("coverageTotals()", e);
             return java.util.Optional.empty();
         }
     }
