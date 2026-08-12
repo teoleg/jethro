@@ -244,16 +244,61 @@
         <div style="margin-top:10px;color:var(--dim)">
           <b style="color:var(--txt)">Two inputs no document can supply</b> — the model needs them regardless
           of how many bonds you load:
-          <div style="margin-top:4px">· <b>Benchmark curve</b> — <span style="color:var(--warn)">not ingested yet</span>.
-            The free, official, automatable one is the US Treasury daily par curve; a AAA muni curve (MMD/BVAL) is paid.</div>
-          <div>· <b>Rate volatility</b> — <span style="color:var(--warn)">not set</span>. A lattice needs one;
-            market vol surfaces are paid, so this is an explicit assumption you set, and results should be
-            reported at vol ± a band rather than as a single hidden number.</div>
+          <div id="curve-inputs" style="margin-top:4px">checking…</div>
           <div style="margin-top:6px">Valuation history depth:
             <b style="color:var(--txt)">${r.valuationPeriods || 0}</b> quarterly period(s) —
             what any time-series or refunding-efficiency work runs on.</div>
         </div>`;
+      loadCurve();
     } catch (e) { el.textContent = "readiness unavailable"; }
+  }
+
+  /**
+   * The two GLOBAL model inputs (ADR-0017), read from live state rather than hard-coded as "not done".
+   * Both come from ONE free official file — the Fed's GSW daily zero curve — so the curve ingest and the
+   * volatility measurement land together. Sigma is never shown alone: the p10/p50/p90 band travels with it,
+   * because a single sigma with no band is a hidden assumption.
+   */
+  async function loadCurve() {
+    const el = document.getElementById("curve-inputs");
+    if (!el) { return; }
+    try {
+      const c = await (await fetch("/api/muni/curve", { cache: "no-store" })).json();
+      const days = c.curveDays || 0;
+      const curveLine = days > 0
+        ? `<span style="color:var(--up)">ingested</span> — <b>${Number(days).toLocaleString()}</b> daily
+           curve(s) from <b>${esc(c.source)}</b>, newest <span class="mono">${esc(c.newestCurve)}</span>.
+           Zero-coupon, so it discounts cash flows directly.
+           <div style="font-size:10.5px">Basis is <b>taxable Treasury</b>, not a tax-exempt muni curve — the
+             muni ratio leg is measured from the fund panel as OS coverage grows (ADR-0017).</div>`
+        : `<span style="color:var(--warn)">not ingested yet</span> — ${esc(c.lastResult || "no run")}`;
+
+      const vols = c.vols || [];
+      const volLine = vols.length === 0
+        ? `<span style="color:var(--warn)">not measured yet</span> — it is computed from the curve history
+           above, so it arrives with the curve.`
+        : `<span style="color:var(--up)">measured</span>, not assumed — realized vol of the
+           ${esc(vols[0].series)} zero over a ${vols[0].windowDays}-day window.
+           <div style="overflow-x:auto;margin-top:4px"><table class="tbl"><thead><tr>
+             <th>Model</th><th>σ</th><th>p10</th><th>p50</th><th>p90</th><th>Obs</th></tr></thead><tbody>
+             ${vols.map(v => `<tr>
+               <td>${esc(v.kind)}<div style="color:var(--dim);font-size:10px">${
+                 v.kind === "NORMAL" ? "Hull-White, bp/yr" : "BDT / Black-Karasinski, proportion"}</div></td>
+               <td class="mono">${esc(String(v.sigma))}</td>
+               <td class="mono">${v.p10 === null ? "—" : esc(String(v.p10))}</td>
+               <td class="mono">${v.p50 === null ? "—" : esc(String(v.p50))}</td>
+               <td class="mono">${v.p90 === null ? "—" : esc(String(v.p90))}</td>
+               <td class="mono">${Number(v.observations).toLocaleString()}${
+                 v.excluded > 0 ? ` <span style="color:var(--dim)">(${v.excluded} excl.)</span>` : ""}</td>
+             </tr>`).join("")}
+           </tbody></table></div>
+           <div style="font-size:10.5px">OAS is quoted across p10/p50/p90 — a single σ would hide the
+             assumption. Treasury vol overstates muni option value, so OAS on callables reads
+             conservative.</div>`;
+
+      el.innerHTML = `<div>· <b>Benchmark curve</b> — ${curveLine}</div>
+        <div style="margin-top:4px">· <b>Rate volatility</b> — ${volLine}</div>`;
+    } catch (e) { el.textContent = "curve status unavailable"; }
   }
 
   let COVERAGE_ALL = false;   // false = TO-DO only (issuers whose OS is already read are hidden)
