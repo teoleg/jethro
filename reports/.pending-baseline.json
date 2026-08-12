@@ -1,0 +1,20 @@
+{
+  "commit": "63afe1f676286ee9e310927164470538f0c8536f",
+  "fees": "337.802004",
+  "gross_exposure": "98812.13628750",
+  "net_exposure": "-49853.28791250",
+  "source": {
+    "feedMode": "LIVE",
+    "grossExposure": "98812.13628750",
+    "hedgePnl": "-38.02825909",
+    "netExposure": "-49853.28791250",
+    "realizedPnl": "-1198.28995383",
+    "strategyAlpha": "-1152.13365237",
+    "totalFees": "337.802004",
+    "totalPnl": "-1190.16191146",
+    "unrealizedPnl": "8.12804237"
+  },
+  "summary": "a flat target is an exit only when something other than the forecast made it flat \u2014 the conviction floor's own exemption was liquidating whole positions at zero conviction (ADR-0149)",
+  "total_pnl": "-1190.16191146",
+  "ts": "2026-08-12T18:19:16Z"
+}
