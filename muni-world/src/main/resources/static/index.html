@@ -147,7 +147,7 @@
     </div>
   </div>
 
-  <div class="foot">muni-world runs as a separate process · <b>UI build B13</b> (model readiness: OAS preconditions counted from the data)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B14</b> (upsert merges instead of erasing; panels refresh together after a load)</div>
 </main>
 
 <script>
@@ -512,6 +512,7 @@
       await refreshStore();
       go(0);   // refresh the browser list in place (loadRecent was removed with the old table)
       loadCoverage();   // a just-loaded issuer drops off the to-do list straight away
+      loadReadiness();  // and the OAS preconditions move with it, in the same breath
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">load failed — is muni-world up?</span>'; }
   }
 
@@ -534,6 +535,7 @@
       await refreshStore();
       go(0);   // refresh the browser list in place (loadRecent was removed with the old table)
       loadCoverage();   // a just-loaded issuer drops off the to-do list straight away
+      loadReadiness();  // and the OAS preconditions move with it, in the same breath
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">upload error</span>'; }
   }
 

@@ -28,18 +28,45 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
 
     private static final Logger log = LoggerFactory.getLogger(SecurityRepository.class);
 
-    // Idempotent upsert (hard invariant 6): re-loading the same OS overwrites the row, never duplicates it.
+    /**
+     * Idempotent upsert (hard invariant 6): re-loading the same OS overwrites the row, never duplicates it.
+     *
+     * <p><b>COALESCE on every field, and that is the whole point.</b> Two sources write this table and they
+     * know different things: the N-PORT fund feed carries cusip/issuer/coupon/maturity and NOTHING else,
+     * while an Official Statement carries the call schedule, tax status and provenance. With a plain
+     * {@code = EXCLUDED.x} the daily fund pass re-wrote all ~5,000 rows with null call_date, tax_status and
+     * source_id — silently DESTROYING every call schedule extracted from a document, which is exactly the
+     * data the whole OS pipeline exists to obtain. It also erased source_id, so issuers already done
+     * reappeared on the coverage plan and the readiness counts moved on their own.
+     *
+     * <p>The rule now: a source that does not carry a field cannot erase it. A source that DOES carry one
+     * still overwrites (a corrected OS supplies a non-null value and wins), so this is not a write-once
+     * table — it is a merge that never trades knowledge for ignorance.
+     */
     private static final String UPSERT = """
             INSERT INTO muni.security
               (cusip, issuer, coupon, maturity_date, dated_date, price, tax_status,
                call_date, call_price, rating, geo_fips, source_id, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
             ON CONFLICT (cusip) DO UPDATE SET
-              issuer = EXCLUDED.issuer, coupon = EXCLUDED.coupon, maturity_date = EXCLUDED.maturity_date,
-              dated_date = EXCLUDED.dated_date, price = EXCLUDED.price, tax_status = EXCLUDED.tax_status,
-              call_date = EXCLUDED.call_date, call_price = EXCLUDED.call_price, rating = EXCLUDED.rating,
-              geo_fips = EXCLUDED.geo_fips, source_id = EXCLUDED.source_id, updated_at = now()
+              issuer        = COALESCE(EXCLUDED.issuer,        muni.security.issuer),
+              coupon        = COALESCE(EXCLUDED.coupon,        muni.security.coupon),
+              maturity_date = COALESCE(EXCLUDED.maturity_date, muni.security.maturity_date),
+              dated_date    = COALESCE(EXCLUDED.dated_date,    muni.security.dated_date),
+              price         = COALESCE(EXCLUDED.price,         muni.security.price),
+              tax_status    = COALESCE(EXCLUDED.tax_status,    muni.security.tax_status),
+              call_date     = COALESCE(EXCLUDED.call_date,     muni.security.call_date),
+              call_price    = COALESCE(EXCLUDED.call_price,    muni.security.call_price),
+              rating        = COALESCE(EXCLUDED.rating,        muni.security.rating),
+              geo_fips      = COALESCE(EXCLUDED.geo_fips,      muni.security.geo_fips),
+              source_id     = COALESCE(EXCLUDED.source_id,     muni.security.source_id),
+              updated_at    = now()
             """;
+
+    /** The upsert statement — package-private so the no-erasure rule is TESTED, not just intended. */
+    static String upsertSql() {
+        return UPSERT;
+    }
 
     private static final RowMapper<Bond> ROW = (rs, i) -> new Bond(
             rs.getString("cusip"),

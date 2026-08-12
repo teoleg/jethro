@@ -42,4 +42,31 @@ class CoverageSqlTest {
         assertFalse(SecurityRepository.coverageSql(true).contains("HAVING"),
                 "show-all must return every issuer");
     }
+
+    /**
+     * The upsert must MERGE, never trade knowledge for ignorance. Two sources write this table and they
+     * know different things: the N-PORT fund feed carries cusip/issuer/coupon/maturity and nothing else,
+     * an Official Statement carries the call schedule, tax status and provenance.
+     *
+     * <p>With plain {@code = EXCLUDED.x} the daily fund pass re-wrote every row with null call_date,
+     * tax_status and source_id — silently destroying the call schedules the OS pipeline exists to obtain,
+     * and making the coverage plan and readiness counts move on their own. Every updatable field must be
+     * COALESCEd, so a source that does not carry a field cannot erase it.
+     */
+    @Test
+    void theUpsertNeverErasesAKnownValueWithANull() {
+        String sql = SecurityRepository.upsertSql();
+        String doUpdate = sql.substring(sql.indexOf("DO UPDATE SET"));
+
+        for (String field : new String[] {"issuer", "coupon", "maturity_date", "dated_date", "price",
+                                          "tax_status", "call_date", "call_price", "rating", "geo_fips",
+                                          "source_id"}) {
+            assertTrue(doUpdate.contains("COALESCE(EXCLUDED." + field + ","),
+                    field + " must be COALESCEd or a source that lacks it will erase it:\n" + doUpdate);
+            assertFalse(doUpdate.matches("(?s).*\\b" + field + "\\s*=\\s*EXCLUDED\\." + field + "\\b.*"),
+                    field + " is assigned bare from EXCLUDED — that is the erasing form:\n" + doUpdate);
+        }
+        // The one field that SHOULD be written unconditionally.
+        assertTrue(doUpdate.contains("updated_at    = now()"), doUpdate);
+    }
 }
