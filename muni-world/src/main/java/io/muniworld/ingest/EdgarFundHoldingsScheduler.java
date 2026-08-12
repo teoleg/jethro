@@ -210,7 +210,9 @@ public final class EdgarFundHoldingsScheduler {
             java.math.BigDecimal valPer100 = valPer100(a.parVal()[1], par);
             boolean ok = repo.updateDetail(e.getKey(), new SecurityRepository.Detail(
                     a.kind()[0], a.flags()[0], a.flags()[1], a.funds().size(),
-                    par.signum() > 0 ? par : null, valPer100, a.asOf()[0]));
+                    // sourceId stays null here: this is FUND data, and only an Official Statement makes
+                    // a bond "documented". updateDetail never writes source_id anyway.
+                    par.signum() > 0 ? par : null, valPer100, a.asOf()[0], null));
             if (ok) {
                 written++;
             }

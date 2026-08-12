@@ -90,7 +90,8 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
                     rs.getObject("held_funds", Integer.class),
                     rs.getBigDecimal("held_par"),
                     rs.getBigDecimal("val_per100"),
-                    rs.getObject("val_as_of", LocalDate.class)));
+                    rs.getObject("val_as_of", LocalDate.class),
+                    rs.getString("source_id")));
 
     // When the DB is down, every JDBC call blocks on Hikari's connection-timeout. Loading N bonds must not pay
     // that N times, nor must the 5s status poll pay it each tick. So health is CACHED: probe at most once per
@@ -149,7 +150,8 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
     /** Fund-attested filing detail beside a bond's terms (V3 columns) — see {@code Detail}. */
     public record Detail(String couponKind, Boolean inDefault, Boolean intArrears,
                          Integer heldFunds, java.math.BigDecimal heldPar,
-                         java.math.BigDecimal valPer100, LocalDate valAsOf) {
+                         java.math.BigDecimal valPer100, LocalDate valAsOf,
+                         String sourceId) {
     }
 
     /** A bond with its filing detail, as one read. Detail fields are null where nothing was filed. */
@@ -359,6 +361,10 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
                            count(*) FILTER (WHERE coupon IS NOT NULL
                                               AND maturity_date IS NOT NULL)::int AS terms,
                            count(*) FILTER (WHERE call_date IS NOT NULL)::int AS callable,
+                           count(*) FILTER (WHERE call_date IS NULL
+                                              AND source_id IS NOT NULL)::int AS non_callable,
+                           count(*) FILTER (WHERE call_date IS NULL
+                                              AND source_id IS NULL)::int AS call_unknown,
                            count(*) FILTER (WHERE val_per100 IS NOT NULL
                                                OR price IS NOT NULL)::int AS priced,
                            count(*) FILTER (WHERE tax_status IS NOT NULL)::int AS with_tax,
@@ -378,6 +384,8 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
                         m.put("bonds", rs.getInt("bonds"));
                         m.put("terms", rs.getInt("terms"));
                         m.put("callable", rs.getInt("callable"));
+                        m.put("nonCallable", rs.getInt("non_callable"));
+                        m.put("callUnknown", rs.getInt("call_unknown"));
                         m.put("priced", rs.getInt("priced"));
                         m.put("withTax", rs.getInt("with_tax"));
                         m.put("fromOs", rs.getInt("from_os"));

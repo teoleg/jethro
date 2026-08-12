@@ -213,9 +213,10 @@ public final class MuniBondService {
         // A call with no stated price used to display "@100" — an invented money number wearing the
         // clothes of a document fact. An OS footnote often gives the call DATE and no redemption price;
         // say so rather than assuming par.
-        String call = b.callDate() == null ? "—"
-                : b.callDate() + (b.callPrice() == null ? " @price not stated"
-                                                        : " @" + b.callPrice().toPlainString());
+        String call = b.callDate() != null
+                ? b.callDate() + (b.callPrice() == null ? " @price not stated"
+                                                        : " @" + b.callPrice().toPlainString())
+                : "";     // filled in below once the call STATE is known — never a bare dash
 
         // Current price: the price store (ADR-0015 — MSRB trade prints etc.) is the market authority; fall
         // back to a price carried on the bond itself (e.g. a direct/CSV ingest). OS-terms bonds have neither
@@ -234,6 +235,9 @@ public final class MuniBondService {
         Boolean intArrears = d == null ? null : d.intArrears();
         Integer heldFunds = d == null ? null : d.heldFunds();
         Double heldPar = d == null || d.heldPar() == null ? null : d.heldPar().doubleValue();
+        boolean documented = d != null && d.sourceId() != null && !d.sourceId().isBlank();
+        String callState = b.callDate() != null ? "CALLABLE"
+                : documented ? "NON_CALLABLE" : "UNKNOWN";
 
         if (px == null) {
             double nan = Double.NaN;
@@ -242,7 +246,7 @@ public final class MuniBondService {
                     nan, nan, nan, nan, nan,
                     r(BondMath.accrued(coupon, settle, b.maturity()), 3),
                     b.taxStatus(), call, b.rating(), null, null,
-                    couponKind, inDefault, intArrears, heldFunds, heldPar, valPer100, valAsOf);
+                    couponKind, inDefault, intArrears, heldFunds, heldPar, valPer100, valAsOf, callState);
         }
         double price = px.doubleValue();
         double callPrice = b.callPrice() == null ? 0.0 : b.callPrice().doubleValue();
@@ -255,7 +259,7 @@ public final class MuniBondService {
                 r(BondMath.convexity(coupon, settle, b.maturity(), price), 2),
                 r(BondMath.accrued(coupon, settle, b.maturity()), 3),
                 b.taxStatus(), call, b.rating(), asOf, pxSource,
-                couponKind, inDefault, intArrears, heldFunds, heldPar, valPer100, valAsOf);
+                couponKind, inDefault, intArrears, heldFunds, heldPar, valPer100, valAsOf, callState);
     }
 
     private static double r(double v, int dp) {

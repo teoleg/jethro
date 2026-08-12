@@ -147,7 +147,7 @@
     </div>
   </div>
 
-  <div class="foot">muni-world runs as a separate process · <b>UI build B14</b> (upsert merges instead of erasing; panels refresh together after a load)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B15</b> (call state is three-way: callable / confirmed non-callable / unknown)</div>
 </main>
 
 <script>
@@ -234,7 +234,9 @@
           <th>Precondition</th><th>Bonds</th><th>Share</th></tr></thead><tbody>
           ${bar("Terms (coupon + maturity)", r.terms, "the cash flows — from the fund filings")}
           ${bar("A price to solve from", r.priced, "quarterly filing marks; OAS is solved FROM a price, so it is an as-of-quarter-end OAS")}
-          ${bar("Call schedule", r.callable, "the OPTION — only an Official Statement has it")}
+          ${bar("Callable (call date known)", r.callable, "the OPTION — only an Official Statement has it")}
+          ${bar("Non-callable, CONFIRMED", r.nonCallable, "an OS was read and states no call — a fact, not a gap")}
+          ${bar("Call UNKNOWN", r.callUnknown, "no OS for these yet. Not the same as non-callable, and never assumed to be")}
           ${bar("Tax status", r.withTax, "needed for the de-minimis / tax-option work")}
           ${bar("Read from an OS", r.fromOs, "documents loaded so far")}
           ${bar("FULLY SPECIFIED, callable", r.modelableCallable, "terms + price + call + a document behind it — the OAS-ready set")}
@@ -404,7 +406,7 @@
           <div>
             ${f("Coupon", num(r.coupon, 6) + " %")}
             ${f("Maturity", esc(r.maturity))}
-            ${f("Call", esc(r.call))}
+            ${f("Call", callText(r))}
             ${f("Tax status", esc(r.taxStatus) || "—")}
             ${f("Rating", esc(r.rating) || "—")}
             ${f("Coupon kind", esc(r.couponKind) || "—")}

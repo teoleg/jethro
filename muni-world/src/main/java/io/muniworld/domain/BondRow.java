@@ -29,5 +29,12 @@ public record BondRow(
         Integer heldFunds,    // how many registered funds held it last ingested cycle
         Double heldPar,       // total par those funds held (USD issues)
         Double valPer100,     // par-weighted FILING valuation per 100 — as-of valAsOf, never a live mark
-        String valAsOf) {     // the filings' reporting-period date
+        String valAsOf,       // the filings' reporting-period date
+        // "No call date" means two completely different things and they must never render the same:
+        //   CALLABLE      — a document states a call date
+        //   NON_CALLABLE  — an Official Statement WAS read and states no call: a FACT about the bond
+        //   UNKNOWN       — no Official Statement exists for this bond yet, so its optionality is simply
+        //                   not known. Treating that as "non-callable" would invent the most important
+        //                   term in the whole model (ADR-0011 — never force-fit).
+        String callState) {
 }
