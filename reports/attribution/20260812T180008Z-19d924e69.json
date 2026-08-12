@@ -1,0 +1,56 @@
+{
+  "after": {
+    "at": "2026-08-12T18:00:08Z",
+    "fees": "335.344074",
+    "gross": "46240.81321250",
+    "net": "-5804.56638750",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "46240.81321250",
+      "hedgePnl": "-37.68242943",
+      "netExposure": "-5804.56638750",
+      "realizedPnl": "-1216.16871253",
+      "strategyAlpha": "-1172.63017628",
+      "totalFees": "335.344074",
+      "totalPnl": "-1210.31260571",
+      "unrealizedPnl": "5.85610682"
+    },
+    "total_pnl": "-1210.31260571"
+  },
+  "before": {
+    "at": "2026-08-11T18:43:56Z",
+    "gross": "65681.69250000",
+    "net": "-5892.27250000",
+    "total_pnl": "-1047.29461529"
+  },
+  "commit": "19d924e69981ebed751f5084aa4fa2bda2fa4fe1",
+  "delta": {
+    "gross": "-19440.87928750",
+    "net": "87.70611250",
+    "total_pnl": "-163.01799042"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "feeDeadbandUsd": "25",
+    "grossFloorUsd": "1000",
+    "minCycles": 12,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.000302 over 13 cycles, t=-1.69 (hurdle 1.5); gross 65,682\u219246,241; fees +$58.00 \u2014 fee churn with nothing earned (ADR-0146)",
+  "revert": true,
+  "revertApplied": true,
+  "revertMethod": "git-revert",
+  "scoredAt": "2026-08-12T18:00:08Z",
+  "summary": "conviction weights are estimated on the ladder rung with the most independent cohorts rather than the rung the cost gate fell back to, so the desk stops voting against its only source with measured edge (ADR-0148)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "fee_burn": "57.999735",
+    "grew": false,
+    "gross_end": 46240.8132125,
+    "gross_start": 65681.6925,
+    "mean_ret_per_cycle": -0.00030171,
+    "n": 13,
+    "scale": 41562.52,
+    "t": -1.694
+  }
+}
