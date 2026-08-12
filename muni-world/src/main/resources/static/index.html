@@ -548,6 +548,49 @@
     return '<span style="color:var(--warn)">unknown <span style="font-size:10px">(no OS loaded)</span></span>';
   }
 
+  /**
+   * The OAS block (ADR-0018): the first actual Kalotay-family output. Either the solved spreads across the
+   * σ band, with every input echoed — or the NAMED reason there is no OAS for this bond yet. A refusal is
+   * a first-class answer here, not an error state.
+   */
+  async function loadOas(cusip) {
+    const el = document.getElementById("oasBlock");
+    if (!el) { return; }
+    try {
+      const o = await (await fetch("/api/muni/bonds/" + encodeURIComponent(cusip) + "/oas",
+          { cache: "no-store" })).json();
+      if (!o.available) {
+        el.innerHTML = `<b style="color:var(--txt)">OAS</b> — <span style="color:var(--warn)">not computed:</span>
+          ${esc(o.reason)}`;
+        return;
+      }
+      const i = o.inputs;
+      const cell = r => r == null ? "—" : (r.solved
+          ? `<b>${esc(String(r.oasBp))}</b>`
+          : `<span style="color:var(--warn)" title="${esc(r.reason)}">unsolvable</span>`);
+      const s = o.oasBpBySigma;
+      el.innerHTML = `<b style="color:var(--txt)">OAS — ${o.callable ? "callable, priced on the lattice"
+            : "non-callable (per OS), straight solve"}</b>
+        <span style="font-size:10.5px">(bp, vs taxable Treasury — see note)</span>
+        <div style="overflow-x:auto;margin-top:4px"><table class="tbl"><thead><tr>
+          <th>at measured σ</th><th>at p10</th><th>at p50</th><th>at p90</th></tr></thead><tbody><tr>
+          <td class="mono">${cell(s.measured)}</td><td class="mono">${cell(s.p10)}</td>
+          <td class="mono">${cell(s.p50)}</td><td class="mono">${cell(s.p90)}</td>
+        </tr></tbody></table></div>
+        <div style="font-size:10.5px;margin-top:4px">
+          Solved from the <b>${esc(String(i.cleanPricePer100))}</b> filing mark of ${esc(i.priceAsOf)}
+          on the ${esc(i.curveSource)} curve of ${esc(i.curveAsOf)} · σ = ${esc(String(i.sigmaMeasured))}
+          (${esc(i.sigmaSeries)}) · ${i.steps} steps${o.callable ? ` · call ${esc(i.callDate)} @
+          ${esc(String(i.callPricePer100))}${i.assumedParCall ? " <span style='color:var(--warn)'>(price not in OS — par assumed, the modern-muni convention)</span>" : ""}` : ""}.
+        </div>
+        <div style="font-size:10.5px;margin-top:2px;color:var(--dim)">
+          Basis note: this is OAS vs the <b>taxable Treasury</b> curve — tax-exempt bonds normally show
+          <b>negative</b> OAS on this basis. Use it to <b>rank</b> bonds against each other; absolute
+          cheap/rich needs the muni-ratio leg (measured as OS coverage grows, ADR-0017). An OAS that flips
+          sign between p10 and p90 is a volatility bet, not a value signal.</div>`;
+    } catch (e) { el.innerHTML = `<b style="color:var(--txt)">OAS</b> — unavailable (${esc(String(e))})`; }
+  }
+
   /** Everything stored about one bond, plus WHY the economics are blank when they are. */
   async function showDetail(cusip) {
     SELECTED = cusip;
@@ -594,6 +637,7 @@
             ${f("Accrued", num(r.accrued, 4))}
           </div>
         </div>
+        <div id="oasBlock" style="margin-top:12px;color:var(--dim);font-size:12px">computing OAS…</div>
         <div id="valHist" style="margin-top:12px;color:var(--dim);font-size:12px">loading valuation history…</div>
         ${priced ? "" : `<div style="color:var(--warn);font-size:11.5px;margin-top:10px">
           Economics are blank because this bond has <b>no current price</b>. The filing valuation above
@@ -602,6 +646,7 @@
           never from a stale or invented mark.</div>`}
       </div>`;
       loadValuationHistory(cusip);
+      loadOas(cusip);
     } catch (e) { el.innerHTML = `<div class="card">detail unavailable</div>`; }
   }
 

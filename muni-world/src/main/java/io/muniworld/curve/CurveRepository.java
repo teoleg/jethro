@@ -135,6 +135,59 @@ public class CurveRepository {   // non-final: @Repository beans are CGLIB-proxi
         }
     }
 
+    /**
+     * The most recent stored fit ON OR BEFORE a date (ADR-0018 §2: a price is discounted on the curve of
+     * ITS day, and quarter-ends fall on weekends while the Fed publishes business days). Null when nothing
+     * is stored that early.
+     */
+    public Map<String, Object> fitOnOrBefore(String source, LocalDate date) {
+        try {
+            List<Map<String, Object>> got = jdbc.query("""
+                    SELECT as_of, beta0, beta1, beta2, beta3, tau1, tau2
+                    FROM muni.curve_fit
+                    WHERE source = ? AND as_of <= ?
+                    ORDER BY as_of DESC LIMIT 1""",
+                    (rs, i) -> {
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("asOf", String.valueOf(rs.getObject("as_of", LocalDate.class)));
+                        for (String c : new String[] {"beta0", "beta1", "beta2", "beta3", "tau1", "tau2"}) {
+                            m.put(c, rs.getBigDecimal(c));
+                        }
+                        return m;
+                    }, source, date);
+            return got.isEmpty() ? null : got.get(0);
+        } catch (DataAccessException e) {
+            log.warn("fitOnOrBefore({}, {}) failed: {}", source, date, e.getMostSpecificCause().toString());
+            return null;
+        }
+    }
+
+    /** The most recent vol estimate for a series+kind, or null (never a default σ — ADR-0017). */
+    public Map<String, Object> latestVol(String series, String kind) {
+        try {
+            List<Map<String, Object>> got = jdbc.query("""
+                    SELECT as_of, window_days, sigma, observations, excluded, p10, p50, p90
+                    FROM muni.rate_vol
+                    WHERE series = ? AND kind = ?
+                    ORDER BY as_of DESC LIMIT 1""",
+                    (rs, i) -> {
+                        Map<String, Object> m = new LinkedHashMap<>();
+                        m.put("asOf", String.valueOf(rs.getObject("as_of", LocalDate.class)));
+                        m.put("windowDays", rs.getInt("window_days"));
+                        m.put("sigma", rs.getBigDecimal("sigma"));
+                        m.put("observations", rs.getInt("observations"));
+                        m.put("excluded", rs.getInt("excluded"));
+                        m.put("p10", rs.getBigDecimal("p10"));
+                        m.put("p50", rs.getBigDecimal("p50"));
+                        m.put("p90", rs.getBigDecimal("p90"));
+                        return m;
+                    }, series, kind);
+            return got.isEmpty() ? null : got.get(0);
+        } catch (DataAccessException e) {
+            return null;
+        }
+    }
+
     /** How many curve days are stored for a source. */
     public int fitCount(String source) {
         try {

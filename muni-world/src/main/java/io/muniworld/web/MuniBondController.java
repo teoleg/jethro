@@ -21,9 +21,20 @@ import java.util.Map;
 public final class MuniBondController {
 
     private final MuniBondService bonds;
+    private final io.muniworld.bond.OasService oas;
 
-    public MuniBondController(MuniBondService bonds) {
+    public MuniBondController(MuniBondService bonds, io.muniworld.bond.OasService oas) {
         this.bonds = bonds;
+        this.oas = oas;
+    }
+
+    /**
+     * The OAS for one bond (ADR-0018): solved on a BDT lattice against the curve of the price's own date,
+     * at the measured σ and its p10/p50/p90 band. {@code available:false} carries the named refusal reason.
+     */
+    @GetMapping("/api/muni/bonds/{cusip}/oas")
+    public Map<String, Object> oas(@PathVariable String cusip) {
+        return oas.oas(cusip.toUpperCase(java.util.Locale.ROOT));
     }
 
     /** Bonds for an issuer (CUSIP-6 prefix), with indicators. */
