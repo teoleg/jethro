@@ -79,13 +79,20 @@ muni_running() { [ -f "$MUNI_PIDFILE" ] && kill -0 "$(cat "$MUNI_PIDFILE" 2>/dev
 # A muni backup before stopping, at most once an hour. `restart muni` is the command actually used all
 # day, so hanging the backup off `stop:all` alone meant the muni data — the OS PDFs especially — could go
 # for days with no restore point. Rate-limited so a restart loop does not dump on every bounce.
+# EVERY statement here must tolerate failure. This script runs under `set -euo pipefail`, and the first
+# cut used `newest="$(ls -1t backups/... | head -1)"` — with no backups yet, ls exits 2, pipefail
+# propagates it, the assignment fails, and -e killed the WHOLE script silently: `restart muni` printed
+# nothing and did nothing. A convenience hook must never be able to abort the command it is attached to.
 muni_backup_if_stale() {
-  local newest
-  newest="$(ls -1t backups/muni-*.tar.gz 2>/dev/null | head -1)"
-  if [ -n "$newest" ] && [ -n "$(find "$newest" -mmin -60 2>/dev/null)" ]; then
+  local newest=""
+  if [ -d backups ]; then
+    newest="$(find backups -maxdepth 1 -name 'muni-*.tar.gz' -newermt '-60 minutes' -print -quit 2>/dev/null || true)"
+  fi
+  if [ -n "$newest" ]; then
     return 0     # backed up within the hour — nothing to do
   fi
   ./scripts/backup-muni.sh || true
+  return 0
 }
 
 muni_stop() {
