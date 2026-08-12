@@ -54,6 +54,7 @@
   <span class="brand"><span class="dot"></span>MUNI·WORLD</span>
   <nav class="tabs">
     <a class="tab active" href="#bonds">Bonds</a>
+    <a class="tab" href="/model.html">Model workbench</a>
     <a class="tab" href="/tv.html">TV / Audio</a>
   </nav>
   <span class="spacer"></span>
@@ -583,6 +584,23 @@
           (${esc(i.sigmaSeries)}) · ${i.steps} steps${o.callable ? ` · call ${esc(i.callDate)} @
           ${esc(String(i.callPricePer100))}${i.assumedParCall ? " <span style='color:var(--warn)'>(price not in OS — par assumed, the modern-muni convention)</span>" : ""}` : ""}.
         </div>
+        ${o.analytics ? (a => `<div style="overflow-x:auto;margin-top:6px"><table class="tbl"><thead><tr>
+          <th>Straight /100</th><th>Callable /100</th><th>Option value</th><th>Eff. duration</th>
+          <th>Eff. convexity</th><th>Refunding eff.</th></tr></thead><tbody><tr>
+          <td class="mono">${Number(a.straightPer100).toFixed(3)}</td>
+          <td class="mono">${Number(a.callablePer100).toFixed(3)}</td>
+          <td class="mono">${Number(a.optionValuePer100).toFixed(3)}</td>
+          <td class="mono">${Number(a.effDuration).toFixed(2)}y</td>
+          <td class="mono">${Number(a.effConvexity).toFixed(1)}</td>
+          <td class="mono">${a.refundingEfficiencyPct == null
+              ? `<span style="color:var(--dim)" title="defined only once the call window is open and the option has value">${a.currentlyCallable ? "option ~0" : "not callable yet"}</span>`
+              : Number(a.refundingEfficiencyPct).toFixed(1) + "%"}</td>
+        </tr></tbody></table></div>
+        <div style="font-size:10.5px;margin-top:2px">Option value = straight − callable: what the issuer's
+          call is costing the holder, in points, at the solved OAS and measured σ. Duration/convexity are
+          effective (±25bp curve bumps on the lattice). Open the <a href="/model.html"
+          style="color:var(--brand);text-decoration:underline">Model workbench</a> to run these mechanics
+          on inputs you choose and see every intermediate step.</div>`)(o.analytics) : ""}
         <div style="font-size:10.5px;margin-top:2px;color:var(--dim)">
           Basis note: this is OAS vs the <b>taxable Treasury</b> curve — tax-exempt bonds normally show
           <b>negative</b> OAS on this basis. Use it to <b>rank</b> bonds against each other; absolute

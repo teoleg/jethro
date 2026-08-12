@@ -40,7 +40,7 @@ class StaticPageTest {
 
     @Test
     void everyHandlerAndTemplateCallIsDefinedOnItsOwnPage() throws Exception {
-        for (String page : List.of("/static/index.html", "/static/tv.html")) {
+        for (String page : List.of("/static/index.html", "/static/tv.html", "/static/model.html")) {
             String html = read(page);
 
             Set<String> defined = new LinkedHashSet<>();

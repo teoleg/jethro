@@ -120,8 +120,9 @@ public class OasService {
         // ---- solve at the measured σ and across its band (ADR-0018 §4) ------------------------------
         Map<String, Object> results = new LinkedHashMap<>();
         BigDecimal sigmaMeasured = (BigDecimal) vol.get("sigma");
-        results.put("measured", solveAt(sigmaMeasured, stepDf, dt, couponPerStep, callPrice,
-                firstCallStep, targetClean));
+        Map<String, Object> atMeasured = solveAt(sigmaMeasured, stepDf, dt, couponPerStep, callPrice,
+                firstCallStep, targetClean);
+        results.put("measured", atMeasured);
         for (String p : List.of("p10", "p50", "p90")) {
             BigDecimal s = (BigDecimal) vol.get(p);
             results.put(p, s == null ? null
@@ -131,6 +132,24 @@ public class OasService {
         out.put("available", true);
         out.put("callable", callable);
         out.put("oasBpBySigma", results);
+        // ---- the book-level analytics at the measured-σ OAS (option value, duration, refunding) -----
+        if (Boolean.TRUE.equals(atMeasured.get("solved"))) {
+            double oasSpread = ((BigDecimal) atMeasured.get("oasBp")).doubleValue() / 10_000.0;
+            boolean currentlyCallable = callable && !b.callDate().isAfter(priceDate);
+            io.muniworld.curve.ModelAnalytics.Result a = io.muniworld.curve.ModelAnalytics.analyze(
+                    stepDf, sigmaMeasured.doubleValue(), dt, couponPerStep, callPrice, firstCallStep,
+                    currentlyCallable, oasSpread);
+            Map<String, Object> analytics = new LinkedHashMap<>();
+            analytics.put("straightPer100", round(a.straight(), 6));
+            analytics.put("callablePer100", round(a.callable(), 6));
+            analytics.put("optionValuePer100", round(a.optionValue(), 6));
+            analytics.put("effDuration", round(a.effDuration(), 4));
+            analytics.put("effConvexity", round(a.effConvexity(), 4));
+            analytics.put("currentlyCallable", currentlyCallable);
+            analytics.put("refundingEfficiencyPct", a.refundingEfficiency() == null ? null
+                    : round(a.refundingEfficiency() * 100, 2));
+            out.put("analytics", analytics);
+        }
         Map<String, Object> inputs = new LinkedHashMap<>();
         inputs.put("cleanPricePer100", d.valPer100());
         inputs.put("priceAsOf", String.valueOf(priceDate));
@@ -178,6 +197,47 @@ public class OasService {
         // The one rounding of the transcendental result: continuous spread → basis points at 2dp.
         r.put("oasBp", BigDecimal.valueOf(spread * 10_000).setScale(OAS_SCALE, RoundingMode.HALF_UP));
         return r;
+    }
+
+    /**
+     * The SAME assembled inputs the OAS path uses, exposed for the model workbench's "load a real bond"
+     * mode — one assembly code path, so a workbench view of a bond can never disagree with its OAS block.
+     * Returns {@code available:false} with the same named refusals, or the explicit-input equivalents:
+     * the curve fit of the price's date, the measured σ, and the bond's terms as year counts.
+     */
+    public Map<String, Object> workbenchInputs(String cusip) {
+        Map<String, Object> full = oas(cusip);
+        if (!Boolean.TRUE.equals(full.get("available"))) {
+            return full;
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> in = (Map<String, Object>) full.get("inputs");
+        SecurityRepository.Row row = securities.findDetailed(cusip).orElseThrow();
+        LocalDate priceDate = row.detail().valAsOf();
+        Map<String, Object> fit = curves.fitOnOrBefore(GswCurveIngest.SOURCE, priceDate);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("available", true);
+        out.put("cusip", cusip);
+        out.put("issuer", row.bond().issuer());
+        out.put("fit", fit);
+        out.put("curveAsOf", in.get("curveAsOf"));
+        out.put("sigmaPct", ((BigDecimal) in.get("sigmaMeasured")).multiply(new BigDecimal(100)));
+        out.put("sigmaSeries", in.get("sigmaSeries"));
+        out.put("couponPct", in.get("couponPct"));
+        out.put("years", ChronoUnit.DAYS.between(priceDate, row.bond().maturity()) / 365.25);
+        out.put("callYears", row.bond().callDate() == null ? null
+                : ChronoUnit.DAYS.between(priceDate, row.bond().callDate()) / 365.25);
+        out.put("callPricePer100", in.get("callPricePer100"));
+        out.put("assumedParCall", in.get("assumedParCall"));
+        out.put("pricePer100", in.get("cleanPricePer100"));
+        out.put("priceAsOf", in.get("priceAsOf"));
+        out.put("priceSource", in.get("priceSource"));
+        return out;
+    }
+
+    /** The single rounding of a transcendental result at its declared scale (ADR-0017 §4). */
+    private static BigDecimal round(double v, int scale) {
+        return BigDecimal.valueOf(v).setScale(scale, RoundingMode.HALF_UP);
     }
 
     private static Map<String, Object> refuse(Map<String, Object> out, String reason) {
