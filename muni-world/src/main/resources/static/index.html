@@ -114,6 +114,13 @@
       <div id="readiness" style="margin-top:10px;color:var(--dim);font-size:12px">loading…</div>
     </details>
 
+    <!-- ADR-0017: every number the curve/vol machinery computes, shown with the formula and the inputs
+         that produced it — so any figure on this page can be reproduced by hand. -->
+    <details class="card" style="margin-top:12px" ontoggle="if (this.open) loadCurvePanel()">
+      <summary style="cursor:pointer;font-size:13px;color:var(--brand)">Benchmark curve &amp; rate volatility — the calculations</summary>
+      <div id="curvePanel" style="margin-top:10px;color:var(--dim);font-size:12px">loading…</div>
+    </details>
+
     <!-- Answers "5,000 bonds = 5,000 documents?" from the data: it does not. One OS covers a whole
          series, so a handful of the biggest issuers carries most of the book. -->
     <details class="card" style="margin-top:12px" ontoggle="if (this.open) loadCoverage()">
@@ -299,6 +306,105 @@
       el.innerHTML = `<div>· <b>Benchmark curve</b> — ${curveLine}</div>
         <div style="margin-top:4px">· <b>Rate volatility</b> — ${volLine}</div>`;
     } catch (e) { el.textContent = "curve status unavailable"; }
+  }
+
+  /** A rate (0.04528482) as a percent string for reading; the raw value stays alongside it. */
+  function pct(rate, dp) { return (Number(rate) * 100).toFixed(dp === undefined ? 4 : dp) + "%"; }
+
+  /**
+   * The FULL calculation view (ADR-0017): fitted parameters → formula → zero curve → discount factors →
+   * volatility estimates, each with the inputs that produced it, so every number here can be reproduced
+   * by hand. Data provenance renders next to every block — nothing on this panel is entered by a human.
+   */
+  async function loadCurvePanel() {
+    const el = document.getElementById("curvePanel");
+    if (!el) { return; }
+    try {
+      const [c, g] = await Promise.all([
+        (await fetch("/api/muni/curve", { cache: "no-store" })).json(),
+        (await fetch("/api/muni/curve/grid", { cache: "no-store" })).json(),
+      ]);
+
+      const head = `<div style="margin-bottom:8px">
+        <b style="color:var(--txt)">Source:</b> Federal Reserve GSW daily zero-coupon Treasury curve
+        (FEDS 2006-28, <span class="mono">feds200628.csv</span>) —
+        <b>${Number(c.curveDays || 0).toLocaleString()}</b> curve day(s) stored, newest
+        <span class="mono">${esc(String(c.newestCurve))}</span>.
+        <div style="font-size:10.5px;margin-top:2px">Ingest: ${esc(String(c.lastResult || "never run"))}</div>
+      </div>`;
+
+      if (!g.available) {
+        el.innerHTML = head + `<div style="color:var(--warn)">${esc(g.reason)}</div>`;
+        return;
+      }
+
+      const p = g.parameters;
+      const paramsBlock = `
+        <div style="margin-top:6px"><b style="color:var(--txt)">1 · The day's fitted parameters</b>
+          <span style="font-size:10.5px">(as published for ${esc(String(g.asOf))}; β in percent, τ in years)</span></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>β₀ level</th><th>β₁ slope</th><th>β₂ hump 1</th><th>β₃ hump 2</th><th>τ₁</th><th>τ₂</th></tr></thead>
+          <tbody><tr>
+            <td class="mono">${esc(String(p.beta0))}</td><td class="mono">${esc(String(p.beta1))}</td>
+            <td class="mono">${esc(String(p.beta2))}</td><td class="mono">${esc(String(p.beta3))}</td>
+            <td class="mono">${esc(String(p.tau1))}</td><td class="mono">${esc(String(p.tau2))}</td>
+          </tr></tbody></table></div>
+        <div style="font-size:11px;margin-top:4px" class="mono">
+          y(n) = β₀ + β₁·(1−e^(−n/τ₁))/(n/τ₁) + β₂·[(1−e^(−n/τ₁))/(n/τ₁) − e^(−n/τ₁)]
+               + β₃·[(1−e^(−n/τ₂))/(n/τ₂) − e^(−n/τ₂)]</div>
+        <div style="font-size:10.5px;margin-top:2px">β₃ = 0 means the Fed fitted plain Nelson-Siegel that
+          day (its convention for the early history) — same formula, no fourth term.
+          Short rate y(0) = β₀ + β₁ = <b class="mono">${pct(g.shortRate)}</b> — the lattice's first node.</div>`;
+
+      const gridBlock = `
+        <div style="margin-top:12px"><b style="color:var(--txt)">2 · The zero curve that formula produces</b>
+          <span style="font-size:10.5px">(continuously compounded; DF = e^(−y·n) is what a cash flow n years
+          out is multiplied by)</span></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>Tenor</th><th>Zero rate</th><th>(raw, 8dp)</th><th>Discount factor</th></tr></thead><tbody>
+          ${g.grid.map(r => `<tr>
+            <td class="mono">${r.years >= 1 ? r.years + "y" : (r.years * 12) + "m"}</td>
+            <td class="mono">${pct(r.zeroRate)}</td>
+            <td class="mono" style="color:var(--dim)">${esc(String(r.zeroRate))}</td>
+            <td class="mono">${esc(String(r.discountFactor))}</td></tr>`).join("")}
+        </tbody></table></div>
+        <div style="font-size:10.5px;margin-top:2px">Basis: <b>taxable Treasury</b> — not yet the tax-exempt
+          muni curve. The muni/Treasury ratio leg is measured from the fund-filing panel as OS coverage
+          grows (ADR-0017 §2); until a tenor bucket has enough corroborated observations it publishes no
+          ratio, and OAS for that bucket is withheld rather than guessed.</div>`;
+
+      const vols = c.vols || [];
+      const volBlock = `
+        <div style="margin-top:12px"><b style="color:var(--txt)">3 · Rate volatility — measured from the
+          curve history above, never assumed</b></div>
+        ${vols.length === 0
+          ? `<div style="color:var(--warn)">not measured yet — needs at least 2 stored curve days</div>`
+          : `<div style="font-size:11px;margin-top:4px" class="mono">
+               σ_normal = stdev(Δr) × √252 &nbsp;·&nbsp; σ_lognormal = stdev(Δ ln r) × √252
+             </div>
+             <div style="overflow-x:auto;margin-top:4px"><table class="tbl"><thead><tr>
+               <th>Series</th><th>Model</th><th>σ (annualised)</th><th>p10</th><th>p50</th><th>p90</th>
+               <th>Window</th><th>Obs</th></tr></thead><tbody>
+               ${vols.map(v => `<tr>
+                 <td class="mono">${esc(v.series)}</td>
+                 <td>${esc(v.kind)}<div style="color:var(--dim);font-size:10px">${
+                   v.kind === "NORMAL" ? "Hull-White · bp/yr" : "BDT / Black-Karasinski · proportion"}</div></td>
+                 <td class="mono"><b>${esc(String(v.sigma))}</b></td>
+                 <td class="mono">${v.p10 === null ? "—" : esc(String(v.p10))}</td>
+                 <td class="mono">${v.p50 === null ? "—" : esc(String(v.p50))}</td>
+                 <td class="mono">${v.p90 === null ? "—" : esc(String(v.p90))}</td>
+                 <td class="mono">${v.windowDays}d</td>
+                 <td class="mono" title="rates at or below 1bp are excluded from the lognormal estimate (ln undefined) — counted, never silently dropped">${Number(v.observations).toLocaleString()}${
+                   v.excluded > 0 ? `<div style="color:var(--dim);font-size:10px">${v.excluded} excl. ≤1bp</div>` : ""}</td>
+               </tr>`).join("")}
+             </tbody></table></div>
+             <div style="font-size:10.5px;margin-top:4px">p10/p50/p90 = the band of rolling one-year realized
+               vol across the full history — OAS is reported at all three, never at one hidden σ. Known bias,
+               stated: Treasury vol overstates muni option value, which understates OAS on callables — the
+               conservative direction (a callable can screen worse than it is, never cheaper).</div>`}`;
+
+      el.innerHTML = head + paramsBlock + gridBlock + volBlock;
+    } catch (e) { el.textContent = "curve panel unavailable"; }
   }
 
   let COVERAGE_ALL = false;   // false = TO-DO only (issuers whose OS is already read are hidden)

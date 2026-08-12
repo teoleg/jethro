@@ -65,6 +65,43 @@ public final class CurveController {
         return out;
     }
 
+    /**
+     * The whole calculation, visible: the day's fitted parameters, the short rate they imply, and the zero
+     * rate + discount factor evaluated at a standard tenor grid — everything a reader needs to reproduce
+     * any number on the page by hand from the formula in the docs. Evaluated from the stored FIT in closed
+     * form, so the grid here is presentation; the fit is the source of truth.
+     */
+    @GetMapping("/api/muni/curve/grid")
+    public Map<String, Object> grid(@RequestParam(defaultValue = "") String asOf) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        Map<String, Object> fit = repo.fitFor(GswCurveIngest.SOURCE, asOf.isBlank() ? null : asOf);
+        if (fit == null) {
+            out.put("available", false);
+            out.put("reason", "no curve stored yet — the ingest runs ~45s after start and needs "
+                    + "federalreserve.gov reachable");
+            return out;
+        }
+        NelsonSiegelSvensson curve = new NelsonSiegelSvensson(
+                d(fit, "beta0"), d(fit, "beta1"), d(fit, "beta2"), d(fit, "beta3"),
+                d(fit, "tau1"), d(fit, "tau2"));
+        out.put("available", true);
+        out.put("source", GswCurveIngest.SOURCE);
+        out.put("asOf", fit.get("asOf"));
+        out.put("parameters", fit);                       // beta0..beta3 (percent), tau1, tau2 (years)
+        out.put("shortRate", curve.shortRate());          // y(0) = beta0 + beta1
+        out.put("compounding", "continuous");
+        java.util.List<Map<String, Object>> rows = new java.util.ArrayList<>();
+        for (double t : new double[] {0.25, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30}) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("years", t);
+            row.put("zeroRate", curve.zeroRate(t));
+            row.put("discountFactor", curve.discountFactor(t));
+            rows.add(row);
+        }
+        out.put("grid", rows);
+        return out;
+    }
+
     private static double d(Map<String, Object> fit, String key) {
         return ((BigDecimal) fit.get(key)).doubleValue();
     }
