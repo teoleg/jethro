@@ -183,6 +183,21 @@ public final class PositionBuffer {
                         java.util.function.Predicate<String> stopArmed,
                         java.util.function.Function<String, BigDecimal> plannedTargets,
                         double minForecastToRoute) {
+        return apply(targets, gate, adjustmentRate, stopArmed, plannedTargets, minForecastToRoute, null);
+    }
+
+    /**
+     * As above, plus ADR-0149's attribution of a FLAT target to its author.
+     *
+     * @param controlFlattened per-name predicate: true when a risk control planned this name flat on
+     *                         THIS cycle (the ADR-0086 trailing cut). Null means unwired, which reads
+     *                         every flat target as control-authored and leaves the book byte-identical.
+     */
+    public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
+                        java.util.function.Predicate<String> stopArmed,
+                        java.util.function.Function<String, BigDecimal> plannedTargets,
+                        double minForecastToRoute,
+                        java.util.function.Predicate<String> controlFlattened) {
         ensureRestored();
         if (targets == null || targets.isEmpty()) {
             // ADR-0140: an empty plan is a cycle in which every name was absent, not proof that the
@@ -226,8 +241,13 @@ public final class PositionBuffer {
                 // risk control authored still routes in full. Re-seed the aim to where the desk will
                 // actually be, for the same reason the clamp above does: an intent it is not acting on
                 // must not accumulate into one large unwind that fires the moment conviction returns.
+                // ADR-0149: a flat target is an exit only when something OTHER than the forecast made
+                // it flat. A control that planned this name flat this cycle, and a name the planner
+                // could not value (its zero is a data fact, not a view), both keep the old reading.
+                boolean flatByControl = controlFlattened == null || controlFlattened.test(t.instrument())
+                        || t.price() == null || t.price().signum() <= 0;
                 BigDecimal convicted = ConvictionHold.apply(delta, held, plannedTargets.apply(t.instrument()),
-                        target, t.combinedForecast(), minForecastToRoute);
+                        target, t.combinedForecast(), minForecastToRoute, flatByControl, t.sources());
                 if (convicted.compareTo(delta) != 0) {
                     delta = convicted;
                     aim = held.add(delta).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);

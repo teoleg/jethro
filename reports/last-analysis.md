@@ -1,61 +1,67 @@
-# Shipped ADR-0145: the desk could be OPENED only at full conviction but CLOSED at none — that asymmetry is the round-trip machine paying half our loss in fees.
+# ADR-0145 shipped with an exemption that admitted the worst case it was written to stop — a decayed forecast liquidating a whole position at market, wearing a chandelier cut's clothes.
 
 ## Situation (live, read from this run's report — never authored)
 
-1. **Money.** Total PnL **-$1,188.69**, down **$176.69** since last run and **$163.82** over the last three.
-   The book is bleeding, and it is UNDERWATER.
-2. **Risk.** Gross **$41,355.64** = **2.8%** of the $1,500,000 firm cap, **$1,458,644** of headroom; net
-   **-$25,490.04** = **2.5%** of the $1,000,000 net cap. Gross rose **+$29,438.14** this window. That is not
-   danger — it is a book coming off dormant into an almost entirely unused budget (ADR-0132). VaR95 **$714.07**,
-   ES95 **$961.45**, breaker not halted.
-3. **Cause.** The change under measurement, `3c43242ba`, was **scored this cycle: ❌ BAD**, and its auto-revert
-   failed on a git conflict. **I did not complete that revert, deliberately** — `3c43242ba` *is* the revert of
-   ADR-0144, which the scorer graded ❌ BAD one window earlier. Reverting it would put the condemned ADR-0144
-   code back in the running book. Two mutually exclusive changes cannot both be reverted, and re-instating a
-   reverted idea is the one thing the contract forbids. Recorded in `reports/must-fix.md`.
-4. **Danger.** No. Bleeding, yes — but at 2.8% of the gross cap with the breaker cold, this is the DORMANT-side
-   failure (unused budget), not the near-the-cap one. De-risking would be the wrong move.
-5. **Change vs market.** Nothing deployed in the last two cycles (`git log` shows only `docs/` and
-   `chore(status)`); `uptimeSeconds` **10452** at a 19:30:01Z stamp derives a JVM start of **16:35:49Z**, one
-   continuous process across five verifications. **So the entire window's PnL and exposure move is market and
-   pre-existing logic — none of it is creditable or blameable on a change.**
+1. **Money.** Total PnL **-$1,207.61**, **+$6.93** since last run, **-$5.07** across the last three.
+   Essentially flat and UNDERWATER. Realized **-$1,216.05** against unrealized **+$8.44** — the loss is
+   almost entirely *round trips*, not held positions.
+2. **Risk.** Gross **$45,018.69** = **3.0%** of the $1,500,000 firm cap, **$1,454,981** of headroom; net
+   **-$4,582.44** = **0.5%** of the $1,000,000 net cap. Gross **+$8,134.46** this window. Not danger —
+   this is the DORMANT-side failure (an unused budget), and gross rising is the ADR-0132 intent.
+3. **Cause.** `19d924e69` (ADR-0148) was scored **❌ BAD** this cycle and reverted by the scorer
+   (`6937cea`). That revert landed at 18:00:08Z, **seven seconds after this report's stamp** and well
+   after the running JVM started (uptime **3577** at a stamp of **18:00:01Z** ⇒ start **17:00:24Z**), so
+   the binary that produced this window is still ADR-0148. Nothing in this window is creditable to the
+   revert; the revert is graded next cycle.
+4. **Danger.** No. Bleeding slowly at 3.0% of the gross cap with the breaker cold.
+5. **Change vs market.** No logic deployed during this window. The move is market and pre-existing
+   logic — none of it is creditable or blameable on a change.
 
-## What I found, and why it is different from the last four cycles
+## Step 0 — ADR-0145 (kept ⚠️ INCONCLUSIVE): ⚠️ **STILL-BROKEN**, and I found why
 
-Four cycles have confirmed item #1's *mechanism* — "the fusion target tracks a ~90-second mean-reverting
-forecast 1:1" — without ever finding its **cause**. The cost is not in dispute: `totalFees` **$488.284665**
-against `firmTotal` **-$1,188.68635665** is **41.1%** of the whole cumulative loss (**49.0%** on ALPHA alone,
-$465.190115 of -$949.70770444), across **$5,716,068.55** of LIVE turnover and **3,319** fills — while the three
-large-n LIVE hit rates sit at **0.490 / 0.501 / 0.498**. Half the loss is paid in fees to trade a coin flip.
+ADR-0145 made the conviction floor symmetric so a decayed forecast could not unwind a position it was
+never strong enough to open. `recent_orders` says it did not: `PFE BUY 240 — fusion exit — target
+decayed to flat [forecast=-0.0, sources=1]` at 17:49:19. A source is still speaking, no control fired,
+the forecast is a signed zero, and 240 shares go back at market. WMT, NVDA and BAC carried the same
+reason the prior window.
 
-The cause is one line of `FusionLifecycle.tick`: the ADR-0059 conviction floor is applied **only to
-`!reducing`**. A name may be **opened** only at `|f| ≥ 5.0` and **closed at nothing at all**. Because
-`TargetPlanner.targetQuantity` is *linear* in the forecast, a forecast that merely **decays** toward zero
-collapses the target and unwinds the whole position — at a strength that would not have been allowed to open a
-single share of it. Read from this window's own FILLED LIVE ALPHA orders: **AMZN `BUY 34` at f=+9.25 (18:54:25),
-`SELL 26` at f=+0.0688 (18:59:59)** — the forecast never changed *sign*; 82% sold back five minutes later.
-**BAC `SELL 156` at f=−7.38 → `BUY 1`×4 at f≈+0.002…+0.10 → `BUY 115` at f=−0.288**, inside four minutes.
-`f ≈ 0` is the combiner saying it has *no view*. No view is a reason to **hold**, not to liquidate.
+The mechanism is `ConvictionHold`'s own exemption. It returns the delta untouched when the *controlled*
+target is a literal zero, on the reasoning that every control meaning "get out" plans the name FLAT
+(ADR-0086/0065/0027). Sound about controls, wrong about its converse: `TargetPlanner.targetQuantity` is
+**linear** in the combined forecast and returns `BigDecimal.ZERO` the instant that forecast reaches
+zero — so a view that merely finished decaying arrives at the exemption indistinguishable from a
+chandelier cut. ADR-0107's javadoc states the principle ("an EXIT is what a control ORDERED, not what
+the arithmetic happens to read") and then reads `target == 0` as the control.
 
-## The change
+It is not a rounding detail, because two paths key on the same zero: `nextAim` **snaps** the aim to flat
+rather than stepping it at the ADR-0080 rate, and `bufferedDelta` works a flat target **in full,
+unbuffered and unrated**. Both the rate limit and the ADR-0094 band are bypassed, so the cycle with the
+*least* conviction available produces the *largest* order the desk can place — the whole position, at
+market — where that position was accumulated one rated step at a time. Buy slowly, sell instantly,
+repeat. That is a ratchet, and it explains a realized-only loss on a book whose measured hit rates sit
+at **0.523 / 0.483 / 0.486** (trend / xsreversion / reversion at 225s, n = 5,170 / 5,082 / 4,714) with
+`totalFees` **$335.22** against `firmTotal` **-$1,207.61**.
 
-**ADR-0145 — apply the conviction floor to the EXIT as well as the entry.** A Schmitt trigger: enter on
-conviction, exit on conviction, do nothing in between. It gates **only** the reduction the *forecast* authored;
-a reduction a *risk control* authored always routes in full, separated exactly by capturing the planner's
-target before any control runs. It introduces **no number** — the threshold is
-`jethro.fusion.min-forecast-to-route` itself. A flat target returns before any of it, so the ADR-0086
-chandelier cut, the ADR-0065 unwind and the ADR-0027 breaker keep exact semantics; the whole deterministic
-floor is untouched. Deliberately **not** ADR-0133, which widened the *band* and was scored ❌ BAD — a wider
-band vetoes weak-conviction *names*; this filters weak-conviction *exits*.
+## The change — ADR-0149
 
-The honest risk: losers are held longer. That is what the ADR-0086 trailing σ cut exists for, and it is exempt
-here — so this moves the exit decision **from the forecast to the risk sensor**, which is the owner's stated
-thesis. Expect gross to RISE; that is the ADR-0132 intent at 2.8% of the cap, not a relaxed limit.
+Attribute a flat target to its **author**, from facts already at the call site, never from magnitude. A
+flat controlled target routes in full when a risk control planned the name flat *this cycle* (the
+ADR-0086 cut set, already built for the ADR-0134 reason string, now computed before the buffer and
+passed in — plus a name the planner could not value), or when `sources == 0` (the ADR-0065 orphan), or
+when the planner's own target was non-zero before the controls ran. Everything else — live sources, no
+control, planner target itself flat — was authored by the forecast, and the existing ADR-0145
+arithmetic already yields zero at `p = 0`, so the position is held whole and the aim is re-seeded to
+where the desk actually is.
 
-## How it gets graded
+No number is introduced: the threshold is still `jethro.fusion.min-forecast-to-route`. Unwired is
+byte-identical. The deterministic floor is untouched, and four independent exits remain — conviction
+returning either way, the ADR-0086 chandelier stop, the ADR-0118 trapped-exit path, and the ADR-0065
+unwind. Deliberately **not** ADR-0133 (a wider band, scored ❌ BAD) and deliberately not a change to
+`nextAim`/`bufferedDelta`, whose flat-target behaviour is correct *for a control-ordered exit*.
 
-`scripts/reversal-rate.py` (new, committed) computes the register's proof metric from `recent_orders` so the
-loop never authors it: the ALPHA same-name direction-reversal rate, pooled over the full 6-report window.
-Baseline **0.1975 (32 of 162 pairs)**; it must fall **below ~0.080** against a measured no-deploy noise floor
-of mean 0.190 / sd 0.055; pooled sample gate **≥150 pairs** or NO VERDICT. Guards: gross must not fall and
-`firmTotal` must not deteriorate. `./gradlew -Pci test` green.
+**How it gets graded next run**, from live telemetry only: in `recent_orders`, orders whose reason is
+`fusion exit — target decayed to flat` with `sources ≥ 1` must be **zero**; the same reason at
+`sources = 0` may still appear and is correct. Secondary: `totalFees` as a share of `firmTotal` falls,
+`grossExposure` does not. Falsified if gross rises while `firmTotal` deteriorates on the retained
+names — i.e. the decayed positions were worth exiting, which is the ADR-0086 trailing cut's job and it
+is exempt here. `./gradlew -Pci test` green.

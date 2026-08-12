@@ -5869,3 +5869,39 @@ each finding + trade outcome and retrieve the relevant ones per situation instea
 - **Cost side, restated:** `totalFees` **$488.284665** of `firmTotal` **-$1,188.68635665** = **41.1%** (ALPHA
   alone **$465.190115** of **-$949.70770444** = **49.0%**), over **$5,716,068.55** LIVE turnover and **3,319**
   fills, against LIVE hit rates **0.490 / 0.501 / 0.498** on n = 14,672 / 14,395 / 13,471.
+
+## 2026-08-12 18:00Z — the exemption ate the rule: a decayed forecast wearing a chandelier cut's clothes
+
+- **Rule 490 — when a change scores INCONCLUSIVE, read its EXEMPTIONS before re-deriving its mechanism.**
+  ADR-0145 was right about the defect and shipped with a carve-out wide enough to admit the worst instance
+  of it. `ConvictionHold` waived the floor whenever the CONTROLLED target was a literal zero, on the
+  reasoning that every control meaning "get out" plans the name flat. Sound about controls, wrong about the
+  converse: `TargetPlanner.targetQuantity` is LINEAR in the forecast and returns `BigDecimal.ZERO` the
+  instant the forecast reaches zero, so a decayed view is byte-identical to a chandelier cut at that test.
+- **Rule 491 — a "flat target" is a VALUE two different authors can write; never infer authorship from a
+  magnitude.** The three cheap discriminators were all already at the call site: the ADR-0086 cut set
+  (`FusionLifecycle` builds it for the ADR-0134 reason string), `sources == 0` for the ADR-0065 orphan, and
+  the pre-control planner target. Magnitude cannot work here — a stopped-out position's forecast has often
+  decayed too, so "hold when the planner target is also flat" would block the chandelier stop on exactly
+  the names that need it most.
+- **Rule 492 — check what a special-case branch BYPASSES, not just what it decides.** The zero was read by
+  two more paths: `nextAim` SNAPS the aim to flat instead of stepping it at the ADR-0080 rate, and
+  `bufferedDelta` works a flat target IN FULL, unbuffered and unrated. So the cycle with the LEAST
+  conviction available produced the LARGEST order the desk can place — the whole position at market —
+  against a position accumulated one rated step at a time. Accumulate at `a·gap`, shed in full: a ratchet.
+- **Proof from this window's tape:** `PFE BUY 240 — fusion exit — target decayed to flat [forecast=-0.0,
+  sources=1]` (17:49:19) — a source still speaking, no control fired, signed-zero forecast, whole position
+  back at market. WMT/NVDA/BAC carried the same reason the prior window. Consistent with the book's shape:
+  realized **-$1,216.05** against unrealized **+$8.44** — the loss is round trips, not held positions.
+- **Rule 493 — a revert that lands after the report stamp did not run in the window you are reading.**
+  `19d924e69` (ADR-0148) scored ❌ BAD and was reverted at 18:00:08Z, seven seconds AFTER this report's
+  stamp and an hour after the JVM started (`uptimeSeconds` 3577 ⇒ start 17:00:24Z). The window's binary is
+  still ADR-0148; the revert grades next cycle. Do not credit or blame it here.
+- **Edge, re-checked and worth recording because it changed:** `signal_observations` LIVE 225s now reads
+  trend **0.523** on n=5,170, xsreversion **0.483** on n=5,082, reversion **0.486** on n=4,714 — trend is
+  the first large-n series to sit meaningfully above a coin flip. But `signals_telemetry` prices it at
+  `avgReturnBps` **+0.248** at 225s and **-0.477** at 3600s, against a 1.00 bps per-side fee. The best
+  expectancy anywhere on the ladder is xsreversion **+3.781** bps at 3600s on 19 cohorts. Nothing clears
+  cost with significance — so the lever remains COST, not another weight.
+- **Attribution:** no logic deployed during this window; the **+$6.93** PnL and **+$8,134.46** gross are
+  market and pre-existing logic, creditable to nothing.

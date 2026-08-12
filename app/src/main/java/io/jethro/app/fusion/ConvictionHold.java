@@ -46,6 +46,37 @@ import java.math.RoundingMode;
  * ({@code controlled == 0} — the ADR-0086 chandelier cut, the ADR-0065 orphan unwind, the ADR-0027
  * breaker above them) returns before any of this and is never held at all.
  *
+ * <h3>ADR-0149 — a flat target is an exit only when something OTHER than the forecast made it flat</h3>
+ * The escape hatch above read {@code controlled == 0} as "a control ordered the exit". It is not: the
+ * planner's target is linear in the combined forecast and {@link TargetPlanner#targetQuantity} returns
+ * a literal ZERO the moment that forecast reaches zero, so a view that merely finished decaying lands
+ * on exactly the same value a chandelier cut does. Downstream that reading is not a rounding detail —
+ * {@link PositionBuffer#bufferedDelta} works a flat target <em>in full, unbuffered and unrated</em> and
+ * {@link PositionBuffer#nextAim} snaps the aim to flat rather than stepping it. So the ONE case with
+ * the least conviction available produced the LARGEST possible order: the entire position, liquidated
+ * at market, at {@code f = 0} — the exact behaviour this class exists to stop, arriving through its own
+ * exemption. The live tape names it: {@code fusion exit — target decayed to flat [forecast=-0.0]}.
+ *
+ * <p>The two authors are told apart by facts already known at the call site, never by magnitude:
+ * <ul>
+ *   <li>{@code controlFlattened} — a risk control planned this name flat <em>this cycle</em> (the
+ *       ADR-0086 trailing cut; the caller also sets it for a name the planner could not value, whose
+ *       zero is a data fact rather than a view). Routes in full. <b>The deterministic floor is
+ *       untouched.</b></li>
+ *   <li>{@code sources <= 0} — the ADR-0065 orphan: no live source has a view on a name the desk
+ *       holds, which is an unwind, not a decayed opinion. Routes in full.</li>
+ *   <li>{@code planned != 0} — the planner wanted a position and a control took it to flat. Routes in
+ *       full.</li>
+ *   <li>otherwise — live sources, no control, and the planner's own target is flat: the FORECAST
+ *       authored this, and the floor applies. With {@code p = 0} the arithmetic above already yields
+ *       {@code max(0, min(h,0) − min(h,0)) = 0}, so the position is held whole and the buffer re-seeds
+ *       the aim to where the desk actually is (Rule 487).</li>
+ * </ul>
+ * Four independent ways out of such a position remain: conviction returning on either side, the
+ * ADR-0086 chandelier stop, the ADR-0118 trapped-exit path once the edge gate shuts the name, and the
+ * ADR-0065 unwind when its sources fall silent. Unwired ({@code controlFlattened} defaulted true by
+ * the six-argument overload) leaves every path byte-identical.
+ *
  * <h3>What it can never do</h3>
  * {@code |delta'| ≤ |delta|} and {@code sgn(delta') ∈ {0, sgn(delta)}} by construction, and it fires
  * only on a delta that {@link TargetPlanner#isRiskReducing} already classified as risk-REDUCING. So it
@@ -81,11 +112,33 @@ final class ConvictionHold {
      */
     static BigDecimal apply(BigDecimal delta, BigDecimal held, BigDecimal planned, BigDecimal controlled,
                             double forecast, double minForecastToRoute) {
+        return apply(delta, held, planned, controlled, forecast, minForecastToRoute, true, 1);
+    }
+
+    /**
+     * As above, with the two facts that say WHO authored a flat controlled target (ADR-0149).
+     *
+     * @param controlFlattened a risk control planned this name flat this cycle, or the planner could
+     *                         not value it — either way the zero is not a decayed view. True is the
+     *                         pre-ADR-0149 reading and leaves every path byte-identical.
+     * @param sources          how many live sources contributed to this cycle's combined forecast;
+     *                         zero is the ADR-0065 orphan, which is an unwind rather than an opinion.
+     */
+    static BigDecimal apply(BigDecimal delta, BigDecimal held, BigDecimal planned, BigDecimal controlled,
+                            double forecast, double minForecastToRoute,
+                            boolean controlFlattened, int sources) {
         if (planned == null || !(minForecastToRoute > 0.0)) {
             return delta; // unwired, or the desk has no conviction floor at all
         }
         if (controlled == null || controlled.signum() == 0) {
-            return delta; // a control ordered the exit — never buffered, never held (ADR-0090/0086/0065)
+            // ADR-0149: a flat target is an exit only when something other than the forecast made it
+            // flat. A control, an orphan, or a planner target that was alive before the controls ran —
+            // each routes in full exactly as before (ADR-0090/0086/0065). What is left is a view that
+            // finished decaying, and that is precisely the reduction this class gates.
+            if (controlFlattened || sources <= 0 || planned.signum() != 0) {
+                return delta;
+            }
+            controlled = BigDecimal.ZERO;
         }
         if (Math.abs(forecast) >= minForecastToRoute) {
             return delta; // the view that asks for this reduction would have been allowed to open it

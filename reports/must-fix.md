@@ -15,6 +15,79 @@ and worked — so the same problem can't bleed money run after run.
 
 ---
 
+## Verification block — 2026-08-12 18:00Z (**CHANGE SHIPPED — ADR-0149.** No pending baseline on disk, so the previous change (`19d924e69`, ADR-0148) has been scored ❌ BAD and reverted by the scorer at `6937cea`. Step 0 re-tested the change that is actually still in the running book — ADR-0145, kept on an ⚠️ INCONCLUSIVE verdict — against this run's live tape, and it is **STILL-BROKEN**: not because its mechanism was wrong, but because it shipped with an exemption wide enough to admit the worst instance of the behaviour it was written to stop.)
+
+### Step 0 — ADR-0145 (`4e1ed98a3`, kept ⚠️ INCONCLUSIVE): ⚠️ **STILL-BROKEN — cause found and fixed this cycle (ADR-0149)**
+
+**The proving order, read from `recent_orders`:** `PFE BUY 240 — fusion exit — target decayed to flat
+[forecast=-0.0, sources=1]` at 17:49:19. A source is still speaking, no risk control fired, the forecast is a
+signed zero, and the whole 240-share position goes back at market. WMT, NVDA and BAC carried the same reason
+the prior window. ADR-0145 exists to stop exactly this and did not fire.
+
+**Why.** `ConvictionHold.apply` returned the delta untouched whenever the CONTROLLED target was a literal
+zero — "every control that means *get out* plans the name FLAT" (ADR-0086/0065/0027). Sound about controls,
+wrong about its converse: `TargetPlanner.targetQuantity` is LINEAR in the combined forecast and returns
+`BigDecimal.ZERO` the moment that forecast reaches zero, so a view that merely finished decaying is
+byte-identical, at that test, to a chandelier cut. Two further paths key on the same zero — `nextAim` SNAPS
+the aim to flat instead of stepping it at the ADR-0080 rate, and `bufferedDelta` works a flat target IN FULL,
+unbuffered and unrated — so the rate limit and the ADR-0094 band are both bypassed and the cycle carrying the
+LEAST conviction produces the LARGEST order the desk can place.
+
+**Consistent with the book's shape:** `/api/risk` `.total` realized **-1216.04675853** against unrealized
+**+8.44110655** — the loss is round trips, not held positions.
+
+### Step 0 — `19d924e69` (ADR-0148): ❌ **BAD, reverted by the scorer — NOT graded on this window**
+
+`ops_jvm.uptimeSeconds` **3577** against a report stamp of **2026-08-12T18:00:01Z** derives a JVM start of
+**17:00:24Z**; the revert commit `6937cea` is stamped **18:00:08Z**, seven seconds AFTER the report. The
+binary that produced this window is still ADR-0148 and the revert grades next cycle (Rule 493).
+
+### Open items, re-ranked
+
+**#1 — ✅ CAUSE FOUND AND FIXED THIS CYCLE (ADR-0149). Awaiting its ADR-0116 verification window.** The desk
+liquidates whole positions at market at zero conviction, through ADR-0145's own flat-target exemption.
+
+Cost side, read live this cycle: `/api/attribution` `totalFees` **335.222120** against `firmTotal`
+**-1207.60565198** — **27.8%** of the cumulative loss; ALPHA alone **322.645276** of **-1175.08455833** =
+**27.5%**. Turnover is spread near-uniformly across 21 names ($106k–$277k each, `turnover_cost_by_name`) to
+hold an ALPHA book of **36797.16500000** gross across 19 positions.
+
+**VERIFY-BY next run (primary, from `recent_orders` only):** the count of orders whose reason is
+`fusion exit — target decayed to flat` **with `sources >= 1`** must be **0**. The same reason at
+`sources = 0` (the ADR-0065 orphan) may still appear and is CORRECT — its absence would mean an exit had
+been trapped and would falsify the change rather than confirm it.
+**VERIFY-BY (secondary):** `/api/attribution` `totalFees` as a share of `firmTotal` falls against this
+window, and `/api/risk` `.total.grossExposure` does not fall.
+
+**#2 — OPEN, unattacked: the MACRO aim ratchets against an order that never fills.** Diagnosed this cycle,
+not fixed (one change per run). `orders_day` shows the SAME EURUSD passive `LIMIT SELL` at `limitPrice`
+**1.152600** re-planned and CANCELLED **33 consecutive times** between 17:43:44 and 17:59:58 — "fusion
+re-plan — passive order superseded by a fresh target (ADR-0084)" — with the quantity ratcheting
+**2427 → 26854** while the forecast sat flat at **≈ -7.9** and `currentQty` stayed **-773.0** against a
+`targetQty` of **-89603.380189**. The per-cycle ADR-0080 allowance is `a·gap ≈ 737`; the order is now **36×**
+that, because the ADR-0140 durable aim walks toward the target from its own previous value rather than from
+the held position, so unfilled intent accumulates without bound — textbook integrator windup against a
+saturated actuator. EURUSD's own `strategy_selection` note reads "no positive OOS edge — momentum
+**-45.42841846** over 3 paths, mean-rev **-109.78610827** over 3", and its 13 fills average **21,575** units:
+the intent is realised in one adversely-selected block. Fee-free on FX, so the cost is slippage, not fees —
+which is why it ranks below #1.
+**VERIFY-BY:** in `orders_day`, no name's consecutive `fusion entry — target increase` quantity series may
+exceed the cycle's `a·(target − held)` allowance while `currentQty` is unchanged.
+
+**#3 — OPEN, standing: no source clears its execution cost at any rung of the ADR-0082 ladder.**
+`signals_telemetry` `avgReturnBps` this cycle: at 3600s, trend **-0.47724570099046154** (39 cohorts),
+reversion **+0.3963511202193856** (33), xsreversion **+3.780663815186572** (19), momentum
+**+7.033572220238096** (8), social **+6.217282971428572** (7); at 225s, trend **+0.24822449516568365** on 336
+cohorts. Fees run at **1.00 bps per side** on every equity (`turnover_cost_by_name`). The hit rates moved
+this cycle — `signal_observations` LIVE 225s trend **0.523** on n=**5170** is the first large-n series
+meaningfully above a coin flip — but the expectancy it carries is a quarter of a basis point against a two
+basis point round trip. **The lever is COST, not another weight.** Do not spend a cycle re-weighting sources
+(ADR-0148 was the last attempt and scored ❌ BAD).
+**VERIFY-BY:** any source/rung whose `avgReturnBps` exceeds the desk's measured round-trip cost with the
+ADR-0108 cohort standard error behind it, at which point the work becomes "let it size".
+
+---
+
 ## Verification block — 2026-08-07 19:30Z (**CHANGE SHIPPED — ADR-0145.** `3c43242ba` has been **scored** (❌ BAD, ledger commit `fcacfc8`), `reports/.pending-baseline.json` is gone and `scripts/score-change.py score` prints "no pending change to score", so the ADR-0116 freeze that blocked the last two cycles is lifted. Item #1's VERIFY-BY was drift-tested last cycle and survived; this cycle it is also **reproducible by code** — `scripts/reversal-rate.py` computes it from `recent_orders`, so the register never has to author it. The three cycles before this one confirmed item #1's *mechanism* but never found its **cause**; this cycle did, and it is not band width. It is that the ADR-0059 conviction floor in `FusionLifecycle.tick` is applied only to `!reducing`: **a name may be opened only at `|f| ≥ 5.0` and closed at nothing at all.**)
 
 ### Step 0 — `3c43242ba` (revert of ADR-0144): ✅ **VERIFIED (closed)** / 🔴 **its ❌ BAD verdict is NOT to be acted on**

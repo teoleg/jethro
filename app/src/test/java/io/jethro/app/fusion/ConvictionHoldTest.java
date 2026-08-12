@@ -134,4 +134,60 @@ class ConvictionHoldTest {
         assertThat(ConvictionHold.apply(delta, q("100"), q("120"), q("60"), 0.1, FLOOR))
                 .isEqualByComparingTo(q("-5"));
     }
+
+    // ---- ADR-0149: a flat target is an exit only when something other than the forecast made it flat ----
+
+    /**
+     * The live leak this closes, taken from the tape: {@code PFE BUY 240 — fusion exit — target decayed
+     * to flat [forecast=-0.0, sources=1]}. Short 240 against a forecast that finished decaying, so the
+     * planner's own target is a literal zero, no control ran, and a source is still speaking. Before
+     * ADR-0149 the {@code controlled == 0} exemption routed the whole 240 at market at zero conviction —
+     * the largest possible order at the least possible conviction, through the exemption of the very
+     * class that exists to stop it. Now the planner's share is {@code max(0, min(240,0) − min(240,0)) = 0}.
+     */
+    @Test
+    void aTargetThatDecayedToFlatIsHeld() {
+        BigDecimal delta = q("240"); // buying back the whole short
+        assertThat(ConvictionHold.apply(delta, q("-240"), BigDecimal.ZERO, BigDecimal.ZERO, -0.0, FLOOR,
+                false, 1)).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    /** The ADR-0086 chandelier cut still flattens a decayed name in full — the floor is untouched. */
+    @Test
+    void aControlThatFlattenedTheNameStillRoutesInFull() {
+        BigDecimal delta = q("240");
+        assertThat(ConvictionHold.apply(delta, q("-240"), BigDecimal.ZERO, BigDecimal.ZERO, -0.0, FLOOR,
+                true, 1)).isEqualByComparingTo(delta);
+    }
+
+    /** The ADR-0065 orphan — a held name no live source has a view on — is an unwind, not an opinion. */
+    @Test
+    void anOrphanWithNoLiveSourceStillUnwindsInFull() {
+        BigDecimal delta = q("240");
+        assertThat(ConvictionHold.apply(delta, q("-240"), BigDecimal.ZERO, BigDecimal.ZERO, 0.0, FLOOR,
+                false, 0)).isEqualByComparingTo(delta);
+    }
+
+    /** A planner target that was ALIVE before the controls ran and flat after is theirs, and routes. */
+    @Test
+    void aControlThatTookALiveTargetToFlatRoutesInFull() {
+        BigDecimal delta = q("-34");
+        assertThat(ConvictionHold.apply(delta, q("34"), q("0.25"), BigDecimal.ZERO, 0.0688, FLOOR,
+                false, 3)).isEqualByComparingTo(delta);
+    }
+
+    /** The six-argument overload is the pre-ADR-0149 reading exactly: every flat target routes in full. */
+    @Test
+    void theUnwiredOverloadIsByteIdentical() {
+        BigDecimal delta = q("240");
+        assertThat(ConvictionHold.apply(delta, q("-240"), BigDecimal.ZERO, BigDecimal.ZERO, -0.0, FLOOR))
+                .isEqualByComparingTo(delta);
+    }
+
+    /** Held flat: there is no position to unwind, so the attribution never fires either way. */
+    @Test
+    void aFlatBookIsUntouchedByTheAttribution() {
+        assertThat(ConvictionHold.apply(q("12"), BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, -0.0,
+                FLOOR, false, 1)).isEqualByComparingTo(q("12"));
+    }
 }
