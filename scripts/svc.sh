@@ -12,6 +12,7 @@
 #   scripts/svc.sh start tv           # turn TV audio capture ON and (re)start muni-world
 #   scripts/svc.sh stop tv            # turn capture OFF (muni-world keeps running)
 #   scripts/svc.sh status tv          # capture flags + recent leads
+#   scripts/svc.sh backup muni        # dump the muni schema + the OS PDFs to backups/
 #   scripts/svc.sh status             # what's up
 #
 # Targets: app | muni | tv | ollama | postgres | redpanda | infra (the 3 containers) | all  (default: all)
@@ -75,7 +76,20 @@ app_start() { echo "==> starting app (infra left as-is: LLM + DB keep running)";
 # stop the running JVM BEFORE rebuilding the jar (run-local's caveat applies — Spring Boot loads classes
 # lazily out of build/libs, so overwriting the jar under a live process corrupts its classloader).
 muni_running() { [ -f "$MUNI_PIDFILE" ] && kill -0 "$(cat "$MUNI_PIDFILE" 2>/dev/null || echo 0)" 2>/dev/null; }
+# A muni backup before stopping, at most once an hour. `restart muni` is the command actually used all
+# day, so hanging the backup off `stop:all` alone meant the muni data — the OS PDFs especially — could go
+# for days with no restore point. Rate-limited so a restart loop does not dump on every bounce.
+muni_backup_if_stale() {
+  local newest
+  newest="$(ls -1t backups/muni-*.tar.gz 2>/dev/null | head -1)"
+  if [ -n "$newest" ] && [ -n "$(find "$newest" -mmin -60 2>/dev/null)" ]; then
+    return 0     # backed up within the hour — nothing to do
+  fi
+  ./scripts/backup-muni.sh || true
+}
+
 muni_stop() {
+  muni_backup_if_stale
   if muni_running; then
     local pid; pid="$(cat "$MUNI_PIDFILE")"
     echo "==> stopping muni-world (pid $pid)"
@@ -146,6 +160,9 @@ tv_status() {
 
 case "$ACTION:$TARGET" in
   # TV status must come BEFORE the general status:* below, or it'd be shadowed by it.
+  backup:muni)   ./scripts/backup-muni.sh ;;
+  backup:*)      ./scripts/backup-db.sh || true; ./scripts/backup-muni.sh ;;
+
   status:tv)     tv_status ;;
 
   status:*)
@@ -194,6 +211,6 @@ case "$ACTION:$TARGET" in
   start:ollama|start:postgres|start:redpanda)       docker compose up -d "$TARGET" ;;
   restart:ollama|restart:postgres|restart:redpanda) docker compose restart "$TARGET" ;;
 
-  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|setup|status> [app|muni|tv|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
+  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|setup|status|backup> [app|muni|tv|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
 esac
 echo "==> done."
