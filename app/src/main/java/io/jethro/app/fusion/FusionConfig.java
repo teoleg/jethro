@@ -128,33 +128,24 @@ public class FusionConfig {
         // ladder is read off the telemetry itself rather than restated here, so the two cannot drift.
         var gateParams = new EdgeGate.Params(edgeGateMinSample, edgeGateTHurdle,
                 telemetryRungs(telemetry));
-        // ADR-0082: ONE rung selection per cycle drives the gate's verdict and (in FusionLifecycle) the
-        // holding period, recomputed by every consumer from the same live telemetry with the same pure
-        // function so they cannot disagree.
-        //
-        // ADR-0148: the per-source WEIGHTS are estimated over the best-DETERMINED rung instead — the one
-        // with the most independent cohorts. The gate's rung answers a cost question (over what period
-        // does expectancy beat a round trip) and rightly sets the holding period; the weights answer a
-        // purely directional one, gross of cost by TelemetryWeights' own design, and the honest rung for
-        // that is the one the desk has the most independent draws of. Grading and holding stay on one
-        // period; only "whose view counts" moves, to the measurement that can actually distinguish.
+        // ADR-0082: ONE rung selection per cycle drives everything downstream — the gate's verdict, the
+        // per-source weights, and (in FusionLifecycle) the holding period. Both suppliers recompute it
+        // from the same live telemetry with the same pure function, so they cannot disagree; the desk
+        // must never grade a source over one period, weight it over a second and hold it for a third.
         java.util.function.Supplier<FusionWeights> weightsSupplier =
                 "equal".equalsIgnoreCase(weightsMode)
                         ? FusionWeights::equal
                         : () -> {
                             var selection = selectRung(telemetry, tca, tradingCore, refs, markHistory,
                                     intervalSeconds, gateParams);
-                            if (selection == null) {
-                                return FusionWeights.equal();
-                            }
                             // ADR-0097: the SAME gateParams admit a source to the vote. A source that
                             // cannot show a directional edge at the desk's own hurdle is held at the MIN
                             // weight — Φ(t) saturates above the hurdle and cannot tell a source that
                             // barely clears from one that clears sixfold, so without this a failing
                             // source out-votes the only passing one on the desk's largest position.
-                            return FusionWeights.fromTelemetry(
-                                    weightingStats(telemetry, selection.stats()), weightParams,
-                                    gateParams);
+                            return selection == null ? FusionWeights.equal()
+                                    : FusionWeights.fromTelemetry(selection.stats(), weightParams,
+                                            gateParams);
                         };
         // ADR-0064: the edge gate re-reads BOTH measurements every cycle — per-source realised
         // expectancy (signal telemetry) and the desk's own realised slippage (TCA) — so it opens by
@@ -309,25 +300,6 @@ public class FusionConfig {
      * Rung 3 is floored at exactly the minimum {@link EdgeGate} takes its desk-wide verdict at, so it
      * can move a per-name hurdle and provably cannot move that verdict.
      */
-    /**
-     * The rung the ADR-0148 combination weights are estimated over — the best-DETERMINED one, read off
-     * the same live telemetry the gate's rung is. Any failure to read it degrades to the gate's own rung,
-     * so the weights are never left without a measurement.
-     */
-    private static java.util.List<io.jethro.app.signal.SignalScoring.Stats> weightingStats(
-            ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
-            java.util.List<io.jethro.app.signal.SignalScoring.Stats> selected) {
-        var t = telemetry.getIfAvailable();
-        if (t == null) {
-            return selected;
-        }
-        try {
-            return HorizonLadder.weightingStats(t.statsByHorizon(), selected);
-        } catch (RuntimeException e) {
-            return selected;
-        }
-    }
-
     private static HorizonLadder.Selection selectRung(
             ObjectProvider<io.jethro.app.signal.SignalTelemetry> telemetry,
             ObjectProvider<io.jethro.order.ExecutionQualityRepository> tca,
