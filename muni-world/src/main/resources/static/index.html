@@ -384,6 +384,19 @@
     }
   }
 
+  /**
+   * "No call date" is TWO different facts and they must never render the same: an Official Statement
+   * that states no call is a FACT about the bond; no Official Statement at all is an absence of
+   * knowledge. Showing both as "—" quietly licenses treating unknown bonds as bullets.
+   */
+  function callText(r) {
+    if (r.callState === "CALLABLE") { return esc(r.call); }
+    if (r.callState === "NON_CALLABLE") {
+      return '<span style="color:var(--dim)">not callable <span style="font-size:10px">(per OS)</span></span>';
+    }
+    return '<span style="color:var(--warn)">unknown <span style="font-size:10px">(no OS loaded)</span></span>';
+  }
+
   /** Everything stored about one bond, plus WHY the economics are blank when they are. */
   async function showDetail(cusip) {
     SELECTED = cusip;
