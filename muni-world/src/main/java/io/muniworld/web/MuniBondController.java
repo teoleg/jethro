@@ -85,6 +85,12 @@ public final class MuniBondController {
         return bonds.coverage(limit, includeDone);
     }
 
+    /** Can the lattice/OAS work start? The preconditions, counted from the data. */
+    @GetMapping("/api/muni/bonds/readiness")
+    public Map<String, Object> readiness() {
+        return bonds.modelReadiness();
+    }
+
     /** Index a bond (the loader/connector seam; also lets tools push a bond in). */
     @PostMapping("/api/muni/bonds")
     public Map<String, Object> index(@RequestBody Bond bond) {

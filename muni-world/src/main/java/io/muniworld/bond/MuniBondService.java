@@ -141,6 +141,15 @@ public final class MuniBondService {
         return out;
     }
 
+    /** Analytics readiness, measured from the data — see the repository for what each count means. */
+    public java.util.Map<String, Object> modelReadiness() {
+        return repo.modelReadiness().orElseGet(() -> {
+            java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("note", "Postgres is not reachable — readiness is measured against the system of record.");
+            return m;
+        });
+    }
+
     /** Stamp the OS artifact these CUSIPs were read from — the "we have this issuer's document" fact. */
     public int markSourced(java.util.List<String> cusips, String sourceId) {
         return repo.markSourced(cusips, sourceId);

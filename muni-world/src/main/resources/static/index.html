@@ -108,6 +108,12 @@
       <div id="loadResults" style="margin-top:8px"></div>
     </details>
 
+    <!-- Can the Kalotay/OAS work start? Measured against the model's real preconditions, not guessed. -->
+    <details class="card" style="margin-top:12px" ontoggle="if (this.open) loadReadiness()">
+      <summary style="cursor:pointer;font-size:13px;color:var(--brand)">Is there enough data to start the OAS model? — readiness</summary>
+      <div id="readiness" style="margin-top:10px;color:var(--dim);font-size:12px">loading…</div>
+    </details>
+
     <!-- Answers "5,000 bonds = 5,000 documents?" from the data: it does not. One OS covers a whole
          series, so a handful of the biggest issuers carries most of the book. -->
     <details class="card" style="margin-top:12px" ontoggle="if (this.open) loadCoverage()">
@@ -141,7 +147,7 @@
     </div>
   </div>
 
-  <div class="foot">muni-world runs as a separate process · <b>UI build B12</b> (coverage plan hides issuers whose OS is loaded — a to-do list that shrinks)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B13</b> (model readiness: OAS preconditions counted from the data)</div>
 </main>
 
 <script>
@@ -201,6 +207,53 @@
    * whole series, so this ranks where one download buys the most call-schedule coverage — the honest
    * answer to "that's 5,000 documents" (it is not: it is a few dozen, and the top ten carry most of it).
    */
+  /**
+   * Model readiness. Per-bond preconditions come from the data; the two GLOBAL inputs (a benchmark curve
+   * and a volatility assumption) are not in any document and are reported as the open items they are —
+   * a bond-by-bond green light would otherwise imply the model can run when it cannot.
+   */
+  async function loadReadiness() {
+    const el = document.getElementById("readiness");
+    if (!el) { return; }
+    try {
+      const r = await (await fetch("/api/muni/bonds/readiness", { cache: "no-store" })).json();
+      if (r.note) { el.textContent = r.note; return; }
+      const pct = n => r.bonds ? Math.round(n * 1000 / r.bonds) / 10 : 0;
+      const bar = (label, n, why) => `<tr>
+          <td style="white-space:normal">${label}<div style="color:var(--dim);font-size:10.5px">${why}</div></td>
+          <td class="mono" style="color:${n > 0 ? "var(--up)" : "var(--warn)"}">${Number(n).toLocaleString()}</td>
+          <td class="mono">${pct(n)}%</td></tr>`;
+      const ready = r.modelableCallable || 0;
+      const verdict = ready >= 20
+        ? `<b style="color:var(--up)">Yes — ${ready} callable bonds have terms, a price and a call schedule.</b>
+           That is enough to build and validate a lattice: a first OAS run wants tens of bonds, not thousands.`
+        : `<b style="color:var(--warn)">Not yet — ${ready} callable bonds are fully specified.</b>
+           Load a few more Official Statements from the coverage plan; each one lands a whole series.`;
+      el.innerHTML = `<div style="margin-bottom:8px">${verdict}</div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>Precondition</th><th>Bonds</th><th>Share</th></tr></thead><tbody>
+          ${bar("Terms (coupon + maturity)", r.terms, "the cash flows — from the fund filings")}
+          ${bar("A price to solve from", r.priced, "quarterly filing marks; OAS is solved FROM a price, so it is an as-of-quarter-end OAS")}
+          ${bar("Call schedule", r.callable, "the OPTION — only an Official Statement has it")}
+          ${bar("Tax status", r.withTax, "needed for the de-minimis / tax-option work")}
+          ${bar("Read from an OS", r.fromOs, "documents loaded so far")}
+          ${bar("FULLY SPECIFIED, callable", r.modelableCallable, "terms + price + call + a document behind it — the OAS-ready set")}
+        </tbody></table></div>
+        <div style="margin-top:10px;color:var(--dim)">
+          <b style="color:var(--txt)">Two inputs no document can supply</b> — the model needs them regardless
+          of how many bonds you load:
+          <div style="margin-top:4px">· <b>Benchmark curve</b> — <span style="color:var(--warn)">not ingested yet</span>.
+            The free, official, automatable one is the US Treasury daily par curve; a AAA muni curve (MMD/BVAL) is paid.</div>
+          <div>· <b>Rate volatility</b> — <span style="color:var(--warn)">not set</span>. A lattice needs one;
+            market vol surfaces are paid, so this is an explicit assumption you set, and results should be
+            reported at vol ± a band rather than as a single hidden number.</div>
+          <div style="margin-top:6px">Valuation history depth:
+            <b style="color:var(--txt)">${r.valuationPeriods || 0}</b> quarterly period(s) —
+            what any time-series or refunding-efficiency work runs on.</div>
+        </div>`;
+    } catch (e) { el.textContent = "readiness unavailable"; }
+  }
+
   let COVERAGE_ALL = false;   // false = TO-DO only (issuers whose OS is already read are hidden)
 
   function toggleCoverageDone() {

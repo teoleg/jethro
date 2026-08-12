@@ -304,6 +304,73 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
         }
     }
 
+    /**
+     * What the lattice/OAS work (muni ADR-0002's Kalotay-inspired north star) can actually be run on
+     * TODAY, counted from the data rather than estimated. Each field is a real precondition:
+     *
+     * <ul>
+     *   <li><b>terms</b> — coupon + maturity: the cash flows. Without these there is no bond to value.</li>
+     *   <li><b>callable</b> — a call date: the OPTION. An OAS engine with no option to value is a YTM
+     *       calculator with extra steps, so this is the field that decides whether the work is worth
+     *       doing at all.</li>
+     *   <li><b>priced</b> — a filing valuation or an ingested price: OAS is SOLVED FROM a price. Quarterly
+     *       filing marks make it an as-of-quarter-end OAS, which is honest and still useful.</li>
+     *   <li><b>withTax</b> — tax status: needed for the de-minimis / tax-option analysis.</li>
+     *   <li><b>modelable</b> — terms AND a price AND (a call OR a document proving there is none). The
+     *       last clause matters: a bond read from an OS with no call is genuinely non-callable, which is a
+     *       FACT, whereas a bond with no document simply has unknown optionality.</li>
+     *   <li><b>periods</b> — distinct quarterly valuation dates, i.e. how long a time series exists.</li>
+     * </ul>
+     */
+    public java.util.Optional<java.util.Map<String, Object>> modelReadiness() {
+        if (!available()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            java.util.Map<String, Object> out = jdbc.queryForObject("""
+                    SELECT count(*)::int AS bonds,
+                           count(*) FILTER (WHERE coupon IS NOT NULL
+                                              AND maturity_date IS NOT NULL)::int AS terms,
+                           count(*) FILTER (WHERE call_date IS NOT NULL)::int AS callable,
+                           count(*) FILTER (WHERE val_per100 IS NOT NULL
+                                               OR price IS NOT NULL)::int AS priced,
+                           count(*) FILTER (WHERE tax_status IS NOT NULL)::int AS with_tax,
+                           count(*) FILTER (WHERE source_id IS NOT NULL)::int AS from_os,
+                           count(*) FILTER (WHERE coupon IS NOT NULL
+                                              AND maturity_date IS NOT NULL
+                                              AND (val_per100 IS NOT NULL OR price IS NOT NULL)
+                                              AND source_id IS NOT NULL)::int AS modelable,
+                           count(*) FILTER (WHERE coupon IS NOT NULL
+                                              AND maturity_date IS NOT NULL
+                                              AND (val_per100 IS NOT NULL OR price IS NOT NULL)
+                                              AND source_id IS NOT NULL
+                                              AND call_date IS NOT NULL)::int AS modelable_callable
+                    FROM muni.security""",
+                    (rs, i) -> {
+                        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+                        m.put("bonds", rs.getInt("bonds"));
+                        m.put("terms", rs.getInt("terms"));
+                        m.put("callable", rs.getInt("callable"));
+                        m.put("priced", rs.getInt("priced"));
+                        m.put("withTax", rs.getInt("with_tax"));
+                        m.put("fromOs", rs.getInt("from_os"));
+                        m.put("modelable", rs.getInt("modelable"));
+                        m.put("modelableCallable", rs.getInt("modelable_callable"));
+                        return m;
+                    });
+            if (out == null) {
+                return java.util.Optional.empty();
+            }
+            Integer periods = jdbc.queryForObject(
+                    "SELECT count(DISTINCT as_of)::int FROM muni.valuation_history", Integer.class);
+            out.put("valuationPeriods", periods == null ? 0 : periods);
+            return java.util.Optional.of(out);
+        } catch (DataAccessException e) {
+            queryFailed("modelReadiness()", e);
+            return java.util.Optional.empty();
+        }
+    }
+
     /** Read a one-time-job marker ({@code muni.ingest_state}); empty when unset or the DB is off. */
     public java.util.Optional<String> state(String key) {
         if (!available()) {
