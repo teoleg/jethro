@@ -41,7 +41,12 @@ public final class RealizedVol {
     /** Trading days per year — the annualisation convention for a business-day series. */
     public static final int TRADING_DAYS = 252;
 
-    /** Rates at or below 1bp are excluded from the LOGNORMAL estimate (ln explodes); counted, not dropped. */
+    /**
+     * Rates at or below this are excluded from the LOGNORMAL estimate (ln explodes); counted, not dropped.
+     * The 1bp LEVEL is an implementer-chosen guard, not a market convention — arbitrary within an order of
+     * magnitude, registered as Tier J in docs/model-assumptions.md. Raising it excludes more ZIRP-era data
+     * and LOWERS the measured lognormal sigma; the normal estimate is unaffected either way.
+     */
     public static final double LN_FLOOR_BP = 1.0;
 
     /** Volatility results are carried at 6dp — finer than any sigma is ever quoted. */

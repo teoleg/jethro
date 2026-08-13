@@ -232,11 +232,15 @@
           <td class="mono" style="color:${n > 0 ? "var(--up)" : "var(--warn)"}">${Number(n).toLocaleString()}</td>
           <td class="mono">${pct(n)}%</td></tr>`;
       const ready = r.modelableCallable || 0;
+      // 20 is a WORKING FIGURE (enough bonds to validate a lattice against — tens, not thousands), not a
+      // statistical rule; it is registered as such in docs/model-assumptions.md.
       const verdict = ready >= 20
         ? `<b style="color:var(--up)">Yes — ${ready} callable bonds have terms, a price and a call schedule.</b>
-           That is enough to build and validate a lattice: a first OAS run wants tens of bonds, not thousands.`
+           That is enough to build and validate a lattice: a first OAS run wants tens of bonds, not thousands
+           <span style="font-size:10px">(20 is a working figure, not a rule)</span>.`
         : `<b style="color:var(--warn)">Not yet — ${ready} callable bonds are fully specified.</b>
-           Load a few more Official Statements from the coverage plan; each one lands a whole series.`;
+           Load a few more Official Statements from the coverage plan; each one lands a whole series.
+           <span style="font-size:10px">(The "enough" line of ${20} is a working figure, not a rule.)</span>`;
       el.innerHTML = `<div style="margin-bottom:8px">${verdict}</div>
         <div style="overflow-x:auto"><table class="tbl"><thead><tr>
           <th>Precondition</th><th>Bonds</th><th>Share</th></tr></thead><tbody>
@@ -332,6 +336,11 @@
         <b>${Number(c.curveDays || 0).toLocaleString()}</b> curve day(s) stored, newest
         <span class="mono">${esc(String(c.newestCurve))}</span>.
         <div style="font-size:10.5px;margin-top:2px">Ingest: ${esc(String(c.lastResult || "never run"))}</div>
+        <div style="font-size:10.5px;margin-top:2px">Every curve day passes three validations before it is
+          stored (ADR-0020): parameters must <b>reprice the file's own published SVENY zeros</b> (mis-parse
+          detector), discount factors must be <b>strictly decreasing</b> (no negative implied forwards),
+          and levels must sit inside the <b>plausibility band</b> measured from the published record.
+          Failing days are quarantined and counted above — never stored, never guessed.</div>
       </div>`;
 
       if (!g.available) {
@@ -579,6 +588,14 @@
         return;
       }
       const i = o.inputs;
+      // The assumption ledger: green when every input is a documented fact, amber chips naming each
+      // assumption otherwise — so "which of these numbers rest on a call I didn't make?" is answerable
+      // at a glance. Facts-only filtering: /oas?strict=true refuses instead of assuming.
+      const assumeLine = o.assumptionFree
+        ? `<div style="font-size:10.5px;margin-top:3px;color:var(--up)">assumption-free — every input is a
+             documented fact (OS-stated call price, fund-attested coupon kind)</div>`
+        : `<div style="font-size:10.5px;margin-top:3px;color:var(--warn)">assumes: ${
+             (o.assumptions || []).map(a => esc(a)).join(" · ")}</div>`;
       const cell = r => r == null ? "—" : (r.solved
           ? `<b>${esc(String(r.oasBp))}</b>`
           : `<span style="color:var(--warn)" title="${esc(r.reason)}">unsolvable</span>`);
@@ -586,6 +603,7 @@
       el.innerHTML = `<b style="color:var(--txt)">OAS — ${o.callable ? "callable, priced on the lattice"
             : "non-callable (per OS), straight solve"}</b>
         <span style="font-size:10.5px">(bp, vs taxable Treasury — see note)</span>
+        ${assumeLine}
         <div style="overflow-x:auto;margin-top:4px"><table class="tbl"><thead><tr>
           <th>at measured σ</th><th>at p10</th><th>at p50</th><th>at p90</th></tr></thead><tbody><tr>
           <td class="mono">${cell(s.measured)}</td><td class="mono">${cell(s.p10)}</td>

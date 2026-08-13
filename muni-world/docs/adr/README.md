@@ -26,6 +26,8 @@ gets an ADR here **before** implementation; accepted ADRs are settled and supers
 | [0016](0016-fund-holdings-nport-cusip-source.md) | SEC N-PORT fund holdings as the bulk CUSIP source | Accepted |
 | [0017](0017-benchmark-curve-and-rate-volatility.md) | Benchmark curve and rate volatility from free official sources | Accepted |
 | [0018](0018-bdt-lattice-and-oas.md) | BDT lattice and the first OAS calculation | Accepted |
+| [0019](0019-quantlib-as-validation-oracle.md) | QuantLib as the validation oracle; own engine stays the runtime | Accepted |
+| [0020](0020-benchmark-curve-validation.md) | Benchmark curve validation and the assumption ledger | Accepted |
 
 ## Reading order
 

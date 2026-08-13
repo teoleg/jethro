@@ -34,14 +34,30 @@ public class OasService {
 
     private final SecurityRepository securities;
     private final CurveRepository curves;
+    private final int maxCurveStalenessDays;
 
-    public OasService(SecurityRepository securities, CurveRepository curves) {
+    public OasService(SecurityRepository securities, CurveRepository curves,
+                      @org.springframework.beans.factory.annotation.Value(
+                              "${muni.curve.max-staleness-days:14}") int maxCurveStalenessDays) {
         this.securities = securities;
         this.curves = curves;
+        this.maxCurveStalenessDays = maxCurveStalenessDays;
     }
 
     /** Compute (or refuse, with the reason) the OAS for one CUSIP. Shapes match the API response. */
     public Map<String, Object> oas(String cusip) {
+        return oas(cusip, false);
+    }
+
+    /**
+     * @param strict facts-only mode (owner directive: "filter out all your assumptions"): when true, a
+     *               result that would depend on ANY per-bond assumption (par call assumed because the OS
+     *               stated no price; coupon kind not fund-attested) is REFUSED, naming the assumptions,
+     *               instead of computed. Universal stated conventions (clean-price treatment, Treasury
+     *               basis, ACT/365.25 geometry) are listed in every response and are not per-bond
+     *               assumptions — they are the model's declared frame (ADR-0018 §3).
+     */
+    public Map<String, Object> oas(String cusip, boolean strict) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("cusip", cusip);
 
@@ -80,15 +96,49 @@ public class OasService {
             return refuse(out, "bond matured on/before the price date (" + priceDate + ")");
         }
 
-        // ---- the market inputs (ADR-0017) -----------------------------------------------------------
+        // ---- the market inputs (ADR-0017), VALIDATED before use (ADR-0020) --------------------------
         Map<String, Object> fit = curves.fitOnOrBefore(GswCurveIngest.SOURCE, priceDate);
         if (fit == null) {
             return refuse(out, "no benchmark curve on/before " + priceDate
                     + " — has the GSW ingest run? (see the curve panel)");
         }
+        // Staleness: a price is discounted on the curve of ITS market, and a curve much older than the
+        // price is a different market. The Fed publishes weekly, so small gaps are normal; the cutoff is
+        // an owner dial (muni.curve.max-staleness-days — see its provenance comment), echoed here.
+        LocalDate curveDate = LocalDate.parse(String.valueOf(fit.get("asOf")));
+        long staleDays = ChronoUnit.DAYS.between(curveDate, priceDate);
+        if (staleDays > maxCurveStalenessDays) {
+            return refuse(out, "benchmark curve too stale — nearest stored curve (" + curveDate + ") is "
+                    + staleDays + " day(s) before the price date (" + priceDate + "), limit "
+                    + maxCurveStalenessDays + " (muni.curve.max-staleness-days). Refusing rather than "
+                    + "discounting on a different market's curve.");
+        }
+        // Sanity, re-checked at read time (the ingest gate may have tightened after this day landed).
+        NelsonSiegelSvensson sanityCheck = new NelsonSiegelSvensson(
+                dv(fit, "beta0"), dv(fit, "beta1"), dv(fit, "beta2"), dv(fit, "beta3"),
+                dv(fit, "tau1"), dv(fit, "tau2"));
+        String objection = io.muniworld.curve.CurveSanity.objection(sanityCheck);
+        if (objection != null) {
+            return refuse(out, "benchmark curve of " + curveDate + " failed validation: " + objection);
+        }
         Map<String, Object> vol = curves.latestVol("GSW:1Y", "LOGNORMAL");
         if (vol == null) {
             return refuse(out, "rate volatility not measured yet — it lands with the curve ingest");
+        }
+
+        // ---- the per-bond ASSUMPTION LEDGER: every non-fact input this result would rest on ----------
+        List<String> assumptions = new java.util.ArrayList<>();
+        if (callable && b.callPrice() == null) {
+            assumptions.add("par call assumed — the OS states a call date but no price (market convention, "
+                    + "not a document fact)");
+        }
+        if (d.couponKind() == null || d.couponKind().isBlank()) {
+            assumptions.add("coupon kind not fund-attested — treated as fixed because a coupon rate is "
+                    + "stored, but no filing said 'Fixed'");
+        }
+        if (strict && !assumptions.isEmpty()) {
+            return refuse(out, "strict mode: result would depend on assumption(s): "
+                    + String.join("; ", assumptions));
         }
 
         // ---- lattice geometry (ADR-0018 §3) ----------------------------------------------------------
@@ -131,6 +181,9 @@ public class OasService {
 
         out.put("available", true);
         out.put("callable", callable);
+        // The assumption ledger travels WITH the result: empty = every input is a documented fact.
+        out.put("assumptions", assumptions);
+        out.put("assumptionFree", assumptions.isEmpty());
         out.put("oasBpBySigma", results);
         // ---- the book-level analytics at the measured-σ OAS (option value, duration, refunding) -----
         if (Boolean.TRUE.equals(atMeasured.get("solved"))) {
@@ -172,6 +225,8 @@ public class OasService {
                 "price treated as CLEAN (fund fair-value practice); N-PORT does not state accrued handling",
                 "coupons semiannual fixed; steps ACT/365.25, landing exactly on maturity",
                 "call: American on/after the OS call date, issuer minimises value",
+                "OAS solved within ±1,000bp; a price outside returns unsolvable, never a clamped fit — "
+                + "every constant is registered in docs/model-assumptions.md",
                 "BASIS: taxable Treasury — tax-exempt bonds typically show NEGATIVE OAS on this basis; "
                 + "rank bonds against each other, do not read absolute cheapness until the muni-ratio "
                 + "leg is measured (ADR-0017 §2)"));
