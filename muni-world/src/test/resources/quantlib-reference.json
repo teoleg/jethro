@@ -1,0 +1,194 @@
+{
+ "quantlib": "1.43",
+ "evaluationDate": "June 15th, 2026",
+ "treeSteps": 500,
+ "blackKarasinskiA": 1e-06,
+ "cases": [
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 0.0,
+   "years": 1,
+   "qlClean": 97.04455335485082
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 0.0,
+   "years": 10,
+   "qlClean": 74.08182206817179
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 0.0,
+   "years": 30,
+   "qlClean": 40.656965974059915
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 4.0,
+   "years": 1,
+   "qlClean": 100.95566830115396
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 4.0,
+   "years": 10,
+   "qlClean": 108.38085881664296
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 4.0,
+   "years": 30,
+   "qlClean": 119.18906457200795
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 6.0,
+   "years": 1,
+   "qlClean": 102.91122577430554
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 6.0,
+   "years": 10,
+   "qlClean": 125.53037719087857
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 3.0,
+   "couponPct": 6.0,
+   "years": 30,
+   "qlClean": 158.455113870982
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 0.0,
+   "years": 1,
+   "qlClean": 95.12294245007139
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 0.0,
+   "years": 10,
+   "qlClean": 60.65306597126335
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 0.0,
+   "years": 30,
+   "qlClean": 22.313016014842983
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 4.0,
+   "years": 1,
+   "qlClean": 98.97602112312948
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 4.0,
+   "years": 10,
+   "qlClean": 91.73878329247245
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 4.0,
+   "years": 30,
+   "qlClean": 83.68897028706532
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 6.0,
+   "years": 1,
+   "qlClean": 100.90256045965853
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 6.0,
+   "years": 10,
+   "qlClean": 107.28164195307701
+  },
+  {
+   "kind": "bullet",
+   "flatYPct": 5.0,
+   "couponPct": 6.0,
+   "years": 30,
+   "qlClean": 114.37694742317652
+  },
+  {
+   "kind": "callable",
+   "flatYPct": 3.0,
+   "couponPct": 4.0,
+   "years": 10,
+   "callYears": 5,
+   "strike": 100.0,
+   "sigma": 0.1,
+   "qlClean": 104.29239947483154
+  },
+  {
+   "kind": "callable",
+   "flatYPct": 3.0,
+   "couponPct": 4.0,
+   "years": 10,
+   "callYears": 5,
+   "strike": 100.0,
+   "sigma": 0.15,
+   "qlClean": 103.85954848497998
+  },
+  {
+   "kind": "callable",
+   "flatYPct": 3.0,
+   "couponPct": 4.0,
+   "years": 10,
+   "callYears": 5,
+   "strike": 100.0,
+   "sigma": 0.2,
+   "qlClean": 103.34159493973385
+  },
+  {
+   "kind": "callable",
+   "flatYPct": 3.0,
+   "couponPct": 6.0,
+   "years": 10,
+   "callYears": 5,
+   "strike": 100.0,
+   "sigma": 0.15,
+   "qlClean": 113.6539967289192
+  },
+  {
+   "kind": "callable",
+   "flatYPct": 5.0,
+   "couponPct": 4.0,
+   "years": 10,
+   "callYears": 5,
+   "strike": 100.0,
+   "sigma": 0.15,
+   "qlClean": 90.8120762357757
+  },
+  {
+   "kind": "callable",
+   "flatYPct": 3.0,
+   "couponPct": 4.0,
+   "years": 10,
+   "callYears": 5,
+   "strike": 100.0,
+   "sigma": 0.0001,
+   "qlClean": 104.504123657618
+  }
+ ]
+}
