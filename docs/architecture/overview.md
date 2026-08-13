@@ -196,8 +196,20 @@ jethro/
 ├── app/                             # single-JVM assembly + ~24 subsystems + :8080 edge (ADR-0015)
 ├── infra/  infra/packer/            # AWS CDK + AMI bake (ADR-0007/0013)
 ├── deploy/                          # compose rollout alternatives
+├── muni-world/                      # INDEPENDENT subproject — see below
 └── docker-compose.yml               # local topology
 ```
+
+## Independent subproject: muni-world (not part of this architecture)
+
+`muni-world/` is a **separate deployable** living in the same repo: municipal-bond data collection +
+Kalotay-style OAS analytics, with its own jar (:8090 next to the app's :8080), its own `muni` Postgres
+schema in the shared instance, its own LMDB env, **its own ADR series** (`muni-world/docs/adr/`,
+0001–0020) and [README](../../muni-world/README.md). It reuses `common-domain`/`common-messaging` as
+libraries but is not in the `app` assembly, is not depended on by any jethro module, and nothing on the
+trading path reads from it. Operationally it shares only `scripts/svc.sh` (`start|stop|restart|backup
+muni`, and `stop trading` focus mode, which leaves it and Postgres running). Everything above this
+section describes the trading platform only.
 
 ## What is NOT built / partial
 

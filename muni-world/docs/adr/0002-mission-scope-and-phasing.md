@@ -1,6 +1,10 @@
 # ADR-0002: Mission, scope, and phase order — a muni analytics platform, data first
 
-- **Status:** Accepted
+- **Status:** Accepted — **amended 2026-08-13:** Phase 1 (data) delivered its core; Phase 2 (analytics)
+  is OPEN, at the owner's direction. The universe (ADR-0016), OS term extraction (ADR-0015), benchmark
+  curve + measured volatility (ADR-0017) and the BDT/OAS engine (ADR-0018, validated per ADR-0019, gated
+  per ADR-0020) are live. Data collection continues in parallel — every loaded OS still grows the
+  modelable set — but "we do not build analytics this phase" no longer describes the module.
 - **Date:** 2026-08-01
 - **Deciders:** Oleg
 - **Tags:** mission, scope, roadmap

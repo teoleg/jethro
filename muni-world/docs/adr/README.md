@@ -46,3 +46,13 @@ a transcript is a **lead to verify**, never a number (invariant 7 / ADR-0011 inh
 **0017** closes the last gap between *data* and *analytics*: the benchmark curve and the rate volatility a lattice needs, which no Official Statement can supply because they are properties of the market, not of a bond. Both come from ONE free official file — the Federal Reserve's own daily zero-coupon Treasury curve (GSW / FEDS 2006-28) — so the paid AAA-muni curve and the paid implied-vol surface are both routed around: the curve is ingested, the volatility is **measured** from its history rather than assumed, and OAS is reported across a p10/p50/p90 vol band so the assumption is never hidden inside a single number.
 
 **0018** is the arrival: the BDT lattice + OAS solver the whole data platform was built to feed — calibrated exactly to the 0017 curve as-of each price's own date, σ entering as the measured band, refusal a first-class output, and the taxable-Treasury basis stated on every number until the muni-ratio leg is measurable.
+
+**0019** anchors trust externally: QuantLib's C++ engines (via the official binding, offline) generate
+committed reference prices that CI replays against our engine — bullets agree to ~1e-13, callables within
+~½bp of OAS — while the runtime stays pure Java, line-for-line traceable to the book. **0020** closes the
+loop the owner demanded while reading Kalotay: every benchmark-curve day is *validated* before storage
+(reprices its own published zeros; no negative implied forwards; plausibility band) with failures
+quarantined; the OAS path enforces curve staleness and re-checks sanity; and every result carries an
+**assumption ledger** (`assumptions[]` / `assumptionFree`, `?strict=true` refuses rather than assumes).
+The registry of every constant — mathematics vs cited convention vs judgement call — lives in
+[`../model-assumptions.md`](../model-assumptions.md).
