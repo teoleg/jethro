@@ -56,3 +56,28 @@ Worth restating so this page can't mislead by precision: the **benchmark basis**
 muni-ratio leg is measured — ADR-0017 §2) and **price quality** (quarterly fund fair-value marks, clean/dirty
 unstated in N-PORT — ADR-0018 §3) move OAS by more than every Tier J row combined. Both are labeled on every
 result; neither is a constant anyone can tune away.
+
+## Book references — attached by the owner as he reads
+
+The assistant does not have the book text and will not fabricate page numbers. Each mechanism below
+follows a Kalotay concept; Oleg fills the page/table as he verifies it against
+*Interest Rate Risk Management of Municipal Bonds*:
+
+| Concept | Where implemented | Book page/table |
+|---|---|---|
+| BDT lattice (lognormal short rate, calibrated to the benchmark curve) | `BdtLattice` | ___ |
+| callable = straight − option value decomposition | `ModelAnalytics` | ___ |
+| Refunding efficiency and the ~90% rule of thumb | `ModelAnalytics`, workbench UI | ___ |
+| Curve validation before valuation (reprice constituents; no negative forwards) | `GswCurveIngest.validate`, ADR-0020 | ___ |
+| Benchmark curve must be option-free (muni quotes embed the 5%-callable convention) | ADR-0017 §2 — ratio leg measured from confirmed NON-callable bonds only | ___ |
+| Effective duration/convexity of callables (negative convexity near the call) | `ModelAnalytics` | ___ |
+| OAS as the valuation spread on the lattice | `LatticeBondPricer.solveOas` | ___ |
+
+## Added by ADR-0020 (curve validation + assumption ledger)
+
+| Constant | Tier | Where | Notes |
+|---|---|---|---|
+| SVENY repricing tolerance 1bp | M | `GswCurveIngest.validate` | Parse-error detector: genuine agreement is ~1e-6bp (the file publishes ~6 decimals); 1bp is pure daylight, distinguishing "same number up to print rounding" from "different number". |
+| Plausibility band [−2%, +35%] at 1y/10y/30y | J | `CurveSanity` | Reasoned from the published record itself (~17% worst high in 1981; marginally negative bills): roughly double the historical extremes, so it rejects corruption, never history. Widening admits more of a corrupt file; it never changes a passing value. |
+| Curve staleness limit, default 14 days | **PLACEHOLDER — Oleg to set** | `muni.curve.max-staleness-days` | 14 = one missed weekly Fed publication + a long weekend. The refusal message names the property. |
+| Lattice repricing residual 1e-9 | M | `BdtLattice.calibrate` | Solver-exactness guard: bisection converges to ~1e-15; 1e-9 fails only genuinely unreachable steps (negative/huge implied forwards). |

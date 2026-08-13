@@ -62,6 +62,16 @@ public final class BdtLattice {
                 }
             }
             double a = 0.5 * (lo + hi);
+            // Kalotay's repricing discipline, enforced not assumed: if the bisection could not actually
+            // reach the target (a curve step implying a negative/zero forward — a lognormal model cannot
+            // produce it — or a corrupt DF), REFUSE. Silently carrying a mispriced step would contaminate
+            // every bond priced on the lattice, which is exactly what curve validation exists to prevent.
+            double residual = impliedZeroPrice(q, a, sigma, step, dt) - stepDf[i];
+            if (Math.abs(residual) > 1e-9) {
+                throw new IllegalStateException("lattice cannot reprice the curve at step " + (i + 1)
+                        + " (target DF " + stepDf[i] + ", residual " + residual
+                        + ") — the curve implies a forward a lognormal short-rate model cannot fit");
+            }
             rates[i] = new double[i + 1];
             for (int j = 0; j <= i; j++) {
                 rates[i][j] = a * Math.exp(sigma * Math.sqrt(dt) * (2.0 * j - i));

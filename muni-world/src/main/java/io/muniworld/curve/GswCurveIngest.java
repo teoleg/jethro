@@ -83,16 +83,38 @@ public final class GswCurveIngest {
         lastRun = Instant.now().toString();
         try {
             RawArtifact raw = fetcher.fetch("fed-gsw", url);
-            List<GswCsvParser.Row> rows = GswCsvParser.parse(raw.body());
-            if (rows.isEmpty()) {
+            List<GswCsvParser.Row> parsed = GswCsvParser.parse(raw.body());
+            if (parsed.isEmpty()) {
                 lastResult = "FAILED — file parsed but contained no usable curve rows";
+                return;
+            }
+            // Curve VALIDATION before anything is stored (Kalotay's discipline; ADR-0020): a failing day
+            // is quarantined — counted, first objection kept, never written (ADR-0011).
+            List<GswCsvParser.Row> rows = new java.util.ArrayList<>();
+            int quarantined = 0;
+            String firstObjection = null;
+            for (GswCsvParser.Row r : parsed) {
+                String objection = validate(r);
+                if (objection == null) {
+                    rows.add(r);
+                } else {
+                    quarantined++;
+                    if (firstObjection == null) {
+                        firstObjection = r.date() + ": " + objection;
+                    }
+                }
+            }
+            if (rows.isEmpty()) {
+                lastResult = "FAILED — every curve day failed validation (first: " + firstObjection + ")";
                 return;
             }
             int written = repo.upsertFits(SOURCE, rows, TENORS);
             LocalDate newest = rows.get(rows.size() - 1).date();
             String volNote = measureVol(newest);
-            lastResult = "ok — " + rows.size() + " curve day(s) parsed, " + written + " stored, newest "
-                    + newest + "; " + volNote;
+            String qNote = quarantined == 0 ? "0 quarantined"
+                    : quarantined + " QUARANTINED (first: " + firstObjection + ")";
+            lastResult = "ok — " + parsed.size() + " day(s) parsed, " + written + " stored, " + qNote
+                    + ", newest " + newest + "; " + volNote;
             log.info("GSW curve ingest: {}", lastResult);
         } catch (Exception e) {
             lastResult = "FAILED — " + rootMessage(e);
@@ -118,6 +140,49 @@ public final class GswCurveIngest {
         return "vol measured on " + VOL_SERIES + ": normal " + normal.sigma() + " bp/yr, lognormal "
                 + logn.sigma() + " (" + normal.observations() + " obs, " + logn.excluded()
                 + " excluded at the 1bp floor)";
+    }
+
+    /**
+     * The per-day curve validation (ADR-0020, Kalotay's discipline — every check is mechanical, no chosen
+     * model numbers). Returns the objection, or null when the day passes all three:
+     * <ol>
+     *   <li><b>Internal consistency</b> — the fitted parameters must REPRICE the file's own published
+     *       SVENY zeros (where the row carries them). A gap beyond print-rounding means the row was
+     *       mis-parsed (shifted column, unit slip), the exact corruption a fixed tolerance detects: the
+     *       Fed publishes ~6 decimals, so genuine agreement is ~1e-6bp and 1bp is pure daylight.</li>
+     *   <li><b>No-arbitrage</b> — discount factors strictly decreasing across the tenor grid (equivalently
+     *       every implied forward positive); a lognormal lattice cannot honestly calibrate otherwise, and
+     *       {@link BdtLattice} enforces the same rule again at build time.</li>
+     *   <li><b>Level plausibility</b> — {@link CurveSanity}: zeros inside the band reasoned from the
+     *       published record itself.</li>
+     * </ol>
+     */
+    static String validate(GswCsvParser.Row row) {
+        NelsonSiegelSvensson curve = row.curve();
+        for (Map.Entry<Integer, Double> e : row.svenYieldsPercent().entrySet()) {
+            double reconstructedPct = curve.zeroRate(e.getKey()).movePointRight(2).doubleValue();
+            double gapBp = Math.abs(reconstructedPct - e.getValue()) * 100;
+            if (gapBp > 1.0) {
+                return "parameters do not reprice the file's own SVENY" + String.format("%02d", e.getKey())
+                        + " (published " + e.getValue() + "%, reconstructed " + reconstructedPct
+                        + "%) — row mis-parsed?";
+            }
+        }
+        // Level check BEFORE shape check: a wildly implausible level also underflows the long discount
+        // factors to zero, and "not strictly decreasing" would then mask the real disease (a unit slip).
+        String objection = CurveSanity.objection(curve);
+        if (objection != null) {
+            return objection;
+        }
+        double prev = 1.0;
+        for (BigDecimal t : TENORS) {
+            double df = curve.discountFactor(t.doubleValue()).doubleValue();
+            if (df >= prev) {
+                return "discount factor not strictly decreasing at " + t + "y — a negative implied forward";
+            }
+            prev = df;
+        }
+        return null;
     }
 
     /** For the status endpoint. */

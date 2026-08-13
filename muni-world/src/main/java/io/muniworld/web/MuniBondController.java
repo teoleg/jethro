@@ -33,8 +33,9 @@ public final class MuniBondController {
      * at the measured σ and its p10/p50/p90 band. {@code available:false} carries the named refusal reason.
      */
     @GetMapping("/api/muni/bonds/{cusip}/oas")
-    public Map<String, Object> oas(@PathVariable String cusip) {
-        return oas.oas(cusip.toUpperCase(java.util.Locale.ROOT));
+    public Map<String, Object> oas(@PathVariable String cusip,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean strict) {
+        return oas.oas(cusip.toUpperCase(java.util.Locale.ROOT), strict);
     }
 
     /** Bonds for an issuer (CUSIP-6 prefix), with indicators. */
