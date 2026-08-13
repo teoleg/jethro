@@ -1,71 +1,78 @@
-# Runbook — broadcast-audio capture on the Pi (ADR-0014)
+# Runbook — broadcast-audio capture (ADR-0014)
 
-Capture the audio of **Bloomberg TV / CNBC** from your **YouTube TV** subscription on the Pi, transcribe it
-locally, and surface **leads to verify** (issuer named, muni keyword, CUSIP token) on the muni-world page.
-This captures a feed you are **licensed** to, for **private** analysis. A transcript is a **lead, never a
-number** (ADR-0014) — nothing spoken sets a canonical value.
+Capture the audio of a **live broadcast stream** (Bloomberg TV via its official YouTube live channel),
+transcribe it locally, and surface **leads to verify** (issuer named, muni keyword, CUSIP token) on the
+muni-world TV page. A transcript is a **lead, never a number** (ADR-0014) — nothing spoken sets a
+canonical value. Recording is for **private analysis only** and remains subject to the broadcaster's and
+platform's terms.
 
-Cost: **$0**. YouTube TV plays through the Pi's audio, so we capture the software **loopback (monitor)** —
-no hardware to buy.
-
-## What runs where
+## How it works — one path, no browser, no sound card
 
 ```
-YouTube TV in a browser (Bloomberg/CNBC)  →  PulseAudio/PipeWire ".monitor"
-        →  ffmpeg records a chunk  →  whisper.cpp transcribes (local)
-        →  deterministic lead detection  →  muni-world "Audio leads"
+seeds/audio-sources.csv (yt:<live page>)
+  → yt-dlp resolves the CURRENT stream URL   (per capture — live CDN URLs expire)
+  → ffmpeg pulls the audio chunk straight off the CDN
+  → whisper.cpp transcribes locally
+  → deterministic lead detection → "Audio leads" on /tv.html
 ```
 
-## Step by step
+There is **no host-audio / PulseAudio loopback step** — earlier versions captured a browser playing into
+the Pi's sound stack; that path was removed ("connect and stream", nothing else). The Pi needs no browser,
+no audio device, and nothing playing.
 
-1. **One-time setup** — installs ffmpeg, builds whisper.cpp, fetches a model, finds your loopback:
-   ```bash
-   cd ~/jethro/muni-world
-   bash scripts/setup-audio-pi.sh          # MODEL=tiny.en for a faster (rougher) run on a Pi
-   ```
-   Note the `MUNI_WHISPER_BIN`, `MUNI_WHISPER_MODEL`, and `pulse:<sink>.monitor` values it prints.
+## The feed registry (read-only, ships in the jar)
 
-2. **Tune the feed.** Open YouTube TV in a browser on the Pi and start **Bloomberg TV** (or CNBC). The
-   monitor captures whatever is currently playing out the Pi's audio — so one feed at a time per host.
+`src/main/resources/seeds/audio-sources.csv` — edit and rebuild; there is no writable host copy. The
+`device` field is the source and takes two forms:
 
-3. **Smoke-test the loopback** (should play back the TV audio):
-   ```bash
-   ffmpeg -f pulse -i <sink>.monitor -t 10 -ac 1 -ar 16000 /tmp/test.wav && ffplay /tmp/test.wav
-   ```
-   Silent? Pick the right monitor from `pactl list sources short` (the one ending in `.monitor` for the
-   sink your browser plays into).
+- `yt:<page>` — a live **page** whose current media URL yt-dlp resolves at each capture.
+  **Use a channel's `/live` URL, never a `watch?v=` video id** — a video id points at ONE broadcast and
+  dies with it ("This live stream recording is not available", exactly how the first attempt failed).
+  Shipped default: `yt:https://www.youtube.com/@markets/live` (Bloomberg Television's official channel).
+- `url:<stream>` — a direct HLS/DASH/Icecast URL; ffmpeg reads it straight.
 
-4. **Configure the feed registry + start capture.** Feeds are a registry (like the market-data/social
-   sources), not env vars. Set the config once in `local.env` (copy from `local.env.example`):
-   ```bash
-   MUNI_WHISPER_BIN=~/whisper.cpp/build/bin/whisper-cli
-   MUNI_WHISPER_MODEL=~/whisper.cpp/models/ggml-base.en.bin
-   MUNI_AUDIO_SOURCES_FILE=muni-world/seeds/audio-sources.csv
-   ```
-   Then edit the registry `muni-world/seeds/audio-sources.csv` (pipe-delimited) — bind a feed to your
-   loopback device and enable it:
-   ```
-   tv-bloomberg|Bloomberg TV|Bloomberg|tv|pulse:<sink>.monitor|300|true|
-   ```
-   Turn capture on (flips the master switch + restarts muni-world):
-   ```bash
-   ./scripts/svc.sh start tv
-   ./scripts/svc.sh status tv     # shows the registry + recent leads
-   ```
+## Host prerequisites (the capture host only — nothing runs in CI/sandbox)
 
-5. **Watch the leads** — the muni-world page ("Audio leads") polls every 15s, or:
-   ```bash
-   curl -s localhost:8090/api/muni/audio/leads/recent?limit=20 | jq
-   ```
+One command installs everything below and writes the paths into `local.env`:
 
-## Notes & limits
+```bash
+scripts/svc.sh setup tv
+```
 
-- **Pi speed.** whisper.cpp on a Pi is CPU-bound. `base.en` runs near real-time on a Pi 5, slower on a Pi 4;
-  drop to `tiny.en` if transcription falls behind. The loop is single-threaded, so a slow model just paces
-  capture (chunks never overlap) at the cost of lag — it never drops silently.
-- **One feed per host.** The monitor carries whatever's playing. To run Bloomberg **and** CNBC at once you'd
-  need two audio sinks (two browser profiles routed to separate sinks) and two capture processes — deferred.
-- **Guardrail.** Leads are pointers to verify against hard sources (EMMA/ACFR/refdata). A spoken "5%" or
-  "$300 million" is never captured as a coupon/size — only as context on a keyword lead.
-- **Off by default.** `MUNI_AUDIO_CAPTURE` unset ⇒ the loop bean isn't created; the jar boots identically in
-  CI/sandbox (no audio device). Only the Pi turns it on.
+Or by hand:
+
+1. **ffmpeg** — `apt install ffmpeg`.
+2. **yt-dlp, current** — a stale build cannot resolve today's YouTube:
+   `python3 -m pip install -U yt-dlp` (the app checks the version date and refuses a stale one loudly).
+3. **A JS runtime for yt-dlp** (YouTube requires it for stream resolution) — `deno` is the light option.
+4. **whisper.cpp** + a model (e.g. `small.en`; `tiny.en` for a faster, rougher Pi run).
+
+Config in `local.env` (all read at boot; see `application.properties` for the full list):
+
+```bash
+MUNI_WHISPER_BIN=~/whisper.cpp/build/bin/whisper-cli
+MUNI_WHISPER_MODEL=~/whisper.cpp/models/ggml-small.en.bin
+# optional: MUNI_YTDLP_BIN=~/.local/bin/yt-dlp
+```
+
+## Operate
+
+```bash
+scripts/svc.sh start tv      # flips MUNI_AUDIO_CAPTURE=true in local.env + bounces muni-world
+scripts/svc.sh stop tv       # capture off; muni-world keeps running
+scripts/svc.sh status tv     # capture flags + recent leads
+```
+
+Then open `http://<host>:8090/tv.html` — capture state per feed, last transcript chunks, and the leads
+table. A feed that fails (stream down, resolver refused) backs off exponentially (30s → 5min cap) and says
+why on the page; it never busy-loops.
+
+## Troubleshooting
+
+- **"This live stream recording is not available"** — the registry row points at a `watch?v=` id; use the
+  channel `/live` URL (see registry comments).
+- **"No supported JavaScript runtime"** — install deno (prerequisite 3).
+- **Resolver refused / no formats** — update yt-dlp (prerequisite 2); the page shows the exact resolver
+  message rather than a generic failure.
+- Chunks land, no leads: leads are deterministic keyword/CUSIP hits — quiet market talk produces none;
+  check the transcript pane to confirm transcription itself is running.
