@@ -1,0 +1,255 @@
+package io.muniworld.extract;
+
+import io.muniworld.pdf.OcrText;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+/**
+ * Diagnostic for an OS PDF that yields no bonds: reports the EVIDENCE for why, instead of leaving a silent
+ * "0 indexed". A real Official Statement can fail to parse for three quite different reasons and the fix
+ * differs for each, so the probe separates them:
+ *
+ * <ul>
+ *   <li><b>Image-only (scanned) PDF</b> — pages exist but there is almost no extractable text. Needs OCR
+ *       ({@code muni.ocr.enabled=true} + tesseract). {@code sparse} says so.</li>
+ *   <li><b>Text present, no CUSIPs found</b> — the schedule is there but its identifiers are not in a shape
+ *       the parser recognises (e.g. suffix-only columns under a base CUSIP the document states in wording
+ *       {@code BASE_CUSIP} does not match).</li>
+ *   <li><b>CUSIPs found but rows incomplete</b> — table geometry: PDFBox emits reading order, not columns,
+ *       so a row's coupon/maturity can land on different lines than its CUSIP. These are the quarantined
+ *       lines; {@code cusipLines} shows them verbatim.</li>
+ * </ul>
+ *
+ * Read-only and side-effect free: it indexes nothing and stores nothing. Every number is measured from the
+ * document (invariant 7 — nothing here is inferred or invented).
+ */
+public final class OfficialStatementProbe {
+
+    private static final Pattern FULL_CUSIP = Pattern.compile("\\b([0-9]{3}[0-9A-Z]{5}[0-9])\\b");
+    /** A line shaped like a schedule row — a year, a dollar-ish amount and a rate — identifiers aside. */
+    private static final Pattern SCHEDULE_ROWISH = Pattern.compile(
+            "(?:19|20)\\d{2}\\s+\\$?\\s*[\\d,]{4,}\\s+\\d{1,2}\\.\\d{1,3}");
+    private static final Pattern SCHEDULE_HEADING = Pattern.compile(
+            "(?i)(maturity schedule|maturities|due\\s+[A-Z][a-z]+\\s+\\d{1,2})");
+
+    private OfficialStatementProbe() {
+    }
+
+    /**
+     * What KIND of document this is, judged by its own words. EMMA hosts an issuer's whole disclosure
+     * history — Official Statements, annual reports, event notices — and only the OS carries bond terms.
+     * Telling someone "no CUSIPs found, this is typical of a preliminary OS" about a State Comptroller's
+     * annual financial report is a confident answer to the wrong question.
+     *
+     * <p>The cover page decides: an Official Statement declares itself on page one. Only if the head of
+     * the document makes no such declaration do the whole-text markers get a say — an OS frequently
+     * carries an annual report as an APPENDIX, and that must not flip its identity.
+     */
+    static String documentType(String text) {
+        String t = text == null ? "" : text.toUpperCase(Locale.ROOT);
+        String head = t.length() > 8000 ? t.substring(0, 8000) : t;
+        if (head.contains("OFFICIAL STATEMENT") || head.contains("NEW ISSUE")
+                || head.contains("MATURITY SCHEDULE") || head.contains("BOND COUNSEL")
+                || head.contains("REMARKETING")) {
+            return "official statement";
+        }
+        if (t.contains("BASIC FINANCIAL STATEMENTS") || t.contains("ANNUAL FINANCIAL REPORT")
+                || t.contains("ANNUAL COMPREHENSIVE FINANCIAL REPORT")
+                || t.contains("COMPREHENSIVE ANNUAL FINANCIAL REPORT")
+                || (t.contains("DISCUSSION AND ANALYSIS") && t.contains("STATEMENT OF NET POSITION"))
+                || t.contains("INDEPENDENT AUDITOR")) {
+            return "annual financial report (ACFR)";
+        }
+        if (t.contains("MATERIAL EVENT NOTICE") || t.contains("NOTICE OF EVENT")) {
+            return "event notice";
+        }
+        if (t.contains("CONTINUING DISCLOSURE")) {
+            return "continuing disclosure filing";
+        }
+        return "unknown";
+    }
+
+    /** Diagnose {@code text} extracted from a {@code pages}-page OS. Pure — no I/O, no model. */
+    public static Map<String, Object> probe(String text, int pages, boolean ocrEnabled) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        String t = text == null ? "" : text;
+        String[] lines = t.split("\\r?\\n");
+
+        out.put("pages", pages);
+        out.put("textChars", t.length());
+        out.put("charsPerPage", pages > 0 ? t.length() / pages : 0);
+        out.put("lines", lines.length);
+
+        boolean sparse = OcrText.isSparse(t, pages);
+        out.put("sparse", sparse);
+        out.put("ocrEnabled", ocrEnabled);
+
+        List<String> cusips = new ArrayList<>();
+        Matcher m = FULL_CUSIP.matcher(t);
+        while (m.find() && cusips.size() < 25) {
+            if (!cusips.contains(m.group(1))) {
+                cusips.add(m.group(1));
+            }
+        }
+        out.put("fullCusipsFound", cusips.size());
+        out.put("fullCusipSample", cusips);
+
+        // The verbatim lines a CUSIP appears on — this is what the parser sees, and the fastest way to tell
+        // a split-column layout (CUSIP alone on its line) from a complete row it simply mis-reads.
+        List<String> cusipLines = new ArrayList<>();
+        for (String raw : lines) {
+            String line = raw.strip();
+            if (!line.isEmpty() && FULL_CUSIP.matcher(line).find() && cusipLines.size() < 15) {
+                cusipLines.add(truncate(line));
+            }
+        }
+        out.put("cusipLines", cusipLines);
+
+        out.put("hasScheduleHeading", SCHEDULE_HEADING.matcher(t).find());
+
+        // How the document WRITES its identifiers — the decisive evidence when full CUSIP-9s are absent.
+        // A real OS commonly prints a base CUSIP-6 once and then only 2–3 char suffixes per maturity row;
+        // whether the parser can assemble those depends on it recognising the base, so report both the
+        // detected base and the raw wording around every "CUSIP" mention.
+        out.put("baseCusipDetected", OfficialStatementParser.findBaseCusip(t, null));
+        int[] md = OfficialStatementParser.findScheduleMonthDay(t);
+        out.put("scheduleMonthDay", md == null ? null : md[0] + "/" + md[1]);
+
+        List<String> mentions = new ArrayList<>();
+        Matcher cm = Pattern.compile("(?i)cusip").matcher(t);
+        while (cm.find() && mentions.size() < 12) {
+            int s = Math.max(0, cm.start() - 60);
+            int e = Math.min(t.length(), cm.end() + 90);
+            mentions.add(t.substring(s, e).replaceAll("\\s+", " ").strip());
+        }
+        out.put("cusipMentions", mentions);
+
+        // The schedule block itself: the lines following the first maturity-schedule heading. This is the
+        // table the parser must read, verbatim and in the order PDFBox emits it.
+        List<String> block = new ArrayList<>();
+        Matcher sh = SCHEDULE_HEADING.matcher(t);
+        if (sh.find()) {
+            String[] after = t.substring(sh.start()).split("\\r?\\n");
+            for (String raw : after) {
+                String line = raw.strip();
+                if (!line.isEmpty() && block.size() < 45) {
+                    block.add(truncate(line));
+                }
+            }
+        }
+        out.put("scheduleBlock", block);
+
+        // What the parser actually managed, on this exact text — so the probe and the loader never disagree.
+        OfficialStatementParser.Result res = OfficialStatementParser.parse(t, null, null, "");
+        out.put("parsedRows", res.rows().size());
+        out.put("quarantined", res.quarantined());
+        out.put("confidence", res.confidence());
+
+        List<String> head = new ArrayList<>();
+        for (String raw : lines) {
+            String line = raw.strip();
+            if (!line.isEmpty() && head.size() < 30) {
+                head.add(truncate(line));
+            }
+        }
+        out.put("firstLines", head);
+
+        // Lines that LOOK like schedule rows regardless of identifiers: a year, a dollar amount and a
+        // rate. When a document names no CUSIPs at all, this is the evidence that says whether the table
+        // is present-but-unkeyable or simply absent from the extracted text.
+        List<String> rowish = new ArrayList<>();
+        for (String raw : lines) {
+            String line = raw.strip();
+            if (rowish.size() < 12 && SCHEDULE_ROWISH.matcher(line).find()) {
+                rowish.add(truncate(line));
+            }
+        }
+        out.put("scheduleRowSample", rowish);
+
+        String docType = documentType(t);
+        out.put("documentType", docType);
+
+        out.put("diagnosis", diagnose(sparse, ocrEnabled, pages, cusips.size(), res,
+                (String) out.get("baseCusipDetected"), mentions.size(), rowish.size(), docType));
+        return out;
+    }
+
+    private static String diagnose(boolean sparse, boolean ocrEnabled, int pages, int cusips,
+                                   OfficialStatementParser.Result res, String baseCusip,
+                                   int cusipMentions, int rowishLines, String docType) {
+        if (pages == 0) {
+            return "PDF has no pages — not a readable PDF.";
+        }
+        // Order matters: evidence of a working text layer (a real CUSIP token) OUTRANKS the sparse
+        // heuristic, which is only a <100-chars-per-page rule of thumb. Calling a document "scanned, no
+        // text layer" while quoting a CUSIP read out of that very text is a contradiction the reader
+        // would (rightly) not trust.
+        // Several CUSIPs but no completed rows = the identifiers are there and the failure is geometry.
+        // (Checked before `sparse`: evidence of a working text layer outranks the <100-chars/page rule of
+        // thumb — calling a document "no text layer" while quoting CUSIPs read out of that text is a
+        // contradiction. Checked AFTER the too-few-CUSIPs case below is ruled out by requiring > 1: a
+        // 100-page schedule yielding ONE token is a suffix layout, not a column-split row.)
+        if (cusips > 1 && res.rows().isEmpty()) {
+            return "Found " + cusips + " CUSIP(s) — so the text layer DOES work — but completed 0 rows ("
+                   + res.quarantined() + " quarantined): each CUSIP's coupon and/or maturity is not on the "
+                   + "same line as it. PDFBox emits reading order, not table columns, so a schedule laid "
+                   + "out in columns arrives one cell per line. Inspect cusipLines / firstLines.";
+        }
+        // WRONG DOCUMENT. Ahead of every other explanation, because no amount of parser work will find
+        // bond terms in a document that has none — and the fix is to fetch a different file, not to
+        // change anything here.
+        if (res.rows().isEmpty() && !"official statement".equals(docType) && !"unknown".equals(docType)) {
+            return "This is an " + docType + ", NOT an Official Statement — it carries no maturity "
+                   + "schedule and no bond terms, so there is nothing here to load. EMMA hosts an "
+                   + "issuer's whole disclosure history and only the OS has the terms. Fix: open a bond "
+                   + "you hold in the browser, use its 'open this CUSIP on EMMA' link, and take the "
+                   + "document whose type is Official Statement.";
+        }
+        if (sparse) {
+            return ocrEnabled
+                    ? "Image-only (scanned) PDF and OCR IS enabled — OCR ran but still produced too little "
+                      + "text; check tesseract is installed and muni.ocr.dpi is adequate."
+                    : "Image-only (scanned) PDF: under 100 characters of text per page, i.e. no usable text "
+                      + "layer. Enable OCR (muni.ocr.enabled=true, tesseract installed) and re-load.";
+        }
+        // NO CUSIP ANYWHERE. Not a parser gap and not a layout — the document simply does not name the
+        // securities. Common in preliminary OSs and small competitive GO deals, where CUSIPs are assigned
+        // at award. Nothing can key these rows, and inventing an identifier is the one thing never done
+        // (ADR-0011). Diagnosing this as "suffixes under a base" — as this probe used to — sent the reader
+        // hunting for wording that is not there.
+        if (cusipMentions == 0 && cusips == 0) {
+            return "This document does not contain the word CUSIP anywhere, and no CUSIP tokens"
+                   + (rowishLines > 0
+                      ? " — but " + rowishLines + " line(s) do look like schedule rows (year + amount + "
+                        + "rate), so the maturity table IS in the text, just with no identifiers."
+                      : ", and no schedule-shaped rows either (the table may be on a cover page image or "
+                        + "an appendix this text does not include).")
+                   + " Bonds cannot be keyed without a CUSIP and one is never invented, so nothing can be "
+                   + "loaded from it. This is typical of a PRELIMINARY Official Statement or a small "
+                   + "competitive deal where CUSIPs are assigned at award. Fix: open a bond you actually "
+                   + "hold in the browser and use its 'open this CUSIP on EMMA' link — that lands on the "
+                   + "FINAL OS for a security you own, which always names its CUSIPs.";
+        }
+        if (cusips <= 1) {
+            return "Text extracted fine (" + pages + " pages) but contains " + cusips + " full CUSIP-9 "
+                   + "token(s) — far fewer than a maturity schedule has. The schedule almost certainly "
+                   + "prints a base CUSIP-6 once and only 2–3 character SUFFIXES per row"
+                   + (baseCusip == null
+                      ? ", and no base CUSIP was detected (the parser looks for the literal wording 'Base "
+                        + "CUSIP'/'CUSIP Base')."
+                      : ", base detected: " + baseCusip + ".")
+                   + " Inspect cusipMentions + scheduleBlock to see the document's actual wording.";
+        }
+        return "Parsed " + res.rows().size() + " row(s) — the text path works on this document.";
+    }
+
+    private static String truncate(String s) {
+        return s.length() <= 200 ? s : s.substring(0, 200) + "…";
+    }
+}

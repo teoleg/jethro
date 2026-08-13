@@ -100,7 +100,17 @@ public class FusionConfig {
                                     @Value("${jethro.fusion.book-vol-brake.enabled:true}") boolean bookVolBrakeEnabled,
                                     @Value("${jethro.fusion.book-vol-brake.span:120}") int bookVolBrakeSpan,
                                     @Value("${jethro.fusion.book-vol-brake.min-sample:30}") int bookVolBrakeMinSample,
-                                    @Value("${jethro.hedge.book:HEDGE}") String hedgeBook) {
+                                    // ADR-0137: the planner's gross-notional cap. NOT a new money number
+                                    // — it reads the very cap the deterministic pre-trade guardrail
+                                    // already enforces on the book these orders route to, so the desk
+                                    // cannot plan a book it is forbidden to hold. 0 disables the control.
+                                    @Value("${jethro.fusion.gross-cap-usd:${jethro.risk.max-gross-exposure:0}}")
+                                    BigDecimal fusionGrossCapUsd,
+                                    @Value("${jethro.hedge.book:HEDGE}") String hedgeBook,
+                                    // ADR-0140: the aim's durable home. Absent (no DataSource, e.g. a
+                                    // slice test) ⇒ null ⇒ the in-memory aim path, byte-identical to
+                                    // the pre-ADR-0140 buffer.
+                                    ObjectProvider<org.springframework.jdbc.core.JdbcTemplate> jdbc) {
         // ADR-0080: the trading rate is DERIVED, not dialled — it is the fraction that makes the
         // desk's exposure e-fold toward target in exactly one signal-evidence horizon, so the return
         // the edge gate credits and the round-trip cost it charges are denominated over the same
@@ -208,7 +218,16 @@ public class FusionConfig {
                 // position the partial-adjustment path converges to — at a fraction of the name's
                 // average position, and trade only to the buffer's edge. Disabled ⇒ null and the
                 // deltas are exactly the ADR-0080 ones.
-                positionBufferEnabled ? new PositionBuffer(positionBufferFraction) : null,
+                // ADR-0140: the aim is DURABLE derived state. It was reseeded from the held quantity at
+                // every process start and discarded whenever a name fell out of one cycle's plan, so the
+                // ADR-0080 path — whose time constant is a whole evidence horizon — never completed its
+                // transient and never reached the fraction of target this buffer requires before it
+                // routes. Persisting it changes no band, no rate and no cap: a restored aim is still
+                // stepped at this cycle's rate and still clamped by ADR-0102 into [flat, target].
+                positionBufferEnabled
+                        ? new PositionBuffer(positionBufferFraction,
+                                jdbc.getIfAvailable() == null ? null : new JdbcAimStore(jdbc.getObject()))
+                        : null,
                 // ADR-0104: the absolute risk anchor. ADR-0083 and ADR-0079 both decide the SHAPE of the
                 // book's risk; neither states its LEVEL, so the level was whatever the cross-section
                 // happened to plan that cycle. Cap the book's measured ex-ante σ at the median of its own
@@ -218,7 +237,15 @@ public class FusionConfig {
                 bookVolBrakeEnabled
                         ? new BookVolatilityBrake(
                                 new BookVolatilityBrake.Params(bookVolBrakeSpan, bookVolBrakeMinSample))
-                        : null);
+                        : null,
+                // ADR-0137: the notional level. Every control above is σ-relative and none of them binds
+                // on a calm tape, so the planned book ran to several times the gross the guardrail lets
+                // the routing book hold — an unreachable target, which under ADR-0080 is paid for in
+                // turnover every cycle. The cap is the guardrail's own, not a figure chosen here.
+                // Non-positive ⇒ null and the book is byte-identical.
+                fusionGrossCapUsd == null || fusionGrossCapUsd.signum() <= 0
+                        ? null
+                        : new GrossNotionalCap(fusionGrossCapUsd));
         lifecycle.start();
         return lifecycle;
     }

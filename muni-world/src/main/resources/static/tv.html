@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>muni-world · TV / Audio</title>
+<style>
+  :root {
+    --bg:#0a0f0d; --surface:#111a16; --surface-2:#16221c; --line:#233029; --line-2:#31423a;
+    --txt:#e8f2ec; --dim:#8ba89a; --brand:#2fbf8f; --up:#35c07a; --down:#f0553f; --warn:#e0a83d;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:radial-gradient(1000px 560px at 82% -10%, rgba(47,191,143,.12), transparent 60%), var(--bg);
+    color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  a { color:inherit; text-decoration:none; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,15,13,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:18px; padding:0 24px; height:56px; max-width:1180px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(47,191,143,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { padding:8px 14px; border-radius:8px; color:var(--dim); font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .spacer { flex:1; }
+  .back { font-size:12px; color:var(--dim); border:1px solid var(--line); border-radius:999px; padding:5px 12px; }
+  .back:hover { color:var(--txt); border-color:var(--brand); }
+  main { max-width:1180px; margin:0 auto; padding:34px 24px 56px; }
+  .kicker { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--brand); font-weight:600; }
+  h1 { font-size:22px; font-weight:680; letter-spacing:-.01em; margin:8px 0 4px; }
+  .section h2 { font-weight:640; }
+  .issuer { padding:9px 0; border-bottom:1px solid var(--line); }
+  .issuer .tag { color:var(--brand); font-size:10px; letter-spacing:.05em; text-transform:uppercase; margin-left:6px; }
+  .issuer .sec { font-size:12.5px; color:var(--dim); margin-top:2px; }
+  .tbl { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px; }
+  .tbl th, .tbl td { text-align:right; padding:6px 9px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .tbl th:nth-child(-n+3), .tbl td:nth-child(-n+3) { text-align:left; }
+  .tbl th { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:500; }
+  .tbl tbody tr:hover { background:var(--surface-2); }
+  .banner { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--warn); border-radius:12px; padding:12px 14px; color:var(--dim); font-size:12.5px; margin:16px 0 8px; }
+  /* The buttons on this page have always carried class="btn" with no rule behind it, so they rendered as
+     raw browser default controls against a dark page. */
+  .btn { background:var(--surface-2); color:var(--txt); border:1px solid var(--line-2); border-radius:7px;
+    padding:5px 10px; font:inherit; font-size:11px; cursor:pointer; transition:.15s; }
+  .btn:hover { border-color:var(--brand); color:var(--brand); }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="bar">
+  <span class="brand"><span class="dot"></span>MUNI·WORLD</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Bonds</a>
+    <a class="tab" href="/model.html">Model workbench</a>
+    <a class="tab active" href="/tv.html">TV / Audio</a>
+  </nav>
+  <span class="spacer"></span>
+  <a class="back" href="/">↩ muni landing</a>
+</div></div>
+
+<main>
+  <div class="kicker">Broadcast soft-signal</div>
+  <h1>TV / Audio processing</h1>
+  <!-- What this page IS (audio only, leads only). The LIVE state is the banner below — this one must never
+       claim capture is or isn't happening, or it contradicts it (it used to say "it does nothing here"). -->
+  <div class="banner">Nothing here is recorded or restreamed: an audio chunk is captured, transcribed
+    locally and discarded. The broadcast itself is never stored or served. What you see is what it <b>heard</b>, as <b>leads to verify</b> — never a number that
+    feeds risk/PnL.</div>
+  <!-- The capture loop is SILENT when idle, so state it plainly: is capture on, and if nothing is happening, which gate is blocking. -->
+  <div id="captureState" class="banner" style="border-left-color:var(--dim)">checking capture state…</div>
+
+  <div class="section" style="margin-top:22px">
+    <h2 style="font-size:16px">Stream <span id="srcCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">
+      Pulled straight off the network — no TV, no HDMI, no browser, nothing playing on this box. It
+      connects, records a chunk, transcribes it, and repeats. To change the stream, edit
+      <span class="mono">seeds/audio-sources.csv</span> and rebuild.
+    </div>
+    <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
+  </div>
+
+  <div class="section" style="margin-top:28px">
+    <h2 style="font-size:16px">Live transcript <span id="txCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">What the capture loop heard — compare it to the live broadcast.</div>
+    <div id="transcripts" style="color:var(--dim);font-size:13px">loading…</div>
+  </div>
+
+  <div class="section" style="margin-top:28px">
+    <h2 style="font-size:16px">Audio leads <span id="leadCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+    <div style="color:var(--dim);font-size:11.5px;margin:2px 0 8px">A lead is a pointer to <b>verify</b>, never a number.</div>
+    <div id="leads" style="color:var(--dim)">loading…</div>
+  </div>
+</main>
+
+<script>
+  const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+
+  async function loadSources() {
+    try {
+      const ss = await (await fetch("/api/muni/audio/sources", { cache: "no-store" })).json();
+      const live = ss.filter(s => s.enabled && s.device);
+      CHUNK_SECS = live.length ? Math.max(...live.map(s => s.chunkSeconds || 0)) : 0;
+      document.getElementById("srcCount").textContent = ss.length ? "· " + live.length + " configured" : "";
+      const el = document.getElementById("sources");
+      if (!ss.length) { el.textContent = "no feeds registered"; return; }
+      const cols = ["Feed", "Publisher", "Source", "Chunk", "Status"];
+      el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
+        + ss.map(s => {
+          // A configured row is NOT a streaming row: the loop must also be running. Showing green
+          // "streaming" next to a banner that says "Not capturing" is the page contradicting itself —
+          // exactly what the capture-state banner exists to prevent.
+          const status = !(s.enabled && s.device)
+            ? (s.enabled ? '<span style="color:var(--warn)">no source set</span>'
+                         : '<span style="color:var(--dim)">disabled</span>')
+            : AUDIO.blocker ? '<span style="color:var(--warn)">configured — not streaming</span>'
+            : '<span style="color:var(--up)">streaming</span>';
+          return `<tr><td style="color:var(--txt)">${esc(s.label)}</td><td>${esc(s.publisher)}</td>
+            <td class="mono" style="font-size:11px;max-width:380px;overflow:hidden;text-overflow:ellipsis">${esc(s.device || "—")}</td>
+            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td></tr>`;
+        }).join("") + "</tbody></table>";
+    } catch (e) { document.getElementById("sources").textContent = "unavailable"; }
+  }
+
+  async function loadTranscripts() {
+    try {
+      const ts = await (await fetch("/api/muni/audio/transcripts/recent?limit=10", { cache: "no-store" })).json();
+      document.getElementById("txCount").textContent = ts.length ? "· " + ts.length : "";
+      const el = document.getElementById("transcripts");
+      if (!ts.length) {
+        el.innerHTML = '<span style="font-size:12.5px">' + emptyReason("transcript") + '</span>';
+        return;
+      }
+      el.innerHTML = ts.map(e => {
+        const t = (e.at || "").replace("T", " ").slice(0, 19);
+        return `<div class="issuer"><span class="tag" style="color:var(--brand)">${esc(e.feed)}</span>
+          <span style="color:var(--dim);font-size:11px">${t} · ${e.segments} seg</span>
+          <div style="margin-top:3px;color:var(--txt);font-size:13px;line-height:1.5">${esc(e.text) || "<span style='color:var(--dim)'>(silence / nothing recognized)</span>"}</div></div>`;
+      }).join("");
+    } catch (e) { document.getElementById("transcripts").textContent = "unavailable"; }
+  }
+
+  const kindColor = k => k === "ISSUER" ? "var(--brand)" : k === "CUSIP" ? "var(--warn)" : "var(--dim)";
+  async function loadLeads() {
+    try {
+      const ls = await (await fetch("/api/muni/audio/leads/recent?limit=50", { cache: "no-store" })).json();
+      document.getElementById("leadCount").textContent = ls.length ? "· " + ls.length : "";
+      const el = document.getElementById("leads");
+      if (!ls.length) {
+        el.innerHTML = '<span style="font-size:12.5px">' + emptyReason("lead") + '</span>';
+        return;
+      }
+      el.innerHTML = ls.map(e => {
+        const t = (e.at || "").replace("T", " ").slice(0, 19);
+        const ms = e.lead.atMs || 0, mm = String(Math.floor(ms / 60000)).padStart(2, "0"), ss = String(Math.floor(ms % 60000 / 1000)).padStart(2, "0");
+        return `<div class="issuer"><span class="mono" style="color:${kindColor(e.lead.kind)};font-size:10px">${esc(e.lead.kind)}</span>
+          <b style="margin-left:6px">${esc(e.lead.match)}</b>
+          <span class="tag" style="color:var(--dim)">${esc(e.feed)} · ${mm}:${ss}</span>
+          <div class="sec">${esc(e.lead.context)}</div></div>`;
+      }).join("");
+    } catch (e) { document.getElementById("leads").textContent = "unavailable"; }
+  }
+
+  // Live capture state, shared by the banner AND the empty states below — so no message can assert
+  // "the capture loop is off" while the loop is in fact running (they used to be hardcoded and did).
+  let AUDIO = {};
+  let CHUNK_SECS = 0;
+
+  /** What an empty transcript/leads list MEANS right now: blocked, or simply not enough elapsed time. */
+  function emptyReason(kind) {
+    if (AUDIO.blocker) {
+      return `not capturing — ${esc(AUDIO.blocker)}.`;
+    }
+    if (AUDIO.captureEnabled && AUDIO.capturableFeeds > 0) {
+      const secs = CHUNK_SECS || 300;
+      return `streaming — no ${kind} yet because the first chunk is still recording `
+        + `(${secs}s per chunk, then transcription).`;
+    }
+    return `no ${kind} yet.`;
+  }
+
+  // Which of the three gates (capture switch → an enabled feed with a source → a whisper model) is blocking.
+  async function loadCaptureState() {
+    const el = document.getElementById("captureState");
+    try {
+      const a = (await (await fetch("/api/muni/status", { cache: "no-store" })).json()).audio || {};
+      AUDIO = a;
+      if (!a.blocker) {
+        el.style.borderLeftColor = "var(--up)";
+        el.innerHTML = `<b style="color:var(--up)">Streaming</b> — ${a.capturableFeeds} of ${a.feeds} feed(s) live.`;
+        return;
+      }
+      el.style.borderLeftColor = "var(--warn)";
+      el.innerHTML = `<b style="color:var(--warn)">Not capturing</b> — ${esc(a.blocker)}.`
+        + `<div style="margin-top:4px;font-size:11.5px">capture switch: <b>${a.captureEnabled ? "on" : "off"}</b>`
+        + ` · feeds with a source: <b>${a.capturableFeeds}/${a.feeds}</b>`
+        + ` · yt-dlp: <b>${a.ytdlpReady ? "ready" : "missing"}</b>`
+        + ` · whisper model: <b>${a.whisperModelSet ? "set" : "not set"}</b></div>`;
+    } catch (e) { el.textContent = "capture state unavailable — is muni-world up?"; }
+  }
+  // Capture state FIRST, then the panels whose empty message depends on it. Racing them means an empty
+  // list can render before AUDIO is known and fall back to a bare "no lead yet" — losing the very
+  // explanation this page exists to give. Intervals afterwards are independent (AUDIO is populated by then).
+  loadCaptureState().then(() => { loadSources(); loadTranscripts(); loadLeads(); });
+  setInterval(loadCaptureState, 10000);
+  setInterval(loadSources, 30000);
+  setInterval(loadTranscripts, 8000);
+  setInterval(loadLeads, 15000);
+</script>
+</body>
+</html>

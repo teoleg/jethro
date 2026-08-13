@@ -1,0 +1,56 @@
+{
+  "after": {
+    "at": "2026-08-10T19:00:07Z",
+    "fees": "94.669275",
+    "gross": "104241.91700000",
+    "net": "31750.07700000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "104241.91700000",
+      "hedgePnl": "-7.39185531",
+      "netExposure": "31750.07700000",
+      "realizedPnl": "-237.38881888",
+      "strategyAlpha": "-364.98028246",
+      "totalFees": "94.669275",
+      "totalPnl": "-372.37213777",
+      "unrealizedPnl": "-134.98331889"
+    },
+    "total_pnl": "-372.37213777"
+  },
+  "before": {
+    "at": "2026-08-07T19:46:15Z",
+    "gross": "31344.60211500",
+    "net": "-20483.81461500",
+    "total_pnl": "-1160.53609405"
+  },
+  "commit": "4e1ed98a3be0f564b678a451725904cb5b293055",
+  "delta": {
+    "gross": "72897.31488500",
+    "net": "52233.89161500",
+    "total_pnl": "788.16395628"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "feeDeadbandUsd": "25",
+    "grossFloorUsd": "1000",
+    "minCycles": 12,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle +0.000856 over 13 cycles, t=+0.68 (hurdle 1.5); gross 31,345\u2192104,242 [grew]; fees +$-394.22",
+  "revert": false,
+  "revertApplied": null,
+  "revertMethod": null,
+  "scoredAt": "2026-08-10T19:00:07Z",
+  "summary": "the ADR-0059 conviction floor is applied to the exit as well as the entry \u2014 a reduction the decayed forecast alone authored routes only when that forecast is strong enough to have opened the position, while a reduction a risk control authored always routes in full (ADR-0145)",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "fee_burn": "-394.223427",
+    "grew": true,
+    "gross_end": 104241.917,
+    "gross_start": 31344.602115,
+    "mean_ret_per_cycle": 0.00085602,
+    "n": 13,
+    "scale": 70825.68,
+    "t": 0.682
+  }
+}

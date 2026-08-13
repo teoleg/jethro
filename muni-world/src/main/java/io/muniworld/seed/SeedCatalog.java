@@ -38,7 +38,12 @@ public final class SeedCatalog {
 
     public SeedCatalog() {
         this.issuers = loadIssuers();
-        log.info("SeedCatalog loaded {} NYC issuers", issuers.size());
+        log.info("SeedCatalog loaded {} issuers", issuers.size());
+    }
+
+    /** Explicit-issuers constructor (tests supply their own real issuer instead of a committed seed file). */
+    public SeedCatalog(List<Issuer> issuers) {
+        this.issuers = List.copyOf(issuers);
     }
 
     public List<Issuer> issuers() {
@@ -56,7 +61,7 @@ public final class SeedCatalog {
             // header: id,issuer,type,security,disclosure_url,verified,notes
             for (int i = 1; i < lines.length; i++) {
                 String line = lines[i].strip();
-                if (line.isEmpty()) {
+                if (line.isEmpty() || line.startsWith("#")) {
                     continue;
                 }
                 String[] f = line.split(",", 7); // only `notes` may contain commas; limit keeps it intact

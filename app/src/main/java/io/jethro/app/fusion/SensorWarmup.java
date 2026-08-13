@@ -73,11 +73,52 @@ public final class SensorWarmup {
     static final int GAP_TOLERANCE_SAMPLES = 30;
 
     /**
-     * How much wider than the needed span to read history, so that thinning to the consumption step
-     * still finds enough samples when the stored series is sparse or has been stride-downsampled by the
-     * store's read cap. A shape dial: reading more can only improve the seed, never size anything.
+     * How much wider than the needed span to read history on the FIRST read, so that thinning to the
+     * consumption step still finds enough samples when the stored series is sparse or has been
+     * stride-downsampled by the store's read cap. A shape dial: reading more can only improve the seed,
+     * never size anything. When this first window turns out not to hold enough of the series, the read
+     * is <b>extended</b> rather than accepted short — see {@link #seed}.
      */
     private static final int LOOKBACK_MULTIPLE = 2;
+
+    /**
+     * A hygiene bound on how many times one seed may deepen its read before giving up. Each attempt
+     * doubles the window, so this covers a span {@code 2^11 ×} the first one — orders of magnitude
+     * beyond any retention this store keeps — and exists only so a pathological history cannot spin the
+     * loop. Not a money, risk or exposure dial; termination normally comes from the series itself.
+     */
+    private static final int MAX_READ_ATTEMPTS = 12;
+
+    /** Why a seed's backward walk stopped — reported so a short seed is diagnosable from the log. */
+    public enum Termination {
+        /** The seed filled: {@code samples} prices were replayed. */
+        FULL,
+        /** A break wider than the gap tolerance: warmed from the contiguous tail, never across it. */
+        GAP_BREAK,
+        /** The walk reached the start of the stored series — there is no more history to read. */
+        HISTORY_EXHAUSTED,
+        /** No usable history at all for this instrument: a plain cold start. */
+        NO_HISTORY
+    }
+
+    /**
+     * One instrument's seed: the prices to replay, oldest first, plus why the walk stopped and what it
+     * covered. The diagnostics exist because "seeded {@code n} of {@code needed}" alone cannot tell a
+     * sensor that ran out of stored history from one whose read window was simply too narrow — and those
+     * two call for opposite responses.
+     */
+    public record Seed(List<BigDecimal> prices, Termination termination, long spanMillis,
+                       long stepMillis, int reads) {
+
+        static Seed none() {
+            return new Seed(List.of(), Termination.NO_HISTORY, 0L, 0L, 0);
+        }
+
+        /** How many prices were replayed. */
+        public int size() {
+            return prices.size();
+        }
+    }
 
     /** One stored price point: provider timestamp and the exact-decimal price. */
     public record Point(long timestampMillis, BigDecimal price) {
@@ -105,27 +146,88 @@ public final class SensorWarmup {
      */
     public static List<BigDecimal> seedPrices(History history, String instrumentId, long anchorMillis,
                                               long intervalMillis, int samples) {
+        return seed(history, instrumentId, anchorMillis, intervalMillis, samples).prices();
+    }
+
+    /**
+     * As {@link #seedPrices}, and also reports <b>why</b> the walk stopped and what span it covered.
+     *
+     * <p><b>The read window is a consequence of the walk, not a guess ahead of it (ADR-0138).</b> The
+     * first read looks back {@link #LOOKBACK_MULTIPLE} × the needed span, measured in the step the
+     * sensor consumes this name at. That is an estimate, and print gaps are heavy-tailed, so on any
+     * given boot it may or may not contain {@code samples} usable points: the walk thins to the sensor's
+     * cadence, so a stretch of the window that prints faster than that cadence yields fewer accepted
+     * samples than its width suggests. When the walk runs off the OLDEST point that was read while still
+     * short, the honest question is whether the series continues below it — and it does, because the
+     * store's retention is far longer than the span asked for. Accepting the short seed there is what
+     * left sensors cold after a restart, whereupon the name contributes no forecast, the combined view
+     * falls to one effective source, and the desk liquidates a position it had just opened.
+     *
+     * <p>So the walk <b>extends its read and continues</b> instead: the window doubles and the walk is
+     * repeated, until the seed fills, a genuine hole truncates it, or the stored series demonstrably
+     * ends. Nothing here is fitted and nothing is a per-name constant — the seed depth is a property of
+     * the boot, not of the instrument, so only re-reading against the series itself can answer it. The
+     * shallowest window that fills the seed is the one used, so the replayed horizon stays as close to
+     * what the live sensor would have consumed as the stored series permits.
+     *
+     * <p><b>How "the series ends" is detected without an API for it.</b> A read from {@code since}
+     * returns points at or after it. If the walk exhausts that read at an oldest point that is itself
+     * more than one gap tolerance newer than {@code since}, then the store held nothing in
+     * {@code [since, oldest)} — so the next older point, if one exists at all, is further from
+     * {@code oldest} than the tolerance allows, and a deeper read could only have broken there anyway.
+     * That is reported as a break or an exhausted history rather than being paid for with another scan.
+     */
+    public static Seed seed(History history, String instrumentId, long anchorMillis,
+                            long intervalMillis, int samples) {
         if (history == null || instrumentId == null || samples <= 0 || intervalMillis <= 0) {
-            return List.of();
+            return Seed.none();
         }
-        List<Point> points = read(history, instrumentId, anchorMillis, intervalMillis, samples);
-        if (points.isEmpty()) {
-            return List.of();
+        Read read = read(history, instrumentId, anchorMillis, intervalMillis, samples, LOOKBACK_MULTIPLE);
+        if (read.points().isEmpty()) {
+            return Seed.none();
         }
         // ADR-0114: the span the seed covers and what counts as a hole in it are properties of the
         // series being walked, so both are measured in the step the sensor actually consumes this name
         // at — not in our poll cadence, which says nothing about how often this tape prints.
-        long step = consumptionStepMillis(intervalMillis, points);
+        long step = consumptionStepMillis(intervalMillis, read.points());
         if (step > intervalMillis) {
-            List<Point> wider = read(history, instrumentId, anchorMillis, step, samples);
-            if (wider.size() > points.size()) {
-                points = wider;
-                step = consumptionStepMillis(intervalMillis, points);
+            Read wider = read(history, instrumentId, anchorMillis, step, samples, LOOKBACK_MULTIPLE);
+            if (wider.points().size() > read.points().size()) {
+                read = wider;
+                step = Math.max(step, consumptionStepMillis(intervalMillis, read.points()));
             }
         }
+        long multiple = LOOKBACK_MULTIPLE;
+        int reads = 1;
+        Walk walk = walk(read.points(), intervalMillis, step, samples);
+        while (walk.termination() == Termination.HISTORY_EXHAUSTED && reads < MAX_READ_ATTEMPTS) {
+            long oldestRead = read.points().get(0).timestampMillis();
+            if (oldestRead - read.since() > step * GAP_TOLERANCE_SAMPLES) {
+                break; // nothing stored just below the window: a deeper read would break there anyway
+            }
+            multiple *= 2;
+            Read deeper = read(history, instrumentId, anchorMillis, step, samples, multiple);
+            if (deeper.points().isEmpty() || deeper.points().get(0).timestampMillis() >= oldestRead) {
+                break; // the read reached no further back — this is the start of the stored series
+            }
+            read = deeper;
+            // Never TIGHTEN the hole test across an extension: a deeper read is stride-downsampled more
+            // coarsely by the store, so its median step is the honest unit for the wider series, but a
+            // narrower one would turn the finer series' normal print gaps into fabricated outages.
+            step = Math.max(step, consumptionStepMillis(intervalMillis, read.points()));
+            reads++;
+            walk = walk(read.points(), intervalMillis, step, samples);
+        }
+        return new Seed(walk.prices(), walk.termination(), walk.spanMillis(), step, reads);
+    }
+
+    /** One backward pass over an already-read series, thinning to the sensor's cadence. */
+    private static Walk walk(List<Point> points, long intervalMillis, long step, int samples) {
         long gapTolerance = step * GAP_TOLERANCE_SAMPLES;
         Deque<BigDecimal> out = new ArrayDeque<>();
         long previousAccepted = Long.MIN_VALUE; // timestamp of the last point taken (walking backwards)
+        long newestAccepted = Long.MIN_VALUE;
+        boolean brokeAtHole = false;
         for (int i = points.size() - 1; i >= 0 && out.size() < samples; i--) {
             Point p = points.get(i);
             if (p == null || p.price() == null || p.price().signum() <= 0) {
@@ -137,13 +239,26 @@ public final class SensorWarmup {
                     continue; // too close to the point we already took — thin to the sensor's cadence
                 }
                 if (age > gapTolerance) {
+                    brokeAtHole = true;
                     break; // a hole in the series: warm from the contiguous tail, never across it
                 }
             }
             out.addFirst(p.price());
             previousAccepted = p.timestampMillis();
+            if (newestAccepted == Long.MIN_VALUE) {
+                newestAccepted = p.timestampMillis();
+            }
         }
-        return new ArrayList<>(out);
+        Termination termination = out.size() >= samples ? Termination.FULL
+                : brokeAtHole ? Termination.GAP_BREAK
+                // Ran off the oldest point READ while still short. Whether the series really ends there
+                // is not knowable from this pass — seed() decides, and reads deeper when it can.
+                : Termination.HISTORY_EXHAUSTED;
+        long span = newestAccepted == Long.MIN_VALUE ? 0L : newestAccepted - previousAccepted;
+        return new Walk(new ArrayList<>(out), termination, span);
+    }
+
+    private record Walk(List<BigDecimal> prices, Termination termination, long spanMillis) {
     }
 
     /**
@@ -192,19 +307,24 @@ public final class SensorWarmup {
         return Math.max(intervalMillis, sorted[n / 2]);
     }
 
-    /** One history read of {@code LOOKBACK_MULTIPLE × samples} steps back from the anchor, in the
-     *  store's own clock. Never throws and never reads before the epoch — a history read must not stop
-     *  a sensor from starting. */
-    private static List<Point> read(History history, String instrumentId, long anchorMillis,
-                                    long stepMillis, int samples) {
-        long lookback = stepMillis * (long) samples * LOOKBACK_MULTIPLE;
+    /** One history read of {@code multiple × samples} steps back from the anchor, in the store's own
+     *  clock, with the lower bound it used — the walk needs that bound to tell "the window cut me off"
+     *  from "the series ends here". Never throws and never reads before the epoch: a history read must
+     *  not stop a sensor from starting. */
+    private static Read read(History history, String instrumentId, long anchorMillis,
+                             long stepMillis, int samples, long multiple) {
+        long lookback = stepMillis * (long) samples * multiple;
         long since = lookback < 0 || anchorMillis - lookback < 0 ? 0L : anchorMillis - lookback;
         try {
             List<Point> points = history.since(instrumentId, since);
-            return points == null ? List.of() : points;
+            return new Read(points == null ? List.of() : points, since);
         } catch (RuntimeException e) {
-            return List.of();
+            return new Read(List.of(), since);
         }
+    }
+
+    /** The points one read returned, and the lower bound the store was asked for. */
+    private record Read(List<Point> points, long since) {
     }
 
     /**
@@ -310,14 +430,16 @@ public final class SensorWarmup {
      * Replays one instrument's seed prices, oldest first, into a sensor's ordinary update path.
      *
      * @param anchorMillis the store's own clock, as in {@link #seedPrices} — a provider timestamp
-     * @return how many prices were replayed — 0 when there is no usable history (a plain cold start)
+     * @return the seed, including why the walk stopped — empty prices when there is no usable history
+     *         (a plain cold start). Callers log the terminator on a short seed so the next cycle can
+     *         grade it from the app's own log rather than from a replication script.
      */
-    public static int warm(History history, String instrumentId, long anchorMillis, long intervalMillis,
-                           int samples, java.util.function.Consumer<BigDecimal> sensor) {
-        List<BigDecimal> prices = seedPrices(history, instrumentId, anchorMillis, intervalMillis, samples);
-        for (BigDecimal price : prices) {
+    public static Seed warm(History history, String instrumentId, long anchorMillis, long intervalMillis,
+                            int samples, java.util.function.Consumer<BigDecimal> sensor) {
+        Seed seed = seed(history, instrumentId, anchorMillis, intervalMillis, samples);
+        for (BigDecimal price : seed.prices()) {
             sensor.accept(price);
         }
-        return prices.size();
+        return seed;
     }
 }

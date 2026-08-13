@@ -178,6 +178,15 @@ the UI as a rule; a `β=1.0` placeholder; a sped-up sim clock).
   master row is silently dropped (not skipped by risk — never shown), and its P&L never rolls up to
   FIRM. (Learned: the HEDGE book had risk limits configured but no master row, so hedge trades were
   invisible on the UI — the BETA demo desk was repurposed as HEDGE in V46.)
+- Flyway migration versions are **global, not per-module**: `PersistenceConfig` runs one Flyway over
+  `classpath:db/migration`, merging every module's migrations into a single line. Before adding one,
+  enumerate `find . -path '*/db/migration/V*.sql'` across the **whole repo** and take the global max + 1
+  — versions are scattered across `app/`, `modules/order`, `modules/reference-data`, and gaps exist, so
+  "my module's max + 1" is wrong. A duplicate version is not a merge nuisance: Flyway refuses to resolve
+  at all and **every DB-backed bean fails, so the app does not boot**. `ModuleBoundariesTest` enforces
+  this — module tests can't, since the collision only exists once assembly merges the classpaths.
+  (Learned: a `V48__fusion_aim.sql` in `app/` collided with refdata's `V48__sector_breadth_equities.sql`;
+  tests were green and the app was dead — renumbered to V51.)
 
 ## Response & reasoning style for this repo
 

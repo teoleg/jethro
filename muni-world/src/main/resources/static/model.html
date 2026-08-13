@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>muni-world — model workbench</title>
+<style>
+  :root {
+    --bg:#0a0f0d; --surface:#111a16; --surface-2:#16221c; --line:#233029; --line-2:#31423a;
+    --txt:#e8f2ec; --dim:#8ba89a; --brand:#2fbf8f; --up:#35c07a; --down:#f0553f; --warn:#e0a83d;
+  }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; }
+  body { background:radial-gradient(1000px 560px at 82% -10%, rgba(47,191,143,.12), transparent 60%), var(--bg);
+    color:var(--txt); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
+  a { color:inherit; text-decoration:none; }
+  .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,15,13,.72); border-bottom:1px solid var(--line); }
+  .bar { display:flex; align-items:center; gap:18px; padding:0 24px; height:56px; max-width:1180px; margin:0 auto; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
+  .brand .dot { width:9px; height:9px; border-radius:50%; background:var(--brand); box-shadow:0 0 0 4px rgba(47,191,143,.18); }
+  .tabs { display:flex; gap:4px; margin-left:8px; }
+  .tab { padding:8px 14px; border-radius:8px; color:var(--dim); font-size:13px; font-weight:500; transition:.15s; }
+  .tab:hover { color:var(--txt); background:var(--surface); }
+  .tab.active { color:var(--txt); background:var(--surface-2); }
+  .spacer { flex:1; }
+  main { max-width:1180px; margin:0 auto; padding:34px 24px 56px; }
+  .kicker { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--brand); font-weight:600; }
+  h1 { font-size:24px; font-weight:680; letter-spacing:-.01em; margin:8px 0 4px; }
+  .sub { color:var(--dim); font-size:13px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--brand); border-radius:16px; padding:18px; }
+  .card h2 { font-size:15px; font-weight:640; margin-bottom:8px; }
+  .btn { background:var(--surface-2); color:var(--txt); border:1px solid var(--line-2); border-radius:9px; padding:9px 14px; font:inherit; cursor:pointer; }
+  .btn:hover { border-color:var(--brand); }
+  .tbl { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px; }
+  .tbl th, .tbl td { text-align:right; padding:6px 9px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  .tbl th:first-child, .tbl td:first-child { text-align:left; }
+  .tbl th { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:500; }
+  .tbl tbody tr:hover { background:var(--surface-2); }
+  label { display:block; font-size:11px; color:var(--dim); margin-bottom:3px; text-transform:uppercase; letter-spacing:.05em; }
+  input, select { background:var(--surface-2); border:1px solid var(--line-2); color:var(--txt); border-radius:8px; padding:8px 10px; font:inherit; width:100%; }
+  input:focus, select:focus { outline:none; border-color:var(--brand); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; }
+  .stat { background:var(--surface-2); border:1px solid var(--line); border-radius:12px; padding:12px 14px; }
+  .stat .v { font-size:20px; font-weight:650; margin-top:2px; }
+  .stat .why { color:var(--dim); font-size:11px; margin-top:6px; line-height:1.45; }
+  .explain { color:var(--dim); font-size:12px; margin:6px 0 0; line-height:1.55; }
+  .lattice { display:flex; gap:14px; overflow-x:auto; padding:10px 2px; align-items:center; }
+  .lcol { display:flex; flex-direction:column; gap:6px; }
+  .lnode { background:var(--surface-2); border:1px solid var(--line-2); border-radius:8px; padding:4px 9px; font-size:11.5px; text-align:center; }
+  section { margin-top:22px; }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="bar">
+  <span class="brand"><span class="dot"></span>MUNI·WORLD</span>
+  <nav class="tabs">
+    <a class="tab" href="/">Bonds</a>
+    <a class="tab active" href="/model.html">Model workbench</a>
+    <a class="tab" href="/tv.html">TV / Audio</a>
+  </nav>
+  <span class="spacer"></span>
+</div></div>
+
+<main>
+  <div class="kicker">Book mode · ADR-0018</div>
+  <h1>Model workbench</h1>
+  <p class="sub">Run the lattice on inputs <b>you</b> state — a flat curve like the book's examples, or the live Fed
+    curve — and watch every intermediate step. Nothing here reads or writes bond records: these are your
+    assumptions, and reproducing a printed example from Kalotay's book number-for-number is exactly what
+    this page is for.</p>
+
+  <!-- ============================ REAL BOND ============================ -->
+  <div class="card" style="margin-top:18px">
+    <h2>Run a REAL bond — all collected data, his formulas</h2>
+    <p class="explain" style="margin-bottom:8px">Loads everything from the stored data: the bond's OS-read
+      terms, its fund-filing price, the Fed curve of that price's own date, and the measured σ — assembled
+      by the exact same code as the OAS on the Bonds page, then shown here step by step. Bonds that refuse
+      there refuse here, for the same named reason.</p>
+    <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+      <div style="min-width:220px"><label>CUSIP</label><input id="cusip" placeholder="e.g. 64966QJK2" class="mono"></div>
+      <button class="btn" onclick="loadBond()">Load &amp; analyze</button>
+      <span class="explain" id="bondMsg" style="margin:0"></span>
+    </div>
+  </div>
+
+  <!-- ============================ INPUTS ============================ -->
+  <div class="card" style="margin-top:14px">
+    <h2>…or state inputs by hand (book examples / what-if)</h2>
+    <div class="grid">
+      <div><label>Curve</label>
+        <select id="curveKind" onchange="flatVisibility()">
+          <option value="flat">Flat zero curve (book style)</option>
+          <option value="gsw">Live GSW (latest Fed fit)</option>
+        </select></div>
+      <div id="flatWrap"><label>Flat zero rate, %</label><input id="flatPct" type="number" step="0.05" value="3.50"></div>
+      <div><label>Vol σ (lognormal), %</label><input id="sigmaPct" type="number" step="1" value="15"></div>
+      <div><label>Coupon, % (semiannual)</label><input id="couponPct" type="number" step="0.125" value="5.00"></div>
+      <div><label>Years to maturity</label><input id="years" type="number" step="0.5" value="30"></div>
+      <div><label>Years to first call<br></label><input id="callYears" type="number" step="0.5" value="10" placeholder="blank = bullet"></div>
+      <div><label>Call price /100</label><input id="callPrice" type="number" step="0.5" value="100"></div>
+      <div><label>Market price /100 (optional)</label><input id="pricePer100" type="number" step="0.125" placeholder="blank = fair value"></div>
+    </div>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center">
+      <button class="btn" onclick="runModel()">Run the model</button>
+      <span class="explain" style="margin:0">Defaults are an illustrative case (5% 30-year, callable in 10 at par,
+        σ 15%) — change anything; the numbers recompute from YOUR inputs only.</span>
+    </div>
+  </div>
+
+  <div id="results" style="display:none">
+
+    <!-- provenance banner: rendered only in real-bond mode -->
+    <section id="provSection" style="display:none">
+      <div class="card" style="border-left-color:var(--up)">
+        <h2 id="provTitle"></h2>
+        <div class="explain" id="provBody"></div>
+      </div>
+    </section>
+
+    <!-- ============================ VERDICT NUMBERS ============================ -->
+    <section>
+      <div class="card">
+        <h2>What the model concludes</h2>
+        <div class="grid" id="stats"></div>
+        <p class="explain" id="oasLine"></p>
+      </div>
+    </section>
+
+    <!-- ============================ STEP 1: CURVE ============================ -->
+    <section>
+      <div class="card">
+        <h2>Step 1 — the discount curve, step by step</h2>
+        <p class="explain">The lattice divides the bond's life into <span id="stepMeta" class="mono"></span>.
+          Each step's <b>zero rate</b> comes from the stated curve; the <b>discount factor</b>
+          e<sup>−y·t</sup> is what $1 arriving at that time is worth today. Every valuation below is just
+          cash flows × these discount factors, with the call decision layered on top.</p>
+        <div style="overflow-x:auto;max-height:300px;overflow-y:auto"><table class="tbl" id="curveTbl"></table></div>
+      </div>
+    </section>
+
+    <!-- ============================ STEP 2: LATTICE ============================ -->
+    <section>
+      <div class="card">
+        <h2>Step 2 — the short-rate lattice (first years shown)</h2>
+        <p class="explain">Each column is a coupon date; each box a possible short rate (½/½ up/down,
+          spread σ√Δt apart in log terms — that is what "lognormal, σ = your input" means). The lattice is
+          <b>calibrated</b>: discounting $1 through it reproduces the Step-1 curve exactly, so before any
+          bond is priced the model already agrees with the market curve. The call is valued by walking this
+          tree backwards: at every callable node the issuer redeems at the strike if that is cheaper for
+          them than leaving the bond outstanding.</p>
+        <div class="lattice" id="latticeView"></div>
+      </div>
+    </section>
+
+    <!-- ============================ STEP 3: TWO VALUES ============================ -->
+    <section>
+      <div class="card">
+        <h2>Step 3 — two values, and the option between them</h2>
+        <div style="overflow-x:auto"><table class="tbl" id="valuesTbl"></table></div>
+        <p class="explain"><b>Straight value</b> prices the same cash flows with the call stripped.
+          <b>Callable value</b> lets the issuer call optimally at every eligible node. The gap is the
+          <b>option value</b> — what the issuer's right is costing you as the holder, in points. This is the
+          book's central decomposition: <span class="mono">callable = straight − option</span>.</p>
+      </div>
+    </section>
+
+    <!-- ============================ STEP 4: RISK ============================ -->
+    <section>
+      <div class="card">
+        <h2>Step 4 — rate risk of the callable (effective, not textbook)</h2>
+        <div class="grid" id="riskStats"></div>
+        <p class="explain">Computed by shifting the whole curve ±25bp and repricing on a recalibrated
+          lattice at the same spread. For a bullet these approach the textbook duration/convexity; for a
+          callable near its call, duration <b>shortens</b> and convexity goes <b>negative</b> — the price
+          gains less when rates fall (the issuer calls) than it loses when rates rise. That asymmetry is
+          the book's core warning about callable munis, and here it is measured, not asserted.</p>
+      </div>
+    </section>
+
+    <!-- ============================ STEP 5: REFUNDING ============================ -->
+    <section>
+      <div class="card">
+        <h2>Step 5 — the refunding decision (Kalotay's signature number)</h2>
+        <div id="refunding"></div>
+      </div>
+    </section>
+
+    <!-- ============================ CONVENTIONS ============================ -->
+    <section>
+      <div class="card" style="border-left-color:var(--line-2)">
+        <h2>Stated conventions behind every number above</h2>
+        <ul id="conv" style="margin-left:18px;color:var(--dim);font-size:12px;line-height:1.7"></ul>
+      </div>
+    </section>
+  </div>
+
+  <div class="foot" style="color:var(--dim);font-size:11.5px;margin-top:28px;padding-top:14px;border-top:1px solid var(--line)">
+    Workbench inputs are yours alone — they are never stored and never touch bond records. Per-bond OAS on the
+    Bonds page uses the same engine with the bond's real stored terms, its filing price, the curve of that
+    price's date, and the measured σ band.
+  </div>
+</main>
+
+<script>
+  function esc(s) { return s == null ? "" : String(s).replace(/[&<>"']/g,
+      c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+
+  function flatVisibility() {
+    document.getElementById("flatWrap").style.display =
+        document.getElementById("curveKind").value === "flat" ? "" : "none";
+  }
+
+  function statBox(label, value, why) {
+    return `<div class="stat"><label>${label}</label><div class="v mono">${value}</div>
+        <div class="why">${why}</div></div>`;
+  }
+
+  async function runModel() {
+    const v = id => document.getElementById(id).value.trim();
+    const p = new URLSearchParams();
+    if (v("curveKind") === "gsw") { p.set("gsw", "true"); } else { p.set("flatPct", v("flatPct") || "0"); }
+    p.set("sigmaPct", v("sigmaPct") || "0");
+    p.set("couponPct", v("couponPct") || "0");
+    p.set("years", v("years") || "0");
+    if (v("callYears") !== "") { p.set("callYears", v("callYears")); p.set("callPrice", v("callPrice") || "100"); }
+    if (v("pricePer100") !== "") { p.set("pricePer100", v("pricePer100")); }
+    await fetchAndRender("/api/muni/model/analyze?" + p);
+  }
+
+  /** Real-bond mode: everything from collected data, same engine, same view — plus provenance. */
+  async function loadBond() {
+    const cusip = document.getElementById("cusip").value.trim();
+    const msg = document.getElementById("bondMsg");
+    if (!cusip) { msg.textContent = "enter a CUSIP from the Bonds page"; return; }
+    msg.textContent = "loading…";
+    const r = await fetchAndRender("/api/muni/model/bond?cusip=" + encodeURIComponent(cusip));
+    msg.textContent = r && r.available ? "" : "";
+    if (r && r.available) {
+      // Prefill the manual form from the real inputs, so "what if σ were…" starts from reality.
+      const i = r.inputs;
+      document.getElementById("curveKind").value = "gsw"; flatVisibility();
+      document.getElementById("sigmaPct").value = i.sigmaPct;
+      document.getElementById("couponPct").value = i.couponPct;
+      document.getElementById("years").value = Number(i.years).toFixed(2);
+      document.getElementById("callYears").value = i.callYears == null ? "" : Number(i.callYears).toFixed(2);
+      document.getElementById("callPrice").value = i.callPricePer100 == null ? 100 : i.callPricePer100;
+      document.getElementById("pricePer100").value = i.pricePer100 == null ? "" : i.pricePer100;
+    }
+  }
+
+  async function fetchAndRender(url) {
+    const box = document.getElementById("results");
+    box.style.display = "";
+    try {
+      const r = await (await fetch(url, { cache: "no-store" })).json();
+      if (!r.available) {
+        document.getElementById("provSection").style.display = "none";
+        document.getElementById("stats").innerHTML =
+            `<div class="stat" style="grid-column:1/-1"><div class="why" style="color:var(--warn)">${esc(r.reason)}</div></div>`;
+        document.getElementById("oasLine").textContent = "";
+        return r;
+      }
+      render(r);
+      return r;
+    } catch (e) {
+      document.getElementById("stats").innerHTML =
+          `<div class="stat" style="grid-column:1/-1"><div class="why" style="color:var(--warn)">request failed: ${esc(String(e))}</div></div>`;
+      return null;
+    }
+  }
+
+  function render(r) {
+    {
+      // provenance banner (real-bond mode only)
+      const ps = document.getElementById("provSection");
+      if (r.provenance) {
+        ps.style.display = "";
+        document.getElementById("provTitle").textContent =
+            r.provenance.cusip + " — " + (r.provenance.issuer || "");
+        document.getElementById("provBody").innerHTML =
+            `Every input below is <b>collected data</b>: price ${esc(r.provenance.price)} ·
+             σ ${esc(r.provenance.sigma)} · curve ${esc(r.inputs.curve)}` +
+            (r.provenance.assumedParCall
+              ? ` · <span style="color:var(--warn)">call price not stated in the OS — par assumed (the
+                 modern-muni convention)</span>` : "");
+      } else {
+        ps.style.display = "none";
+      }
+      const val = r.values;
+      const callable = r.inputs.callYears != null;
+
+      // verdict tiles
+      document.getElementById("stats").innerHTML =
+        statBox("Straight value /100", Number(val.straightPer100).toFixed(3),
+            "the same cash flows with the call stripped — pure curve + spread") +
+        (callable ? statBox("Callable value /100", Number(val.callablePer100).toFixed(3),
+            "with the issuer calling optimally at every eligible node") : "") +
+        (callable ? statBox("Option value /100", Number(val.optionValuePer100).toFixed(3),
+            "straight − callable: what the call right costs you, in points") : "") +
+        statBox("Effective duration", Number(val.effDuration).toFixed(2) + "y",
+            "±25bp curve shift, lattice recalibrated — the REAL rate sensitivity") +
+        statBox("Effective convexity", Number(val.effConvexity).toFixed(1),
+            "negative = the call is capping your upside");
+      document.getElementById("oasLine").innerHTML = r.oas == null
+        ? `No market price given — values above are <b>fair value at ${esc(String(r.inputs.spreadBpUsed))}bp
+           spread</b> over the stated curve.`
+        : (r.oas.solved
+            ? `<b>OAS solved: ${esc(String(r.oas.oasBp))}bp</b> — the constant spread over the curve at which
+               the model reproduces your price of ${esc(String(r.oas.targetPrice))}. All values above are AT
+               this spread.`
+            : `<span style="color:var(--warn)">OAS not solvable: ${esc(r.oas.reason)}</span>`);
+
+      // step 1: curve table
+      document.getElementById("stepMeta").textContent =
+          r.steps + " steps of " + Number(r.dtYears).toFixed(4) + "y (≈ semiannual)";
+      document.getElementById("curveTbl").innerHTML =
+        `<thead><tr><th>t (years)</th><th>zero rate %</th><th>discount factor</th></tr></thead><tbody>` +
+        r.stepCurve.map(s => `<tr><td class="mono">${s.t}</td><td class="mono">${s.zeroPct}</td>
+            <td class="mono">${s.df}</td></tr>`).join("") + "</tbody>";
+
+      // step 2: lattice
+      document.getElementById("latticeView").innerHTML = r.latticeRatesPct.map((col, i) =>
+        `<div class="lcol"><div style="color:var(--dim);font-size:10px;text-align:center">t${i}</div>` +
+        col.slice().reverse().map(x => `<div class="lnode mono">${Number(x).toFixed(2)}%</div>`).join("") +
+        `</div>`).join("") +
+        (r.steps > r.latticeShownSteps
+          ? `<div class="explain" style="align-self:center">… continues to step ${r.steps}</div>` : "");
+
+      // step 3: values
+      document.getElementById("valuesTbl").innerHTML =
+        `<thead><tr><th>Leg</th><th>Value /100</th></tr></thead><tbody>
+         <tr><td>Straight (call stripped)</td><td class="mono">${Number(val.straightPer100).toFixed(6)}</td></tr>` +
+        (callable
+          ? `<tr><td>Callable (issuer calls optimally)</td><td class="mono">${Number(val.callablePer100).toFixed(6)}</td></tr>
+             <tr><td><b>Option value = straight − callable</b></td><td class="mono"><b>${Number(val.optionValuePer100).toFixed(6)}</b></td></tr>`
+          : `<tr><td colspan="2" style="text-align:left;color:var(--dim)">no call specified — the two legs coincide</td></tr>`) +
+        "</tbody>";
+
+      // step 4: risk
+      document.getElementById("riskStats").innerHTML =
+        statBox("Effective duration", Number(val.effDuration).toFixed(4) + "y",
+            "price gain for a 1% parallel rate DROP, per 100 of value (first order)") +
+        statBox("Effective convexity", Number(val.effConvexity).toFixed(2),
+            "curvature; a plain bullet is positive, a near-the-call callable turns negative");
+
+      // step 5: refunding
+      const rf = document.getElementById("refunding");
+      if (!callable) {
+        rf.innerHTML = `<p class="explain">Not applicable — no call was specified.</p>`;
+      } else if (val.refundingEfficiencyPct == null) {
+        rf.innerHTML = `<p class="explain">${val.currentlyCallable
+          ? "Option value is ~0 at these inputs, so efficiency is 0/0 — reported absent, never invented."
+          : `The bond is not callable yet (first call in ${Number(r.inputs.callYears).toFixed(2)}y). Efficiency is
+             the ratio of the savings from calling <b>now</b> to the option value given up, so it exists only
+             once the call window opens. What you CAN read today is the option value above — that is the
+             time-value the issuer is holding against you.`}</p>`;
+      } else {
+        const eff = Number(val.refundingEfficiencyPct);
+        rf.innerHTML = `<div class="grid">${
+          statBox("Refunding efficiency", eff.toFixed(1) + "%",
+            "(straight − call price) ÷ option value")}</div>
+          <p class="explain">Kalotay's decision rule: refund when efficiency clears ~<b>90%</b> — below
+          that, calling today throws away more option time-value than the cash-flow savings are worth.
+          At ${eff.toFixed(1)}%: <b>${eff >= 90 ? "refund — the option's time value is exhausted"
+            : eff <= 0 ? "do not call — calling now destroys value outright"
+            : "wait — the option is still worth more alive than exercised"}</b>.</p>`;
+      }
+
+      // conventions
+      document.getElementById("conv").innerHTML =
+          r.conventions.map(c => `<li>${esc(c)}</li>`).join("");
+    }
+  }
+
+  flatVisibility();
+  runModel();   // render the illustrative default immediately — an empty page teaches nothing
+</script>
+</body>
+</html>

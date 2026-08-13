@@ -1,0 +1,20 @@
+cik|expect_name|label|enabled
+# EDGAR fund registry (ADR-0016) — read-only config loaded from the jar: edit this file and rebuild.
+# Each enabled row's latest NPORT-P CYCLE (every series' newest quarterly filing — a registrant trust
+# holds several series and each files separately) is fetched daily and its municipal-debt holdings
+# upserted as terms-only bonds.
+#
+# expect_name is the SAFETY GATE: the registrant name EDGAR itself reports for the CIK must contain this
+# string (case-insensitive) or the fund is REFUSED — so a mistyped CIK cannot silently pollute the master.
+#
+# PROVENANCE: every CIK below was anchored to a sec.gov archive URL by web search (the archive path
+# /edgar/data/<cik>/ carries the registrant's own filings); the name gate re-verifies each against EDGAR
+# itself on every fetch. The build sandbox cannot reach sec.gov, so the first live fetch happens on the
+# capture host and a wrong row fails loudly there, ingesting nothing.
+788599|new york|Vanguard NY municipal funds|true
+718581|new york|Fidelity New York Municipal Trust|true
+703112|new york|Franklin New York Tax-Free Income Fund|true
+798523|new york|Franklin New York Tax-Free Trust|true
+818850|new york|Nuveen New York Municipal Value Fund|true
+882150|new york|BlackRock MuniYield New York Quality|true
+1038186|new york|BlackRock MuniHoldings New York Quality|true

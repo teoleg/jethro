@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-08-03T16:30:10Z",
+    "fees": "312.637586",
+    "gross": "51059.10562500",
+    "net": "21922.13562500",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "51059.10562500",
+      "hedgePnl": "139.35894682",
+      "netExposure": "21922.13562500",
+      "realizedPnl": "10.00384190",
+      "strategyAlpha": "-178.76503961",
+      "totalFees": "312.637586",
+      "totalPnl": "-39.40609279",
+      "unrealizedPnl": "-49.40993469"
+    },
+    "total_pnl": "-39.40609279"
+  },
+  "before": {
+    "at": "2026-08-03T13:47:18Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "32.51192011"
+  },
+  "commit": "74a47adee61481eb50fd9ba825456e79ae8a2ae9",
+  "delta": {
+    "gross": "51059.10562500",
+    "net": "21922.13562500",
+    "total_pnl": "-71.91801290"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.000387 over 7 cycles, t=-1.59 (hurdle 1.5); gross 0\u219251,059 [grew] \u2014 \u26a0\ufe0f REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert",
+  "revert": true,
+  "revertApplied": false,
+  "scoredAt": "2026-08-03T16:30:10Z",
+  "summary": "an unestimable combined view (one effective source) now holds the position already held instead of liquidating it \u2014 a breadth collapse at the equity close no longer executes as a decision to be flat (ADR-0135)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": true,
+    "gross_end": 51059.105625,
+    "gross_start": 0.0,
+    "mean_ret_per_cycle": -0.00038737,
+    "n": 7,
+    "scale": 26522.3,
+    "t": -1.586
+  }
+}

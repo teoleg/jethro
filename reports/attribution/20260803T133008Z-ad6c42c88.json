@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-08-03T13:30:08Z",
+    "fees": "288.003716",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "0.00000000",
+      "hedgePnl": "86.93246234",
+      "netExposure": "0.00000000",
+      "realizedPnl": "32.51192011",
+      "strategyAlpha": "-54.42054223",
+      "totalFees": "288.003716",
+      "totalPnl": "32.51192011",
+      "unrealizedPnl": "0.00000000"
+    },
+    "total_pnl": "32.51192011"
+  },
+  "before": {
+    "at": "2026-07-31T19:44:06Z",
+    "gross": "65194.58500000",
+    "net": "-20406.77500000",
+    "total_pnl": "133.50933717"
+  },
+  "commit": "ad6c42c881be1ab86efdb5759c8d8077e31d9a2e",
+  "delta": {
+    "gross": "-65194.58500000",
+    "net": "20406.77500000",
+    "total_pnl": "-100.99741706"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.001135 over 89 cycles, t=-0.94 (hurdle 1.5); gross 65,195\u21920",
+  "revert": false,
+  "revertApplied": null,
+  "scoredAt": "2026-08-03T13:30:08Z",
+  "summary": "orders record the trigger that originated them \u2014 the origination reason is threaded from the deciding call sites and stamped on the row at insert, so orders that fill are attributable (ADR-0134)",
+  "verdict": "\u26a0\ufe0f INCONCLUSIVE",
+  "windowStats": {
+    "grew": false,
+    "gross_end": 0.0,
+    "gross_start": 65194.585,
+    "mean_ret_per_cycle": -0.0011348,
+    "n": 89,
+    "scale": 1000.0,
+    "t": -0.944
+  }
+}

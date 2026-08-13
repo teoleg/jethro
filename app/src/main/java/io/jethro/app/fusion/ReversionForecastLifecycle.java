@@ -134,17 +134,21 @@ public final class ReversionForecastLifecycle implements AutoCloseable {
         }
         int needed = forecaster.warmupSamples();
         long anchor = providerTimestamp != null ? providerTimestamp.toEpochMilli() : System.currentTimeMillis();
-        int n = SensorWarmup.warm(history, instrumentId, anchor,
+        var seed = SensorWarmup.warm(history, instrumentId, anchor,
                 intervalSeconds * 1_000L, needed,
                 price -> forecaster.update(instrumentId, price));
         boolean warm = forecaster.readingFor(instrumentId).warm();
         if (warm) {
-            log.info("reversion sensor warmed {} from {} stored prices (needs {}) — warm", instrumentId, n, needed);
+            log.info("reversion sensor warmed {} from {} stored prices (needs {}) — warm", instrumentId,
+                    seed.size(), needed);
         } else {
             // WARN, not INFO: a sensor that never warms is silent dead code the edge gate can never
             // judge, and that failure has to be loud enough to reach the report (ADR-0071 correction).
-            log.warn("reversion sensor still cold for {} after seeding {} of {} stored prices — it will not "
-                    + "publish until the mark history has accumulated its warm-up span", instrumentId, n, needed);
+            // The terminator and span say WHY it is short — window or series end (ADR-0138).
+            log.warn("reversion sensor still cold for {} after seeding {} of {} stored prices — stopped on"
+                    + " {} covering {}s in {} read(s) at a {}ms step; it will not publish until the mark "
+                    + "history has accumulated its warm-up span", instrumentId, seed.size(), needed,
+                    seed.termination(), seed.spanMillis() / 1000L, seed.reads(), seed.stepMillis());
         }
     }
 

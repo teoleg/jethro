@@ -8,10 +8,13 @@
 #   scripts/svc.sh start postgres     # start just Postgres
 #   scripts/svc.sh start muni         # build + start the muni-world service (independent, :8090)
 #   scripts/svc.sh restart muni       # rebuild + restart muni-world
-#   scripts/svc.sh setup tv           # one-time: install whisper.cpp/ffmpeg, fill audio config (Pi)
+#   scripts/svc.sh setup tv           # one-time: install ffmpeg/yt-dlp/whisper.cpp, fill audio config (Pi)
 #   scripts/svc.sh start tv           # turn TV audio capture ON and (re)start muni-world
 #   scripts/svc.sh stop tv            # turn capture OFF (muni-world keeps running)
 #   scripts/svc.sh status tv          # capture flags + recent leads
+#   scripts/svc.sh backup muni        # dump the muni schema + the OS PDFs to backups/
+#   scripts/svc.sh stop trading       # focus mode: improvement loop + ollama OFF; the APP KEEPS RUNNING
+#   scripts/svc.sh start trading      # undo it exactly, incl. the loop's original cron line
 #   scripts/svc.sh status             # what's up
 #
 # Targets: app | muni | tv | ollama | postgres | redpanda | infra (the 3 containers) | all  (default: all)
@@ -55,6 +58,62 @@ set_env_kv() {
   echo "==> set ${k}=${v} in $ENV_FILE"
 }
 
+# --- focus mode: the HEAVY background pieces off, the running platform untouched. "stop trading" =
+# improvement loop (a full build+boot cycle every 30 min — the CPU hog) + ollama (the RAM hog). The
+# app JVM — jethro's main service — KEEPS RUNNING, and so does redpanda, because the app's cross-domain
+# flow rides its topics (stopping the broker under a live app breaks it). Ollama down under a live app
+# is safe by design: the ADR-0016 circuit breaker opens after consecutive failures and the model is
+# advisory-only — risk guardrails are deterministic and never wait on it.
+#
+# Every piece of state needed to come back is saved FIRST, including the loop's ORIGINAL cron line
+# (schedule, JETHRO_DEPLOY_CMD, PATH — loop-control.sh off deletes it; re-enabling by hand would
+# silently rebuild it from whatever env the shell happens to have).
+CRON_SNAP="logs/improve-loop.cron.saved"
+trading_stop() {
+  mkdir -p logs
+  # Snapshot the exact loop line BEFORE removing it. An empty snapshot is meaningful: loop was already
+  # OFF, and resume must leave it off rather than inventing an enable.
+  crontab -l 2>/dev/null | grep -F '# jethro-improve-loop' > "$CRON_SNAP" || true
+  if [ -s "$CRON_SNAP" ]; then
+    echo "==> saved improvement-loop cron line → $CRON_SNAP"
+  else
+    echo "==> improvement loop already OFF (empty snapshot — resume will leave it off)"
+  fi
+  ops/loop-control.sh off || true
+  ./scripts/backup-db.sh || true          # full dump (jethro + muni schemas) — cheap insurance
+  ./scripts/backup-muni.sh || true        # plus the OS PDFs — they exist nowhere else
+  docker compose stop ollama
+  echo "==> heavy background OFF: improvement loop + ollama."
+  echo "==> UNTOUCHED: app (jethro's main service), redpanda, postgres$(muni_running && echo ', muni-world' || true)."
+  echo "==> app note: SLM narration/triage degrades while ollama is down (circuit breaker opens);"
+  echo "    trading logic and risk guardrails are deterministic and unaffected."
+  echo "==> bring it all back with: scripts/svc.sh start trading"
+}
+trading_start() {
+  docker compose up -d ollama
+  if [ -s "$CRON_SNAP" ]; then
+    # Restore the loop line VERBATIM — same schedule, same deploy command, same PATH. The inner
+    # `|| true` matters: on an empty crontab the grep exits 1 and set -e would kill the brace group
+    # BEFORE cat runs — the restore would silently write nothing (caught by the dry-run harness).
+    { crontab -l 2>/dev/null | grep -vF '# jethro-improve-loop' || true; cat "$CRON_SNAP"; } \
+      | grep -v '^$' | crontab -
+    echo "==> improvement loop restored from $CRON_SNAP:"
+    sed 's/^/    /' "$CRON_SNAP"
+  else
+    echo "==> improvement loop was OFF when trading was paused — leaving it OFF"
+    echo "    (enable manually if wanted: JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' ops/loop-control.sh on)"
+  fi
+  # The app never stopped in focus mode — but if it happens to be down (stopped by hand, crashed),
+  # resuming trading should bring the whole stack back, not assume.
+  if app_running; then
+    echo "==> app already running (pid $(cat "$PIDFILE")) — left as-is"
+  else
+    echo "==> app is not running — starting it"
+    docker compose up -d redpanda postgres
+    app_start
+  fi
+}
+
 app_running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null || echo 0)" 2>/dev/null; }
 app_stop() {
   if app_running; then
@@ -75,7 +134,27 @@ app_start() { echo "==> starting app (infra left as-is: LLM + DB keep running)";
 # stop the running JVM BEFORE rebuilding the jar (run-local's caveat applies — Spring Boot loads classes
 # lazily out of build/libs, so overwriting the jar under a live process corrupts its classloader).
 muni_running() { [ -f "$MUNI_PIDFILE" ] && kill -0 "$(cat "$MUNI_PIDFILE" 2>/dev/null || echo 0)" 2>/dev/null; }
+# A muni backup before stopping, at most once an hour. `restart muni` is the command actually used all
+# day, so hanging the backup off `stop:all` alone meant the muni data — the OS PDFs especially — could go
+# for days with no restore point. Rate-limited so a restart loop does not dump on every bounce.
+# EVERY statement here must tolerate failure. This script runs under `set -euo pipefail`, and the first
+# cut used `newest="$(ls -1t backups/... | head -1)"` — with no backups yet, ls exits 2, pipefail
+# propagates it, the assignment fails, and -e killed the WHOLE script silently: `restart muni` printed
+# nothing and did nothing. A convenience hook must never be able to abort the command it is attached to.
+muni_backup_if_stale() {
+  local newest=""
+  if [ -d backups ]; then
+    newest="$(find backups -maxdepth 1 -name 'muni-*.tar.gz' -newermt '-60 minutes' -print -quit 2>/dev/null || true)"
+  fi
+  if [ -n "$newest" ]; then
+    return 0     # backed up within the hour — nothing to do
+  fi
+  ./scripts/backup-muni.sh || true
+  return 0
+}
+
 muni_stop() {
+  muni_backup_if_stale
   if muni_running; then
     local pid; pid="$(cat "$MUNI_PIDFILE")"
     echo "==> stopping muni-world (pid $pid)"
@@ -107,13 +186,11 @@ muni_start() {
 # So "TV control" = flip that flag durably in local.env, then bounce muni-world to pick it up.
 tv_setup() {
   ensure_env_file
-  echo "==> muni-world audio setup (installs whisper.cpp/ffmpeg, finds the loopback)"
+  echo "==> muni-world audio setup (installs ffmpeg + yt-dlp + whisper.cpp and its model)"
   # pass the env file so the setup script WRITES MUNI_WHISPER_BIN/MODEL into it (no more empty vars)
   MUNI_ENV_FILE="$ENV_FILE" bash muni-world/scripts/setup-audio-pi.sh
-  # make sure the registry pointer is set too
-  grep -qE "^MUNI_AUDIO_SOURCES_FILE=" "$ENV_FILE" 2>/dev/null || set_env_kv MUNI_AUDIO_SOURCES_FILE muni-world/seeds/audio-sources.csv
-  echo "==> whisper paths written to $ENV_FILE. Next: bind a device + enable a feed in"
-  echo "    muni-world/seeds/audio-sources.csv (the registry), then: scripts/svc.sh start tv"
+  echo "==> paths written to $ENV_FILE. Nothing to configure — the stream ships with the app."
+  echo "    Next: scripts/svc.sh start tv"
 }
 tv_start() {
   set_env_kv MUNI_AUDIO_CAPTURE true
@@ -122,8 +199,8 @@ tv_start() {
     echo "!!  MUNI_WHISPER_MODEL is empty in $ENV_FILE — run 'scripts/svc.sh setup tv' and set it,"
     echo "!!  or capture will error every cycle (it fails loudly, never invents a transcript)."
   fi
-  echo "==> TV capture ON — bouncing muni-world. Feeds come from the registry"
-  echo "    (${MUNI_AUDIO_SOURCES_FILE:-classpath default}); enable + bind a device there, then 'status tv'."
+  echo "==> TV capture ON — bouncing muni-world. It connects to the configured stream and"
+  echo "    transcribes it chunk by chunk; watch it with 'scripts/svc.sh status tv'."
   muni_stop; muni_start
 }
 tv_stop() {
@@ -134,7 +211,10 @@ tv_stop() {
 }
 tv_status() {
   muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
-  echo "master: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} model=${MUNI_WHISPER_MODEL:-unset} registry=${MUNI_AUDIO_SOURCES_FILE:-classpath default}"
+  # Print yt-dlp's VERSION, not just its path: "No video formats found" is nearly always a stale yt-dlp,
+  # and a version is the one fact that separates that from a stream that has genuinely ended.
+  echo "master: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} model=${MUNI_WHISPER_MODEL:-unset}" \
+       "yt-dlp=$("${MUNI_YTDLP_BIN:-yt-dlp}" --version 2>/dev/null || echo 'NOT INSTALLED')"
   if muni_running; then
     grep -q "audio capture ENABLED" logs/muni-world.log 2>/dev/null \
       && echo "capture loop: ENABLED in the running process" || echo "capture loop: not enabled in the running process"
@@ -145,6 +225,9 @@ tv_status() {
 
 case "$ACTION:$TARGET" in
   # TV status must come BEFORE the general status:* below, or it'd be shadowed by it.
+  backup:muni)   ./scripts/backup-muni.sh ;;
+  backup:*)      ./scripts/backup-db.sh || true; ./scripts/backup-muni.sh ;;
+
   status:tv)     tv_status ;;
 
   status:*)
@@ -152,6 +235,12 @@ case "$ACTION:$TARGET" in
     app_running && echo "app: RUNNING (pid $(cat "$PIDFILE"))" || echo "app: stopped"
     muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
     echo "TV capture flag: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} (see 'svc.sh status tv')" ;;
+
+  # focus mode — heavy background off (improvement loop + ollama); the app, redpanda, postgres and
+  # muni-world all keep running. Backups taken and the loop's cron line snapshotted first so resume
+  # restores it verbatim.
+  stop:trading)  trading_stop ;;
+  start:trading) trading_start ;;
 
   stop:app)      ./scripts/backup-db.sh || true; app_stop ;;
   start:app)     app_start ;;
@@ -193,6 +282,6 @@ case "$ACTION:$TARGET" in
   start:ollama|start:postgres|start:redpanda)       docker compose up -d "$TARGET" ;;
   restart:ollama|restart:postgres|restart:redpanda) docker compose restart "$TARGET" ;;
 
-  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|setup|status> [app|muni|tv|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
+  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|setup|status|backup> [app|muni|tv|trading|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
 esac
 echo "==> done."

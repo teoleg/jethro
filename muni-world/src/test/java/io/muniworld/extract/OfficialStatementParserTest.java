@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,6 +45,235 @@ class OfficialStatementParserTest {
             income tax purposes.
             """;
 
+    /**
+     * The real-world layout that yielded ZERO bonds from a 280-page OS (Omaha Airport Authority, Series
+     * 2026A/B — the owner's first live document). Three things defeated the parser at once, and each is
+     * asserted here verbatim from that document's own text:
+     *
+     * <ul>
+     *   <li>the schedule prints CUSIP <b>suffixes</b> under a base stated as "(681725)*" in the column
+     *       header — not the literal wording "Base CUSIP" the parser looked for;</li>
+     *   <li>the table is <b>two columns side by side</b>, so one text line carries TWO bonds;</li>
+     *   <li>two series with different tax treatment (AMT / Non-AMT) are priced in one document.</li>
+     * </ul>
+     */
+    /**
+     * A document that names NO CUSIPs must be diagnosed as exactly that. The owner's second live OS (Albany
+     * County GO, 2018) contains the word "CUSIP" zero times — typical of a preliminary OS or a small
+     * competitive deal where CUSIPs are assigned at award. The probe used to answer "the schedule almost
+     * certainly prints a base CUSIP-6 once and only suffixes per row", sending the reader hunting for
+     * wording that does not exist. A diagnosis that confidently describes something absent is worse than
+     * none.
+     */
+    /**
+     * NYC Transitional Finance Authority, Fiscal 2023 Series B/C — a top NY issuer whose OS defeated the
+     * parser twice over, both verbatim from that document:
+     *
+     * <ul>
+     *   <li>the base is printed as <b>"Base CUSIP(1): 64971X"</b>. The footnote marker "(1)" contains a
+     *       DIGIT, and the separator class between the words and the number excluded digits, so the match
+     *       died at the "1" and the document reported "no base CUSIP detected" while printing one;</li>
+     *   <li>coupons print as <b>"5 %"</b> and prices as <b>"100%"</b> — no decimals — and the tax-exempt
+     *       subseries has a Yield column where the taxable subseries has a Price column. A fixed
+     *       five-number, always-decimal row shape matched none of it.</li>
+     * </ul>
+     */
+    /**
+     * The owner's fifth document: New York State's ACFR (the Comptroller's annual financial report). The
+     * probe answered "no CUSIPs — typical of a PRELIMINARY Official Statement or a small competitive
+     * deal", which is a confident answer to a question nobody asked: this is not an Official Statement at
+     * all. EMMA hosts an issuer's entire disclosure history and only the OS carries bond terms, so the
+     * document TYPE must be named before anything else — no parser work will find bonds in a document
+     * that has none.
+     */
+    /**
+     * MTA Dedicated Tax Fund Bonds, Series 2022A — the right issuer, the right document type, the schedule
+     * plainly present, and it loaded NOTHING over a single character: the base CUSIP is printed as
+     * "(59260X)†" where Omaha printed "(681725)*", and the header pattern demanded an asterisk. Footnote
+     * markers vary by document; the CUSIP-proximity guard is what makes a parenthesised token safe to
+     * read, not the marker.
+     */
+    @Test
+    void readsABaseCusipMarkedWithADaggerNotAnAsterisk() {
+        String os = """
+                Dated: Date of Delivery Due: November 15, as shown on inside cover page
+                Dedicated Tax Fund Bonds, Series 2022A
+                Maturity Principal Interest CUSIP Number
+                (November 15) Amount Rate Yield* (59260X)†
+                2032 $11,015,000 5.00% 1.95% AH1
+                2033 11,565,000 5.00 2.00 AJ7
+                2038 14,760,000 4.00 2.31 AP3
+                """;
+
+        var res = OfficialStatementParser.parse(os, "Metropolitan Transportation Authority", "36", "");
+
+        assertEquals(3, res.rows().size(), "every schedule row lands once the base is recognised");
+        var byCusip = new java.util.HashMap<String, java.util.Map<String, Object>>();
+        res.rows().forEach(r -> byCusip.put(String.valueOf(r.get("cusip")), r));
+
+        var first = byCusip.get("59260XAH1");
+        assertNotNull(first, "base (59260X) from the dagger-marked header + suffix AH1");
+        assertEquals("5.00", first.get("coupon"));
+        assertEquals("2032-11-15", first.get("maturity"));
+        assertEquals("1.95", first.get("reofferingYield"), "the header names a Yield column");
+
+        // A later maturity with a different coupon — proves rows are read individually, not from the first.
+        assertEquals("4.00", byCusip.get("59260XAP3").get("coupon"));
+        assertEquals("2038-11-15", byCusip.get("59260XAP3").get("maturity"));
+    }
+
+    @Test
+    void anAnnualFinancialReportIsNamedAsTheWrongDocument() {
+        String acfr = """
+                STATE OF NEW YORK
+                Basic Financial Statements and Other Supplementary Information
+                for Fiscal Year Ended March 31, 2023
+                THOMAS P. DiNAPOLI, STATE COMPTROLLER
+                Independent Auditors' Report ....... 7
+                Management's Discussion and Analysis (unaudited) ....... 11
+                Statement of Net Position ....... 28
+                """;
+
+        assertEquals("annual financial report (ACFR)", OfficialStatementProbe.documentType(acfr));
+        String diagnosis = String.valueOf(OfficialStatementProbe.probe(acfr, 1, false).get("diagnosis"));
+        assertTrue(diagnosis.contains("NOT an Official Statement"), diagnosis);
+        assertFalse(diagnosis.contains("PRELIMINARY"), "the old wrong explanation is gone: " + diagnosis);
+
+        // An OS that CARRIES an annual report as an appendix is still an Official Statement — the cover
+        // page decides, or a real OS would be rejected for quoting the very document it appends.
+        String osWithAppendix = """
+                NEW ISSUE - BOOK-ENTRY ONLY
+                OFFICIAL STATEMENT dated July 16, 2026
+                MATURITY SCHEDULE
+                APPENDIX B - Basic Financial Statements and Independent Auditors' Report
+                """;
+        assertEquals("official statement", OfficialStatementProbe.documentType(osWithAppendix));
+    }
+
+    @Test
+    void readsAFootnotedBaseCusipAndDecimallessRateAndPriceColumns() {
+        String os = """
+                Dated: Date of Delivery    Due: November 1, as shown on the inside cover pages
+                $829,230,000 Subseries B-1 Tax-Exempt Bonds Base CUSIP(1): 64971X
+                Due Principal Interest CUSIP(1)
+                November 1, Amount Rate Yield Suffix
+                2023 $28,190,000 5 % 2.27% Z43 2024 57,000,000 5 % 2.35% Z50
+                $29,255,000 Subseries B-2 Taxable Bonds Base CUSIP(1): 64971X
+                Due Principal Interest CUSIP(1)
+                November 1, Amount Rate Price Suffix
+                2023 $29,255,000 3.4% 100% Y69
+                """;
+
+        var res = OfficialStatementParser.parse(os, "New York City Transitional Finance Authority", "36", "");
+
+        assertEquals(3, res.rows().size(), "both columns of the tax-exempt line, plus the taxable row");
+        var byCusip = new java.util.HashMap<String, java.util.Map<String, Object>>();
+        res.rows().forEach(r -> byCusip.put(String.valueOf(r.get("cusip")), r));
+
+        // The footnoted base, assembled with each row's suffix.
+        var b1 = byCusip.get("64971XZ43");
+        assertNotNull(b1, "base from \"Base CUSIP(1): 64971X\" + suffix Z43");
+        assertEquals("5", b1.get("coupon"), "a coupon printed as \"5 %\" is still a coupon");
+        assertEquals("2023-11-01", b1.get("maturity"), "bare year + the schedule's November 1 header");
+        assertEquals("2.27", b1.get("reofferingYield"), "this subseries prints a Yield column");
+        assertNull(b1.get("reofferingPrice"));
+
+        assertNotNull(byCusip.get("64971XZ50"), "the second entry on the same physical line");
+
+        // The taxable subseries prints PRICE where the tax-exempt one prints yield. Reading the header
+        // keeps a price from being recorded as a yield.
+        var b2 = byCusip.get("64971XY69");
+        assertNotNull(b2);
+        assertEquals("3.4", b2.get("coupon"));
+        assertEquals("100", b2.get("reofferingPrice"), "the header says Price, so it is recorded as price");
+        assertNull(b2.get("reofferingYield"));
+    }
+
+    @Test
+    void aDocumentWithNoCusipsIsDiagnosedAsUnkeyableNotAsASuffixLayout() {
+        String os = """
+                COUNTY OF ALBANY NEW YORK
+                $140,740,000 VARIOUS PURPOSES SERIAL BONDS - 2018
+                Date of Issue: Date of Delivery    Maturity Date: April 1, 2019-2029
+                2019 $9,655,000 5.000 1.750
+                2020 10,000,000 5.000 1.860
+                The Bonds are general obligations of the County.
+                """;
+
+        // ONE page: the fixture is a page of real text. Declaring 47 pages would make it read as
+        // image-only (under 100 chars/page), and the scanned-PDF diagnosis correctly outranks this one.
+        var d = OfficialStatementProbe.probe(os, 1, false);
+
+        assertEquals(0, d.get("fullCusipsFound"));
+        String diagnosis = String.valueOf(d.get("diagnosis"));
+        assertTrue(diagnosis.contains("does not contain the word CUSIP"),
+                "the absence of identifiers is the finding: " + diagnosis);
+        assertFalse(diagnosis.contains("base CUSIP-6 once"),
+                "must not describe a suffix layout that is not there: " + diagnosis);
+        assertTrue(diagnosis.contains("EMMA"), "and must say what to do instead: " + diagnosis);
+
+        // The schedule rows ARE present in the text — that distinction is the evidence, so it is reported.
+        @SuppressWarnings("unchecked")
+        List<String> rowish = (List<String>) d.get("scheduleRowSample");
+        assertEquals(2, rowish.size(), "year + amount + rate lines are found even with no CUSIP");
+    }
+
+    @Test
+    void readsATwoColumnSuffixScheduleWithPerSeriesTax() {
+        String os = """
+                MATURITY SCHEDULE
+                $162,270,000
+                Airport Facilities Revenue Bonds (AMT), Series 2026A
+                Maturity Principal Interest   CUSIP Maturity Principal Interest   CUSIP
+                (December 15) Amount Rate Yield Price (681725)* (December 15) Amount Rate Yield Price (681725)*
+                2027 $2,395,000 5.000% 2.930% 102.777% NM5 2037 $3,900,000 5.000% 3.860%† 109.670% NX1
+                2028 2,520,000 5.000 3.020 104.511 NN3 2038 4,100,000 5.000 3.950† 108.866 NY9
+                $35,925,000 5.500% Term Bond due December 15, 2051, Yield 4.650%† Price 106.930%, CUSIP Number* 681725 PH4
+                †Yield to first optional call date of December 15, 2036.
+                $45,525,000
+                Airport Facilities Revenue Bonds (Non-AMT), Series 2026B
+                (December 15) Amount Rate Yield Price (681725)* (December 15) Amount Rate Yield Price (681725)*
+                2029 $   780,000 5.000% 2.720% 107.313% PK7 2038 $1,205,000 5.000% 3.590%† 112.125% PU5
+                """;
+
+        var res = OfficialStatementParser.parse(os, "Airport Authority of the City of Omaha", "31", "");
+
+        // 2 lines x 2 columns for series A + 1 term bond + 1 line x 2 columns for series B = 7 bonds.
+        assertEquals(7, res.rows().size(), "both columns of every schedule line, plus the term bond");
+
+        var byCusip = new java.util.HashMap<String, java.util.Map<String, Object>>();
+        res.rows().forEach(r -> byCusip.put(String.valueOf(r.get("cusip")), r));
+
+        // Base CUSIP-6 from the "(681725)*" header, assembled with each row's suffix.
+        var first = byCusip.get("681725NM5");
+        assertNotNull(first, "the base from the parenthesised header + the row's suffix");
+        assertEquals("5.000", first.get("coupon"));
+        assertEquals("2027-12-15", first.get("maturity"), "bare year + the schedule's (December 15) header");
+        assertEquals("2.930", first.get("reofferingYield"), "reoffering yield captured, never emitted as price");
+        assertNull(first.get("price"), "terms only — an OS states no CURRENT price");
+
+        // The SECOND bond on the same physical line — the half the old parser silently dropped.
+        var second = byCusip.get("681725NX1");
+        assertNotNull(second, "the right-hand column of the same line is a bond too");
+        assertEquals("2037-12-15", second.get("maturity"));
+
+        // Term bond, printed as prose with its own full base+suffix.
+        var term = byCusip.get("681725PH4");
+        assertNotNull(term);
+        assertEquals("5.500", term.get("coupon"));
+        assertEquals("2051-12-15", term.get("maturity"));
+
+        // Per-series tax read from the headings — one document, two treatments, neither guessed.
+        assertEquals("AMT", first.get("tax"), "Series 2026A is the AMT tranche");
+        assertEquals("tax-exempt", byCusip.get("681725PK7").get("tax"), "Series 2026B is Non-AMT");
+
+        // The call: date from the footnote, applied ONLY to maturities after it, and NO price invented —
+        // the sentence states a date and no redemption price.
+        assertEquals("2036-12-15", second.get("callDate"), "a 2037 maturity is callable at the 2036 call");
+        assertNull(second.get("callPrice"), "no price is stated, so none is written — never assumed par");
+        assertNull(first.get("callDate"), "a 2027 maturity matures before the call — not callable");
+    }
+
     @Test
     void extractsTermsCallAndTaxButNoPrice() {
         OfficialStatementParser.Result res =
@@ -65,6 +296,45 @@ class OfficialStatementParserTest {
         assertEquals("2040-11-01", r2040.get("maturity"));
         assertEquals("2033-11-01", r2040.get("callDate"), "2040 ≥ 2034 gate → callable on the redemption date");
         assertEquals("100", r2040.get("callPrice"));
+    }
+
+    // A real EMMA OS commonly prints the base CUSIP-6 once, in wording this parser does not match, and then
+    // only 2–3 character SUFFIXES per maturity row.
+    private static final String SUFFIX_ONLY_OS = """
+            MATURITY SCHEDULE
+            (Due November 1)
+            Year   Principal   Coupon   Yield   CUSIP No.†
+            2027   $1,000,000   5.000%   3.10%   AB1
+            2028   $1,050,000   5.000%   3.25%   AC9
+
+            † CUSIP numbers are provided by CUSIP Global Services.
+            """;
+
+    @Test
+    void neverEmitsAPartialCusipWhenNoBaseIsKnown() {
+        // The loaders pass "" as the fallback base. "" is non-null, so this used to reach the suffix branch
+        // and emit "" + "AB1" = "AB1" — a FABRICATED 3-character identity, indexed as a real security.
+        OfficialStatementParser.Result res = OfficialStatementParser.parse(SUFFIX_ONLY_OS, "City", null, "");
+
+        assertTrue(res.rows().isEmpty(), "no base CUSIP → no rows; never a partial key");
+        for (Map<String, Object> r : res.rows()) {
+            assertEquals(9, String.valueOf(r.get("cusip")).length(), "a CUSIP is 9 chars or it is not a CUSIP");
+        }
+        assertEquals(2, res.quarantined(),
+                "the two unkeyable schedule rows are QUARANTINED, not silently skipped — otherwise a "
+                + "suffix-style OS reports '0 rows, 0 quarantined', i.e. 'there was no schedule'");
+    }
+
+    @Test
+    void assemblesSuffixesOnlyAgainstARealBase() {
+        // Same document, base supplied by the caller (e.g. the CUSIP-6 of the OS being ingested).
+        OfficialStatementParser.Result res =
+                OfficialStatementParser.parse(SUFFIX_ONLY_OS, "City", null, "649122");
+
+        assertEquals(2, res.rows().size());
+        assertEquals("649122AB1", res.rows().get(0).get("cusip"));
+        assertEquals("2027-11-01", res.rows().get(0).get("maturity"));
+        assertEquals(0, res.quarantined(), "keyable rows are parsed, not quarantined");
     }
 
     @Test

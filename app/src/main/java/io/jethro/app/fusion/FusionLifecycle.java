@@ -4,6 +4,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Future;
@@ -99,6 +100,8 @@ public final class FusionLifecycle implements AutoCloseable {
     /** ADR-0104: the absolute book-level risk anchor — null ⇒ not wired, the book keeps whatever
      *  risk level the cross-section happened to plan. */
     private final BookVolatilityBrake bookVolBrake;
+    /** ADR-0137: the planned book's gross-notional cap — null ⇒ not wired, the book is byte-identical. */
+    private final GrossNotionalCap grossCap;
 
     private volatile TargetBook lastBook = TargetBook.empty();
     private Future<?> task;
@@ -179,6 +182,25 @@ public final class FusionLifecycle implements AutoCloseable {
                            SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
                            StreamCovariance streamCov, PositionBuffer positionBuffer,
                            BookVolatilityBrake bookVolBrake) {
+        this(registry, priceFor, multiplierFor, positionsSupplier, heldSupplier, weightsSupplier, params,
+                routeOrders, executor, scheduler, intervalSeconds, minForecastToRoute, edgeGate,
+                covariance, baseHorizonSeconds, volBudgetWinsorPct, streamVol, riskCut, markHistory,
+                markTimeFor, streamCov, positionBuffer, bookVolBrake, null);
+    }
+
+    public FusionLifecycle(ForecastRegistry registry, Function<String, BigDecimal> priceFor,
+                           Function<String, BigDecimal> multiplierFor,
+                           Supplier<Map<String, BigDecimal>> positionsSupplier,
+                           Supplier<java.util.Set<String>> heldSupplier, Supplier<FusionWeights> weightsSupplier,
+                           FusionPlanner.Params params, boolean routeOrders, FusionExecutor executor,
+                           ScheduledExecutorService scheduler, long intervalSeconds, double minForecastToRoute,
+                           Supplier<EdgeGate.Decision> edgeGate,
+                           Supplier<ReturnCovarianceSource> covariance, long baseHorizonSeconds,
+                           double volBudgetWinsorPct, StreamVolatility streamVol, TrailingRiskCut riskCut,
+                           SensorWarmup.History markHistory, Function<String, Long> markTimeFor,
+                           StreamCovariance streamCov, PositionBuffer positionBuffer,
+                           BookVolatilityBrake bookVolBrake, GrossNotionalCap grossCap) {
+        this.grossCap = grossCap;
         this.bookVolBrake = bookVolBrake;
         this.positionBuffer = positionBuffer;
         this.streamCov = streamCov;
@@ -259,6 +281,14 @@ public final class FusionLifecycle implements AutoCloseable {
             java.util.Set<String> held = heldSupplier == null ? java.util.Set.of() : heldSupplier.get();
             List<FusionPlanner.Target> targets = FusionPlanner.plan(forecasts, held, weights::weightFor, priceFor,
                     multiplierFor, id -> positions.getOrDefault(id, BigDecimal.ZERO), cycleParams);
+            // ADR-0145: the target the FORECAST asked for, captured before any risk control shrinks it.
+            // Every control below is one-way, so the difference between this and the target that
+            // survives them is exactly the reduction the controls authored — which is what lets the
+            // conviction floor be applied to the planner's own unwind without touching theirs.
+            Map<String, BigDecimal> plannedTargets = new HashMap<>(targets.size());
+            for (FusionPlanner.Target t : targets) {
+                plannedTargets.put(t.instrument(), t.targetQty() == null ? BigDecimal.ZERO : t.targetQty());
+            }
             ReturnCovarianceSource dailyCov = covariance == null ? ReturnCovarianceSource.NONE : covariance.get();
             // ADR-0089: both sizing controls below are silent on a name their covariance does not cover,
             // and the daily-close estimate covers none of this book on a stream only a session or two
@@ -293,6 +323,19 @@ public final class FusionLifecycle implements AutoCloseable {
                     ? new BookVolatilityBrake.Result(targets, 1.0, null, null, 0, 0)
                     : bookVolBrake.apply(targets, multiplierFor, cov, cycleParams);
             targets = braked.targets();
+            // ADR-0137: every control above is σ-RELATIVE — they decide how the book's risk is shared
+            // out, how much of it is one bet, and what σ level it carries. None of them states a
+            // NOTIONAL, and on a calm tape a measured σ is small, so none of them binds: the planned
+            // book ran to several times the gross the deterministic guardrail permits the routing book
+            // to hold. That does not put risk on — the guardrail still refuses the order — it makes the
+            // target permanently unreachable, so the ADR-0094 aim never converges, the held book stays a
+            // small fraction of its own target, and the ADR-0080 step a×gap pays that inflation in
+            // turnover every cycle. Cap the planned gross at the cap the guardrail already enforces:
+            // one-way, uniform, and introducing no money number of its own. Unwired ⇒ book unchanged.
+            var capped = grossCap == null
+                    ? new GrossNotionalCap.Result(targets, 1.0, BigDecimal.ZERO, 0)
+                    : grossCap.apply(targets, multiplierFor, cycleParams);
+            targets = capped.targets();
             // ADR-0064: with no measured edge that beats measured execution cost, the only trades worth
             // paying for are the ones that take risk OFF. ADR-0072 asks the same question per name, so
             // a name whose own round trip costs more than the passing source's measured edge is
@@ -307,6 +350,14 @@ public final class FusionLifecycle implements AutoCloseable {
             long horizon = gate != null && gate.horizonSeconds() > 0 ? gate.horizonSeconds() : baseHorizonSeconds;
             var cut = applyRiskCut(targets, now, horizon, cycleParams);
             targets = cut.targets();
+            // ADR-0134/0149: the names the ADR-0086 trailing stop flattened THIS cycle. A stop cut and a
+            // decayed view both arrive below as a flat target, but they are different triggers — the
+            // post-mortem needs to tell them apart, and so does the ADR-0149 attribution in the buffer,
+            // which must never hold back an exit a risk control ordered.
+            java.util.Set<String> stopped = new java.util.HashSet<>();
+            for (TrailingRiskCut.Cut c : cut.cuts()) {
+                stopped.add(c.instrument());
+            }
             // ADR-0094: the no-trade region, applied LAST and against the AIM rather than the target.
             // Everything above decides where the desk means to be; this decides whether the difference
             // between that and where it is is worth paying spread for. It runs after the risk cut so a
@@ -319,7 +370,8 @@ public final class FusionLifecycle implements AutoCloseable {
             // evaluated independently of the edge gate so switching that gate off cannot silence it.
             var buffered = positionBuffer == null
                     ? new PositionBuffer.Result(targets, Map.of(), 0, targets.size())
-                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate(), this::stopArmed);
+                    : positionBuffer.apply(targets, gate, cycleParams.adjustmentRate(), this::stopArmed,
+                            plannedTargets::get, minForecastToRoute, stopped::contains);
             targets = buffered.targets();
             lastBook = new TargetBook(now, routeOrders, targets.size(), weights.snapshot(), targets, gate,
                     normalised.multiplier(), normalised.coveredNames(),
@@ -331,13 +383,6 @@ public final class FusionLifecycle implements AutoCloseable {
                     braked.samples());
             if (routeOrders) {
                 int routed = 0;
-                // ADR-0134: the names the ADR-0086 trailing stop flattened this cycle. A stop cut and a
-                // decayed view both arrive here as a reduce, but they are different triggers and the
-                // post-mortem needs to tell them apart, so the distinction is captured where it is known.
-                java.util.Set<String> stopped = new java.util.HashSet<>();
-                for (TrailingRiskCut.Cut c : cut.cuts()) {
-                    stopped.add(c.instrument());
-                }
                 for (FusionPlanner.Target t : targets) {
                     if (t.deltaQty().signum() == 0) {
                         continue; // inside the no-trade band — nothing to do
@@ -560,17 +605,20 @@ public final class FusionLifecycle implements AutoCloseable {
         long anchor = providerMillis != null && providerMillis > 0 ? providerMillis : System.currentTimeMillis();
         // The seed is counted in PRICES, the sensor in RETURNS, and a return needs two prices
         // (ADR-0117) — asking for warmupSamples() prices lands the replay one return short every time.
-        int n = SensorWarmup.warm(markHistory, instrument, anchor, intervalSeconds * 1_000L,
+        var seed = SensorWarmup.warm(markHistory, instrument, anchor, intervalSeconds * 1_000L,
                 streamVol.warmupPrices(), price -> streamVol.update(instrument, price));
         if (streamVol.sigmaPerSample(instrument).isEmpty()) {
             // WARN, not INFO: an unmeasured name is one the risk cut can never protect, and that has
             // to be loud enough to reach the report (the ADR-0071 correction's lesson). Quoted against
-            // what the seed ASKED FOR, so "n of n, still cold" can only ever mean a genuine cold start.
-            log.warn("risk-cut σ sensor still cold for {} after seeding {} of {} stored prices — this "
-                    + "name cannot be stopped out until its mark history has accumulated", instrument, n,
-                    streamVol.warmupPrices());
+            // what the seed ASKED FOR, so "n of n, still cold" can only ever mean a genuine cold start,
+            // and with the terminator so a short seed says WHY it is short (ADR-0138).
+            log.warn("risk-cut σ sensor still cold for {} after seeding {} of {} stored prices — stopped "
+                    + "on {} covering {}s in {} read(s) at a {}ms step; this name cannot be stopped out "
+                    + "until its mark history has accumulated", instrument, seed.size(),
+                    streamVol.warmupPrices(), seed.termination(), seed.spanMillis() / 1000L, seed.reads(),
+                    seed.stepMillis());
         } else {
-            log.info("risk-cut σ sensor warmed {} from {} stored prices (ADR-0086)", instrument, n);
+            log.info("risk-cut σ sensor warmed {} from {} stored prices (ADR-0086)", instrument, seed.size());
         }
     }
 

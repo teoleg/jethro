@@ -1,7 +1,0 @@
-id|label|publisher|category|device|chunk_seconds|enabled|notes
-# TV / audio source registry (ADR-0014) — the host-editable feed list. PIPE-delimited (a device may contain
-# a comma, e.g. ALSA hw:1,0). Add rows as your feed list grows; bind each to a host audio device
-# ("<ffmpeg-format>:<name>", e.g. pulse:default.monitor or alsa:hw:1,0), set enabled=true, then:
-# scripts/svc.sh restart tv. Point MUNI_AUDIO_SOURCES_FILE (jethro.env) here.
-tv-bloomberg|Bloomberg TV|Bloomberg|tv||300|false|US market TV via YouTube TV; bind a device then enable
-tv-cnbc|CNBC|CNBC|tv||300|false|US market TV via YouTube TV; bind a device then enable

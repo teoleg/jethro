@@ -22,7 +22,7 @@ public final class AudioCaptureConnector implements SourceConnector {
         /** MIME type of the returned bytes, e.g. {@code audio/wav} or {@code audio/ogg}. */
         String contentType();
 
-        /** A stable descriptor of where this came from, e.g. {@code ffmpeg:alsa:hw:1,0}; used as the url. */
+        /** A stable descriptor of where this came from, e.g. {@code ffmpeg:yt:<page>}; used as the url. */
         String descriptor();
     }
 

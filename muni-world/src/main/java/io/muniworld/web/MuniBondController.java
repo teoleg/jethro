@@ -21,9 +21,20 @@ import java.util.Map;
 public final class MuniBondController {
 
     private final MuniBondService bonds;
+    private final io.muniworld.bond.OasService oas;
 
-    public MuniBondController(MuniBondService bonds) {
+    public MuniBondController(MuniBondService bonds, io.muniworld.bond.OasService oas) {
         this.bonds = bonds;
+        this.oas = oas;
+    }
+
+    /**
+     * The OAS for one bond (ADR-0018): solved on a BDT lattice against the curve of the price's own date,
+     * at the measured σ and its p10/p50/p90 band. {@code available:false} carries the named refusal reason.
+     */
+    @GetMapping("/api/muni/bonds/{cusip}/oas")
+    public Map<String, Object> oas(@PathVariable String cusip) {
+        return oas.oas(cusip.toUpperCase(java.util.Locale.ROOT));
     }
 
     /** Bonds for an issuer (CUSIP-6 prefix), with indicators. */
@@ -36,6 +47,59 @@ public final class MuniBondController {
     @GetMapping("/api/muni/bonds/geo/{fipsPrefix}")
     public List<BondRow> byGeography(@PathVariable String fipsPrefix) {
         return bonds.byGeography(fipsPrefix);
+    }
+
+    /** The most-recently-loaded bonds (from Postgres when up, else the LMDB index) — what the UI shows after a
+     *  folder load, so the result of loading is visible without knowing a CUSIP-6 to search. */
+    @GetMapping("/api/muni/bonds/recent")
+    public List<BondRow> recent(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "50") int limit) {
+        return bonds.recent(Math.min(Math.max(limit, 1), 500));
+    }
+
+    /**
+     * The bond BROWSER: one page of the universe, filtered and sorted in the DB.
+     * {@code {page,size,sort,asc,total,rows}} — the total is what makes the pager navigable.
+     */
+    @GetMapping("/api/muni/bonds")
+    public Map<String, Object> page(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "") String q,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "updated_at") String sort,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean asc,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "0") int page,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "50") int size) {
+        return bonds.page(q, sort, asc, page, size);
+    }
+
+    /** One bond, everything stored about it — the detail view behind a row click. */
+    @GetMapping("/api/muni/bonds/{cusip}")
+    public org.springframework.http.ResponseEntity<BondRow> one(@PathVariable String cusip) {
+        return bonds.get(cusip.toUpperCase(java.util.Locale.ROOT))
+                .map(org.springframework.http.ResponseEntity::ok)
+                .orElseGet(() -> org.springframework.http.ResponseEntity.notFound().build());
+    }
+
+    /**
+     * A CUSIP's quarterly valuation history — dated, fund-attested marks from every N-PORT on EDGAR,
+     * par-weighted across the funds that held it each period. Oldest first; empty when none filed.
+     */
+    @GetMapping("/api/muni/bonds/{cusip}/valuations")
+    public List<io.muniworld.bond.SecurityRepository.ValuationPoint> valuations(@PathVariable String cusip) {
+        return bonds.valuationSeries(cusip.toUpperCase(java.util.Locale.ROOT));
+    }
+
+    /** Which Official Statements to fetch next: the universe by issuer, biggest first, plus totals. */
+    @GetMapping("/api/muni/bonds/coverage")
+    public Map<String, Object> coverage(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "25") int limit,
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "false") boolean includeDone) {
+        return bonds.coverage(limit, includeDone);
+    }
+
+    /** Can the lattice/OAS work start? The preconditions, counted from the data. */
+    @GetMapping("/api/muni/bonds/readiness")
+    public Map<String, Object> readiness() {
+        return bonds.modelReadiness();
     }
 
     /** Index a bond (the loader/connector seam; also lets tools push a bond in). */

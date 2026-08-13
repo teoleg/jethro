@@ -52,6 +52,14 @@ import java.util.Map;
  * {@code |target| · TARGET_ABS / |forecast|} is that name's position at a typical forecast: Carver's
  * "average position", read off this cycle's own arithmetic with no estimator and no warm-up.
  *
+ * <p><b>And the forecast that scale is priced at is MEASURED, not nominal (ADR-0141).</b> {@code
+ * TARGET_ABS} is what each SOURCE is normalised to; the band is applied to the COMBINED forecast, which
+ * the ADR-0076 DM and the ADR-0124 agreement scalar have already attenuated. Pricing the average position
+ * at the unattenuated constant made the release condition {@code |aim|/|target| > width × TARGET_ABS/|f|}
+ * unsatisfiable for every name with {@code |f| < width × TARGET_ABS}, since ADR-0102 caps that ratio at
+ * one — a permanent dead zone in which attenuations meant to reduce SIZE removed the position entirely.
+ * See {@link #typicalForecastAbs}.
+ *
  * <p><b>And so is the buffer WIDTH (ADR-0101).</b> Carver's 0.10 is a published convention for a desk
  * whose cost and edge he does not know; this desk measures both, per name and per source, and the width
  * that follows from them is not 0.10. See {@link #widthFor} for the derivation and the one-way
@@ -104,8 +112,30 @@ public final class PositionBuffer {
      */
     private final Map<String, BigDecimal> aims = new HashMap<>();
 
+    /**
+     * ADR-0140 — instrument → consecutive cycles this name has been ABSENT from the target list. A
+     * name planned this cycle sits at zero; one that stops being plannable ages out after a full
+     * measurement horizon (see {@link #retentionCycles}). Touched only from the fusion tick thread.
+     */
+    private final Map<String, Integer> absentCycles = new HashMap<>();
+
+    /** ADR-0140 — durable home for {@link #aims}; null means in-memory only (the pre-ADR-0140 path). */
+    private final AimStore aimStore;
+
+    /** ADR-0140 — the restore is attempted once, on the first cycle, not on every one. */
+    private boolean restored;
+
     public PositionBuffer(double bufferFraction) {
+        this(bufferFraction, null);
+    }
+
+    /**
+     * ADR-0140 — as above, with a durable home for the aim. {@code aimStore} null leaves every path
+     * byte-identical to the in-memory buffer.
+     */
+    public PositionBuffer(double bufferFraction, AimStore aimStore) {
         this.bufferFraction = Math.max(0.0, bufferFraction);
+        this.aimStore = aimStore;
     }
 
     /** The buffered book plus the aims it was traded against — the aims are operator-visible telemetry. */
@@ -134,12 +164,54 @@ public final class PositionBuffer {
      */
     public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
                         java.util.function.Predicate<String> stopArmed) {
+        return apply(targets, gate, adjustmentRate, stopArmed, null, 0.0);
+    }
+
+    /**
+     * ADR-0145 — as above, plus the mirror of the ADR-0059 conviction floor. A reduction the PLANNER
+     * authored — the forecast-implied target has decayed below the holding — routes only when that
+     * forecast is strong enough that it would have been allowed to OPEN the position; a reduction a risk
+     * control authored is never held. {@code plannedTargets} maps a name to the target the planner
+     * produced BEFORE any control ran; null means unwired, which leaves every path byte-identical.
+     *
+     * @param adjustmentRate     the ADR-0080 derived partial-adjustment fraction for this cycle
+     * @param stopArmed          per-name predicate: true when the risk-cut sensor can price this name's stop
+     * @param plannedTargets     name → the planner's own target, before the risk controls; null = unwired
+     * @param minForecastToRoute the ADR-0059 conviction floor; at or below zero the floor is off
+     */
+    public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
+                        java.util.function.Predicate<String> stopArmed,
+                        java.util.function.Function<String, BigDecimal> plannedTargets,
+                        double minForecastToRoute) {
+        return apply(targets, gate, adjustmentRate, stopArmed, plannedTargets, minForecastToRoute, null);
+    }
+
+    /**
+     * As above, plus ADR-0149's attribution of a FLAT target to its author.
+     *
+     * @param controlFlattened per-name predicate: true when a risk control planned this name flat on
+     *                         THIS cycle (the ADR-0086 trailing cut). Null means unwired, which reads
+     *                         every flat target as control-authored and leaves the book byte-identical.
+     */
+    public Result apply(List<FusionPlanner.Target> targets, EdgeGate.Decision gate, double adjustmentRate,
+                        java.util.function.Predicate<String> stopArmed,
+                        java.util.function.Function<String, BigDecimal> plannedTargets,
+                        double minForecastToRoute,
+                        java.util.function.Predicate<String> controlFlattened) {
+        ensureRestored();
         if (targets == null || targets.isEmpty()) {
-            aims.clear();
+            // ADR-0140: an empty plan is a cycle in which every name was absent, not proof that the
+            // desk has abandoned its intent. Age the map on the same clock as any other absence.
+            ageAndRetain(java.util.Set.of(), Math.max(0.0, Math.min(1.0, adjustmentRate)));
+            persist();
             return new Result(List.of(), Map.of(), 0, 0);
         }
         double rate = Math.max(0.0, Math.min(1.0, adjustmentRate));
         double edgeBps = passingEdgeBps(gate); // ADR-0101: measured once, the same for every name
+        // ADR-0141: the forecast strength the "average position" is priced at, measured on this cycle's
+        // own cross-section rather than assumed at the nominal scaling constant. Measured once, the same
+        // for every name — like the edge above.
+        double typicalForecast = typicalForecastAbs(targets);
         List<FusionPlanner.Target> out = new ArrayList<>(targets.size());
         Map<String, BigDecimal> snapshot = new HashMap<>(targets.size());
         int inside = 0;
@@ -149,8 +221,8 @@ public final class PositionBuffer {
             BigDecimal target = t.targetQty() == null ? BigDecimal.ZERO : t.targetQty();
             BigDecimal aim = nextAim(t.instrument(), target, held, rate);
             double width = widthFor(t.instrument(), gate, edgeBps);
-            BigDecimal delta = bufferedDelta(aim, held, band(target, t.combinedForecast(), held, width),
-                    target, rate);
+            BigDecimal delta = bufferedDelta(aim, held,
+                    band(target, t.combinedForecast(), held, width, typicalForecast), target, rate);
             if (!mayIncrease(gate, stopArmed, t.instrument())) {
                 // ADR-0064/0075: this name may only have risk taken OFF. Clamp, then re-seed the aim to
                 // where the desk will actually be — an intent it is forbidden to act on must not
@@ -162,6 +234,24 @@ public final class PositionBuffer {
                         ? held.negate().setScale(QTY_SCALE, RoundingMode.HALF_EVEN)
                         : TargetPlanner.reduceOnly(delta, held);
                 aim = held.add(delta).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+            } else if (plannedTargets != null) {
+                // ADR-0145: the conviction floor, applied to the exit as well as the entry. A reduction
+                // the forecast alone authored — its target has decayed below the holding — is held back
+                // unless that forecast would have been strong enough to open the position; whatever a
+                // risk control authored still routes in full. Re-seed the aim to where the desk will
+                // actually be, for the same reason the clamp above does: an intent it is not acting on
+                // must not accumulate into one large unwind that fires the moment conviction returns.
+                // ADR-0149: a flat target is an exit only when something OTHER than the forecast made
+                // it flat. A control that planned this name flat this cycle, and a name the planner
+                // could not value (its zero is a data fact, not a view), both keep the old reading.
+                boolean flatByControl = controlFlattened == null || controlFlattened.test(t.instrument())
+                        || t.price() == null || t.price().signum() <= 0;
+                BigDecimal convicted = ConvictionHold.apply(delta, held, plannedTargets.apply(t.instrument()),
+                        target, t.combinedForecast(), minForecastToRoute, flatByControl, t.sources());
+                if (convicted.compareTo(delta) != 0) {
+                    delta = convicted;
+                    aim = held.add(delta).setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+                }
             }
             aims.put(t.instrument(), aim);
             snapshot.put(t.instrument(), aim);
@@ -175,8 +265,101 @@ public final class PositionBuffer {
                             t.diversificationMultiplier(), t.agreement(), t.price(), t.targetQty(), t.currentQty(),
                             delta, t.contributions()));
         }
-        aims.keySet().retainAll(snapshot.keySet()); // a name that left the book leaves no intent behind
+        ageAndRetain(snapshot.keySet(), rate); // ADR-0140: absence ages the intent, it does not erase it
+        persist();
         return new Result(out, Collections.unmodifiableMap(snapshot), inside, traded);
+    }
+
+    /**
+     * ADR-0140 — restore the aim path from its durable home, once, on the first cycle of the process.
+     *
+     * <p>A restored aim is not acted on directly: it enters {@link #nextAim} as the previous aim, is
+     * stepped toward THIS cycle's target at THIS cycle's rate, and is then clamped by ADR-0102's
+     * {@link #withinTarget} into the closed interval between flat and the current target. So a restored
+     * value can never exceed the current target, never oppose it, and never survive a change of view —
+     * it can only spare the desk from re-paying a transient it has already served.
+     */
+    private void ensureRestored() {
+        if (restored) {
+            return;
+        }
+        restored = true;
+        if (aimStore == null) {
+            return;
+        }
+        Map<String, BigDecimal> stored = aimStore.load();
+        if (stored != null) {
+            stored.forEach((instrument, aim) -> {
+                if (instrument != null && aim != null) {
+                    aims.put(instrument, aim.setScale(QTY_SCALE, RoundingMode.HALF_EVEN));
+                }
+            });
+        }
+    }
+
+    /** ADR-0140 — write the aim path through to its durable home. Best-effort by contract. */
+    private void persist() {
+        if (aimStore != null) {
+            aimStore.save(Map.copyOf(aims));
+        }
+    }
+
+    /**
+     * ADR-0140 — the aim of a name absent from this cycle's plan is AGED, not deleted.
+     *
+     * <h3>The defect this replaces</h3>
+     * The map was pruned with {@code retainAll(planned)}, so a name that fell out of the target list
+     * for a single cycle — because a sensor went quiet, a print went stale, or the selector rotated —
+     * lost its whole intent and restarted from the held quantity. Combined with the same reset at every
+     * process start (the map was in-memory), the ADR-0080 path could never complete its transient: with
+     * the aim rising as {@code 1 − (1−a)^n} toward the target and the ADR-0094 buffer only releasing an
+     * order once {@code |aim|} exceeds a band scaled by the name's average position, a repeatedly-reset
+     * aim never reaches the release fraction and the delta reads exactly zero, cycle after cycle.
+     *
+     * <h3>The retention window is derived, not dialled</h3>
+     * The ADR-0080 identity is {@code a = 1 − e^(−c/h)} for cycle length {@code c} and evidence horizon
+     * {@code h}, so {@code −1 / ln(1−a) = h/c} — the number of cycles in exactly one measurement
+     * horizon, read straight off the rate the caller already passed in. That is the natural life of an
+     * intent: an aim whose name has been unplannable for a full horizon describes a view the desk no
+     * longer has evidence for, and is dropped. No number is introduced (invariant 7 / ADR-0016).
+     *
+     * <p>A degenerate rate keeps the old semantics: {@code rate ≤ 0} means the path never moves, so
+     * there is no transient to protect and an absent name is dropped at once.
+     */
+    private void ageAndRetain(java.util.Set<String> planned, double rate) {
+        int window = retentionCycles(rate);
+        aims.keySet().removeIf(instrument -> {
+            if (planned.contains(instrument)) {
+                absentCycles.remove(instrument);
+                return false;
+            }
+            int absent = absentCycles.merge(instrument, 1, Integer::sum);
+            if (absent > window) {
+                absentCycles.remove(instrument);
+                return true;
+            }
+            return false;
+        });
+        absentCycles.keySet().retainAll(aims.keySet());
+    }
+
+    /**
+     * Cycles of absence an intent survives: {@code −1 / ln(1 − rate)}, which is the ADR-0080 identity's
+     * {@code h/c} — one full evidence horizon expressed in planner cycles. Zero for a rate that cannot
+     * move the path at all, and at least one wherever the horizon is a single cycle.
+     */
+    static int retentionCycles(double rate) {
+        if (!(rate > 0.0)) {
+            return 0; // a path that never advances has no transient worth protecting
+        }
+        if (rate >= 1.0) {
+            return 1; // horizon == cycle: the aim reaches target in one step
+        }
+        double cycles = -1.0 / Math.log1p(-rate);
+        if (!Double.isFinite(cycles) || cycles < 1.0) {
+            return 1;
+        }
+        return (int) Math.min(Integer.MAX_VALUE, Math.round(cycles));
     }
 
     /**
@@ -336,13 +519,93 @@ public final class PositionBuffer {
 
     /** As above at an explicit width — the ADR-0101 measured one, or the convention when unmeasured. */
     BigDecimal band(BigDecimal target, double forecast, BigDecimal held, double width) {
+        return band(target, forecast, held, width, Forecast.TARGET_ABS);
+    }
+
+    /**
+     * As above with the forecast strength the average position is priced at stated explicitly — the
+     * ADR-0141 measured cross-section, or {@link Forecast#TARGET_ABS} where there is nothing to measure.
+     *
+     * <p>{@code typicalForecastAbs} enters exactly where {@code TARGET_ABS} did, so the band is still
+     * {@code width × |target| × E|f| / |forecast|} — Carver's "a fraction of the average position" — with
+     * {@code E|f|} read off the desk's own arithmetic instead of assumed.
+     */
+    BigDecimal band(BigDecimal target, double forecast, BigDecimal held, double width,
+                    double typicalForecastAbs) {
         double f = Math.abs(forecast);
+        double typical = typicalForecastAbs > 0.0
+                ? Math.min(Forecast.TARGET_ABS, typicalForecastAbs)
+                : Forecast.TARGET_ABS;
         BigDecimal scale = target.signum() != 0 && f > 0.0
-                ? target.abs().multiply(BigDecimal.valueOf(Forecast.TARGET_ABS))
+                ? target.abs().multiply(BigDecimal.valueOf(typical))
                         .divide(BigDecimal.valueOf(f), QTY_SCALE, RoundingMode.HALF_EVEN)
                 : held.abs();
         return scale.multiply(BigDecimal.valueOf(width))
                 .setScale(QTY_SCALE, RoundingMode.HALF_EVEN);
+    }
+
+    /**
+     * ADR-0141 — the forecast strength this desk's combiner actually produces: the mean {@code |f|} over
+     * the names it planned a view on THIS cycle. Zero when it planned fewer than two, which restores
+     * {@link Forecast#TARGET_ABS} at the call site.
+     *
+     * <h3>The dead zone this removes</h3>
+     * The band is {@code width × |target| × S / |f|} for a scaling constant {@code S}, and ADR-0102 bounds
+     * the aim into the interval between flat and the target, so a name opening from flat routes its first
+     * order only when
+     * <pre>
+     *   |aim| &gt; band   ⟺   |aim|/|target| &gt; width × S / |f|      with   |aim|/|target| ≤ 1
+     * </pre>
+     * which is <b>unsatisfiable for every name with {@code |f| &lt; width × S}</b>. At {@code S = TARGET_ABS}
+     * that threshold is a fixed forecast magnitude, and the desk's combined forecasts sit below it as a
+     * matter of course: the ADR-0076 DM and the ADR-0124 agreement scalar are both attenuations, and both
+     * were specified as size reductions ("can only ever SHRINK the combined value") — but the band was
+     * still priced at the UNATTENUATED constant, so what they actually delivered was a position of exactly
+     * zero, permanently, rather than a smaller one. An 80% haircut to conviction became a 100% haircut to
+     * the position. Read off the live plan the two names carrying a corroborated view needed
+     * {@code |aim|/|target|} of 0.8239 and 3.1807 respectively — the second is greater than one, so no aim
+     * path of any length could ever have opened it, and {@code insideBuffer} read every planned name.
+     *
+     * <h3>Why the cross-section, and why it needs no estimator</h3>
+     * {@code S} is Carver's expected absolute forecast, the constant that turns a forecast into "how big is
+     * a typical position" (<i>Systematic Trading</i>, Harriman House 2015). {@code TARGET_ABS} is what each
+     * SOURCE is scaled to before combination — {@code forecastScalars} normalises every source to it — but
+     * the band is applied to the COMBINED forecast, which is the sources' weighted average times two
+     * scalars in {@code (0, 1]} and one in {@code [1, 2.5]}. Its expected absolute value is therefore a
+     * different, smaller number, and it is one the desk computes for itself every cycle. Taking the mean
+     * over the current plan keeps the property the existing scale already has and the class doc already
+     * claims — "read off this cycle's own arithmetic with no estimator and no warm-up" — so it survives a
+     * restart intact, needs no persistence, and self-calibrates to any feed's forecast distribution
+     * (never a hardcoded level). Names planned with no view are excluded: a name the desk has no opinion on
+     * is not one of its typical positions.
+     *
+     * <h3>What it can never do</h3>
+     * Capped at {@code TARGET_ABS} at the call site, so the band is never WIDER than the pre-ADR-0141 one:
+     * this can only ever release a trade the desk's own arithmetic already wanted, never freeze one it was
+     * making. It touches neither the aim path nor the target, so the desk's intended risk is unchanged
+     * quantity for quantity — only the threshold at which intent becomes an order moves. Every control
+     * below it is untouched: the ADR-0064 edge gate, the ADR-0126 σ-cold veto, the ADR-0083 vol budget, the
+     * ADR-0137 gross cap, the pre-trade guardrail and the firm drawdown breaker all still have the last
+     * word, so a released order is still only filled if every deterministic floor permits it.
+     *
+     * <p>Dimensionless — a forecast magnitude, never a size or a price (invariant 7 / ADR-0016), and it
+     * introduces no number at all: the value is the mean of forecasts the planner already computed.
+     */
+    static double typicalForecastAbs(List<FusionPlanner.Target> targets) {
+        double sum = 0.0;
+        int n = 0;
+        for (FusionPlanner.Target t : targets) {
+            double f = Math.abs(t.combinedForecast());
+            if (f > 0.0) {
+                sum += f;
+                n++;
+            }
+        }
+        // n < 2 is not a cross-section. At n = 1 the mean IS the datum, so E|f|/|f| is identically 1 and
+        // the band would collapse to width x |target| for every forecast strength — the statistic
+        // measuring nothing but itself, the same degeneracy ADR-0124 rejected at one effective source.
+        // Below two names the desk has not measured its own forecast distribution and makes no claim.
+        return n < 2 ? 0.0 : sum / n;
     }
 
     /**

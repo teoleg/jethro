@@ -650,4 +650,294 @@ class PositionBufferTest {
         // With a zero buffer the policy degenerates to "trade to the aim", i.e. exactly ADR-0080.
         assertThat(result.targets().get(0).deltaQty()).isEqualByComparingTo(new BigDecimal("-4.436294"));
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0140 — the aim is durable derived state.
+    //
+    // Worked example (the shipped configuration): cycle 30 s, evidence horizon 3600 s gives the
+    // ADR-0080 rate a = 1 − e^(−30/3600) = 0.008298…, and the retention window inverts it exactly:
+    //     −1 / ln(1 − a) = −1 / (−30/3600) = 120 cycles = 3600 s / 30 s = one evidence horizon.
+    // ---------------------------------------------------------------------------------------------
+
+    /** An in-memory {@link AimStore}, standing in for the V51 table. */
+    private static final class FakeAimStore implements AimStore {
+        private java.util.Map<String, BigDecimal> rows = java.util.Map.of();
+
+        @Override
+        public java.util.Map<String, BigDecimal> load() {
+            return rows;
+        }
+
+        @Override
+        public void save(java.util.Map<String, BigDecimal> aims) {
+            rows = java.util.Map.copyOf(aims);
+        }
+    }
+
+    @Test
+    void theRetentionWindowIsOneEvidenceHorizonInCycles() {
+        // The ADR-0080 identity inverted: a = 1 − e^(−c/h) ⇒ −1/ln(1−a) = h/c, exactly.
+        assertThat(PositionBuffer.retentionCycles(TargetPlanner.adjustmentRateFor(30, 3600))).isEqualTo(120);
+        assertThat(PositionBuffer.retentionCycles(TargetPlanner.adjustmentRateFor(30, 900))).isEqualTo(30);
+        // Degenerate rates keep the pre-ADR-0140 semantics rather than inventing a window.
+        assertThat(PositionBuffer.retentionCycles(0.0)).isZero();   // path never advances ⇒ drop at once
+        assertThat(PositionBuffer.retentionCycles(1.0)).isEqualTo(1); // horizon == cycle
+    }
+
+    @Test
+    void aNameAbsentForOneCycleResumesItsAimInsteadOfRestartingFromTheHeldQuantity() {
+        var wmt = target("WMT", -4.710957, "-846.588220", "0");
+        var other = target("KO", -2.107082, "-599.105696", "0");
+
+        // Continuous: two planning cycles in a row.
+        PositionBuffer continuous = new PositionBuffer(0.10);
+        continuous.apply(List.of(wmt), null, RATE);
+        BigDecimal afterTwoSteps = continuous.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        // Churned: planned, absent for one cycle (the selector rotated), planned again. The absent
+        // cycle does not advance the aim — but it must not erase it either, so the name resumes at
+        // exactly the same place two planning cycles reach.
+        PositionBuffer churned = new PositionBuffer(0.10);
+        churned.apply(List.of(wmt), null, RATE);
+        churned.apply(List.of(other), null, RATE);
+        BigDecimal afterChurn = churned.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        assertThat(afterChurn).isEqualByComparingTo(afterTwoSteps);
+        // And it is strictly further along than a fresh seed from the held quantity would be.
+        assertThat(afterChurn.abs())
+                .isGreaterThan(new PositionBuffer(0.10).apply(List.of(wmt), null, RATE).aims().get("WMT").abs());
+    }
+
+    @Test
+    void anIntentUnplannableForAWholeHorizonIsDropped() {
+        var wmt = target("WMT", -4.710957, "-846.588220", "0");
+        var other = target("KO", -2.107082, "-599.105696", "0");
+        int window = PositionBuffer.retentionCycles(RATE); // 30 cycles at the test rate
+
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        buffer.apply(List.of(wmt), null, RATE);
+        for (int i = 0; i < window; i++) {
+            buffer.apply(List.of(other), null, RATE); // still inside the window
+        }
+        BigDecimal retained = buffer.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        PositionBuffer expired = new PositionBuffer(0.10);
+        expired.apply(List.of(wmt), null, RATE);
+        for (int i = 0; i <= window; i++) {
+            expired.apply(List.of(other), null, RATE); // one cycle past the window
+        }
+        BigDecimal reseeded = expired.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        // The expired name restarts from the held quantity — one step's worth, not two.
+        assertThat(reseeded).isEqualByComparingTo(
+                new PositionBuffer(0.10).apply(List.of(wmt), null, RATE).aims().get("WMT"));
+        assertThat(retained.abs()).isGreaterThan(reseeded.abs());
+    }
+
+    @Test
+    void theAimSurvivesARestartAndIsStillClampedByTheCurrentTarget() {
+        var wmt = target("WMT", -4.710957, "-846.588220", "0");
+        FakeAimStore store = new FakeAimStore();
+
+        PositionBuffer beforeRestart = new PositionBuffer(0.10, store);
+        beforeRestart.apply(List.of(wmt), null, RATE);
+        BigDecimal afterTwoSteps = beforeRestart.apply(List.of(wmt), null, RATE).aims().get("WMT");
+
+        // A fresh process, same store: the aim resumes rather than reseeding at the held quantity.
+        PositionBuffer afterRestart = new PositionBuffer(0.10, store);
+        BigDecimal resumed = afterRestart.apply(List.of(wmt), null, RATE).aims().get("WMT");
+        assertThat(resumed.abs()).isGreaterThan(afterTwoSteps.abs());
+
+        // ADR-0102 still binds a restored aim: a target that has flipped side clamps it to flat, so a
+        // restored value can never be acted on against the desk's current view.
+        PositionBuffer flipped = new PositionBuffer(0.10, store);
+        assertThat(flipped.apply(List.of(target("WMT", 4.710957, "846.588220", "0")), null, RATE)
+                .aims().get("WMT")).isEqualByComparingTo("0.000000");
+    }
+
+    @Test
+    void noStoreLeavesTheAimPathByteIdentical() {
+        var plan = List.of(target("AAPL", -9.64, "-142.319300", "-7"));
+        PositionBuffer withoutStore = new PositionBuffer(0.10);
+        PositionBuffer nullStore = new PositionBuffer(0.10, null);
+        assertThat(nullStore.apply(plan, null, RATE).aims().get("AAPL"))
+                .isEqualByComparingTo(withoutStore.apply(plan, null, RATE).aims().get("AAPL"));
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // ADR-0141 — the average position is priced at the forecast the combiner actually produces.
+    //
+    // Worked example, the live plan of 2026-08-06 13:29:54Z read from /api/fusion/targets. Two names
+    // carried a combined view; the other six were planned flat:
+    //
+    //   NQ    f = −1.2137982837547245   target = −0.017759   held = 0   aim = −0.003064
+    //   NVDA  f = −0.31439455218834894  target = −4.909292   held = 0
+    //
+    //   E|f|  = (1.2137982837547245 + 0.31439455218834894) / 2 = 0.7640964179715367
+    //
+    //   NQ,   nominal  scale = 0.017759 x 10          / 1.2137982837547245 = 0.146310  band = 0.014631
+    //   NQ,   measured scale = 0.017759 x 0.764096417 / 1.2137982837547245 = 0.011179  band = 0.001118
+    //   gap = aim − held = −0.003064; |gap| <= 0.014631 (frozen) but > 0.001118, and the order is then
+    //   gap + band = −(0.003064 − 0.001118) = −0.001946 — traded to the near edge, exactly as before.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    void theTypicalForecastIsTheMeanOverTheNamesActuallyPlannedAView() {
+        // The six flat names contribute nothing: a name the desk has no opinion on is not one of its
+        // typical positions.
+        assertThat(PositionBuffer.typicalForecastAbs(List.of(
+                target("NQ", -1.2137982837547245, "-0.017759", "0"),
+                target("NVDA", -0.31439455218834894, "-4.909292", "0"),
+                target("GOOG", 0.0, "0", "0"),
+                target("AAPL", -0.0, "0", "0"))))
+                .isEqualTo(0.7640964179715367);
+        assertThat(PositionBuffer.typicalForecastAbs(List.of(target("GOOG", 0.0, "0", "0")))).isEqualTo(0.0);
+        assertThat(PositionBuffer.typicalForecastAbs(List.of())).isEqualTo(0.0);
+        // One name is not a cross-section: the mean would be the datum itself, so no claim is made and
+        // the nominal constant stands.
+        assertThat(PositionBuffer.typicalForecastAbs(List.of(target("NQ", -1.21, "-0.017759", "0"))))
+                .isEqualTo(0.0);
+    }
+
+    @Test
+    void aForecastWeakerThanTheDeadZoneCouldNeverRouteAtTheNominalScale() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        // ADR-0102 caps |aim| at |target|, so the largest gap this name can ever present from flat is
+        // |target| itself. At the nominal constant the band exceeds it — no aim path of any length opens
+        // the position. This is the dead zone: |f| = 0.314… < width x TARGET_ABS = 1.0.
+        BigDecimal nominal = buffer.band(new BigDecimal("-4.909292"), -0.31439455218834894,
+                BigDecimal.ZERO, 0.10, Forecast.TARGET_ABS);
+        assertThat(nominal).isEqualByComparingTo("15.615067");
+        assertThat(nominal).isGreaterThan(new BigDecimal("4.909292"));
+
+        // Priced at the forecast strength the combiner actually delivers, the band is a fraction of the
+        // target again and the name is reachable.
+        BigDecimal measured = buffer.band(new BigDecimal("-4.909292"), -0.31439455218834894,
+                BigDecimal.ZERO, 0.10, 0.7640964179715367);
+        assertThat(measured).isEqualByComparingTo("1.193142");
+        assertThat(measured).isLessThan(new BigDecimal("4.909292"));
+    }
+
+    @Test
+    void theLiveFrozenNameRoutesOnceTheScaleIsMeasured() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        BigDecimal target = new BigDecimal("-0.017759");
+        BigDecimal aim = new BigDecimal("-0.003064");
+
+        BigDecimal nominal = buffer.band(target, -1.2137982837547245, BigDecimal.ZERO, 0.10,
+                Forecast.TARGET_ABS);
+        assertThat(nominal).isEqualByComparingTo("0.014631");
+        assertThat(PositionBuffer.bufferedDelta(aim, BigDecimal.ZERO, nominal, target, RATE))
+                .isEqualByComparingTo("0.000000"); // inside the buffer — the live reading
+
+        BigDecimal measured = buffer.band(target, -1.2137982837547245, BigDecimal.ZERO, 0.10,
+                0.7640964179715367);
+        assertThat(measured).isEqualByComparingTo("0.001118");
+        assertThat(PositionBuffer.bufferedDelta(aim, BigDecimal.ZERO, measured, target, RATE))
+                .isEqualByComparingTo("-0.001946"); // to the near edge, on the target's own side
+    }
+
+    @Test
+    void aMeasuredScaleCanOnlyEverNarrowTheBandNeverWidenIt() {
+        PositionBuffer buffer = new PositionBuffer(0.10);
+        BigDecimal nominal = buffer.band(new BigDecimal("-142.319300"), -9.64, BigDecimal.ZERO, 0.10,
+                Forecast.TARGET_ABS);
+        // A cross-section stronger than TARGET_ABS is capped back to it, so the band is never wider than
+        // the pre-ADR-0141 one: this can release a trade, never freeze one.
+        assertThat(buffer.band(new BigDecimal("-142.319300"), -9.64, BigDecimal.ZERO, 0.10, 40.0))
+                .isEqualByComparingTo(nominal);
+        // And a degenerate measurement (no name carried a view) restores the constant exactly.
+        assertThat(buffer.band(new BigDecimal("-142.319300"), -9.64, BigDecimal.ZERO, 0.10, 0.0))
+                .isEqualByComparingTo(nominal);
+    }
+
+    @Test
+    void aPlanAtTheNominalStrengthIsByteIdenticalToThePreAdr0141Desk() {
+        // Two names averaging exactly TARGET_ABS: the measured scale IS the constant, so nothing moves.
+        var plan = List.of(target("AAPL", -14.0, "-142.319300", "-7"),
+                target("MSFT", 6.0, "60.000000", "0"));
+        assertThat(PositionBuffer.typicalForecastAbs(plan)).isEqualTo(Forecast.TARGET_ABS);
+        var applied = new PositionBuffer(0.10).apply(plan, null, RATE);
+        assertThat(applied.targets().get(0).deltaQty()).isEqualByComparingTo(
+                PositionBuffer.bufferedDelta(applied.aims().get("AAPL"), new BigDecimal("-7"),
+                        new PositionBuffer(0.10).band(new BigDecimal("-142.319300"), -14.0,
+                                new BigDecimal("-7")),
+                        new BigDecimal("-142.319300"), RATE));
+    }
+
+    // ---- ADR-0145: the conviction floor applied to the exit as well as the entry ----
+
+    /**
+     * The live pattern: AMZN bought at a forecast of +9.25 and unwound five minutes later at +0.0688,
+     * the target having merely decayed. Alongside a name still carrying a view, so the ADR-0141
+     * cross-section is a real one and the band does not swallow the order by itself.
+     */
+    private static List<FusionPlanner.Target> decayedAmzn() {
+        return List.of(target("AMZN", 0.0688, "0.250000", "34"),
+                target("MSFT", 7.9312, "60.000000", "0"));
+    }
+
+    @Test
+    void unwiredTheDecayedNameStillUnwindsExactlyAsBefore() {
+        var applied = new PositionBuffer(0.10).apply(decayedAmzn(), null, RATE);
+        // The forecast has decayed, not reversed — and the desk sells nearly the whole position for it.
+        assertThat(applied.targets().get(0).deltaQty().signum()).isNegative();
+        assertThat(applied.targets().get(0).deltaQty().abs()).isGreaterThan(new BigDecimal("30"));
+    }
+
+    @Test
+    void aReductionAuthoredByADecayedForecastAloneDoesNotRoute() {
+        // planned == controlled: no risk control shrank this target, so the whole reduction is the
+        // planner's own and the forecast behind it is far below the ADR-0059 floor.
+        var applied = new PositionBuffer(0.10).apply(decayedAmzn(), null, RATE, null,
+                id -> "AMZN".equals(id) ? new BigDecimal("0.250000") : new BigDecimal("60.000000"), 5.0);
+        assertThat(applied.targets().get(0).deltaQty()).isEqualByComparingTo("0");
+        // and the aim is re-seeded to where the desk actually is, so the withheld unwind cannot
+        // accumulate and fire all at once the moment conviction returns.
+        assertThat(applied.aims().get("AMZN")).isEqualByComparingTo("34.000000");
+    }
+
+    @Test
+    void theSameNameUnwindsInFullOnceTheViewHasReversedWithConviction() {
+        var plan = List.of(target("AMZN", -8.25, "-30.000000", "34"),
+                target("MSFT", 7.9312, "60.000000", "0"));
+        var applied = new PositionBuffer(0.10).apply(plan, null, RATE, null,
+                id -> "AMZN".equals(id) ? new BigDecimal("-30.000000") : new BigDecimal("60.000000"), 5.0);
+        assertThat(applied.targets().get(0).deltaQty().signum()).isNegative();
+    }
+
+    @Test
+    void aReductionARiskControlAuthoredStillRoutesWithNoConvictionAtAll() {
+        // The planner wanted MORE than is held; the control cut the target to 4. None of the reduction
+        // is the forecast's, so the hold must not touch it.
+        var plan = List.of(target("AMZN", 0.0688, "4.000000", "34"),
+                target("MSFT", 7.9312, "60.000000", "0"));
+        var applied = new PositionBuffer(0.10).apply(plan, null, RATE, null,
+                id -> "AMZN".equals(id) ? new BigDecimal("50.000000") : new BigDecimal("60.000000"), 5.0);
+        var unheld = new PositionBuffer(0.10).apply(plan, null, RATE);
+        assertThat(applied.targets().get(0).deltaQty())
+                .isEqualByComparingTo(unheld.targets().get(0).deltaQty());
+    }
+
+    @Test
+    void anExitOrderedByAControlIsNeverHeld() {
+        var plan = List.of(target("AMZN", 0.0688, "0.000000", "34"),
+                target("MSFT", 7.9312, "60.000000", "0"));
+        var applied = new PositionBuffer(0.10).apply(plan, null, RATE, null,
+                id -> "AMZN".equals(id) ? new BigDecimal("0.250000") : new BigDecimal("60.000000"), 5.0);
+        assertThat(applied.targets().get(0).deltaQty()).isEqualByComparingTo("-34.000000");
+    }
+
+    @Test
+    void anEntryIsUntouchedByTheHold() {
+        var plan = List.of(target("AAPL", -14.0, "-142.319300", "-7"),
+                target("MSFT", 6.0, "60.000000", "0"));
+        var held = new PositionBuffer(0.10).apply(plan, null, RATE, null,
+                id -> "AAPL".equals(id) ? new BigDecimal("-142.319300") : new BigDecimal("60.000000"), 5.0);
+        var unheld = new PositionBuffer(0.10).apply(plan, null, RATE);
+        assertThat(held.targets().get(0).deltaQty())
+                .isEqualByComparingTo(unheld.targets().get(0).deltaQty());
+        assertThat(held.targets().get(1).deltaQty())
+                .isEqualByComparingTo(unheld.targets().get(1).deltaQty());
+    }
 }

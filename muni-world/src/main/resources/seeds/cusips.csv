@@ -1,6 +1,5 @@
 cusip|issuer|geoFips|notes
-# Bond watchlist — the CUSIPs you want in the table. PIPE-delimited. Add real CUSIP-9s (from EMMA), then
-# click "Load bonds" on the muni page (or POST /api/muni/ingest/load-watchlist) and the server discovers each
-# one's Official Statement on EMMA, extracts its terms, and indexes it. Nothing here is fabricated — it's
-# empty until you add real CUSIPs. Example row (replace with a real one):
-# 649122AC9|NYC Water|3603900000|NYW water & sewer revenue
+# Bond watchlist — real CUSIP-9s the audio-lead matcher watches for. PIPE-delimited. Empty by design —
+# nothing here is fabricated. Add real CUSIPs one per line, e.g.:
+#   649122AC9|NYC Water|3603900000|NYW water & sewer revenue
+# Lines starting with '#' are ignored. (Bond TERMS come from loading the Official Statement PDF, not this file.)

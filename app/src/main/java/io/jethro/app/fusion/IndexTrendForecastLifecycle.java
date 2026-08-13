@@ -146,16 +146,18 @@ public final class IndexTrendForecastLifecycle implements AutoCloseable {
         }
         int needed = forecaster.warmupSamples();
         long anchor = providerTimestamp != null ? providerTimestamp.toEpochMilli() : System.currentTimeMillis();
-        int n = SensorWarmup.warm(history, instrumentId, anchor,
+        var seed = SensorWarmup.warm(history, instrumentId, anchor,
                 intervalSeconds * 1_000L, needed,
                 price -> forecaster.update(instrumentId, price));
         boolean warm = forecaster.readingFor(instrumentId).warm();
         if (warm) {
-            log.info("index-trend sensor warmed {} from {} stored prices (needs {}) — warm", instrumentId, n, needed);
+            log.info("index-trend sensor warmed {} from {} stored prices (needs {}) — warm", instrumentId,
+                    seed.size(), needed);
         } else {
-            log.warn("index-trend sensor still cold for {} after seeding {} of {} stored prices — no market "
-                    + "overlay until {}'s mark history accumulates its warm-up span", instrumentId, n, needed,
-                    instrumentId);
+            log.warn("index-trend sensor still cold for {} after seeding {} of {} stored prices — stopped on"
+                    + " {} covering {}s in {} read(s) at a {}ms step; no market overlay until this name's "
+                    + "mark history accumulates its warm-up span", instrumentId, seed.size(), needed,
+                    seed.termination(), seed.spanMillis() / 1000L, seed.reads(), seed.stepMillis());
         }
     }
 

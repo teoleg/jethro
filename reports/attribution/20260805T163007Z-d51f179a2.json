@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-08-05T16:30:07Z",
+    "fees": "398.561930",
+    "gross": "4451.81500000",
+    "net": "1354.10500000",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "4451.81500000",
+      "hedgePnl": "19.35583469",
+      "netExposure": "1354.10500000",
+      "realizedPnl": "-609.14440772",
+      "strategyAlpha": "-630.18524241",
+      "totalFees": "398.561930",
+      "totalPnl": "-610.82940772",
+      "unrealizedPnl": "-1.68500000"
+    },
+    "total_pnl": "-610.82940772"
+  },
+  "before": {
+    "at": "2026-08-05T13:49:59Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-603.08012889"
+  },
+  "commit": "d51f179a2cb4ca2176d28bc227f3f99478a33971",
+  "delta": {
+    "gross": "4451.81500000",
+    "net": "1354.10500000",
+    "total_pnl": "-7.74927883"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.001107 over 7 cycles, t=-1.47 (hurdle 1.5); gross 0\u21924,452 [grew] \u2014 \u26a0\ufe0f REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert",
+  "revert": true,
+  "revertApplied": false,
+  "scoredAt": "2026-08-05T16:30:07Z",
+  "summary": "platform verification and the measured author floors become alternative credentials for an uncurated social channel, so an organic author can reach the corroboration gate the desk's only cost-beating source needs (ADR-0139)",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": true,
+    "gross_end": 4451.815,
+    "gross_start": 0.0,
+    "mean_ret_per_cycle": -0.00110704,
+    "n": 7,
+    "scale": 1000.0,
+    "t": -1.473
+  }
+}

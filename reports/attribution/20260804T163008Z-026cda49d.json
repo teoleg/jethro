@@ -1,0 +1,53 @@
+{
+  "after": {
+    "at": "2026-08-04T16:30:08Z",
+    "fees": "369.021411",
+    "gross": "124898.96447500",
+    "net": "-33199.04447500",
+    "source": {
+      "feedMode": "LIVE",
+      "grossExposure": "124898.96447500",
+      "hedgePnl": "51.60179592",
+      "netExposure": "-33199.04447500",
+      "realizedPnl": "-360.82845066",
+      "strategyAlpha": "-583.25390023",
+      "totalFees": "369.021411",
+      "totalPnl": "-531.65210431",
+      "unrealizedPnl": "-170.82365365"
+    },
+    "total_pnl": "-531.65210431"
+  },
+  "before": {
+    "at": "2026-08-04T13:37:23Z",
+    "gross": "0E-8",
+    "net": "0E-8",
+    "total_pnl": "-314.90914721"
+  },
+  "commit": "026cda49d857a1bfea2903cb376afd69a6586b9c",
+  "delta": {
+    "gross": "124898.96447500",
+    "net": "-33199.04447500",
+    "total_pnl": "-216.74295710"
+  },
+  "method": {
+    "exposureFrac": "0.01",
+    "grossFloorUsd": "1000",
+    "minCycles": 6,
+    "tHurdle": "1.5"
+  },
+  "note": "risk-adj return/cycle -0.003265 over 7 cycles, t=-1.22 (hurdle 1.5); gross 0\u2192124,899 [grew] \u2014 \u26a0\ufe0f REVERT FAILED (git conflict): the BAD commit is STILL LIVE and needs a manual revert",
+  "revert": true,
+  "revertApplied": false,
+  "scoredAt": "2026-08-04T16:30:08Z",
+  "summary": "completed the failed auto-revert of the graded-BAD ADR-0136 \u2014 the rejected conviction-floor narrowing is out of the running code, keeping the annotated ADR and the loop's findings",
+  "verdict": "\u274c BAD",
+  "windowStats": {
+    "grew": true,
+    "gross_end": 124898.964475,
+    "gross_start": 0.0,
+    "mean_ret_per_cycle": -0.00326541,
+    "n": 7,
+    "scale": 9482.21,
+    "t": -1.218
+  }
+}

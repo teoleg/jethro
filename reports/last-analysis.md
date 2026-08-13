@@ -1,63 +1,67 @@
-Orders now record WHY the desk wanted the trade, not only why a status changed — so the orders that actually fill stop being unattributable (ADR-0134).
+# ADR-0145 shipped with an exemption that admitted the worst case it was written to stop — a decayed forecast liquidating a whole position at market, wearing a chandelier cut's clothes.
 
-*(Every figure below is read from `/api/risk`, `/api/attribution`, `/api/hedging`,
-`/api/signals/telemetry`, `logs/report.md`, the scorer's ledger row, or the repo source. None is authored
-here — invariant 7 / ADR-0016.)*
+## Situation (live, read from this run's report — never authored)
 
-## Situation triage (live)
+1. **Money.** Total PnL **-$1,207.61**, **+$6.93** since last run, **-$5.07** across the last three.
+   Essentially flat and UNDERWATER. Realized **-$1,216.05** against unrealized **+$8.44** — the loss is
+   almost entirely *round trips*, not held positions.
+2. **Risk.** Gross **$45,018.69** = **3.0%** of the $1,500,000 firm cap, **$1,454,981** of headroom; net
+   **-$4,582.44** = **0.5%** of the $1,000,000 net cap. Gross **+$8,134.46** this window. Not danger —
+   this is the DORMANT-side failure (an unused budget), and gross rising is the ADR-0132 intent.
+3. **Cause.** `19d924e69` (ADR-0148) was scored **❌ BAD** this cycle and reverted by the scorer
+   (`6937cea`). That revert landed at 18:00:08Z, **seven seconds after this report's stamp** and well
+   after the running JVM started (uptime **3577** at a stamp of **18:00:01Z** ⇒ start **17:00:24Z**), so
+   the binary that produced this window is still ADR-0148. Nothing in this window is creditable to the
+   revert; the revert is graded next cycle.
+4. **Danger.** No. Bleeding slowly at 3.0% of the gross cap with the breaker cold.
+5. **Change vs market.** No logic deployed during this window. The move is market and pre-existing
+   logic — none of it is creditable or blameable on a change.
 
-1. **Money.** Total PnL **$153.36**, **+31.01** since last run, **+92.30** over the last 3. The latest
-   heartbeat (`2026-07-31T19:04:53Z`) reads `pnl_growth_pct` **15.54** against `pnl_target_pct` **1.0**,
-   `on_track` **true**, `stale` **false**, `underwater` **false**. Not bleeding, and on the owner target.
-2. **Risk.** Gross **$44,999.32** = **3.0%** of the $1,500,000 firm cap (headroom **$1,455,001**); net
-   **$24,004.97** = **2.4%** of the $1,000,000 net cap. `Flags: none`. Under-deployed against the ADR-0132
-   budget, nowhere near a cap.
-3. **Cause.** The pending change cleared: `4f67f0515` (the manual completion of the failed auto-revert)
-   scored **⚠️ INCONCLUSIVE** — risk-adjusted return/cycle **-0.000147** over **7** cycles, **t=-0.37**
-   against a **1.5** hurdle. Kept, not reverted, and the hold that blocked the last five cycles is over.
-4. **Danger.** None. `/api/risk/breaker` `halted: false`, regime `CHOP`/`CALM`, `volRatio` **0.99**.
-5. **Order post-mortem — still impossible, and that is what I changed.** Of this window's 60
-   `recent_orders`: **36 of 36 FILLED** orders carry a NULL `reason`; **24 of 24 CANCELLED** carry text.
-   The orders that never traded are the only ones explained.
-6. **Books.** `/api/attribution` `firmTotal` **153.36244857** = HEDGE **160.19086234** + ALPHA
-   **28.99506278** + MACRO **-35.82347655**, on `totalFees` **272.654475** (ALPHA **266.333508**). HEDGE
-   and MACRO are again byte-identical to last cycle — neither traded. ALPHA read **-13.33312927** last
-   cycle and **28.99506278** now, so the whole run-over-run move is once more the strategy book, this time
-   upward. `hedgeMasking` **true**, `/api/hedging` `covarianceReady` **false**.
-7. **Change vs market.** The **+31.01** is **unattributed**. It sits entirely in ALPHA, on positions no
-   change of mine touched (the pending change was a revert completion, live since 16:35Z), with the breaker
-   clear and the tape calm. With no trigger on any fill I cannot separate market from change, so per
-   Rule 216 I record it as unattributed rather than crediting it to anything.
+## Step 0 — ADR-0145 (kept ⚠️ INCONCLUSIVE): ⚠️ **STILL-BROKEN**, and I found why
 
-## What I changed and why
+ADR-0145 made the conviction floor symmetric so a decayed forecast could not unwind a position it was
+never strong enough to open. `recent_orders` says it did not: `PFE BUY 240 — fusion exit — target
+decayed to flat [forecast=-0.0, sources=1]` at 17:49:19. A source is still speaking, no control fired,
+the forecast is a signed zero, and 240 shares go back at market. WMT, NVDA and BAC carried the same
+reason the prior window.
 
-Item **#1** in the register, and this cycle it was ripe: last cycle traced the *cause* but was under a
-scoring hold and could not ship. The framing that mattered — `reason` is a **status-transition** field, so
-`OrderService.routeApproveAndFill` writes it only on the failure branches while the happy path
-`NEW → ROUTED → FILLED` passes a literal `null`. The column is not failing; it answers a different
-question. No patch at the order layer can recover a trigger that was never passed into it.
+The mechanism is `ConvictionHold`'s own exemption. It returns the delta untouched when the *controlled*
+target is a literal zero, on the reasoning that every control meaning "get out" plans the name FLAT
+(ADR-0086/0065/0027). Sound about controls, wrong about its converse: `TargetPlanner.targetQuantity` is
+**linear** in the combined forecast and returns `BigDecimal.ZERO` the instant that forecast reaches
+zero — so a view that merely finished decaying arrives at the exemption indistinguishable from a
+chandelier cut. ADR-0107's javadoc states the principle ("an EXIT is what a control ORDERED, not what
+the arithmetic happens to read") and then reads `target == 0` as the control.
 
-So the trigger is now threaded from the call sites that decide to trade: `NewOrder` carries a nullable
-`originReason`, written into a new `orders.origin_reason` column **at insert** — before any status exists —
-and never overwritten by a transition. Every deciding call site passes the sentence it already had
-(`signal.rationale()`, the AI sleeve's `thesis()`, the hedge advisor's `rationale()`), and the fusion
-planner, which places most of the flow, names four triggers the post-mortem must tell apart: an ADR-0086
-trailing-stop cut, an entry, a reduce toward a smaller target, and an exit decayed to flat. ADV child
-slices inherit the parent's trigger. A REJECTED order now keeps both the want and the refusal.
+It is not a rounding detail, because two paths key on the same zero: `nextAim` **snaps** the aim to flat
+rather than stepping it at the ADR-0080 rate, and `bufferedDelta` works a flat target **in full,
+unbuffered and unrated**. Both the rate limit and the ADR-0094 band are bypassed, so the cycle with the
+*least* conviction available produces the *largest* order the desk can place — the whole position, at
+market — where that position was accumulated one rated step at a time. Buy slowly, sell instantly,
+repeat. That is a ratchet, and it explains a realized-only loss on a book whose measured hit rates sit
+at **0.523 / 0.483 / 0.486** (trend / xsreversion / reversion at 225s, n = 5,170 / 5,082 / 4,714) with
+`totalFees` **$335.22** against `firmTotal` **-$1,207.61**.
 
-**This is telemetry only and it moves no money.** Nothing reads the field back, so a null origin cannot
-change what the desk trades; the deterministic floor, all money math and every sizing path are unchanged.
-It should be expected to score ⚠️ INCONCLUSIVE — the correct outcome for buying evidence, not a failure.
-It is worth a cycle because the register's next item (#2: ALPHA negative net of its own fees while a frozen
-hedge masks it) is not diagnosable without knowing which trigger opened the losers, and four consecutive
-cycles have now burned themselves guessing at that and then falsifying the guess.
+## The change — ADR-0149
 
-## Edge check (the standing priority) — unchanged, still nothing that can size
+Attribute a flat target to its **author**, from facts already at the call site, never from magnitude. A
+flat controlled target routes in full when a risk control planned the name flat *this cycle* (the
+ADR-0086 cut set, already built for the ADR-0134 reason string, now computed before the buffer and
+passed in — plus a name the planner could not value), or when `sources == 0` (the ADR-0065 orphan), or
+when the planner's own target was non-zero before the controls ran. Everything else — live sources, no
+control, planner target itself flat — was authored by the forecast, and the existing ADR-0145
+arithmetic already yields zero at `p = 0`, so the position is held whole and the aim is re-seeded to
+where the desk actually is.
 
-`/api/signals/telemetry` at `horizonSeconds` **3600**, as `avgReturnBps` / `cohorts` / `stdCohortMeanBps`:
-momentum **5.749961141428572** / **10** / **29.247194899516227**; social **5.743293811097191** / **22** /
-**25.910850044717932**; reversion **4.911734698471268** / **63** / **32.17586652023403**; trend
-**-2.044825086028045** / **71** / **30.426625198598547**; xsreversion **-6.146473850702721** / **25** /
-**33.63312259265042**. Every positive source remains small against its own cohort dispersion and the edge
-gate correctly lets none of them size. Unchanged for seven cycles — which is precisely why I spent this
-cycle on the evidence gap rather than on another combiner parameter.
+No number is introduced: the threshold is still `jethro.fusion.min-forecast-to-route`. Unwired is
+byte-identical. The deterministic floor is untouched, and four independent exits remain — conviction
+returning either way, the ADR-0086 chandelier stop, the ADR-0118 trapped-exit path, and the ADR-0065
+unwind. Deliberately **not** ADR-0133 (a wider band, scored ❌ BAD) and deliberately not a change to
+`nextAim`/`bufferedDelta`, whose flat-target behaviour is correct *for a control-ordered exit*.
+
+**How it gets graded next run**, from live telemetry only: in `recent_orders`, orders whose reason is
+`fusion exit — target decayed to flat` with `sources ≥ 1` must be **zero**; the same reason at
+`sources = 0` may still appear and is correct. Secondary: `totalFees` as a share of `firmTotal` falls,
+`grossExposure` does not. Falsified if gross rises while `firmTotal` deteriorates on the retained
+names — i.e. the decayed positions were worth exiting, which is the ADR-0086 trailing cut's job and it
+is exempt here. `./gradlew -Pci test` green.

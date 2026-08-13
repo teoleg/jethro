@@ -39,7 +39,7 @@ class MuniPriceStoreTest {
         dir = Files.createTempDirectory("muni-px");
         store = new MuniLmdbStore(dir.toString(), 16);
         prices = new MuniPriceStore(store, mapper);
-        bonds = new MuniBondService(new MuniSearchIndex(store), mapper, prices);
+        bonds = new MuniBondService(new MuniSearchIndex(store), mapper, prices, new io.muniworld.bond.SecurityRepository(null));
     }
 
     @AfterEach

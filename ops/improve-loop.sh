@@ -126,12 +126,23 @@ run_deploy() {
   bash -c "$1" >> "$LOG" 2>&1 9>&- || echo "deploy command exited non-zero: $1" >> "$LOG"
 }
 
-# 4b. Rebuild+restart ONLY if code outside reports/ changed between $1 and $2. A ledger-only or
-#     heartbeat-only commit (scoring the previous change, or a market-closed status write) must not
-#     bounce the app. Returns 0 either way — a deploy result is logged, never a cycle-killing status.
+# Paths that CANNOT end up in the app binary, so a commit touching only these must never bounce the
+# app (ADR-0142). `reports/` is the ledger/heartbeat/analysis the scorer and the agent write every
+# cycle; `docs/` is the ADR set plus the loop's own mandated memory (`docs/loop-findings.md`), which
+# ops/improve-prompt.md requires the agent to append EVERY run — change or not; `ops/` is this cron
+# wrapper and its prompt, re-read by cron each fire and never compiled. None is a Gradle input.
+# Anything else is treated as capable of changing the binary and does deploy.
+NON_BINARY_PATHS='^(reports|docs|ops)/'
+
+# 4b. Rebuild+restart ONLY if a path that can affect the app binary changed between $1 and $2. A
+#     ledger-only, heartbeat-only or memory-only commit (scoring the previous change, a market-closed
+#     status write, or a no-change cycle's finding) must not bounce the app: a restart re-seeds every
+#     forecast/σ sensor cold and flattens the book, which destroys the very ADR-0116 evaluation window
+#     a no-change cycle exists to protect (ADR-0142).
+#     Returns 0 either way — a deploy result is logged, never a cycle-killing status.
 deploy_if_code_changed() {
   local before="$1" after="$2" changed deploy_started
-  changed=$(git diff --name-only "$before" "$after" | grep -v '^reports/' || true)
+  changed=$(git diff --name-only "$before" "$after" | grep -Ev "$NON_BINARY_PATHS" || true)
   if [ -z "$changed" ]; then
     echo "no code change $before -> $after — no rebuild/restart" >> "$LOG"
     return 0
@@ -243,6 +254,30 @@ HAD_PENDING=0; [ -f reports/.pending-baseline.json ] && HAD_PENDING=1
 #     makes fall inside BEFORE..AFTER below, so they get pushed and (if the revert changed code)
 #     trigger the rebuild. All numbers come from /api/attribution + /api/risk, none from Claude.
 python3 scripts/score-change.py score >> "$LOG" 2>&1 || echo "scorer exited non-zero (see above)" >> "$LOG"
+
+# 2b-HOLD (ADR-0146): ONE change in flight, mechanically. If a pending baseline STILL exists after the
+# scorer ran, its change is under evaluation (window not yet full) — so this cycle makes NO model call
+# and NO new change: the prompt-level HOLD alone failed in production (35 changes in 4 trading days,
+# week of 07-28, every window contaminated by the next change and 12 of 18 BAD reverts conflicting on
+# the stacked commits). The scorer's `baseline` also refuses while pending — this skip is the outer
+# belt. A distinct `holding` heartbeat records the state for the UI; evidence keeps accruing from the
+# live book. The scorer just above still runs every cycle, so the moment the window fills the change is
+# scored, pending clears, and the NEXT cycle analyses/changes again.
+if [ -f reports/.pending-baseline.json ]; then
+  echo "HOLD (ADR-0146) — pending change under evaluation; skipping analysis/change this cycle" >> "$LOG"
+  # --scored 0: the pending SURVIVED the scorer (window not full), so nothing was scored this cycle —
+  # a stale snapshot verdict must not surface as if fresh.
+  python3 scripts/score-change.py status --scored 0 --holding 1 >> "$LOG" 2>&1 \
+    || echo "status writer exited non-zero (see above)" >> "$LOG"
+  AFTER=$(git rev-parse HEAD)
+  if [ "$BEFORE" != "$AFTER" ]; then
+    push_branch || true
+    # A revert or a maintainer commit pulled in above is real code — deploy it; reports/-only skips.
+    deploy_if_code_changed "$BEFORE" "$AFTER"
+  fi
+  echo "==== $(date -Is) cycle end (holding) ====" >> "$LOG"
+  exit 0
+fi
 
 # 2c. Build THIS RUN'S prompt: the stable contract (ops/improve-prompt.md) followed by a generated
 #     "THIS RUN'S LIVE CONTEXT" section that surfaces the freshest situation + memory (the ⚠ SITUATION

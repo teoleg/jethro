@@ -16,7 +16,6 @@
   .mono { font-variant-numeric:tabular-nums; font-family:"SF Mono", ui-monospace, Menlo, monospace; }
   a { color:inherit; text-decoration:none; }
 
-  /* muni-world's OWN menu — deliberately distinct (teal) from the jethro nav */
   .topbar { position:sticky; top:0; z-index:10; backdrop-filter:blur(10px); background:rgba(10,15,13,.72); border-bottom:1px solid var(--line); }
   .bar { display:flex; align-items:center; gap:18px; padding:0 24px; height:56px; max-width:1180px; margin:0 auto; }
   .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.14em; font-size:15px; }
@@ -33,27 +32,21 @@
   .kicker { font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--brand); font-weight:600; }
   h1 { font-size:24px; font-weight:680; letter-spacing:-.01em; margin:8px 0 4px; }
   .sub { color:var(--dim); font-size:13px; }
-  .grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(240px,1fr)); gap:16px; margin-top:24px; }
   .card { background:var(--surface); border:1px solid var(--line); border-left:3px solid var(--brand); border-radius:16px; padding:18px; }
   .card h2 { font-size:15px; font-weight:640; margin-bottom:8px; }
-  .card .v { font-size:20px; font-weight:660; font-variant-numeric:tabular-nums; }
-  .card .l { font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--dim); margin-top:3px; }
   .row { display:flex; gap:8px; align-items:center; margin:6px 0; font-size:13px; }
   .led { width:8px; height:8px; border-radius:50%; background:var(--dim); }
-  .led.on { background:var(--up); box-shadow:0 0 8px var(--up); } .led.off { background:var(--warn); }
   .foot { color:var(--dim); font-size:11.5px; margin-top:28px; padding-top:14px; border-top:1px solid var(--line); }
   .btn { background:var(--surface-2); color:var(--txt); border:1px solid var(--line-2); border-radius:9px; padding:9px 14px; font:inherit; cursor:pointer; }
   .btn:hover { border-color:var(--brand); }
-  .section h2 { font-weight:640; }
-  .issuer { padding:9px 0; border-bottom:1px solid var(--line); }
-  .issuer .tag { color:var(--brand); font-size:10px; letter-spacing:.05em; text-transform:uppercase; margin-left:6px; }
-  .issuer .sec { font-size:12.5px; color:var(--dim); margin-top:2px; }
-  .issuer a { color:var(--brand); font-size:11px; }
   .tbl { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:6px; }
   .tbl th, .tbl td { text-align:right; padding:6px 9px; border-bottom:1px solid var(--line); white-space:nowrap; }
   .tbl th:nth-child(-n+2), .tbl td:nth-child(-n+2) { text-align:left; }
   .tbl th { color:var(--dim); font-size:10px; text-transform:uppercase; letter-spacing:.05em; font-weight:500; }
   .tbl tbody tr:hover { background:var(--surface-2); }
+  .tbl tbody tr.sel { background:var(--surface-2); box-shadow:inset 2px 0 0 var(--brand); }
+  .browse { display:grid; grid-template-columns:minmax(300px,5fr) 7fr; gap:16px; align-items:start; }
+  @media (max-width:900px) { .browse { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -61,8 +54,8 @@
   <span class="brand"><span class="dot"></span>MUNI·WORLD</span>
   <nav class="tabs">
     <a class="tab active" href="#bonds">Bonds</a>
-    <a class="tab" href="#sources">Sources</a>
-    <a class="tab" href="#audio">Audio</a>
+    <a class="tab" href="/model.html">Model workbench</a>
+    <a class="tab" href="/tv.html">TV / Audio</a>
   </nav>
   <span class="spacer"></span>
   <span class="mono" id="statusline" style="font-size:11px;color:var(--dim);margin-right:14px">…</span>
@@ -70,67 +63,104 @@
 </div></div>
 
 <main>
-  <!-- HERO: the bonds table (CUSIPs extracted from OS PDFs) is the primary content -->
-  <div id="bonds" class="section">
+  <!-- The bonds table (CUSIPs from OS PDFs) is the ONLY content on the landing page. -->
+  <div id="bonds">
     <div class="kicker">Municipal bonds</div>
     <h1 style="margin:6px 0 4px">Bonds by CUSIP</h1>
-    <div class="sub">Terms extracted from Official Statements (EMMA) into a searchable table; the economics columns compute once a current price lands. Nothing here is illustrative — the table is empty until real bonds are ingested (<span class="mono">POST /api/muni/ingest/emma-discover</span> or <span class="mono">/emma-os</span> on the Pi).</div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:16px">
-      <input id="q" placeholder="CUSIP-6 issuer prefix (e.g. 649122) or FIPS (e.g. 36 / 3600000000)"
-             style="flex:1;min-width:260px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:9px 11px;font:inherit">
-      <button class="btn" onclick="search('issuer')">By issuer</button>
-      <button class="btn" onclick="search('geo')">By geography</button>
+    <div class="sub">The universe loads <b>automatically</b> from public SEC fund filings (N-PORT: every
+      NY muni fund's complete portfolio — CUSIP, issuer, coupon, maturity) into Postgres
+      <span class="mono">muni.security</span>. Official Statement PDFs remain the deep-terms source for a
+      single issue. Economics columns compute once a current price lands. Nothing here is illustrative.</div>
+
+    <!-- The PRIMARY feed: automatic N-PORT fund-holdings ingest (ADR-0016), no button to press. -->
+    <div class="card" style="margin-top:18px">
+      <h2 style="display:flex;align-items:center;gap:8px">Universe — NY fund holdings
+        <span id="storeReadout" class="mono" style="font-size:11px;color:var(--dim);font-weight:400"></span></h2>
+      <div style="color:var(--dim);font-size:12px;margin:2px 0 8px">
+        Each registered fund's latest quarterly portfolio filing is fetched daily and its municipal bonds
+        upserted — automatic, nothing to click. Per-fund outcome of the last pass:
+      </div>
+      <div id="fundStatus" style="font-size:12px;color:var(--dim)">checking…</div>
     </div>
-    <!-- Upload an Official Statement PDF (downloaded from EMMA) → the extractor pulls its CUSIPs into the table -->
-    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
-      <input type="file" id="osfile" accept="application/pdf"
-             style="flex:1;min-width:220px;color:var(--dim);font-size:12px">
-      <input id="osbase" placeholder="issuer name (optional)"
-             style="width:150px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:8px 10px;font:inherit;font-size:12px">
-      <button class="btn" onclick="uploadOs()">Upload OS PDF</button>
+
+    <!-- OS PDFs: still the deep-terms path for one issue, but SECONDARY — folded so the landing leads
+         with the automatic universe, not a manual file chore. -->
+    <details class="card" style="margin-top:12px">
+      <summary style="cursor:pointer;font-size:13px;color:var(--dim)">Load an Official Statement PDF (deep terms for one issue)</summary>
+      <div style="color:var(--dim);font-size:12px;margin:10px 0 12px">
+        <b>Which PDF?</b> Only the one titled <b style="color:var(--txt)">“Official Statement”</b> (the
+        final OS for that series) — it holds the call schedule, original issue prices and tax status.
+        Skip annual reports, ACFRs, event notices and amendments; they carry none of that. The fastest
+        route: select a bond below → click <b>“open this CUSIP on EMMA”</b> in its detail panel → EMMA’s
+        page for that exact security links its OS → download it.<br><br>
+        <b>1.</b> Put the OS PDF in <span class="mono" style="color:var(--txt)">os-inbox/</span>
+        (also scanned on a schedule). &nbsp;<b>2.</b> Click <b>Load</b>. The parser reads the maturity
+        schedule and lands EVERY CUSIP in that series — one OS typically covers dozens of your bonds.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn" style="border-color:var(--brand);color:var(--brand)" onclick="loadFromFolder()">⤓ Load OS PDFs from folder</button>
+        <span style="color:var(--dim);font-size:11.5px">or upload one directly:</span>
+        <input type="file" id="osfile" accept="application/pdf" style="color:var(--dim);font-size:12px">
+        <input id="osbase" placeholder="issuer (optional)"
+               style="width:130px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:8px 10px;font:inherit;font-size:12px">
+        <button class="btn" onclick="uploadOs()">Upload</button>
+      </div>
+      <div id="loadMsg" style="color:var(--dim);font-size:11.5px;margin-top:8px"></div>
+      <div id="loadResults" style="margin-top:8px"></div>
+    </details>
+
+    <!-- Can the Kalotay/OAS work start? Measured against the model's real preconditions, not guessed. -->
+    <details class="card" style="margin-top:12px" ontoggle="if (this.open) loadReadiness()">
+      <summary style="cursor:pointer;font-size:13px;color:var(--brand)">Is there enough data to start the OAS model? — readiness</summary>
+      <div id="readiness" style="margin-top:10px;color:var(--dim);font-size:12px">loading…</div>
+    </details>
+
+    <!-- ADR-0017: every number the curve/vol machinery computes, shown with the formula and the inputs
+         that produced it — so any figure on this page can be reproduced by hand. -->
+    <details class="card" style="margin-top:12px" ontoggle="if (this.open) loadCurvePanel()">
+      <summary style="cursor:pointer;font-size:13px;color:var(--brand)">Benchmark curve &amp; rate volatility — the calculations</summary>
+      <div id="curvePanel" style="margin-top:10px;color:var(--dim);font-size:12px">loading…</div>
+    </details>
+
+    <!-- Answers "5,000 bonds = 5,000 documents?" from the data: it does not. One OS covers a whole
+         series, so a handful of the biggest issuers carries most of the book. -->
+    <details class="card" style="margin-top:12px" ontoggle="if (this.open) loadCoverage()">
+      <summary style="cursor:pointer;font-size:13px;color:var(--brand)">Which documents should I fetch next? — coverage plan</summary>
+      <div id="coverage" style="margin-top:10px;color:var(--dim);font-size:12px">loading…</div>
+    </details>
+
+    <h2 style="font-size:16px;margin-top:26px">Browse the universe
+      <span id="pageInfo" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
+    <!-- Master–detail: the slim list on the left is for FINDING a bond; everything known about the
+         selected one lives on the right, always visible — no scrolling under a giant table. -->
+    <div class="browse" style="margin-top:8px">
+      <div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <input id="q" placeholder="search CUSIP or issuer"
+                 style="flex:1;min-width:170px;background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:8px 10px;font:inherit;font-size:13px">
+          <button class="btn" onclick="go(0)">Search</button>
+        </div>
+        <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:8px">loading bonds…</div></div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:8px">
+          <button class="btn" onclick="go(PAGE - 1)">‹ Prev</button>
+          <button class="btn" onclick="go(PAGE + 1)">Next ›</button>
+          <select id="size" onchange="go(0)"
+                  style="background:#0c1512;color:var(--txt);border:1px solid var(--line-2);border-radius:9px;padding:8px;font:inherit;font-size:12px">
+            <option value="50">50 / page</option><option value="100">100 / page</option>
+            <option value="250">250 / page</option>
+          </select>
+        </div>
+      </div>
+      <div id="bondDetail"><div class="card" style="color:var(--dim);font-size:13px">select a bond on the left — its full detail and quarterly valuation history render here.</div></div>
     </div>
-    <div id="uploadMsg" style="color:var(--dim);font-size:11.5px;margin-top:6px"></div>
-    <div style="overflow-x:auto"><div id="bondTable" style="color:var(--dim);font-size:13px;margin-top:10px">loading bonds…</div></div>
   </div>
 
-  <!-- SOURCES: where the bond data comes from -->
-  <div id="sources" class="section" style="margin-top:40px">
-    <div class="kicker">Provenance</div>
-    <h2 style="font-size:18px;margin:6px 0 4px">Sources</h2>
-    <div class="sub" style="margin-bottom:14px">Bonds are extracted from <b>EMMA Official Statements</b> and Open-Data connectors. The NYC issuer complex below is the seed universe those connectors key off.</div>
-    <h3 style="font-size:13px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-bottom:8px">NYC issuers <span id="issuerCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
-    <div id="issuers" style="color:var(--dim)">loading…</div>
-  </div>
-
-  <!-- ADR-0014: the TV/audio source REGISTRY (feeds configured like the market-data/social sources) -->
-  <div id="audio" class="section" style="margin-top:40px">
-    <div class="kicker">Broadcast soft-signal</div>
-    <h2 style="font-size:18px;margin:6px 0 12px">Audio</h2>
-    <h3 style="font-size:13px;color:var(--dim);letter-spacing:.04em;text-transform:uppercase;margin-bottom:4px">TV sources <span id="srcCount" style="font-weight:400;text-transform:none;letter-spacing:0"></span></h3>
-    <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">Registry of audio feeds — a feed captures only when enabled and bound to a host device.</div>
-    <div style="overflow-x:auto"><div id="sources" style="color:var(--dim);font-size:13px">loading…</div></div>
-  </div>
-
-  <!-- ADR-0014: raw transcript — "what did it hear", to eyeball against the TV -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:15px;margin-bottom:4px">Live transcript <span id="txCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">What the capture loop heard — compare it to what's on the TV.</div>
-    <div id="transcripts" style="color:var(--dim);font-size:13px">loading…</div>
-  </div>
-
-  <!-- ADR-0014: live audio leads from the capture loop (issuer/keyword/CUSIP pointers to VERIFY, not numbers) -->
-  <div class="section" style="margin-top:28px">
-    <h2 style="font-size:15px;margin-bottom:4px">Audio leads <span id="leadCount" style="color:var(--dim);font-weight:400;font-size:12px"></span></h2>
-    <div style="color:var(--dim);font-size:11.5px;margin-bottom:8px">Broadcast-audio soft signal — a lead is a pointer to <b>verify</b>, never a number.</div>
-    <div id="leads" style="color:var(--dim)">loading…</div>
-  </div>
-
-  <div class="foot">muni-world runs as a separate process · <b>UI build B2</b> (data-first: Bonds / Sources / Audio)</div>
+  <div class="foot">muni-world runs as a separate process · <b>UI build B15</b> (call state is three-way: callable / confirmed non-callable / unknown)</div>
 </main>
 
 <script>
-  // Back-link resolves to the jethro app on the same host (:8080).
   document.getElementById("jethroLink").href = location.protocol + "//" + location.hostname + ":8080/";
+
   async function poll() {
     const el = document.getElementById("statusline");
     try {
@@ -138,127 +168,600 @@
       const b = s.backends || {};
       el.textContent = (s.status || "up").toLowerCase()
         + " · lmdb " + (b.lmdb || "—") + " · pg " + (b.postgres || "—") + " · kafka " + (b.kafka || "—");
-    } catch (e) {
-      el.textContent = "service down";
-    }
+    } catch (e) { el.textContent = "service down"; }
   }
   poll(); setInterval(poll, 5000);
 
   const esc = s => { const d = document.createElement("span"); d.textContent = s ?? ""; return d.innerHTML; };
+  const num = (n, dp) => (n == null || isNaN(n)) ? "—" : Number(n).toFixed(dp);
 
-  async function loadIssuers() {
+  // Store readout: rows in the DB (Postgres system of record) vs the LMDB search index.
+  async function refreshStore() {
+    const el = document.getElementById("storeReadout");
     try {
-      const list = await (await fetch("/api/muni/issuers")).json();
-      const verified = list.filter(i => i.verified === "yes").length;
-      document.getElementById("issuerCount").textContent = "· " + verified + " verified / " + list.length;
-      document.getElementById("issuers").innerHTML = list.map(i => {
-        // Only a confirmed (verified=yes) disclosure page is shown as a real link; otherwise say so plainly.
-        const link = (i.verified === "yes" && i.disclosureUrl)
-          ? `<a href="${esc(i.disclosureUrl)}" target="_blank" rel="noopener">${esc(i.disclosureUrl)}</a>`
-          : `<span style="color:var(--warn);font-size:11px">⚠ disclosure source unverified — pending confirmation</span>`;
-        return `<div class="issuer"><b>${esc(i.name)}</b><span class="tag">${esc(i.type)}</span>
-         <div class="sec">${esc(i.security)}</div>${link}</div>`;
-      }).join("");
-    } catch (e) { document.getElementById("issuers").textContent = "unavailable"; }
+      const s = await (await fetch("/api/muni/status", { cache: "no-store" })).json();
+      const c = s.counts || {};
+      const db = c.dbSecurities == null ? "DB off (LMDB only)" : c.dbSecurities + " in DB";
+      el.textContent = "· " + db + " · " + (c.lmdbSecurities || 0) + " indexed";
+      renderFunds(s.funds || {});
+    } catch (e) { el.textContent = ""; }
   }
 
-  const num = (n, dp) => (n == null || isNaN(n)) ? "—" : Number(n).toFixed(dp);
+  // Per-fund outcome of the last N-PORT pass, verbatim from the service — ok in green, FAILED in red,
+  // so a refused CIK or an unreachable EDGAR reads here instead of only in a log.
+  function renderFunds(f) {
+    const el = document.getElementById("fundStatus");
+    if (!el) { return; }
+    if (f.enabled === false) { el.textContent = "fund ingest is OFF (MUNI_FUNDS_ENABLED=false)."; return; }
+    const results = f.results || {};
+    const names = Object.keys(results);
+    if (!names.length) {
+      el.textContent = (f.lastRun === "never" || !f.lastRun)
+        ? "first pass runs ~30s after start (" + (f.funds || 0) + " fund(s) registered)…"
+        : "no results yet";
+      return;
+    }
+    el.innerHTML = names.map(n => {
+      const r = String(results[n]);
+      const ok = r.startsWith("ok");
+      return `<div style="padding:3px 0;border-bottom:1px solid var(--line)">
+        <span style="color:var(--txt)">${esc(n)}</span> ·
+        <span style="color:${ok ? "var(--up)" : "var(--down)"}">${esc(r)}</span></div>`;
+    }).join("") + `<div style="font-size:10.5px;margin-top:5px">last pass: ${esc(String(f.lastRun))}</div>`;
+  }
+
+  /**
+   * The coverage plan: the universe grouped by ISSUER, biggest first. One Official Statement covers a
+   * whole series, so this ranks where one download buys the most call-schedule coverage — the honest
+   * answer to "that's 5,000 documents" (it is not: it is a few dozen, and the top ten carry most of it).
+   */
+  /**
+   * Model readiness. Per-bond preconditions come from the data; the two GLOBAL inputs (a benchmark curve
+   * and a volatility assumption) are not in any document and are reported as the open items they are —
+   * a bond-by-bond green light would otherwise imply the model can run when it cannot.
+   */
+  async function loadReadiness() {
+    const el = document.getElementById("readiness");
+    if (!el) { return; }
+    try {
+      const r = await (await fetch("/api/muni/bonds/readiness", { cache: "no-store" })).json();
+      if (r.note) { el.textContent = r.note; return; }
+      const pct = n => r.bonds ? Math.round(n * 1000 / r.bonds) / 10 : 0;
+      const bar = (label, n, why) => `<tr>
+          <td style="white-space:normal">${label}<div style="color:var(--dim);font-size:10.5px">${why}</div></td>
+          <td class="mono" style="color:${n > 0 ? "var(--up)" : "var(--warn)"}">${Number(n).toLocaleString()}</td>
+          <td class="mono">${pct(n)}%</td></tr>`;
+      const ready = r.modelableCallable || 0;
+      const verdict = ready >= 20
+        ? `<b style="color:var(--up)">Yes — ${ready} callable bonds have terms, a price and a call schedule.</b>
+           That is enough to build and validate a lattice: a first OAS run wants tens of bonds, not thousands.`
+        : `<b style="color:var(--warn)">Not yet — ${ready} callable bonds are fully specified.</b>
+           Load a few more Official Statements from the coverage plan; each one lands a whole series.`;
+      el.innerHTML = `<div style="margin-bottom:8px">${verdict}</div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>Precondition</th><th>Bonds</th><th>Share</th></tr></thead><tbody>
+          ${bar("Terms (coupon + maturity)", r.terms, "the cash flows — from the fund filings")}
+          ${bar("A price to solve from", r.priced, "quarterly filing marks; OAS is solved FROM a price, so it is an as-of-quarter-end OAS")}
+          ${bar("Callable (call date known)", r.callable, "the OPTION — only an Official Statement has it")}
+          ${bar("Non-callable, CONFIRMED", r.nonCallable, "an OS was read and states no call — a fact, not a gap")}
+          ${bar("Call UNKNOWN", r.callUnknown, "no OS for these yet. Not the same as non-callable, and never assumed to be")}
+          ${bar("Tax status", r.withTax, "needed for the de-minimis / tax-option work")}
+          ${bar("Read from an OS", r.fromOs, "documents loaded so far")}
+          ${bar("FULLY SPECIFIED, callable", r.modelableCallable, "terms + price + call + a document behind it — the OAS-ready set")}
+        </tbody></table></div>
+        <div style="margin-top:10px;color:var(--dim)">
+          <b style="color:var(--txt)">Two inputs no document can supply</b> — the model needs them regardless
+          of how many bonds you load:
+          <div id="curve-inputs" style="margin-top:4px">checking…</div>
+          <div style="margin-top:6px">Valuation history depth:
+            <b style="color:var(--txt)">${r.valuationPeriods || 0}</b> quarterly period(s) —
+            what any time-series or refunding-efficiency work runs on.</div>
+        </div>`;
+      loadCurve();
+    } catch (e) { el.textContent = "readiness unavailable"; }
+  }
+
+  /**
+   * The two GLOBAL model inputs (ADR-0017), read from live state rather than hard-coded as "not done".
+   * Both come from ONE free official file — the Fed's GSW daily zero curve — so the curve ingest and the
+   * volatility measurement land together. Sigma is never shown alone: the p10/p50/p90 band travels with it,
+   * because a single sigma with no band is a hidden assumption.
+   */
+  async function loadCurve() {
+    const el = document.getElementById("curve-inputs");
+    if (!el) { return; }
+    try {
+      const c = await (await fetch("/api/muni/curve", { cache: "no-store" })).json();
+      const days = c.curveDays || 0;
+      const curveLine = days > 0
+        ? `<span style="color:var(--up)">ingested</span> — <b>${Number(days).toLocaleString()}</b> daily
+           curve(s) from <b>${esc(c.source)}</b>, newest <span class="mono">${esc(c.newestCurve)}</span>.
+           Zero-coupon, so it discounts cash flows directly.
+           <div style="font-size:10.5px">Basis is <b>taxable Treasury</b>, not a tax-exempt muni curve — the
+             muni ratio leg is measured from the fund panel as OS coverage grows (ADR-0017).</div>`
+        : `<span style="color:var(--warn)">not ingested yet</span> — ${esc(c.lastResult || "no run")}`;
+
+      const vols = c.vols || [];
+      const volLine = vols.length === 0
+        ? `<span style="color:var(--warn)">not measured yet</span> — it is computed from the curve history
+           above, so it arrives with the curve.`
+        : `<span style="color:var(--up)">measured</span>, not assumed — realized vol of the
+           ${esc(vols[0].series)} zero over a ${vols[0].windowDays}-day window.
+           <div style="overflow-x:auto;margin-top:4px"><table class="tbl"><thead><tr>
+             <th>Model</th><th>σ</th><th>p10</th><th>p50</th><th>p90</th><th>Obs</th></tr></thead><tbody>
+             ${vols.map(v => `<tr>
+               <td>${esc(v.kind)}<div style="color:var(--dim);font-size:10px">${
+                 v.kind === "NORMAL" ? "Hull-White, bp/yr" : "BDT / Black-Karasinski, proportion"}</div></td>
+               <td class="mono">${esc(String(v.sigma))}</td>
+               <td class="mono">${v.p10 === null ? "—" : esc(String(v.p10))}</td>
+               <td class="mono">${v.p50 === null ? "—" : esc(String(v.p50))}</td>
+               <td class="mono">${v.p90 === null ? "—" : esc(String(v.p90))}</td>
+               <td class="mono">${Number(v.observations).toLocaleString()}${
+                 v.excluded > 0 ? ` <span style="color:var(--dim)">(${v.excluded} excl.)</span>` : ""}</td>
+             </tr>`).join("")}
+           </tbody></table></div>
+           <div style="font-size:10.5px">OAS is quoted across p10/p50/p90 — a single σ would hide the
+             assumption. Treasury vol overstates muni option value, so OAS on callables reads
+             conservative.</div>`;
+
+      el.innerHTML = `<div>· <b>Benchmark curve</b> — ${curveLine}</div>
+        <div style="margin-top:4px">· <b>Rate volatility</b> — ${volLine}</div>`;
+    } catch (e) { el.textContent = "curve status unavailable"; }
+  }
+
+  /** A rate (0.04528482) as a percent string for reading; the raw value stays alongside it. */
+  function pct(rate, dp) { return (Number(rate) * 100).toFixed(dp === undefined ? 4 : dp) + "%"; }
+
+  /**
+   * The FULL calculation view (ADR-0017): fitted parameters → formula → zero curve → discount factors →
+   * volatility estimates, each with the inputs that produced it, so every number here can be reproduced
+   * by hand. Data provenance renders next to every block — nothing on this panel is entered by a human.
+   */
+  async function loadCurvePanel() {
+    const el = document.getElementById("curvePanel");
+    if (!el) { return; }
+    try {
+      const [c, g] = await Promise.all([
+        (await fetch("/api/muni/curve", { cache: "no-store" })).json(),
+        (await fetch("/api/muni/curve/grid", { cache: "no-store" })).json(),
+      ]);
+
+      const head = `<div style="margin-bottom:8px">
+        <b style="color:var(--txt)">Source:</b> Federal Reserve GSW daily zero-coupon Treasury curve
+        (FEDS 2006-28, <span class="mono">feds200628.csv</span>) —
+        <b>${Number(c.curveDays || 0).toLocaleString()}</b> curve day(s) stored, newest
+        <span class="mono">${esc(String(c.newestCurve))}</span>.
+        <div style="font-size:10.5px;margin-top:2px">Ingest: ${esc(String(c.lastResult || "never run"))}</div>
+      </div>`;
+
+      if (!g.available) {
+        el.innerHTML = head + `<div style="color:var(--warn)">${esc(g.reason)}</div>`;
+        return;
+      }
+
+      const p = g.parameters;
+      const paramsBlock = `
+        <div style="margin-top:6px"><b style="color:var(--txt)">1 · The day's fitted parameters</b>
+          <span style="font-size:10.5px">(as published for ${esc(String(g.asOf))}; β in percent, τ in years)</span></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>β₀ level</th><th>β₁ slope</th><th>β₂ hump 1</th><th>β₃ hump 2</th><th>τ₁</th><th>τ₂</th></tr></thead>
+          <tbody><tr>
+            <td class="mono">${esc(String(p.beta0))}</td><td class="mono">${esc(String(p.beta1))}</td>
+            <td class="mono">${esc(String(p.beta2))}</td><td class="mono">${esc(String(p.beta3))}</td>
+            <td class="mono">${esc(String(p.tau1))}</td><td class="mono">${esc(String(p.tau2))}</td>
+          </tr></tbody></table></div>
+        <div style="font-size:11px;margin-top:4px" class="mono">
+          y(n) = β₀ + β₁·(1−e^(−n/τ₁))/(n/τ₁) + β₂·[(1−e^(−n/τ₁))/(n/τ₁) − e^(−n/τ₁)]
+               + β₃·[(1−e^(−n/τ₂))/(n/τ₂) − e^(−n/τ₂)]</div>
+        <div style="font-size:10.5px;margin-top:2px">β₃ = 0 means the Fed fitted plain Nelson-Siegel that
+          day (its convention for the early history) — same formula, no fourth term.
+          Short rate y(0) = β₀ + β₁ = <b class="mono">${pct(g.shortRate)}</b> — the lattice's first node.</div>`;
+
+      const gridBlock = `
+        <div style="margin-top:12px"><b style="color:var(--txt)">2 · The zero curve that formula produces</b>
+          <span style="font-size:10.5px">(continuously compounded; DF = e^(−y·n) is what a cash flow n years
+          out is multiplied by)</span></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>Tenor</th><th>Zero rate</th><th>(raw, 8dp)</th><th>Discount factor</th></tr></thead><tbody>
+          ${g.grid.map(r => `<tr>
+            <td class="mono">${r.years >= 1 ? r.years + "y" : (r.years * 12) + "m"}</td>
+            <td class="mono">${pct(r.zeroRate)}</td>
+            <td class="mono" style="color:var(--dim)">${esc(String(r.zeroRate))}</td>
+            <td class="mono">${esc(String(r.discountFactor))}</td></tr>`).join("")}
+        </tbody></table></div>
+        <div style="font-size:10.5px;margin-top:2px">Basis: <b>taxable Treasury</b> — not yet the tax-exempt
+          muni curve. The muni/Treasury ratio leg is measured from the fund-filing panel as OS coverage
+          grows (ADR-0017 §2); until a tenor bucket has enough corroborated observations it publishes no
+          ratio, and OAS for that bucket is withheld rather than guessed.</div>`;
+
+      const vols = c.vols || [];
+      const volBlock = `
+        <div style="margin-top:12px"><b style="color:var(--txt)">3 · Rate volatility — measured from the
+          curve history above, never assumed</b></div>
+        ${vols.length === 0
+          ? `<div style="color:var(--warn)">not measured yet — needs at least 2 stored curve days</div>`
+          : `<div style="font-size:11px;margin-top:4px" class="mono">
+               σ_normal = stdev(Δr) × √252 &nbsp;·&nbsp; σ_lognormal = stdev(Δ ln r) × √252
+             </div>
+             <div style="overflow-x:auto;margin-top:4px"><table class="tbl"><thead><tr>
+               <th>Series</th><th>Model</th><th>σ (annualised)</th><th>p10</th><th>p50</th><th>p90</th>
+               <th>Window</th><th>Obs</th></tr></thead><tbody>
+               ${vols.map(v => `<tr>
+                 <td class="mono">${esc(v.series)}</td>
+                 <td>${esc(v.kind)}<div style="color:var(--dim);font-size:10px">${
+                   v.kind === "NORMAL" ? "Hull-White · bp/yr" : "BDT / Black-Karasinski · proportion"}</div></td>
+                 <td class="mono"><b>${esc(String(v.sigma))}</b></td>
+                 <td class="mono">${v.p10 === null ? "—" : esc(String(v.p10))}</td>
+                 <td class="mono">${v.p50 === null ? "—" : esc(String(v.p50))}</td>
+                 <td class="mono">${v.p90 === null ? "—" : esc(String(v.p90))}</td>
+                 <td class="mono">${v.windowDays}d</td>
+                 <td class="mono" title="rates at or below 1bp are excluded from the lognormal estimate (ln undefined) — counted, never silently dropped">${Number(v.observations).toLocaleString()}${
+                   v.excluded > 0 ? `<div style="color:var(--dim);font-size:10px">${v.excluded} excl. ≤1bp</div>` : ""}</td>
+               </tr>`).join("")}
+             </tbody></table></div>
+             <div style="font-size:10.5px;margin-top:4px">p10/p50/p90 = the band of rolling one-year realized
+               vol across the full history — OAS is reported at all three, never at one hidden σ. Known bias,
+               stated: Treasury vol overstates muni option value, which understates OAS on callables — the
+               conservative direction (a callable can screen worse than it is, never cheaper).</div>`}`;
+
+      el.innerHTML = head + paramsBlock + gridBlock + volBlock;
+    } catch (e) { el.textContent = "curve panel unavailable"; }
+  }
+
+  let COVERAGE_ALL = false;   // false = TO-DO only (issuers whose OS is already read are hidden)
+
+  function toggleCoverageDone() {
+    COVERAGE_ALL = !COVERAGE_ALL;
+    loadCoverage();
+  }
+
+  async function loadCoverage() {
+    const el = document.getElementById("coverage");
+    if (!el) { return; }
+    try {
+      const c = await (await fetch(`/api/muni/bonds/coverage?limit=25&includeDone=${COVERAGE_ALL}`,
+        { cache: "no-store" })).json();
+      const rows = c.rows || [];
+      const doneIssuers = c.issuersDone || 0;
+      const doneBonds = c.fromOs || 0;
+      const toggle = `<button class="btn" style="padding:5px 10px;font-size:11px" onclick="toggleCoverageDone()">`
+        + (COVERAGE_ALL ? "hide the ones already loaded" : `show all (incl. ${doneIssuers} done)`) + `</button>`;
+
+      if (!rows.length) {
+        el.innerHTML = c.bonds == null ? "Postgres not reachable."
+          : `<b style="color:var(--up)">Nothing left in the top ${25}</b> — every issuer shown here already
+             has its Official Statement loaded (${doneIssuers} issuer(s), ${doneBonds.toLocaleString()}
+             bonds carry OS terms). ${toggle}`;
+        return;
+      }
+      let run = 0;
+      const body = rows.map(r => {
+        run += r.bonds;
+        const cum = c.bonds ? Math.round(run * 1000 / c.bonds) / 10 : 0;
+        const loaded = r.fromOs > 0;
+        return `<tr style="${loaded ? "opacity:.55" : ""}">
+          <td class="mono">${esc(r.cusip6)}</td>
+          <td style="white-space:normal">${esc(r.issuer)}${loaded ? ' <b style="color:var(--up);font-size:10px">OS LOADED</b>' : ''}</td>
+          <td class="mono">${r.bonds}</td>
+          <td class="mono">${r.heldPar == null ? "—" : Number(r.heldPar).toLocaleString()}</td>
+          <td class="mono" style="color:${r.withCall > 0 ? "var(--up)" : "var(--dim)"}">${r.withCall}</td>
+          <td class="mono">${cum}%</td>
+          <td><a href="https://emma.msrb.org/Security/Details/${encodeURIComponent(r.sampleCusip)}"
+                 target="_blank" rel="noopener" style="color:var(--brand);text-decoration:underline">find OS ↗</a></td>
+        </tr>`;
+      }).join("");
+      const pct = c.bonds ? Math.round(doneBonds * 1000 / c.bonds) / 10 : 0;
+      el.innerHTML = `<div style="margin-bottom:8px">
+          <b style="color:var(--txt)">${Number(c.bonds).toLocaleString()} bonds</b> from
+          <b style="color:var(--txt)">${c.issuers}</b> issuers — one Official Statement covers a whole
+          series (the Omaha OS landed 42 bonds from one PDF).
+          Loaded so far: <b style="color:${doneBonds ? "var(--up)" : "var(--warn)"}">${doneIssuers} issuer(s),
+          ${doneBonds.toLocaleString()} bonds (${pct}%)</b>.
+          ${COVERAGE_ALL ? "Showing everything." : "Issuers already loaded are hidden — this is your to-do list."}
+          ${toggle}
+        </div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>CUSIP-6</th><th>Issuer</th><th>Bonds</th><th>Par held</th><th>With call</th><th>Cum %</th><th>Document</th>
+        </tr></thead><tbody>${body}</tbody></table></div>`;
+    } catch (e) { el.textContent = "coverage unavailable"; }
+  }
+
+  // --- the bond browser: server-side page/sort/filter, so thousands of securities stay navigable ---
+  // Default sort = call-knowledge rank, best-documented first: among 5k bonds the readable ones are the
+  // few dozen whose option is actually KNOWN (call schedule or confirmed non-callable) — the OAS-ready set.
+  let PAGE = 0, SORT = "call", ASC = false, TOTAL = null;
+
+  // sort key → column label. The key is what the API takes; the DB maps it through a whitelist.
+  const SORTABLE = { cusip: "CUSIP", issuer: "Issuer", maturity: "Maturity", call: "Call" };
+
+  function sortBy(key) {
+    // Same header toggles direction. A NEW header starts ascending — except "call", whose natural first
+    // view is descending (documented bonds first; ascending would surface the 5k unknowns).
+    ASC = (SORT === key) ? !ASC : key !== "call";
+    SORT = key;
+    go(0);
+  }
+
+  /** The list-level call marker: the finder must show WHICH bonds are documented without a click each. */
+  function callBadge(r) {
+    // List shows the call DATE only — the strike and its provenance live in the detail panel.
+    if (r.callState === "CALLABLE") { return `<span style="color:var(--up)">${esc(String(r.call).split(" @")[0])}</span>`; }
+    if (r.callState === "NON_CALLABLE") { return '<span style="color:var(--dim)">n/c</span>'; }
+    return '<span style="color:var(--dim);opacity:.45">?</span>';
+  }
 
   function renderBonds(rows) {
     const el = document.getElementById("bondTable");
     if (!rows || !rows.length) {
-      el.innerHTML = "no bonds loaded — real bonds arrive only via the EMMA / Open-Data connectors (ingest on the Pi). Nothing here is illustrative.";
+      el.innerHTML = TOTAL === 0
+        ? "no bond matches that search. Clear the box to see the whole universe."
+        : "no bonds yet — the universe loads automatically from the fund filings above (first pass ~30s "
+          + "after start; check the per-fund status). Nothing here is illustrative.";
       return;
     }
-    const cols = ["CUSIP", "Issuer", "Cpn", "Maturity", "Price", "Cur Yld", "YTM", "YTW", "Mod Dur", "Cvx", "Tax", "Rating", "Call"];
-    el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
-      + rows.map(r => `<tr>
-          <td class="mono" style="color:var(--txt)">${esc(r.cusip)}</td><td>${esc(r.issuer)}</td>
-          <td class="mono">${num(r.coupon, 3)}</td><td class="mono">${esc(r.maturity)}</td>
-          <td class="mono">${num(r.price, 2)}${r.priceAsOf ? `<div style="font-size:9px;color:var(--dim)" title="${esc(r.priceSource)}">${esc(r.priceAsOf)}</div>` : ""}</td><td class="mono">${num(r.currentYield, 3)}</td>
-          <td class="mono">${num(r.ytm, 3)}</td><td class="mono" style="color:var(--brand)">${num(r.ytw, 3)}</td>
-          <td class="mono">${num(r.modDuration, 2)}</td><td class="mono">${num(r.convexity, 2)}</td>
-          <td>${esc(r.taxStatus)}</td><td>${esc(r.rating)}</td>
-          <td class="mono" style="font-size:11px;color:var(--dim)">${esc(r.call)}</td>
+    // Slim finder columns only — everything else lives in the detail panel on the right. The credit
+    // badges stay: a default must be visible from the LIST, not only after a click.
+    const head = ["cusip", "issuer", "maturity", "call"].map(k =>
+        `<th style="cursor:pointer" onclick="sortBy('${k}')">${SORTABLE[k]}${SORT === k ? (ASC ? " ▲" : " ▼") : ""}</th>`).join("");
+    el.innerHTML = '<table class="tbl"><thead><tr>' + head + "</tr></thead><tbody>"
+      + rows.map(r => `<tr id="row-${esc(r.cusip)}" style="cursor:pointer" onclick="showDetail('${esc(r.cusip)}')">
+          <td class="mono" style="color:var(--txt)">${esc(r.cusip)}</td>
+          <td style="white-space:normal">${esc(r.issuer)}${r.inDefault ? ' <b style="color:var(--down);font-size:10px">IN DEFAULT</b>' : ''}${r.intArrears ? ' <b style="color:var(--warn);font-size:10px">ARREARS</b>' : ''}</td>
+          <td class="mono">${esc(r.maturity)}</td>
+          <td class="mono">${callBadge(r)}</td>
         </tr>`).join("") + "</tbody></table>";
-  }
-
-  async function search(kind) {
-    const q = document.getElementById("q").value.trim();
-    if (!q) {
-      document.getElementById("bondTable").textContent = "enter a CUSIP-6 issuer prefix or a FIPS code to search the loaded bonds.";
-      return;
+    // Keep the panel in step with the list: restore the highlight, or select the first row so the
+    // right panel is never a stale bond from a previous page.
+    if (SELECTED && rows.some(r => r.cusip === SELECTED)) {
+      markSelected(SELECTED);
+    } else if (rows.length) {
+      showDetail(rows[0].cusip);
     }
-    const path = kind === "geo" ? "/api/muni/bonds/geo/" : "/api/muni/bonds/issuer/";
-    try {
-      renderBonds(await (await fetch(path + encodeURIComponent(q))).json());
-    } catch (e) { document.getElementById("bondTable").textContent = "source unreachable — could not query the bond index."; }
   }
 
-  async function loadSources() {
-    try {
-      const ss = await (await fetch("/api/muni/audio/sources", { cache: "no-store" })).json();
-      const cap = ss.filter(s => s.enabled && s.device).length;
-      document.getElementById("srcCount").textContent = ss.length ? "· " + cap + " capturable / " + ss.length : "";
-      const el = document.getElementById("sources");
-      if (!ss.length) { el.textContent = "no feeds registered"; return; }
-      const cols = ["Feed", "Publisher", "Category", "Device", "Chunk", "Status"];
-      el.innerHTML = '<table class="tbl"><thead><tr>' + cols.map(h => `<th>${h}</th>`).join("") + "</tr></thead><tbody>"
-        + ss.map(s => {
-          const capturable = s.enabled && s.device;
-          const status = capturable ? '<span style="color:var(--up)">capturing</span>'
-            : s.enabled ? '<span style="color:var(--warn)">no device bound</span>'
-            : '<span style="color:var(--dim)">disabled</span>';
-          return `<tr><td style="color:var(--txt)">${esc(s.label)}</td><td>${esc(s.publisher)}</td>
-            <td>${esc(s.category)}</td><td class="mono" style="font-size:11px">${esc(s.device || "—")}</td>
-            <td class="mono">${esc(s.chunkSeconds)}s</td><td>${status}</td></tr>`;
-        }).join("") + "</tbody></table>";
-    } catch (e) { document.getElementById("sources").textContent = "unavailable"; }
+  let SELECTED = null;
+  function markSelected(cusip) {
+    document.querySelectorAll(".tbl tr.sel").forEach(t => t.classList.remove("sel"));
+    const row = document.getElementById("row-" + cusip);
+    if (row) { row.classList.add("sel"); }
   }
 
-  async function loadTranscripts() {
+  /** Fetch and render page n. The only path that loads the table — search, sort and paging all land here. */
+  async function go(n) {
+    const size = parseInt(document.getElementById("size").value, 10) || 50;
+    const q = document.getElementById("q").value.trim();
+    const want = Math.max(0, n);
+    const info = document.getElementById("pageInfo");
     try {
-      const ts = await (await fetch("/api/muni/audio/transcripts/recent?limit=10", { cache: "no-store" })).json();
-      document.getElementById("txCount").textContent = ts.length ? "· " + ts.length : "";
-      const el = document.getElementById("transcripts");
-      if (!ts.length) {
-        el.innerHTML = '<span style="font-size:12.5px">no transcript yet — enable a feed and run <code>svc.sh tv start</code>.</span>';
+      const r = await (await fetch(`/api/muni/bonds?q=${encodeURIComponent(q)}&sort=${SORT}`
+        + `&asc=${ASC}&page=${want}&size=${size}`, { cache: "no-store" })).json();
+      TOTAL = r.total;
+      // Don't advance past the end: asking for page 99 of 3 must not blank the table.
+      if (r.total != null && want * size >= r.total && want > 0) { return go(Math.floor((r.total - 1) / size)); }
+      PAGE = r.page;
+      renderBonds(r.rows);
+      const from = r.total ? PAGE * size + 1 : 0;
+      const to = Math.min((PAGE + 1) * size, r.total == null ? (r.rows || []).length : r.total);
+      info.textContent = r.note ? "· " + r.note
+        : (r.total == null ? "" : `· ${from}–${to} of ${r.total.toLocaleString()}${q ? " matching" : ""}`);
+    } catch (e) {
+      document.getElementById("bondTable").textContent = "could not read the bond store.";
+    }
+  }
+
+  /**
+   * "No call date" is TWO different facts and they must never render the same: an Official Statement
+   * that states no call is a FACT about the bond; no Official Statement at all is an absence of
+   * knowledge. Showing both as "—" quietly licenses treating unknown bonds as bullets.
+   */
+  function callText(r) {
+    if (r.callState === "CALLABLE") { return esc(r.call); }
+    if (r.callState === "NON_CALLABLE") {
+      return '<span style="color:var(--dim)">not callable <span style="font-size:10px">(per OS)</span></span>';
+    }
+    return '<span style="color:var(--warn)">unknown <span style="font-size:10px">(no OS loaded)</span></span>';
+  }
+
+  /**
+   * The OAS block (ADR-0018): the first actual Kalotay-family output. Either the solved spreads across the
+   * σ band, with every input echoed — or the NAMED reason there is no OAS for this bond yet. A refusal is
+   * a first-class answer here, not an error state.
+   */
+  async function loadOas(cusip) {
+    const el = document.getElementById("oasBlock");
+    if (!el) { return; }
+    try {
+      const o = await (await fetch("/api/muni/bonds/" + encodeURIComponent(cusip) + "/oas",
+          { cache: "no-store" })).json();
+      if (!o.available) {
+        el.innerHTML = `<b style="color:var(--txt)">OAS</b> — <span style="color:var(--warn)">not computed:</span>
+          ${esc(o.reason)}`;
         return;
       }
-      el.innerHTML = ts.map(e => {
-        const t = (e.at || "").replace("T", " ").slice(0, 19);
-        return `<div class="issuer"><span class="tag" style="color:var(--brand)">${esc(e.feed)}</span>
-          <span style="color:var(--dim);font-size:11px">${t} · ${e.segments} seg</span>
-          <div style="margin-top:3px;color:var(--txt);font-size:13px;line-height:1.5">${esc(e.text) || "<span style='color:var(--dim)'>(silence / nothing recognized)</span>"}</div></div>`;
-      }).join("");
-    } catch (e) { document.getElementById("transcripts").textContent = "unavailable"; }
+      const i = o.inputs;
+      const cell = r => r == null ? "—" : (r.solved
+          ? `<b>${esc(String(r.oasBp))}</b>`
+          : `<span style="color:var(--warn)" title="${esc(r.reason)}">unsolvable</span>`);
+      const s = o.oasBpBySigma;
+      el.innerHTML = `<b style="color:var(--txt)">OAS — ${o.callable ? "callable, priced on the lattice"
+            : "non-callable (per OS), straight solve"}</b>
+        <span style="font-size:10.5px">(bp, vs taxable Treasury — see note)</span>
+        <div style="overflow-x:auto;margin-top:4px"><table class="tbl"><thead><tr>
+          <th>at measured σ</th><th>at p10</th><th>at p50</th><th>at p90</th></tr></thead><tbody><tr>
+          <td class="mono">${cell(s.measured)}</td><td class="mono">${cell(s.p10)}</td>
+          <td class="mono">${cell(s.p50)}</td><td class="mono">${cell(s.p90)}</td>
+        </tr></tbody></table></div>
+        <div style="font-size:10.5px;margin-top:4px">
+          Solved from the <b>${esc(String(i.cleanPricePer100))}</b> filing mark of ${esc(i.priceAsOf)}
+          on the ${esc(i.curveSource)} curve of ${esc(i.curveAsOf)} · σ = ${esc(String(i.sigmaMeasured))}
+          (${esc(i.sigmaSeries)}) · ${i.steps} steps${o.callable ? ` · call ${esc(i.callDate)} @
+          ${esc(String(i.callPricePer100))}${i.assumedParCall ? " <span style='color:var(--warn)'>(price not in OS — par assumed, the modern-muni convention)</span>" : ""}` : ""}.
+        </div>
+        ${o.analytics ? (a => `<div style="overflow-x:auto;margin-top:6px"><table class="tbl"><thead><tr>
+          <th>Straight /100</th><th>Callable /100</th><th>Option value</th><th>Eff. duration</th>
+          <th>Eff. convexity</th><th>Refunding eff.</th></tr></thead><tbody><tr>
+          <td class="mono">${Number(a.straightPer100).toFixed(3)}</td>
+          <td class="mono">${Number(a.callablePer100).toFixed(3)}</td>
+          <td class="mono">${Number(a.optionValuePer100).toFixed(3)}</td>
+          <td class="mono">${Number(a.effDuration).toFixed(2)}y</td>
+          <td class="mono">${Number(a.effConvexity).toFixed(1)}</td>
+          <td class="mono">${a.refundingEfficiencyPct == null
+              ? `<span style="color:var(--dim)" title="defined only once the call window is open and the option has value">${a.currentlyCallable ? "option ~0" : "not callable yet"}</span>`
+              : Number(a.refundingEfficiencyPct).toFixed(1) + "%"}</td>
+        </tr></tbody></table></div>
+        <div style="font-size:10.5px;margin-top:2px">Option value = straight − callable: what the issuer's
+          call is costing the holder, in points, at the solved OAS and measured σ. Duration/convexity are
+          effective (±25bp curve bumps on the lattice). Open the <a href="/model.html"
+          style="color:var(--brand);text-decoration:underline">Model workbench</a> to run these mechanics
+          on inputs you choose and see every intermediate step.</div>`)(o.analytics) : ""}
+        <div style="font-size:10.5px;margin-top:2px;color:var(--dim)">
+          Basis note: this is OAS vs the <b>taxable Treasury</b> curve — tax-exempt bonds normally show
+          <b>negative</b> OAS on this basis. Use it to <b>rank</b> bonds against each other; absolute
+          cheap/rich needs the muni-ratio leg (measured as OS coverage grows, ADR-0017). An OAS that flips
+          sign between p10 and p90 is a volatility bet, not a value signal.</div>`;
+    } catch (e) { el.innerHTML = `<b style="color:var(--txt)">OAS</b> — unavailable (${esc(String(e))})`; }
   }
 
-  const kindColor = k => k === "ISSUER" ? "var(--brand)" : k === "CUSIP" ? "var(--warn)" : "var(--dim)";
-  async function loadLeads() {
+  /** Everything stored about one bond, plus WHY the economics are blank when they are. */
+  async function showDetail(cusip) {
+    SELECTED = cusip;
+    markSelected(cusip);
+    const el = document.getElementById("bondDetail");
+    el.innerHTML = `<div class="card">loading ${esc(cusip)}…</div>`;
     try {
-      const ls = await (await fetch("/api/muni/audio/leads/recent?limit=50", { cache: "no-store" })).json();
-      document.getElementById("leadCount").textContent = ls.length ? "· " + ls.length : "";
-      const el = document.getElementById("leads");
-      if (!ls.length) {
-        el.innerHTML = '<span style="font-size:12.5px">no leads yet — the capture loop is off. Enable it on the Pi (muni.audio.capture.enabled=true).</span>';
+      const resp = await fetch("/api/muni/bonds/" + encodeURIComponent(cusip), { cache: "no-store" });
+      if (!resp.ok) { el.innerHTML = `<div class="card">no stored detail for ${esc(cusip)}</div>`; return; }
+      const r = await resp.json();
+      const priced = r.price != null && !isNaN(r.price);
+      const f = (label, v) => `<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid var(--line)">
+          <span style="min-width:150px;color:var(--dim);font-size:11.5px">${label}</span>
+          <span class="mono" style="color:var(--txt);font-size:12px">${v}</span></div>`;
+      el.innerHTML = `<div class="card">
+        <h2 style="font-size:15px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap">
+          <span class="mono">${esc(r.cusip)}</span>
+          <span style="font-weight:400;font-size:13px;color:var(--dim)">${esc(r.issuer)}</span></h2>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 26px;margin-top:8px">
+          <div>
+            ${f("Coupon", num(r.coupon, 6) + " %")}
+            ${f("Maturity", esc(r.maturity))}
+            ${f("Call", callText(r))}
+            ${f("Tax status", esc(r.taxStatus) || "—")}
+            ${f("Rating", esc(r.rating) || "—")}
+            ${f("Coupon kind", esc(r.couponKind) || "—")}
+            ${f("In default", r.inDefault == null ? "—" : r.inDefault ? '<b style="color:var(--down)">YES — fund-attested</b>' : "no")}
+            ${f("Interest in arrears", r.intArrears == null ? "—" : r.intArrears ? '<b style="color:var(--warn)">YES — fund-attested</b>' : "no")}
+            ${f("Held by funds", r.heldFunds ?? "—")}
+            ${f("Par held (USD)", r.heldPar == null ? "—" : Number(r.heldPar).toLocaleString())}
+            ${f("Filing valuation /100", r.valPer100 == null ? "—" : num(r.valPer100, 3) + " · as-of " + esc(r.valAsOf))}
+            ${f("Documents", `<a href="https://emma.msrb.org/Security/Details/${encodeURIComponent(r.cusip)}"
+                target="_blank" rel="noopener" style="color:var(--brand);text-decoration:underline">open this CUSIP on EMMA ↗</a>`)}
+          </div>
+          <div>
+            ${f("Price (clean /100)", priced ? num(r.price, 3) : "—")}
+            ${f("Price as of", esc(r.priceAsOf) || "—")}
+            ${f("Price source", esc(r.priceSource) || "—")}
+            ${f("Current yield", num(r.currentYield, 3))}
+            ${f("YTM", num(r.ytm, 3))}
+            ${f("Yield to worst", num(r.ytw, 3))}
+            ${f("Mod. duration", num(r.modDuration, 3))}
+            ${f("Convexity", num(r.convexity, 3))}
+            ${f("Accrued", num(r.accrued, 4))}
+          </div>
+        </div>
+        <div id="oasBlock" style="margin-top:12px;color:var(--dim);font-size:12px">computing OAS…</div>
+        <div id="valHist" style="margin-top:12px;color:var(--dim);font-size:12px">loading valuation history…</div>
+        ${priced ? "" : `<div style="color:var(--warn);font-size:11.5px;margin-top:10px">
+          Economics are blank because this bond has <b>no current price</b>. The filing valuation above
+          is what funds carried it at on the filings' period date — a labeled, dated fact, deliberately
+          NOT fed into yields/duration. Those compute the moment a real price source covers this CUSIP —
+          never from a stale or invented mark.</div>`}
+      </div>`;
+      loadValuationHistory(cusip);
+      loadOas(cusip);
+    } catch (e) { el.innerHTML = `<div class="card">detail unavailable</div>`; }
+  }
+
+  /** The quarterly valuation series — dated fund-attested marks from EDGAR's full N-PORT history. */
+  async function loadValuationHistory(cusip) {
+    const el = document.getElementById("valHist");
+    if (!el) { return; }
+    try {
+      const vs = await (await fetch(`/api/muni/bonds/${encodeURIComponent(cusip)}/valuations`, { cache: "no-store" })).json();
+      if (!vs.length) {
+        el.textContent = "no valuation history yet — the one-time EDGAR backfill runs after the daily pass "
+          + "(minutes per fund); quarterly points appear here as filings are walked.";
         return;
       }
-      el.innerHTML = ls.map(e => {
-        const t = (e.at || "").replace("T", " ").slice(0, 19);
-        const ms = e.lead.atMs || 0, mm = String(Math.floor(ms / 60000)).padStart(2, "0"), ss = String(Math.floor(ms % 60000 / 1000)).padStart(2, "0");
-        return `<div class="issuer"><span class="mono" style="color:${kindColor(e.lead.kind)};font-size:10px">${esc(e.lead.kind)}</span>
-          <b style="margin-left:6px">${esc(e.lead.match)}</b>
-          <span class="tag" style="color:var(--dim)">${esc(e.feed)} · ${mm}:${ss}</span>
-          <div class="sec">${esc(e.lead.context)}</div></div>`;
-      }).join("");
-    } catch (e) { document.getElementById("leads").textContent = "unavailable"; }
+      el.innerHTML = `<div style="color:var(--txt);font-size:12.5px;font-weight:600;margin-bottom:4px">
+          Valuation history <span style="color:var(--dim);font-weight:400">· ${vs.length} quarter(s), par-weighted across funds — filing marks, not live prices</span></div>
+        <div style="overflow-x:auto"><table class="tbl"><thead><tr>
+          <th>As of</th><th>Val /100</th><th>Δ vs prior</th><th>Par held</th><th>Funds</th>
+        </tr></thead><tbody>`
+        + vs.map((v, i) => {
+          const prev = i > 0 ? vs[i - 1].valPer100 : null;
+          const d = prev == null ? null : (v.valPer100 - prev);
+          const dTxt = d == null ? "—"
+            : `<span style="color:${d >= 0 ? "var(--up)" : "var(--down)"}">${d >= 0 ? "+" : ""}${Number(d).toFixed(3)}</span>`;
+          return `<tr><td class="mono">${esc(v.asOf)}</td>
+            <td class="mono" style="color:var(--txt)">${Number(v.valPer100).toFixed(3)}</td>
+            <td class="mono">${dTxt}</td>
+            <td class="mono">${Number(v.heldPar).toLocaleString()}</td>
+            <td class="mono">${v.funds}</td></tr>`;
+        }).reverse().join("")
+        + "</tbody></table></div>";
+    } catch (e) { el.textContent = "valuation history unavailable"; }
+  }
+
+  // Render the loading PROCESS — one line per file, so the load is observable, not a black box.
+  /** The probe evidence for a zero-yield OS, rendered copyable — the parser gap's raw material. */
+  function probeBlock(s) {
+    if (!s.probe) { return ""; }
+    const p = s.probe;
+    const kept = s.keptAt ? `<div style="color:var(--dim)">document kept on the server at <span class="mono">${esc(s.keptAt)}</span></div>` : "";
+    return `<details style="margin:4px 0 8px 16px"><summary style="cursor:pointer;color:var(--warn);font-size:11.5px">why 0 bonds? — evidence (paste this to Claude)</summary>
+      <pre style="white-space:pre-wrap;background:#0c1512;border:1px solid var(--line-2);border-radius:8px;padding:8px;font-size:10.5px;color:var(--dim);max-height:300px;overflow:auto">${esc(JSON.stringify(p, null, 1))}</pre>${kept}</details>`;
+  }
+
+  function renderLoadResults(list) {
+    const el = document.getElementById("loadResults");
+    if (!list || !list.length) { el.innerHTML = ""; return; }
+    el.innerHTML = list.map(s => {
+      const led = s.ok ? (s.indexed > 0 ? "var(--up)" : "var(--warn)") : "var(--down)";
+      const detail = s.ok
+        ? `${s.pages} pages · ${s.indexed} saved · ${s.quarantined} quarantined · ${esc(s.method)} · conf ${num(s.confidence, 2)}`
+        : `<span style="color:var(--down)">${esc(s.error || "failed")}</span>`;
+      const name = (s.sourceId || "").replace(/^(file:|upload:)/, "");
+      return `<div class="row" style="margin:3px 0"><span class="led" style="background:${led}"></span>
+        <span class="mono" style="color:var(--txt);font-size:12px">${esc(name)}</span>
+        <span style="color:var(--dim);font-size:11.5px">${detail}</span></div>`;
+    }).join("");
+    el.innerHTML += list.filter(s => s.probe).map(probeBlock).join("");
+  }
+
+  // ONE button: load every OS PDF in the well-defined folder → extract → DB + index → table.
+  async function loadFromFolder() {
+    const msg = document.getElementById("loadMsg");
+    msg.textContent = "scanning os-inbox/ and extracting each PDF…";
+    document.getElementById("loadResults").innerHTML = "";
+    try {
+      const list = await (await fetch("/api/muni/ingest/scan", { method: "POST" })).json();
+      renderLoadResults(list);
+      const files = (list || []).length;
+      const saved = (list || []).reduce((a, x) => a + (x.indexed || 0), 0);
+      msg.innerHTML = files
+        ? `<span style="color:var(--up)">loaded ${files} file${files === 1 ? "" : "s"} · ${saved} bonds saved to the DB + index.</span>`
+        : `<span style="color:var(--warn)">no PDFs in os-inbox/ — drop Official Statement PDFs there, then load.</span>`;
+      await refreshStore();
+      go(0);   // refresh the browser list in place (loadRecent was removed with the old table)
+      loadCoverage();   // a just-loaded issuer drops off the to-do list straight away
+      loadReadiness();  // and the OAS preconditions move with it, in the same breath
+    } catch (e) { msg.innerHTML = '<span style="color:var(--down)">load failed — is muni-world up?</span>'; }
   }
 
   async function uploadOs() {
     const f = document.getElementById("osfile").files[0];
-    const msg = document.getElementById("uploadMsg");
-    if (!f) { msg.textContent = "pick an Official Statement PDF first."; return; }
+    const msg = document.getElementById("loadMsg");
+    if (!f) { msg.textContent = "pick an Official Statement PDF first, or use Load from folder."; return; }
     msg.textContent = "extracting " + f.name + " …";
     const fd = new FormData();
     fd.append("file", f);
@@ -267,20 +770,20 @@
     if (issuer) url += "?issuer=" + encodeURIComponent(issuer);
     try {
       const s = await (await fetch(url, { method: "POST", body: fd })).json();
-      if (!s.ok) { msg.innerHTML = '<span style="color:var(--down)">failed: ' + esc(s.error || "extraction error") + '</span>'; return; }
-      msg.innerHTML = `<span style="color:var(--up)">${s.pages} pages · ${s.indexed} bonds indexed · ${s.quarantined} quarantined · method ${esc(s.method)} · confidence ${num(s.confidence,2)}</span>`;
-      // reload the table for whatever CUSIP-6 was just extracted (search by issuer prefix is up to the user)
-      if (s.indexed > 0) document.getElementById("q").focus();
+      renderLoadResults([s]);
+      msg.innerHTML = s.ok
+        ? `<span style="color:var(--up)">${s.indexed} bonds saved to the DB + index.</span>`
+        : `<span style="color:var(--down)">failed: ${esc(s.error || "extraction error")}</span>`;
+      await refreshStore();
+      go(0);   // refresh the browser list in place (loadRecent was removed with the old table)
+      loadCoverage();   // a just-loaded issuer drops off the to-do list straight away
+      loadReadiness();  // and the OAS preconditions move with it, in the same breath
     } catch (e) { msg.innerHTML = '<span style="color:var(--down)">upload error</span>'; }
   }
 
-  document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") search("issuer"); });
-  loadIssuers();
-  loadSources(); setInterval(loadSources, 30000);
-  loadTranscripts(); setInterval(loadTranscripts, 8000);
-  loadLeads(); setInterval(loadLeads, 15000);
-  // No default query — the table is empty until real bonds are ingested (no illustrative data on open).
-  document.getElementById("bondTable").textContent = "no bonds loaded yet — ingest real bonds via the EMMA / Open-Data connectors on the Pi.";
+  document.getElementById("q").addEventListener("keydown", e => { if (e.key === "Enter") go(0); });
+  refreshStore(); setInterval(refreshStore, 5000);
+  go(0);
 </script>
 </body>
 </html>

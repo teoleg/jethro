@@ -23,6 +23,9 @@ gets an ADR here **before** implementation; accepted ADRs are settled and supers
 | [0013](0013-lmdb-btree-search-index.md) | LMDB B-tree search-index layer (derived, ordered-key search) | Accepted |
 | [0014](0014-broadcast-audio-capture-and-transcription.md) | Broadcast-audio capture and transcription as a soft-signal source | Accepted |
 | [0015](0015-emma-official-statement-term-extraction.md) | EMMA Official Statement term extraction — the flagship data pipeline | Accepted |
+| [0016](0016-fund-holdings-nport-cusip-source.md) | SEC N-PORT fund holdings as the bulk CUSIP source | Accepted |
+| [0017](0017-benchmark-curve-and-rate-volatility.md) | Benchmark curve and rate volatility from free official sources | Accepted |
+| [0018](0018-bdt-lattice-and-oas.md) | BDT lattice and the first OAS calculation | Accepted |
 
 ## Reading order
 
@@ -37,3 +40,7 @@ under jethro's AI guardrails. Analytics (OAS on callable munis) is the deferred 
 in 0006 is built to serve it, and 0012 governs the LLM assistance around it. **0014** adds a new source
 **modality** — broadcast-audio capture + local transcription — feeding the same pipeline as a *soft signal*:
 a transcript is a **lead to verify**, never a number (invariant 7 / ADR-0011 inherited).
+
+**0017** closes the last gap between *data* and *analytics*: the benchmark curve and the rate volatility a lattice needs, which no Official Statement can supply because they are properties of the market, not of a bond. Both come from ONE free official file — the Federal Reserve's own daily zero-coupon Treasury curve (GSW / FEDS 2006-28) — so the paid AAA-muni curve and the paid implied-vol surface are both routed around: the curve is ingested, the volatility is **measured** from its history rather than assumed, and OAS is reported across a p10/p50/p90 vol band so the assumption is never hidden inside a single number.
+
+**0018** is the arrival: the BDT lattice + OAS solver the whole data platform was built to feed — calibrated exactly to the 0017 curve as-of each price's own date, σ entering as the measured band, refusal a first-class output, and the taxable-Treasury basis stated on every number until the muni-ratio leg is measurable.

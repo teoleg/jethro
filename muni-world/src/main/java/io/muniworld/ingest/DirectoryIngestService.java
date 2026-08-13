@@ -88,7 +88,7 @@ public final class DirectoryIngestService {
         } catch (IOException e) {
             log.warn("failed to load {}: {}", name, e.toString());
             return new OfficialStatementExtractor.Summary("file:" + name, null, 0, "read-failed",
-                    0, 0, 0, 0, 0.0, false, e.getMessage());
+                    0, 0, 0, 0, 0.0, false, e.getMessage(), null, null);
         }
     }
 
