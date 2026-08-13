@@ -45,7 +45,12 @@ public final class GswCurveIngest {
             new BigDecimal("7"), new BigDecimal("10"), new BigDecimal("15"), new BigDecimal("20"),
             new BigDecimal("30"));
 
-    /** The vol is measured on the shortest published GSW tenor — the Fed does not fit below one year. */
+    /**
+     * The vol is measured on the GSW 1Y zero. The lattice wants SHORT-rate vol and 1Y is the shortest
+     * tenor the Fed fits — a constrained pick, but still a pick (Tier J, docs/model-assumptions.md): a
+     * longer proxy would measure lower sigma and raise OAS on callables. The series name travels inside
+     * every stored vol row, so the choice is never invisible.
+     */
     private static final BigDecimal VOL_TENOR = new BigDecimal("1");
     private static final String VOL_SERIES = SOURCE + ":1Y";
 

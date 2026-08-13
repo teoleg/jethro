@@ -232,11 +232,15 @@
           <td class="mono" style="color:${n > 0 ? "var(--up)" : "var(--warn)"}">${Number(n).toLocaleString()}</td>
           <td class="mono">${pct(n)}%</td></tr>`;
       const ready = r.modelableCallable || 0;
+      // 20 is a WORKING FIGURE (enough bonds to validate a lattice against — tens, not thousands), not a
+      // statistical rule; it is registered as such in docs/model-assumptions.md.
       const verdict = ready >= 20
         ? `<b style="color:var(--up)">Yes — ${ready} callable bonds have terms, a price and a call schedule.</b>
-           That is enough to build and validate a lattice: a first OAS run wants tens of bonds, not thousands.`
+           That is enough to build and validate a lattice: a first OAS run wants tens of bonds, not thousands
+           <span style="font-size:10px">(20 is a working figure, not a rule)</span>.`
         : `<b style="color:var(--warn)">Not yet — ${ready} callable bonds are fully specified.</b>
-           Load a few more Official Statements from the coverage plan; each one lands a whole series.`;
+           Load a few more Official Statements from the coverage plan; each one lands a whole series.
+           <span style="font-size:10px">(The "enough" line of ${20} is a working figure, not a rule.)</span>`;
       el.innerHTML = `<div style="margin-bottom:8px">${verdict}</div>
         <div style="overflow-x:auto"><table class="tbl"><thead><tr>
           <th>Precondition</th><th>Bonds</th><th>Share</th></tr></thead><tbody>

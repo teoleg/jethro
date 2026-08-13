@@ -172,6 +172,8 @@ public class OasService {
                 "price treated as CLEAN (fund fair-value practice); N-PORT does not state accrued handling",
                 "coupons semiannual fixed; steps ACT/365.25, landing exactly on maturity",
                 "call: American on/after the OS call date, issuer minimises value",
+                "OAS solved within ±1,000bp; a price outside returns unsolvable, never a clamped fit — "
+                + "every constant is registered in docs/model-assumptions.md",
                 "BASIS: taxable Treasury — tax-exempt bonds typically show NEGATIVE OAS on this basis; "
                 + "rank bonds against each other, do not read absolute cheapness until the muni-ratio "
                 + "leg is measured (ADR-0017 §2)"));

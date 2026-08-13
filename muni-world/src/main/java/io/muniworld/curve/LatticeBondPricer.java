@@ -17,7 +17,12 @@ package io.muniworld.curve;
  */
 public final class LatticeBondPricer {
 
-    /** OAS solve bounds: ±1,000bp as a continuous spread. A price outside this range is reported, not fit. */
+    /**
+     * OAS solve bounds: ±1,000bp as a continuous spread. An implementer-chosen range (Tier J,
+     * docs/model-assumptions.md): wide enough for any performing muni, and a price outside it returns
+     * "unsolvable" — reported, never clamped to a bound and presented as a fit. Widening the range only
+     * changes which marks get an answer instead of a refusal; it never changes a solved value.
+     */
     public static final double MAX_SPREAD = 0.10;
 
     private LatticeBondPricer() {
