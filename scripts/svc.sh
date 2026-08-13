@@ -13,6 +13,8 @@
 #   scripts/svc.sh stop tv            # turn capture OFF (muni-world keeps running)
 #   scripts/svc.sh status tv          # capture flags + recent leads
 #   scripts/svc.sh backup muni        # dump the muni schema + the OS PDFs to backups/
+#   scripts/svc.sh stop trading       # focus mode: loop + app + ollama + redpanda OFF; postgres + muni stay
+#   scripts/svc.sh start trading      # undo it exactly, incl. the loop's original cron line
 #   scripts/svc.sh status             # what's up
 #
 # Targets: app | muni | tv | ollama | postgres | redpanda | infra (the 3 containers) | all  (default: all)
@@ -54,6 +56,47 @@ set_env_kv() {
     echo "${k}=${v}" >> "$ENV_FILE"
   fi
   echo "==> set ${k}=${v} in $ENV_FILE"
+}
+
+# --- trading pause/resume: everything HEAVY off, muni-world + Postgres untouched, and every piece of
+# state needed to come back is saved first. "stop trading" = improvement loop + app JVM + ollama +
+# redpanda; "start trading" reverses it exactly, including the loop's ORIGINAL cron line (schedule,
+# JETHRO_DEPLOY_CMD, PATH — loop-control.sh off deletes it, so it is snapshotted here first; re-enabling
+# by hand would silently rebuild it from whatever env the shell happens to have).
+CRON_SNAP="logs/improve-loop.cron.saved"
+trading_stop() {
+  mkdir -p logs
+  # Snapshot the exact loop line BEFORE removing it. An empty snapshot is meaningful: loop was already
+  # OFF, and resume must leave it off rather than inventing an enable.
+  crontab -l 2>/dev/null | grep -F '# jethro-improve-loop' > "$CRON_SNAP" || true
+  if [ -s "$CRON_SNAP" ]; then
+    echo "==> saved improvement-loop cron line → $CRON_SNAP"
+  else
+    echo "==> improvement loop already OFF (empty snapshot — resume will leave it off)"
+  fi
+  ops/loop-control.sh off || true
+  ./scripts/backup-db.sh || true          # full dump (jethro + muni schemas) before anything stops
+  ./scripts/backup-muni.sh || true        # plus the OS PDFs — they exist nowhere else
+  app_stop
+  docker compose stop ollama redpanda
+  echo "==> trading paused. Still up: postgres (muni-world's only dependency)$(muni_running && echo ', muni-world' || true)."
+  echo "==> bring it all back with: scripts/svc.sh start trading"
+}
+trading_start() {
+  docker compose up -d ollama redpanda postgres
+  app_start
+  if [ -s "$CRON_SNAP" ]; then
+    # Restore the loop line VERBATIM — same schedule, same deploy command, same PATH. The inner
+    # `|| true` matters: on an empty crontab the grep exits 1 and set -e would kill the brace group
+    # BEFORE cat runs — the restore would silently write nothing (caught by the dry-run harness).
+    { crontab -l 2>/dev/null | grep -vF '# jethro-improve-loop' || true; cat "$CRON_SNAP"; } \
+      | grep -v '^$' | crontab -
+    echo "==> improvement loop restored from $CRON_SNAP:"
+    sed 's/^/    /' "$CRON_SNAP"
+  else
+    echo "==> improvement loop was OFF when trading was paused — leaving it OFF"
+    echo "    (enable manually if wanted: JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' ops/loop-control.sh on)"
+  fi
 }
 
 app_running() { [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null || echo 0)" 2>/dev/null; }
@@ -178,6 +221,11 @@ case "$ACTION:$TARGET" in
     muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
     echo "TV capture flag: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} (see 'svc.sh status tv')" ;;
 
+  # trading pause/resume — heavy stuff off (loop + app + ollama + redpanda), postgres + muni untouched,
+  # backups taken and the loop's cron line snapshotted first so resume restores it verbatim.
+  stop:trading)  trading_stop ;;
+  start:trading) trading_start ;;
+
   stop:app)      ./scripts/backup-db.sh || true; app_stop ;;
   start:app)     app_start ;;
   restart:app)   app_stop; app_start ;;                         # DB stays up; no dump needed
@@ -218,6 +266,6 @@ case "$ACTION:$TARGET" in
   start:ollama|start:postgres|start:redpanda)       docker compose up -d "$TARGET" ;;
   restart:ollama|restart:postgres|restart:redpanda) docker compose restart "$TARGET" ;;
 
-  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|setup|status|backup> [app|muni|tv|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
+  *) echo "usage: scripts/svc.sh <start|stop|restart|deploy|setup|status|backup> [app|muni|tv|trading|ollama|postgres|redpanda|infra|all]"; exit 1 ;;
 esac
 echo "==> done."
