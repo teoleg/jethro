@@ -481,8 +481,12 @@ public class SecurityRepository {   // non-final: @Repository beans are CGLIB-pr
             return List.of();
         }
         String where = query == null || query.isBlank() ? "" : " WHERE cusip ILIKE ? OR issuer ILIKE ? ";
+        // The cusip tiebreaker makes paging DETERMINISTIC: LIMIT/OFFSET over a non-unique sort key lets
+        // the DB reshuffle equal rows between pages, silently duplicating some bonds and dropping others
+        // as the user pages — exactly the kind of quiet data corruption a browser must not have.
         String sql = "SELECT * FROM muni.security" + where
-                + " ORDER BY " + sortColumn + (asc ? " ASC" : " DESC") + " NULLS LAST LIMIT ? OFFSET ?";
+                + " ORDER BY " + sortColumn + (asc ? " ASC" : " DESC")
+                + " NULLS LAST, cusip LIMIT ? OFFSET ?";
         try {
             if (where.isEmpty()) {
                 return jdbc.query(sql, DETAILED, limit, offset);

@@ -114,6 +114,12 @@ public final class MuniBondService {
             case "issuer" -> "issuer";
             case "coupon" -> "coupon";
             case "maturity" -> "maturity_date";
+            // Call-knowledge rank (descending = most-documented first): a stated call schedule, then an
+            // OS-confirmed non-callable, then the call-UNKNOWN mass. Still a fixed string from this closed
+            // set — no request text reaches SQL — and it is the browser's DEFAULT sort, because the bonds
+            // worth reading first among 5k are the ones whose option is actually known (the OAS-ready set).
+            case "call" -> "(CASE WHEN call_date IS NOT NULL THEN 3"
+                    + " WHEN source_id IS NOT NULL THEN 2 ELSE 1 END)";
             default -> "updated_at";
         };
     }

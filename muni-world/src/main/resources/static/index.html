@@ -467,15 +467,27 @@
   }
 
   // --- the bond browser: server-side page/sort/filter, so thousands of securities stay navigable ---
-  let PAGE = 0, SORT = "updated_at", ASC = false, TOTAL = null;
+  // Default sort = call-knowledge rank, best-documented first: among 5k bonds the readable ones are the
+  // few dozen whose option is actually KNOWN (call schedule or confirmed non-callable) — the OAS-ready set.
+  let PAGE = 0, SORT = "call", ASC = false, TOTAL = null;
 
   // sort key → column label. The key is what the API takes; the DB maps it through a whitelist.
-  const SORTABLE = { cusip: "CUSIP", issuer: "Issuer", maturity: "Maturity" };
+  const SORTABLE = { cusip: "CUSIP", issuer: "Issuer", maturity: "Maturity", call: "Call" };
 
   function sortBy(key) {
-    ASC = (SORT === key) ? !ASC : true;   // same header toggles direction; a new one starts ascending
+    // Same header toggles direction. A NEW header starts ascending — except "call", whose natural first
+    // view is descending (documented bonds first; ascending would surface the 5k unknowns).
+    ASC = (SORT === key) ? !ASC : key !== "call";
     SORT = key;
     go(0);
+  }
+
+  /** The list-level call marker: the finder must show WHICH bonds are documented without a click each. */
+  function callBadge(r) {
+    // List shows the call DATE only — the strike and its provenance live in the detail panel.
+    if (r.callState === "CALLABLE") { return `<span style="color:var(--up)">${esc(String(r.call).split(" @")[0])}</span>`; }
+    if (r.callState === "NON_CALLABLE") { return '<span style="color:var(--dim)">n/c</span>'; }
+    return '<span style="color:var(--dim);opacity:.45">?</span>';
   }
 
   function renderBonds(rows) {
@@ -489,13 +501,14 @@
     }
     // Slim finder columns only — everything else lives in the detail panel on the right. The credit
     // badges stay: a default must be visible from the LIST, not only after a click.
-    const head = ["cusip", "issuer", "maturity"].map(k =>
+    const head = ["cusip", "issuer", "maturity", "call"].map(k =>
         `<th style="cursor:pointer" onclick="sortBy('${k}')">${SORTABLE[k]}${SORT === k ? (ASC ? " ▲" : " ▼") : ""}</th>`).join("");
     el.innerHTML = '<table class="tbl"><thead><tr>' + head + "</tr></thead><tbody>"
       + rows.map(r => `<tr id="row-${esc(r.cusip)}" style="cursor:pointer" onclick="showDetail('${esc(r.cusip)}')">
           <td class="mono" style="color:var(--txt)">${esc(r.cusip)}</td>
           <td style="white-space:normal">${esc(r.issuer)}${r.inDefault ? ' <b style="color:var(--down);font-size:10px">IN DEFAULT</b>' : ''}${r.intArrears ? ' <b style="color:var(--warn);font-size:10px">ARREARS</b>' : ''}</td>
           <td class="mono">${esc(r.maturity)}</td>
+          <td class="mono">${callBadge(r)}</td>
         </tr>`).join("") + "</tbody></table>";
     // Keep the panel in step with the list: restore the highlight, or select the first row so the
     // right panel is never a stale bond from a previous page.
