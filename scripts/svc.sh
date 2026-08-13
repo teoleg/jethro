@@ -13,7 +13,7 @@
 #   scripts/svc.sh stop tv            # turn capture OFF (muni-world keeps running)
 #   scripts/svc.sh status tv          # capture flags + recent leads
 #   scripts/svc.sh backup muni        # dump the muni schema + the OS PDFs to backups/
-#   scripts/svc.sh stop trading       # focus mode: loop + app + ollama + redpanda OFF; postgres + muni stay
+#   scripts/svc.sh stop trading       # focus mode: improvement loop + ollama OFF; the APP KEEPS RUNNING
 #   scripts/svc.sh start trading      # undo it exactly, incl. the loop's original cron line
 #   scripts/svc.sh status             # what's up
 #
@@ -58,11 +58,16 @@ set_env_kv() {
   echo "==> set ${k}=${v} in $ENV_FILE"
 }
 
-# --- trading pause/resume: everything HEAVY off, muni-world + Postgres untouched, and every piece of
-# state needed to come back is saved first. "stop trading" = improvement loop + app JVM + ollama +
-# redpanda; "start trading" reverses it exactly, including the loop's ORIGINAL cron line (schedule,
-# JETHRO_DEPLOY_CMD, PATH — loop-control.sh off deletes it, so it is snapshotted here first; re-enabling
-# by hand would silently rebuild it from whatever env the shell happens to have).
+# --- focus mode: the HEAVY background pieces off, the running platform untouched. "stop trading" =
+# improvement loop (a full build+boot cycle every 30 min — the CPU hog) + ollama (the RAM hog). The
+# app JVM — jethro's main service — KEEPS RUNNING, and so does redpanda, because the app's cross-domain
+# flow rides its topics (stopping the broker under a live app breaks it). Ollama down under a live app
+# is safe by design: the ADR-0016 circuit breaker opens after consecutive failures and the model is
+# advisory-only — risk guardrails are deterministic and never wait on it.
+#
+# Every piece of state needed to come back is saved FIRST, including the loop's ORIGINAL cron line
+# (schedule, JETHRO_DEPLOY_CMD, PATH — loop-control.sh off deletes it; re-enabling by hand would
+# silently rebuild it from whatever env the shell happens to have).
 CRON_SNAP="logs/improve-loop.cron.saved"
 trading_stop() {
   mkdir -p logs
@@ -75,16 +80,17 @@ trading_stop() {
     echo "==> improvement loop already OFF (empty snapshot — resume will leave it off)"
   fi
   ops/loop-control.sh off || true
-  ./scripts/backup-db.sh || true          # full dump (jethro + muni schemas) before anything stops
+  ./scripts/backup-db.sh || true          # full dump (jethro + muni schemas) — cheap insurance
   ./scripts/backup-muni.sh || true        # plus the OS PDFs — they exist nowhere else
-  app_stop
-  docker compose stop ollama redpanda
-  echo "==> trading paused. Still up: postgres (muni-world's only dependency)$(muni_running && echo ', muni-world' || true)."
+  docker compose stop ollama
+  echo "==> heavy background OFF: improvement loop + ollama."
+  echo "==> UNTOUCHED: app (jethro's main service), redpanda, postgres$(muni_running && echo ', muni-world' || true)."
+  echo "==> app note: SLM narration/triage degrades while ollama is down (circuit breaker opens);"
+  echo "    trading logic and risk guardrails are deterministic and unaffected."
   echo "==> bring it all back with: scripts/svc.sh start trading"
 }
 trading_start() {
-  docker compose up -d ollama redpanda postgres
-  app_start
+  docker compose up -d ollama
   if [ -s "$CRON_SNAP" ]; then
     # Restore the loop line VERBATIM — same schedule, same deploy command, same PATH. The inner
     # `|| true` matters: on an empty crontab the grep exits 1 and set -e would kill the brace group
@@ -96,6 +102,15 @@ trading_start() {
   else
     echo "==> improvement loop was OFF when trading was paused — leaving it OFF"
     echo "    (enable manually if wanted: JETHRO_DEPLOY_CMD='scripts/svc.sh deploy app' ops/loop-control.sh on)"
+  fi
+  # The app never stopped in focus mode — but if it happens to be down (stopped by hand, crashed),
+  # resuming trading should bring the whole stack back, not assume.
+  if app_running; then
+    echo "==> app already running (pid $(cat "$PIDFILE")) — left as-is"
+  else
+    echo "==> app is not running — starting it"
+    docker compose up -d redpanda postgres
+    app_start
   fi
 }
 
@@ -221,8 +236,9 @@ case "$ACTION:$TARGET" in
     muni_running && echo "muni-world: RUNNING (pid $(cat "$MUNI_PIDFILE"))" || echo "muni-world: stopped"
     echo "TV capture flag: MUNI_AUDIO_CAPTURE=${MUNI_AUDIO_CAPTURE:-false} (see 'svc.sh status tv')" ;;
 
-  # trading pause/resume — heavy stuff off (loop + app + ollama + redpanda), postgres + muni untouched,
-  # backups taken and the loop's cron line snapshotted first so resume restores it verbatim.
+  # focus mode — heavy background off (improvement loop + ollama); the app, redpanda, postgres and
+  # muni-world all keep running. Backups taken and the loop's cron line snapshotted first so resume
+  # restores it verbatim.
   stop:trading)  trading_stop ;;
   start:trading) trading_start ;;
 
