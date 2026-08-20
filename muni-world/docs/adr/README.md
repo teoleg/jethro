@@ -28,6 +28,7 @@ gets an ADR here **before** implementation; accepted ADRs are settled and supers
 | [0018](0018-bdt-lattice-and-oas.md) | BDT lattice and the first OAS calculation | Accepted |
 | [0019](0019-quantlib-as-validation-oracle.md) | QuantLib as the validation oracle; own engine stays the runtime | Accepted |
 | [0020](0020-benchmark-curve-validation.md) | Benchmark curve validation and the assumption ledger | Accepted |
+| [0021](0021-aws-deployment.md) | AWS deployment: own stack, own node, own pipeline | Accepted |
 
 ## Reading order
 
