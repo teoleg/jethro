@@ -12,17 +12,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Bucket: explicit env wins; else the stack's SSM parameter (the canonical location).
+# Bucket by convention (muni ADR-0021): muni-world-backups-<account-id>, created by the deploy
+# workflow. Explicit env override wins.
 BUCKET="${MUNI_BACKUP_BUCKET:-}"
 if [ -z "$BUCKET" ]; then
-  BUCKET="$(aws ssm get-parameter --name /muni/prod/MUNI_BACKUP_BUCKET \
-            --query Parameter.Value --output text 2>/dev/null || true)"
+  ACCOUNT="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || true)"
+  [ -n "$ACCOUNT" ] || { echo "ERROR: aws credentials not configured on this machine"; exit 1; }
+  BUCKET="muni-world-backups-$ACCOUNT"
 fi
-if [ -z "$BUCKET" ] || [ "$BUCKET" = "None" ]; then
-  echo "ERROR: no bucket. Deploy the MuniWorld stack first (it writes /muni/prod/MUNI_BACKUP_BUCKET),"
-  echo "       or pass MUNI_BACKUP_BUCKET=<name> explicitly."
+aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null || {
+  echo "ERROR: bucket $BUCKET not found — run the Muni Deploy workflow once first (it creates it)."
   exit 1
-fi
+}
 
 echo "==> Taking a fresh local muni backup"
 ./scripts/backup-muni.sh

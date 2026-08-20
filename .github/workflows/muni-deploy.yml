@@ -1,55 +1,52 @@
 name: Muni Deploy
 
-# muni-world's OWN deploy pipeline (muni ADR-0021) — fully separate from Deploy (the trading
-# platform): its own ECR repo, its own EC2 node, its own OIDC role (muni-world-deploy: can push
-# only the muni image and command only the muni instance), its own concurrency group.
+# muni-world's pipeline on the SAME rails as the WORKING jethro path (bake.yml/launch.yml):
+# static AWS keys from the EXISTING repo secrets, hardcoded region, Packer bakes an AMI with the
+# whole stack, run-instances replaces the node. No CDK, no OIDC, nothing to pre-provision by hand
+# — the workflow idempotently ensures the few AWS pieces it needs (backup bucket, instance
+# role/profile, security group).
 #
-# TWO ways in (owner directive — continuous deployment for muni):
-#   * AUTO: every push to the muni branch that touches muni-world runs the full test suite and,
-#     ONLY on green, deploys that exact commit to AWS. The deploy job additionally skips cleanly
-#     while the infra doesn't exist yet (no MUNI_EC2_INSTANCE_ID variable set).
-#   * MANUAL: workflow_dispatch stays for redeploys of any ref / single components.
+# AUTO on every green push to the muni branch (owner directive: only the data load is manual),
+# plus manual dispatch. Unlike jethro's stateless node, muni has a DATABASE: the old node is
+# backed up to S3 before it is replaced, and the AMI's boot step seeds a fresh instance from the
+# newest backup — state survives every deploy.
+#
+# Repo variables (Settings -> Variables), both optional-ish:
+#   MUNI_ALLOWED_CIDR   REQUIRED for first launch: who may reach :8090 (e.g. 203.0.113.7/32 —
+#                       your IP; the SG is the access control, same posture as jethro's node)
+#   MUNI_CONTACT_EMAIL  SEC fair-access contact baked into the AMI env (sec.gov 403s without it)
+#   MUNI_EIP_ALLOC_ID   optional eipalloc-... for a stable IP across replacements
 on:
   push:
     branches: [claude/muni-world-aws-deploy]
-    paths:
-      - "muni-world/**"
-      - ".github/workflows/muni-deploy.yml"
+    paths: ["muni-world/**", ".github/workflows/muni-deploy.yml"]
   workflow_dispatch:
     inputs:
-      component:
-        description: Which component(s) to deploy
+      instance_type:
+        description: Runtime instance type
         type: choice
-        default: all
-        options: [all, muni, postgres, caddy]
+        default: t3a.small
+        options: [t3a.small, t3a.medium, t3.small]
       ref:
-        description: Git ref to deploy (branch, tag or SHA)
+        description: Git ref to bake + deploy
         type: string
-        default: master
+        default: claude/muni-world-aws-deploy
 
 concurrency:
-  group: muni-deploy-prod       # never two overlapping deploys to the muni node
+  group: muni-deploy
   cancel-in-progress: false
 
-permissions:
-  id-token: write               # OIDC federation to AWS
-  contents: read
-
 env:
-  # ZERO muni-only GitHub configuration (owner directive: the jethro setup was configured once and
-  # is THE config). AWS_REGION and AWS_DEPLOY_ROLE_ARN are jethro's existing variables — the
-  # MuniWorld stack additively grants that same role the muni permissions. The muni node is found
-  # AT DEPLOY TIME by its project=muni-world tag, so no instance-id variable exists at all.
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  MUNI_ECR_REPOSITORY: muni-world
-  MUNI_SSM_PREFIX: /muni/prod
-  # push event → the pushed commit; manual dispatch → the chosen ref/component.
+  # Same hardcoded region as the jethro bake (edit this one line to change it).
+  AWS_REGION: us-east-2
   DEPLOY_REF: ${{ inputs.ref || github.sha }}
-  DEPLOY_COMPONENT: ${{ inputs.component || 'all' }}
+  # t3a.small (2 vCPU / 2GiB, ~$14/mo on-demand — AWS's published rate; the SIZE is the owner's
+  # dial via manual dispatch). x86 to stay on the exact AMI path jethro proved.
+  INSTANCE_TYPE: ${{ inputs.instance_type || 't3a.small' }}
 
 jobs:
-  # The GATE: nothing deploys unless the whole muni test suite is green on this exact commit —
-  # the lattice identities, the QuantLib cross-validation, the curve-validation gates, all of it.
+  # THE GATE: nothing bakes unless the whole muni suite is green on this exact commit —
+  # lattice identities, QuantLib cross-validation, curve-validation gates, all of it.
   test:
     name: Test muni-world
     runs-on: ubuntu-latest
@@ -66,118 +63,121 @@ jobs:
       - name: Run the muni-world test suite
         run: ./gradlew :muni-world:test -Pci --no-daemon
 
-  # Find the muni node by tag — no stored instance id. Empty result = infra not stood up yet:
-  # the deploy job then SKIPS cleanly (tests still gate every commit).
-  resolve:
-    name: Find the muni node
+  bake-and-deploy:
+    name: Bake AMI + replace node
     needs: test
     runs-on: ubuntu-latest
-    outputs:
-      instance_id: ${{ steps.find.outputs.id }}
-    steps:
-      - name: Configure AWS credentials (OIDC, jethro's existing role)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Locate instance tagged project=muni-world
-        id: find
-        run: |
-          ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:project,Values=muni-world" \
-                      "Name=instance-state-name,Values=running,stopped,pending" \
-            --query 'Reservations[].Instances[].InstanceId | [0]' --output text)
-          if [ "$ID" = "None" ] || [ -z "$ID" ]; then
-            echo "No muni-world instance found — stack not deployed yet; deploy will skip."
-            echo "id=" >> "$GITHUB_OUTPUT"
-          else
-            echo "Found muni node: $ID"
-            echo "id=$ID" >> "$GITHUB_OUTPUT"
-          fi
-
-  deploy:
-    name: Build + deploy muni-world (${{ inputs.component || 'all' }})
-    needs: resolve
-    if: ${{ needs.resolve.outputs.instance_id != '' }}
-    runs-on: ubuntu-latest
-    env:
-      MUNI_EC2_INSTANCE_ID: ${{ needs.resolve.outputs.instance_id }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.DEPLOY_REF }}
 
-      - name: Resolve image tag
-        id: img
-        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Configure AWS credentials (OIDC, jethro's existing role)
+      - name: Configure AWS credentials (same secrets as the jethro bake)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Log in to Amazon ECR
-        id: ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      # Build the jar NATIVELY on the runner, then wrap it in a thin arm64 JRE image — the
-      # Dockerfile only COPIES the jar, so nothing compiles under QEMU emulation.
-      - name: Set up JDK 21
-        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "21"
-
-      - name: Build muni-world jar
-        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
-        run: ./gradlew :muni-world:bootJar -Pci --no-daemon
-
-      - name: Set up Docker Buildx (arm64)
-        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
-        uses: docker/setup-buildx-action@v3
-
-      - name: Set up QEMU for arm64
-        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
-        uses: docker/setup-qemu-action@v3
-
-      - name: Build and push muni-world image (linux/arm64)
-        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
+      # Idempotent: bucket (versioned), node role+instance profile (SSM + that bucket), SG.
+      - name: Ensure AWS prerequisites
         env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          ALLOWED_CIDR: ${{ vars.MUNI_ALLOWED_CIDR }}
         run: |
-          IMAGE="$REGISTRY/${MUNI_ECR_REPOSITORY}:${{ steps.img.outputs.sha }}"
-          docker buildx build --platform linux/arm64 --push \
-            -t "$IMAGE" -f muni-world/deploy/Dockerfile muni-world/
-          echo "MUNI_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          set -euo pipefail
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="muni-world-backups-$ACCOUNT"
+          if ! aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null; then
+            aws s3api create-bucket --bucket "$BUCKET" \
+              --create-bucket-configuration LocationConstraint="$AWS_REGION"
+            aws s3api put-bucket-versioning --bucket "$BUCKET" \
+              --versioning-configuration Status=Enabled
+            aws s3api put-public-access-block --bucket "$BUCKET" --public-access-block-configuration \
+              BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+            echo "created versioned bucket $BUCKET"
+          fi
+          if ! aws iam get-role --role-name muni-world-node >/dev/null 2>&1; then
+            aws iam create-role --role-name muni-world-node --assume-role-policy-document '{
+              "Version":"2012-10-17","Statement":[{"Effect":"Allow",
+              "Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
+            aws iam attach-role-policy --role-name muni-world-node \
+              --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+            aws iam put-role-policy --role-name muni-world-node --policy-name muni-backups \
+              --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[
+                {\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:ListBucket\",\"s3:GetBucketLocation\"],
+                 \"Resource\":[\"arn:aws:s3:::$BUCKET\",\"arn:aws:s3:::$BUCKET/*\"]}]}"
+            aws iam create-instance-profile --instance-profile-name muni-world-node
+            aws iam add-role-to-instance-profile --instance-profile-name muni-world-node \
+              --role-name muni-world-node
+            echo "created role + instance profile muni-world-node"; sleep 10
+          fi
+          SG=$(aws ec2 describe-security-groups --filters Name=group-name,Values=muni-world-sg \
+               --query 'SecurityGroups[0].GroupId' --output text)
+          if [ "$SG" = "None" ] || [ -z "$SG" ]; then
+            [ -n "$ALLOWED_CIDR" ] || { echo "::error::set the MUNI_ALLOWED_CIDR repo variable (your IP, e.g. 203.0.113.7/32) — the SG is the access control"; exit 1; }
+            SG=$(aws ec2 create-security-group --group-name muni-world-sg \
+                 --description "muni-world :8090, owner IP only" \
+                 --query GroupId --output text)
+            aws ec2 authorize-security-group-ingress --group-id "$SG" \
+              --protocol tcp --port 8090 --cidr "$ALLOWED_CIDR"
+            echo "created SG $SG (8090 from $ALLOWED_CIDR)"
+          fi
+          echo "MUNI_SG_ID=$SG" >> "$GITHUB_ENV"
 
-      - name: Resolve image for infra-only deploy
-        if: ${{ env.DEPLOY_COMPONENT != 'all' && env.DEPLOY_COMPONENT != 'muni' }}
+      - name: Package source
+        run: git archive --format=tar.gz -o muni-world/deploy/packer/muni-src.tgz HEAD
+
+      - uses: hashicorp/setup-packer@v3
+
+      - name: Bake AMI
+        working-directory: muni-world/deploy/packer
         env:
-          REGISTRY: ${{ steps.ecr.outputs.registry }}
-        run: echo "MUNI_IMAGE=$REGISTRY/${MUNI_ECR_REPOSITORY}:${{ steps.img.outputs.sha }}" >> "$GITHUB_ENV"
-
-      - name: Roll out on the muni node via SSM
+          CONTACT: ${{ vars.MUNI_CONTACT_EMAIL }}
         run: |
-          CMD="cd /opt/muni-world \
-            && git fetch origin '${{ env.DEPLOY_REF }}' \
-            && git checkout -f FETCH_HEAD \
-            && AWS_REGION='${AWS_REGION}' MUNI_SSM_PREFIX='${MUNI_SSM_PREFIX}' \
-               bash muni-world/deploy/remote-deploy.sh '${MUNI_IMAGE}' '${DEPLOY_COMPONENT}'"
-          CMD_ID=$(aws ssm send-command \
-            --instance-ids "$MUNI_EC2_INSTANCE_ID" \
-            --document-name AWS-RunShellScript \
-            --comment "muni deploy ${DEPLOY_COMPONENT} @ ${{ steps.img.outputs.sha }}" \
-            --parameters "commands=[\"$CMD\"]" \
-            --cloud-watch-output-config CloudWatchOutputEnabled=true \
-            --query 'Command.CommandId' --output text)
-          echo "SSM command: $CMD_ID"
-          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" || true
-          STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query Status --output text)
-          echo "----- remote stdout -----"
-          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query StandardOutputContent --output text
-          echo "----- remote stderr -----"
-          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query StandardErrorContent --output text
-          echo "SSM status: $STATUS"
-          [ "$STATUS" = "Success" ]
+          packer init .
+          packer build -var region="$AWS_REGION" -var src_archive=muni-src.tgz \
+            -var contact_email="$CONTACT" .
+          AMI=$(python3 -c "import json;print(json.load(open('manifest.json'))['builds'][-1]['artifact_id'].split(':')[1])")
+          echo "AMI_ID=$AMI" >> "$GITHUB_ENV"
+          echo "baked $AMI"
+
+      # State survives the replace: back the old node up (best-effort — first deploy has none).
+      - name: Backup old node before replacing it
+        run: |
+          set -euo pipefail
+          OLD=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=muni-world" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[].Instances[].InstanceId' --output text)
+          echo "OLD_IDS=$OLD" >> "$GITHUB_ENV"
+          for id in $OLD; do
+            echo "pre-replace backup on $id"
+            CMD_ID=$(aws ssm send-command --instance-ids "$id" \
+              --document-name AWS-RunShellScript \
+              --parameters 'commands=["bash /opt/muni-world/muni-world/deploy/backup-to-s3.sh"]' \
+              --query 'Command.CommandId' --output text) || continue
+            aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$id" || true
+          done
+
+      - name: Launch new node, retire old
+        env:
+          EIP_ALLOC: ${{ vars.MUNI_EIP_ALLOC_ID }}
+        run: |
+          set -euo pipefail
+          NEW=$(aws ec2 run-instances \
+            --image-id "$AMI_ID" --instance-type "$INSTANCE_TYPE" \
+            --security-group-ids "$MUNI_SG_ID" \
+            --iam-instance-profile Name=muni-world-node \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=muni-world},{Key=project,Value=muni-world},{Key=service,Value=muni-world}]' \
+            --query 'Instances[0].InstanceId' --output text)
+          echo "launched $NEW; waiting for running"
+          aws ec2 wait instance-running --instance-ids "$NEW"
+          [ -n "${EIP_ALLOC:-}" ] && aws ec2 associate-address --allocation-id "$EIP_ALLOC" --instance-id "$NEW"
+          for id in ${OLD_IDS:-}; do
+            [ "$id" != "$NEW" ] && aws ec2 terminate-instances --instance-ids "$id" >/dev/null \
+              && echo "terminated old $id" || true
+          done
+          IP=$(aws ec2 describe-instances --instance-ids "$NEW" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          echo "### muni-world up: http://${IP}:8090 (instance $NEW)" >> "$GITHUB_STEP_SUMMARY"
+          echo "boot restores the newest S3 backup automatically; give it ~2 minutes."

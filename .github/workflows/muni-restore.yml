@@ -14,37 +14,32 @@ on:
         description: "Backup object key (e.g. migrate/muni-20260813-101500.tar.gz) or latest-migrate"
         type: string
         default: latest-migrate
-      ref:
-        description: Git ref whose restore script to run
-        type: string
-        default: master
-
 concurrency:
   group: muni-deploy-prod       # shares the deploy group — never restore during a deploy
   cancel-in-progress: false
 
 permissions:
-  id-token: write
   contents: read
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_REGION: us-east-2   # same hardcoded region as the muni/jethro bakes
 
 jobs:
   restore:
     name: Restore ${{ inputs.s3_key }} on the muni node
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS credentials (OIDC, jethro's existing role)
+      - name: Configure AWS credentials (same secrets as the jethro bake)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Locate instance tagged project=muni-world
         run: |
           ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:project,Values=muni-world" \
+            --filters "Name=tag:Name,Values=muni-world" \
                       "Name=instance-state-name,Values=running,stopped,pending" \
             --query 'Reservations[].Instances[].InstanceId | [0]' --output text)
           [ "$ID" != "None" ] && [ -n "$ID" ] || { echo "ERROR: no muni-world instance"; exit 1; }
@@ -52,10 +47,8 @@ jobs:
 
       - name: Run restore on the node via SSM
         run: |
-          CMD="cd /opt/muni-world \
-            && git fetch origin '${{ inputs.ref }}' \
-            && git checkout -f FETCH_HEAD \
-            && bash muni-world/deploy/restore-from-s3.sh '${{ inputs.s3_key }}' --yes"
+          # The script is BAKED into the AMI — no git on the node needed.
+          CMD="bash /opt/muni-world/muni-world/deploy/restore-from-s3.sh '${{ inputs.s3_key }}' --yes"
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$MUNI_EC2_INSTANCE_ID" \
             --document-name AWS-RunShellScript \

@@ -1,95 +1,57 @@
-# ADR-0021 — AWS deployment: own stack, own node, own pipeline
+# ADR-0021 — AWS deployment on the proven jethro rails: baked AMI, replaced node, S3-carried state
 
-Status: Accepted (2026-08-13)
+Status: Accepted (2026-08-13). Supersedes this ADR's own first draft (a CDK/OIDC design, built and
+then removed on this same branch): the owner pointed out the deployment path that actually WORKS for
+jethro is the AMI bake (`bake.yml`/`launch.yml` — static repo secrets, hardcoded region, Packer,
+`run-instances`), and the CDK stack + OIDC roles my first draft assumed were never the deployed
+reality. Mirror what works.
 
 ## Context
 
-The owner wants muni-world running in AWS — **only muni-world and its database**, with design, build and
-deployment fully separate from the trading platform's earlier deployment (`JethroDev` stack +
-`deploy.yml`). The two systems already share nothing at runtime (ADR-0001); the deployment must preserve
-that boundary: deploying, breaking, or tearing down one must never touch the other, and their costs must
-be separable lines in billing.
+Only muni-world + its own Postgres in AWS, separate from the trading node, fully automatic except
+the deliberate data load. jethro's working pipeline: GitHub secrets `AWS_ACCESS_KEY_ID`/
+`AWS_SECRET_ACCESS_KEY`, region hardcoded `us-east-2`, Packer bakes the whole compose stack into an
+x86 Ubuntu AMI with a systemd unit, and the workflow `run-instances`-replaces the tagged node behind
+an IP-locked security group. No CDK, no OIDC, no parameter store.
 
-jethro's deployment pattern is proven and fits: a single-node CDK stack (EC2 + compose + Caddy edge),
-ECR for the app image, GitHub OIDC (no static creds), manual `workflow_dispatch` deploys via SSM Run
-Command, secrets in SSM Parameter Store. Reusing the *pattern* while duplicating none of the *resources*
-is the cheapest reliable path.
+One thing muni has that jethro's stateless dev node doesn't: **a database that must survive the
+replace-the-instance deploy style.**
 
 ## Decision
 
-### 1. Separate CloudFormation stack, same CDK app
-
-`MuniWorldStack` lives beside `JethroDevStack` in `infra/` (same tooling, one `cdk deploy MuniWorld`),
-but is an independent stack: its own VPC, node, ECR repo, IAM roles, and S3 bucket. Tags on the stack
-scope override the app-level ones: `project=muni-world` — a **separate FinOps line** (ADR-0011 pattern).
-Destroying either stack leaves the other untouched.
-
-### 2. One small ARM node, ALWAYS ON — a deliberate divergence from ADR-0013
-
-- Default `t4g.small` (2 vCPU / 2 GiB Graviton) + 20 GiB encrypted gp3 root. Approximate on-demand cost
-  ≈ **$12–14/month + ~$1.60 EBS** (owner dial: `-c muniInstanceType=...`; prices are AWS's published
-  on-demand rates, not a chosen number). The workload is one Spring jar (≤512 MiB heap) + Postgres —
-  a fraction of the trading node.
-- **No stop-when-idle schedules.** jethro's node stops nightly (ADR-0013) because it is expensive and
-  session-bound; muni-world's *value is its daily cadence* (curve refresh, fund pass, backfills), and an
-  idle-stopped node silently skips ingests. At ~2% of the trading node's cost, always-on is the right
-  default; the account-wide budget alarm in `JethroDev` (ADR-0011) still covers the account.
-
-### 3. Database: Postgres in compose, durability via S3 — not RDS
-
-Postgres 16 runs as a compose service with a named volume, **its own database (`muni`)** — no shared
-instance, nothing of jethro's on the node. Durability comes from **nightly `pg_dump` + the OS-PDF inbox
-synced to a versioned S3 bucket** (and a backup before every deploy), because the data's real shape says
-so: the N-PORT universe and curve history are re-derivable from public sources; the irreplaceable bytes
-are the hand-fetched OS PDFs and the parsed terms — megabytes, perfectly served by dump+S3. RDS
-(~$15+/month for the smallest useful instance) buys managed failover the workload doesn't need; it stays
-the upgrade path if the DB ever becomes primary-source.
-
-### 4. Edge: Caddy, TLS, basic auth — nothing else listens
-
-Same proven shape as jethro: security group opens 80/443 only (SSM needs no inbound), Caddy terminates
-TLS (ACME) and basic-auth-gates the UI, muni-world's :8090 is never published on the host. The
-coverage/ingest endpoints stay behind that auth wall.
-
-### 5. Secrets and settings: SSM Parameter Store under `/muni/prod/*`
-
-SecureStrings set out-of-band (never in the repo): `POSTGRES_PASSWORD`, `MUNI_BASIC_AUTH_HASH`, and
-`MUNI_CONTACT_EMAIL` (the SEC fair-access contact — kept a secret parameter so the owner's address never
-enters git, same rule as before). Non-secret params (domain, basic-auth user, backup bucket name) are
-created by the stack. `remote-deploy.sh` materialises the whole prefix into `deploy/.env` on the node.
-
-### 6. Build + deploy pipeline: separate workflow, separate role — CONTINUOUS on green
-
-`.github/workflows/muni-deploy.yml` has two ways in (the continuous mode is the owner's direction —
-muni-world is analytics, not the trading book, so the deliberate-manual-only posture jethro's deploy
-keeps is not required here):
-
-- **Auto:** every push to the designated muni branch that touches `muni-world/**` runs the FULL muni
-  test suite (lattice identities, QuantLib cross-validation, curve-validation gates) and, **only on
-  green**, deploys that exact commit. The deploy job skips cleanly while the AWS infra doesn't exist
-  yet (the tag lookup finds no node), so the pipeline is safe on the branch before `cdk deploy`.
-- **Manual:** `workflow_dispatch` stays for redeploying any ref or a single component.
-
-Mechanics in both modes: build `:muni-world:bootJar` natively on the runner, wrap it in a thin
-`linux/arm64` JRE image (the Dockerfile only COPIES the jar — nothing compiles under emulation), push
-to the muni ECR repo, then SSM Run Command on the muni node runs `muni-world/deploy/remote-deploy.sh`
-(backup first, then pull + up, health-gated). **Zero muni-only GitHub configuration** (owner
-directive — the jethro variables were configured once and are THE config): the workflows assume
-jethro's existing `AWS_DEPLOY_ROLE_ARN`, to which this stack ADDITIVELY attaches the muni
-permissions (push the muni image; SendCommand to the muni node; read-only `ec2:DescribeInstances`)
-— JethroDev's template is untouched. The muni node is discovered **at deploy time by its
-`project=muni-world` tag**, so not even an instance-id variable exists; while the stack is not yet
-deployed, the lookup comes back empty and the deploy job skips cleanly (tests still gate every
-commit). The ONLY manual act in steady state is loading the collected data (Muni Restore) — the
-Postgres container, its `muni` database and the whole Flyway schema come up automatically on the
-first deploy.
+1. **Same rails, one new workflow (`muni-deploy.yml`), nothing existing altered.** Same secrets,
+   same region, same Packer→`run-instances` mechanics, x86 `t3a.small` (~$14/mo published on-demand
+   rate; size is a dispatch input). Instance tagged `Name=muni-world`, `project=muni-world` (its own
+   cost line, ADR-0011 pattern).
+2. **Auto on green.** Every push to the muni branch touching `muni-world/**` runs the full test
+   suite (lattice identities, QuantLib cross-validation, curve gates) and only on green bakes the
+   AMI and replaces the node. Manual dispatch remains for re-deploys/instance-type changes.
+3. **The workflow ensures its own AWS prerequisites, idempotently** (with the same admin secrets it
+   already holds): the versioned backup bucket `muni-world-backups-<account>`, the
+   `muni-world-node` role/instance-profile (SSM core + that bucket only), and the `muni-world-sg`
+   security group — created on first run with :8090 open ONLY to `MUNI_ALLOWED_CIDR` (a repo
+   variable = the owner's IP). **The IP-locked SG is the access control, the same posture jethro's
+   working node uses**; no Caddy/TLS layer on this path.
+4. **State survives the replace, automatically.** Before terminating the old node the workflow
+   triggers a backup over SSM (pg_dump + OS-PDF inbox → S3; the same script also runs nightly via a
+   baked timer). The AMI's systemd unit runs `restore-latest.sh` before first start: an EMPTY
+   database is seeded from the newest S3 dump and the newest PDF archive; a database with data is
+   never touched. Fresh account, empty bucket → clean Flyway bootstrap.
+5. **The Pi's data arrives via the same bucket** (`scripts/muni-migrate-to-aws.sh` → the manual
+   `Muni Restore` workflow, which is deliberately destructive: `--yes` required, pre-restore safety
+   dump taken). This is the ONLY manual step in steady state.
+6. **Secrets posture matches the path.** DB credentials are compose defaults inside a box whose only
+   open port is the app's, IP-locked — jethro's working posture. `MUNI_CONTACT_EMAIL` (the SEC
+   fair-access address) is baked from a repo variable into the node's env file, never committed.
 
 ## Consequences
 
-- First-time bring-up is a short runbook (`muni-world/deploy/README.md`): `cdk deploy MuniWorld`, set the
-  three SecureStrings, point DNS at the Elastic IP, run the deploy workflow.
-- The trading platform's `deploy.yml`, stack, ECR repo, IAM roles and node are untouched by any of this.
-- Backup/restore becomes S3-first in AWS (the Pi's `backups/` discipline continues locally); the bucket
-  is versioned and `RETAIN`ed, so even a stack teardown keeps the data.
-- The muni node runs the ingest schedule continuously — the curve stays current daily and quarterly
-  N-PORT filings are picked up within a day, without anyone's laptop being on.
+- Bring-up from a phone: set repo variables `MUNI_ALLOWED_CIDR` (+ optionally `MUNI_CONTACT_EMAIL`,
+  `MUNI_EIP_ALLOC_ID`), run *Muni Deploy*. Everything else — bucket, role, SG, AMI, node, schema,
+  ingests, backups — is automatic.
+- Each deploy replaces the node (immutable AMI), so "what is running" is always exactly one baked,
+  tested commit; the S3 round-trip makes that safe for the DB.
+- Without an Elastic IP the address changes per deploy (the workflow prints it in the run summary);
+  set `MUNI_EIP_ALLOC_ID` for a stable one.
+- If the trading deployment ever moves to the CDK/OIDC design, muni can follow — this ADR's first
+  draft documents that shape — but muni does not lead that migration.

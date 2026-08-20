@@ -1,76 +1,52 @@
 # muni-world on AWS — runbook (muni ADR-0021)
 
-Only muni-world + its own Postgres, on its own node, with its own pipeline. Nothing here touches the
-trading platform's stack, workflows, or node — and vice versa.
+Same rails as the WORKING jethro deployment (bake an AMI, replace the node), same repo secrets,
+same region (`us-east-2`), nothing of jethro's touched. Everything is automatic except loading
+your collected data — and the whole bring-up works from a phone browser.
 
-## What exists after `cdk deploy MuniWorld`
+## Bring-up (one time, all in web UIs)
 
-One CloudFormation stack (`infra/…/MuniWorldStack.java`, tagged `project=muni-world` = its own cost
-line): a `t4g.small` ARM node (Ubuntu 24.04, 20GiB encrypted gp3, Elastic IP, **always on** — muni's
-value is its daily ingest cadence), an ECR repo `muni-world`, a **versioned S3 backup bucket**
-(RETAINed — survives teardown), and the node IAM role (SSM, ECR pull, `/muni/prod/*` params, the bucket). Deploy permissions are
-attached ADDITIVELY to jethro's existing `jethro-deploy` role — no new role, no new GitHub
-variables. Security group: 80/443 only; SSM needs no inbound.
+1. **Repo variables** (GitHub → Settings → Secrets and variables → Actions → *Variables*):
+   - `MUNI_ALLOWED_CIDR` — **required**: who may reach the UI, e.g. `203.0.113.7/32` (your IP —
+     the security group is the access control, same posture as jethro's node). Googling
+     "what is my ip" on the phone gives the address; append `/32`.
+   - `MUNI_CONTACT_EMAIL` — recommended: the SEC fair-access contact (sec.gov 403s EDGAR fetches
+     without it). Baked into the node's env, never committed.
+   - `MUNI_EIP_ALLOC_ID` — optional `eipalloc-…` for a stable IP across deploys (create an
+     Elastic IP in the EC2 console once and paste its allocation id).
+   The AWS secrets (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) **already exist** — jethro's
+   bake uses them.
+2. **Run it**: Actions → *Muni Deploy* → Run workflow (or just push to the muni branch). The
+   workflow tests, then idempotently creates the backup bucket + node role + security group,
+   bakes the AMI (app image + Postgres + systemd units inside), launches the node and prints
+   `http://<ip>:8090` in the run summary. First boot: Flyway builds the schema, the curve and
+   fund ingests start on their own.
 
-On the node (via user-data → `bootstrap.sh`): Docker + compose, the repo at `/opt/muni-world`, a
-systemd unit restoring the stack on reboot, and a nightly backup timer (`backup-to-s3.sh`: pg_dump +
-the OS-PDF inbox → S3; also runs before every deploy).
+## Every deploy after that — automatic
 
-Compose (`docker-compose.aws.yml`): `postgres` (own database `muni`), `muni` (the jar; :8090 never
-published on the host), `caddy` (TLS + basic auth, the only public surface).
+Push to `claude/muni-world-aws-deploy` touching `muni-world/**` → full test suite → on green:
+bake a fresh AMI of that exact commit, **back the old node up to S3 over SSM**, launch the new
+node (its boot seeds the database and OS PDFs from the newest backup), retire the old one. The
+DB survives every deploy; nightly backups run on a baked systemd timer as well.
 
-## First bring-up
-
-```bash
-# 1. Synthesise + deploy the stack (from the repo root; AWS creds configured)
-cd infra && npx cdk deploy MuniWorld
-#    -c muniInstanceType=t4g.small   -c muniGithubBranch=master     # owner dials
-
-# 2. Set the three SecureStrings the stack CANNOT create (secrets never enter git):
-aws ssm put-parameter --type SecureString --name /muni/prod/POSTGRES_PASSWORD    --value '...'
-aws ssm put-parameter --type SecureString --name /muni/prod/MUNI_BASIC_AUTH_HASH --value '<bcrypt>'
-#    bcrypt: docker run --rm caddy:2-alpine caddy hash-password --plaintext 'yourpassword'
-aws ssm put-parameter --type SecureString --name /muni/prod/MUNI_CONTACT_EMAIL   --value 'you@...'
-#    (SEC fair-access contact — sec.gov 403s the EDGAR fetch without it)
-#    private repo? also: /muni/prod/GITHUB_TOKEN
-
-# 3. Point DNS (or use <eip-with-dashes>.nip.io) and set the domain param:
-aws ssm put-parameter --overwrite --name /muni/prod/MUNI_DOMAIN --value 'muni.yourdomain.com'
-
-# 4. GitHub variables: NOTHING TO CREATE. The workflows reuse jethro's existing AWS_REGION and
-#    AWS_DEPLOY_ROLE_ARN (the stack additively grants that role the muni permissions), and the
-#    muni node is found at deploy time by its project=muni-world tag.
-
-# 5. Push to the muni branch (or Actions -> "Muni Deploy" manually) — tests gate, then the whole
-#    stack (Postgres + app + Caddy) comes up by itself; Flyway creates the muni schema on first
-#    boot. The ONLY manual act left afterwards is loading your collected data (next section).
-```
-
-## Moving the data you collected locally (Pi → AWS)
-
-The transfer medium is the S3 bucket, **not git** — a dump + PDFs committed to a branch would sit in
-repo history forever and can exceed GitHub's limits; both ends already have credentials for the bucket.
+## Loading the data from the Pi — the one manual step
 
 ```bash
-# On the Pi (fresh backup + upload; needs the same AWS creds you deploy with):
+# On the Pi (uses your normal AWS credentials; bucket name is found by convention):
 scripts/muni-migrate-to-aws.sh
-
-# Then: Actions -> "Muni Restore" -> Run workflow (s3_key: latest-migrate)
 ```
-
-The restore is deliberately destructive (drops + replaces the `muni` schema, overlays the PDFs into
-`/data/os-inbox/processed`), so: it is manual-only, requires `--yes` on the node script, and takes a
-**pre-restore safety dump to S3 first** — a mistaken restore is reversible. The archive carries its own
-`flyway_schema_history`, so the app boots consistent on the restored state.
+Then: Actions → *Muni Restore* → Run workflow (`s3_key: latest-migrate`). Deliberately manual and
+destructive (drops + replaces the `muni` schema, overlays the PDFs) — it takes a pre-restore
+safety dump to S3 first, so even a mistake is reversible.
 
 ## Day 2
 
-- **Deploy a change — AUTOMATIC:** push to `claude/muni-world-aws-deploy` touching `muni-world/**` →
-  the full test suite runs → **only on green**, that exact commit deploys (backup first, health-gated).
-  The node is found at deploy time by its `project=muni-world` tag; until the stack exists the
-  lookup is empty and the deploy job skips cleanly — only tests run. Manual redeploys of any ref/component: Actions → *Muni Deploy*.
-- **Backups:** nightly timer + pre-deploy, to `s3://<bucket>/db/` and `/os-inbox/`; bucket versioned.
-- **Restore/DR:** *Muni Restore* workflow with any backup key.
-- **Logs:** `aws ssm start-session --target <instance>` then `docker compose ... logs muni`.
-- **Costs:** the `project=muni-world` tag isolates this stack in Cost Explorer; the account-wide
-  budget alarm (JethroDev stack) still covers everything.
+- **Where is it?** The *Muni Deploy* run summary prints the URL; with `MUNI_EIP_ALLOC_ID` set the
+  IP never changes.
+- **Your IP changed?** Update `MUNI_ALLOWED_CIDR` and add the new source to the `muni-world-sg`
+  security group in the EC2 console (or delete the SG and let the next deploy recreate it).
+- **Logs:** EC2 console → instance → Connect → Session Manager →
+  `docker compose -f /opt/muni-world/muni-world/deploy/docker-compose.aws.yml logs muni`.
+- **Backups:** `s3://muni-world-backups-<account>/db/` and `/os-inbox/`, versioned; also taken
+  automatically before every node replacement.
+- **Costs:** everything is tagged `project=muni-world` — its own line in Cost Explorer.
