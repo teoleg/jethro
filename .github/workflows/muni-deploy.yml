@@ -12,8 +12,8 @@ name: Muni Deploy
 # newest backup — state survives every deploy.
 #
 # Repo variables (Settings -> Variables), both optional-ish:
-#   MUNI_ALLOWED_CIDR   REQUIRED for first launch: who may reach :8090 (e.g. 203.0.113.7/32 —
-#                       your IP; the SG is the access control, same posture as jethro's node)
+#   MUNI_ALLOWED_CIDR   optional: who may reach :8090. When unset, the allowed IP is COPIED from
+#                       jethro's existing IP-locked SG — the owner configured it once, reuse it.
 #   MUNI_CONTACT_EMAIL  SEC fair-access contact baked into the AMI env (sec.gov 403s without it)
 #   MUNI_EIP_ALLOC_ID   optional eipalloc-... for a stable IP across replacements
 on:
@@ -84,6 +84,7 @@ jobs:
       - name: Ensure AWS prerequisites
         env:
           ALLOWED_CIDR: ${{ vars.MUNI_ALLOWED_CIDR }}
+          JETHRO_SG: ${{ vars.JETHRO_SG_ID }}
         run: |
           set -euo pipefail
           ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
@@ -115,7 +116,17 @@ jobs:
           SG=$(aws ec2 describe-security-groups --filters Name=group-name,Values=muni-world-sg \
                --query 'SecurityGroups[0].GroupId' --output text)
           if [ "$SG" = "None" ] || [ -z "$SG" ]; then
-            [ -n "$ALLOWED_CIDR" ] || { echo "::error::set the MUNI_ALLOWED_CIDR repo variable (your IP, e.g. 203.0.113.7/32) — the SG is the access control"; exit 1; }
+            # Allowed source, in order: the optional MUNI_ALLOWED_CIDR variable, else COPIED from
+            # jethro's existing IP-locked SG (the owner already configured their IP there once —
+            # reuse it, ask for nothing). Same SG default id as bake.yml/launch.yml.
+            if [ -z "$ALLOWED_CIDR" ]; then
+              JSG="${JETHRO_SG:-sg-03e71c0481e7c16f4}"
+              ALLOWED_CIDR=$(aws ec2 describe-security-groups --group-ids "$JSG" \
+                --query 'SecurityGroups[0].IpPermissions[0].IpRanges[0].CidrIp' --output text 2>/dev/null || true)
+              [ "$ALLOWED_CIDR" != "None" ] || ALLOWED_CIDR=""
+              [ -n "$ALLOWED_CIDR" ] && echo "reusing allowed source $ALLOWED_CIDR from jethro's SG $JSG"
+            fi
+            [ -n "$ALLOWED_CIDR" ] || { echo "::error::could not derive the allowed IP from jethro's SG — set the MUNI_ALLOWED_CIDR repo variable (your IP, e.g. 203.0.113.7/32)"; exit 1; }
             SG=$(aws ec2 create-security-group --group-name muni-world-sg \
                  --description "muni-world :8090, owner IP only" \
                  --query GroupId --output text)

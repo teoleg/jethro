@@ -6,17 +6,13 @@ your collected data — and the whole bring-up works from a phone browser.
 
 ## Bring-up (one time, all in web UIs)
 
-1. **Repo variables** (GitHub → Settings → Secrets and variables → Actions → *Variables*):
-   - `MUNI_ALLOWED_CIDR` — **required**: who may reach the UI, e.g. `203.0.113.7/32` (your IP —
-     the security group is the access control, same posture as jethro's node). Googling
-     "what is my ip" on the phone gives the address; append `/32`.
-   - `MUNI_CONTACT_EMAIL` — recommended: the SEC fair-access contact (sec.gov 403s EDGAR fetches
-     without it). Baked into the node's env, never committed.
-   - `MUNI_EIP_ALLOC_ID` — optional `eipalloc-…` for a stable IP across deploys (create an
-     Elastic IP in the EC2 console once and paste its allocation id).
-   The AWS secrets (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) **already exist** — jethro's
-   bake uses them.
-2. **Run it**: Actions → *Muni Deploy* → Run workflow (or just push to the muni branch). The
+1. **Nothing to configure.** The AWS secrets already exist (jethro's bake uses them), and the
+   allowed IP is **copied from jethro's existing IP-locked security group** on first run.
+   Optional variables, only if wanted: `MUNI_ALLOWED_CIDR` (override the allowed IP),
+   `MUNI_CONTACT_EMAIL` (SEC fair-access contact — without it the EDGAR ingest is refused with a
+   403, everything else runs), `MUNI_EIP_ALLOC_ID` (stable IP across deploys).
+2. **Run it**: merge the PR (`claude/muni-world-aws-deploy` → `master`), then Actions →
+   *Muni Deploy* → Run workflow (or just push to the muni branch). The
    workflow tests, then idempotently creates the backup bucket + node role + security group,
    bakes the AMI (app image + Postgres + systemd units inside), launches the node and prints
    `http://<ip>:8090` in the run summary. First boot: Flyway builds the schema, the curve and
