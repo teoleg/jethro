@@ -58,16 +58,25 @@ SecureStrings set out-of-band (never in the repo): `POSTGRES_PASSWORD`, `MUNI_BA
 enters git, same rule as before). Non-secret params (domain, basic-auth user, backup bucket name) are
 created by the stack. `remote-deploy.sh` materialises the whole prefix into `deploy/.env` on the node.
 
-### 6. Build + deploy pipeline: separate workflow, separate role, same mechanics
+### 6. Build + deploy pipeline: separate workflow, separate role — CONTINUOUS on green
 
-`.github/workflows/muni-deploy.yml` — manual `workflow_dispatch` (deliberate deploys, same posture as
-jethro's): build `:muni-world:bootJar` on the runner, wrap it in a thin `linux/arm64` JRE image (no
-compilation under emulation — the jar is built natively, the image is a COPY), push to the muni ECR repo,
-then SSM Run Command on the muni node runs `muni-world/deploy/remote-deploy.sh` (backup first, then
-pull + up). It assumes a **muni-only OIDC role** (`muni-world-deploy`: push to the muni repo, SendCommand
-to the muni instance — no access to jethro's). Own concurrency group; own GitHub variables
-(`MUNI_EC2_INSTANCE_ID`, `MUNI_ECR_REPOSITORY`, `MUNI_DEPLOY_ROLE_ARN`). CI already builds and tests
-muni-world on every push (root gradle build); no separate CI workflow is needed.
+`.github/workflows/muni-deploy.yml` has two ways in (the continuous mode is the owner's direction —
+muni-world is analytics, not the trading book, so the deliberate-manual-only posture jethro's deploy
+keeps is not required here):
+
+- **Auto:** every push to the designated muni branch that touches `muni-world/**` runs the FULL muni
+  test suite (lattice identities, QuantLib cross-validation, curve-validation gates) and, **only on
+  green**, deploys that exact commit. The deploy job skips cleanly while the AWS infra doesn't exist
+  yet (no `MUNI_EC2_INSTANCE_ID` variable), so the pipeline is safe to merge before `cdk deploy`.
+- **Manual:** `workflow_dispatch` stays for redeploying any ref or a single component.
+
+Mechanics in both modes: build `:muni-world:bootJar` natively on the runner, wrap it in a thin
+`linux/arm64` JRE image (the Dockerfile only COPIES the jar — nothing compiles under emulation), push
+to the muni ECR repo, then SSM Run Command on the muni node runs `muni-world/deploy/remote-deploy.sh`
+(backup first, then pull + up, health-gated). It assumes a **muni-only OIDC role**
+(`muni-world-deploy`: push to the muni repo, SendCommand to the muni instance — no access to
+jethro's). Own concurrency group; own GitHub variables (`MUNI_EC2_INSTANCE_ID`,
+`MUNI_ECR_REPOSITORY`, `MUNI_DEPLOY_ROLE_ARN`, `MUNI_SSM_PREFIX`).
 
 ## Consequences
 

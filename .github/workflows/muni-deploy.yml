@@ -2,9 +2,19 @@ name: Muni Deploy
 
 # muni-world's OWN deploy pipeline (muni ADR-0021) — fully separate from Deploy (the trading
 # platform): its own ECR repo, its own EC2 node, its own OIDC role (muni-world-deploy: can push
-# only the muni image and command only the muni instance), its own concurrency group. Manual,
-# deliberate deploys, same posture as the trading workflow.
+# only the muni image and command only the muni instance), its own concurrency group.
+#
+# TWO ways in (owner directive — continuous deployment for muni):
+#   * AUTO: every push to the muni branch that touches muni-world runs the full test suite and,
+#     ONLY on green, deploys that exact commit to AWS. The deploy job additionally skips cleanly
+#     while the infra doesn't exist yet (no MUNI_EC2_INSTANCE_ID variable set).
+#   * MANUAL: workflow_dispatch stays for redeploys of any ref / single components.
 on:
+  push:
+    branches: [claude/muni-world-aws-deploy]
+    paths:
+      - "muni-world/**"
+      - ".github/workflows/muni-deploy.yml"
   workflow_dispatch:
     inputs:
       component:
@@ -30,15 +40,39 @@ env:
   MUNI_ECR_REPOSITORY: ${{ vars.MUNI_ECR_REPOSITORY }}      # e.g. muni-world
   MUNI_EC2_INSTANCE_ID: ${{ vars.MUNI_EC2_INSTANCE_ID }}    # i-0abc... (MuniWorld stack output)
   MUNI_SSM_PREFIX: ${{ vars.MUNI_SSM_PREFIX }}              # e.g. /muni/prod
+  # push event → the pushed commit; manual dispatch → the chosen ref/component.
+  DEPLOY_REF: ${{ inputs.ref || github.sha }}
+  DEPLOY_COMPONENT: ${{ inputs.component || 'all' }}
 
 jobs:
+  # The GATE: nothing deploys unless the whole muni test suite is green on this exact commit —
+  # the lattice identities, the QuantLib cross-validation, the curve-validation gates, all of it.
+  test:
+    name: Test muni-world
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEPLOY_REF }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run the muni-world test suite
+        run: ./gradlew :muni-world:test -Pci --no-daemon
+
   deploy:
-    name: Build + deploy muni-world (${{ inputs.component }})
+    name: Build + deploy muni-world (${{ inputs.component || 'all' }})
+    needs: test
+    # Skip cleanly (not fail) while the AWS infra hasn't been stood up yet.
+    if: ${{ vars.MUNI_EC2_INSTANCE_ID != '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ env.DEPLOY_REF }}
 
       - name: Resolve image tag
         id: img
@@ -57,26 +91,26 @@ jobs:
       # Build the jar NATIVELY on the runner, then wrap it in a thin arm64 JRE image — the
       # Dockerfile only COPIES the jar, so nothing compiles under QEMU emulation.
       - name: Set up JDK 21
-        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Build muni-world jar
-        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
         run: ./gradlew :muni-world:bootJar -Pci --no-daemon
 
       - name: Set up Docker Buildx (arm64)
-        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
         uses: docker/setup-buildx-action@v3
 
       - name: Set up QEMU for arm64
-        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
         uses: docker/setup-qemu-action@v3
 
       - name: Build and push muni-world image (linux/arm64)
-        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        if: ${{ env.DEPLOY_COMPONENT == 'all' || env.DEPLOY_COMPONENT == 'muni' }}
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
@@ -86,7 +120,7 @@ jobs:
           echo "MUNI_IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Resolve image for infra-only deploy
-        if: ${{ inputs.component != 'all' && inputs.component != 'muni' }}
+        if: ${{ env.DEPLOY_COMPONENT != 'all' && env.DEPLOY_COMPONENT != 'muni' }}
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: echo "MUNI_IMAGE=$REGISTRY/${MUNI_ECR_REPOSITORY}:${{ steps.img.outputs.sha }}" >> "$GITHUB_ENV"
@@ -94,14 +128,14 @@ jobs:
       - name: Roll out on the muni node via SSM
         run: |
           CMD="cd /opt/muni-world \
-            && git fetch origin '${{ inputs.ref }}' \
+            && git fetch origin '${{ env.DEPLOY_REF }}' \
             && git checkout -f FETCH_HEAD \
             && AWS_REGION='${AWS_REGION}' MUNI_SSM_PREFIX='${MUNI_SSM_PREFIX}' \
-               bash muni-world/deploy/remote-deploy.sh '${MUNI_IMAGE}' '${{ inputs.component }}'"
+               bash muni-world/deploy/remote-deploy.sh '${MUNI_IMAGE}' '${DEPLOY_COMPONENT}'"
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$MUNI_EC2_INSTANCE_ID" \
             --document-name AWS-RunShellScript \
-            --comment "muni deploy ${{ inputs.component }} @ ${{ steps.img.outputs.sha }}" \
+            --comment "muni deploy ${DEPLOY_COMPONENT} @ ${{ steps.img.outputs.sha }}" \
             --parameters "commands=[\"$CMD\"]" \
             --cloud-watch-output-config CloudWatchOutputEnabled=true \
             --query 'Command.CommandId' --output text)

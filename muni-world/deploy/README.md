@@ -63,7 +63,10 @@ The restore is deliberately destructive (drops + replaces the `muni` schema, ove
 
 ## Day 2
 
-- **Deploy a change:** Actions → *Muni Deploy* (choose ref). Backup runs first, health-gated rollout.
+- **Deploy a change — AUTOMATIC:** push to `claude/muni-world-aws-deploy` touching `muni-world/**` →
+  the full test suite runs → **only on green**, that exact commit deploys (backup first, health-gated).
+  Until the stack exists (no `MUNI_EC2_INSTANCE_ID` variable), the deploy step skips cleanly and only
+  tests run. Manual redeploys of any ref/component: Actions → *Muni Deploy*.
 - **Backups:** nightly timer + pre-deploy, to `s3://<bucket>/db/` and `/os-inbox/`; bucket versioned.
 - **Restore/DR:** *Muni Restore* workflow with any backup key.
 - **Logs:** `aws ssm start-session --target <instance>` then `docker compose ... logs muni`.
