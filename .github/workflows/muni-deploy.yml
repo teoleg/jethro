@@ -37,9 +37,12 @@ permissions:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
-  MUNI_ECR_REPOSITORY: ${{ vars.MUNI_ECR_REPOSITORY }}      # e.g. muni-world
+  # Defaults match what MuniWorldStack creates, so ONLY the two values that cannot be known in
+  # advance (instance id + role ARN, both stack outputs) need GitHub variables — everything else
+  # rides the SAME AWS config the jethro deploy already proved out (account, region, OIDC provider).
+  MUNI_ECR_REPOSITORY: ${{ vars.MUNI_ECR_REPOSITORY || 'muni-world' }}
   MUNI_EC2_INSTANCE_ID: ${{ vars.MUNI_EC2_INSTANCE_ID }}    # i-0abc... (MuniWorld stack output)
-  MUNI_SSM_PREFIX: ${{ vars.MUNI_SSM_PREFIX }}              # e.g. /muni/prod
+  MUNI_SSM_PREFIX: ${{ vars.MUNI_SSM_PREFIX || '/muni/prod' }}
   # push event → the pushed commit; manual dispatch → the chosen ref/component.
   DEPLOY_REF: ${{ inputs.ref || github.sha }}
   DEPLOY_COMPONENT: ${{ inputs.component || 'all' }}

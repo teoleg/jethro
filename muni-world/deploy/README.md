@@ -37,9 +37,10 @@ aws ssm put-parameter --type SecureString --name /muni/prod/MUNI_CONTACT_EMAIL  
 # 3. Point DNS (or use <eip-with-dashes>.nip.io) and set the domain param:
 aws ssm put-parameter --overwrite --name /muni/prod/MUNI_DOMAIN --value 'muni.yourdomain.com'
 
-# 4. GitHub repo variables (Settings -> Variables), from the stack outputs:
-#    MUNI_ECR_REPOSITORY  MUNI_EC2_INSTANCE_ID  MUNI_DEPLOY_ROLE_ARN  MUNI_SSM_PREFIX=/muni/prod
-#    (AWS_REGION already exists from the trading setup)
+# 4. GitHub repo variables (Settings -> Variables) — ONLY TWO, both from the stack outputs
+#    (everything else defaults / reuses the jethro AWS config that already works: same account,
+#     same AWS_REGION variable, same OIDC provider):
+#    MUNI_EC2_INSTANCE_ID   MUNI_DEPLOY_ROLE_ARN
 
 # 5. Actions -> "Muni Deploy" -> Run workflow (ref: master, component: all)
 ```
