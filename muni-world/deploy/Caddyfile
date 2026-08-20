@@ -1,0 +1,22 @@
+# Caddy fronts muni-world (muni ADR-0021): automatic TLS + HTTP basic auth in front of the
+# UI/API, which has no authentication of its own. One credential guards everything, including
+# the ingest/upload endpoints.
+#
+# MUNI_DOMAIN must resolve to the node's Elastic IP (a real domain, or a
+# <ip-with-dashes>.nip.io for a quick cert without owning DNS). The bcrypt hash comes from
+# `docker run --rm caddy:2-alpine caddy hash-password --plaintext 'yourpassword'` and lives
+# in SSM as /muni/prod/MUNI_BASIC_AUTH_HASH (SecureString).
+{$MUNI_DOMAIN} {
+	encode zstd gzip
+
+	basic_auth {
+		{$MUNI_BASIC_AUTH_USER} {$MUNI_BASIC_AUTH_HASH}
+	}
+
+	reverse_proxy muni:8090
+
+	log {
+		output stdout
+		format console
+	}
+}

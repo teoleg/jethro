@@ -1,0 +1,66 @@
+name: Muni Restore
+
+# Restore muni-world data on the AWS node from the S3 backup bucket (muni ADR-0021) — the
+# receiving end of scripts/muni-migrate-to-aws.sh, and the disaster-recovery path for any
+# nightly backup. A NEW workflow: nothing shared with Deploy/Muni Deploy.
+#
+# DESTRUCTIVE by design (drops + replaces the muni schema on the node), which is why it is
+# manual-only, takes an explicit key, and the node script takes a pre-restore safety dump to
+# S3 before touching anything.
+on:
+  workflow_dispatch:
+    inputs:
+      s3_key:
+        description: "Backup object key (e.g. migrate/muni-20260813-101500.tar.gz) or latest-migrate"
+        type: string
+        default: latest-migrate
+      ref:
+        description: Git ref whose restore script to run
+        type: string
+        default: master
+
+concurrency:
+  group: muni-deploy-prod       # shares the deploy group — never restore during a deploy
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  MUNI_EC2_INSTANCE_ID: ${{ vars.MUNI_EC2_INSTANCE_ID }}
+
+jobs:
+  restore:
+    name: Restore ${{ inputs.s3_key }} on the muni node
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.MUNI_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Run restore on the node via SSM
+        run: |
+          CMD="cd /opt/muni-world \
+            && git fetch origin '${{ inputs.ref }}' \
+            && git checkout -f FETCH_HEAD \
+            && bash muni-world/deploy/restore-from-s3.sh '${{ inputs.s3_key }}' --yes"
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$MUNI_EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "muni restore ${{ inputs.s3_key }}" \
+            --parameters "commands=[\"$CMD\"]" \
+            --cloud-watch-output-config CloudWatchOutputEnabled=true \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $CMD_ID"
+          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" || true
+          STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query Status --output text)
+          echo "----- remote stdout -----"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query StandardOutputContent --output text
+          echo "----- remote stderr -----"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query StandardErrorContent --output text
+          echo "SSM status: $STATUS"
+          [ "$STATUS" = "Success" ]

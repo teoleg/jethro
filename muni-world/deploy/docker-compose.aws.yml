@@ -1,0 +1,68 @@
+# muni-world's AWS single-node stack (muni ADR-0021): ONLY muni-world + its OWN Postgres + the
+# Caddy edge. Nothing of jethro's runs here and nothing here publishes a host port except Caddy
+# (80/443, TLS + basic auth). Deployed by .github/workflows/muni-deploy.yml via SSM; secrets come
+# from SSM Parameter Store (/muni/prod/*) into deploy/.env — see muni-world/deploy/README.md.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: muni                     # muni-world's OWN database — no shared jethro instance here
+      POSTGRES_USER: ${POSTGRES_USER:?set in deploy/.env from SSM}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in deploy/.env from SSM}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d muni"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  muni:
+    image: ${MUNI_IMAGE:?set by remote-deploy.sh}
+    environment:
+      MUNI_DB_URL: jdbc:postgresql://postgres:5432/muni
+      MUNI_DB_USER: ${POSTGRES_USER}
+      MUNI_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      MUNI_FLYWAY_ENABLED: "true"
+      # SEC fair-access contact (www.sec.gov 403s without it) — a SecureString param, never in git.
+      MUNI_CONTACT_EMAIL: ${MUNI_CONTACT_EMAIL:-}
+      MUNI_LMDB_PATH: /data/lmdb
+      MUNI_OS_INBOX: /data/os-inbox
+    volumes:
+      # One named volume for everything the jar writes: the LMDB index (derived, rebuildable) and
+      # the OS-PDF inbox (irreplaceable — ALSO synced to S3 nightly by backup-to-s3.sh).
+      - muni-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8090/api/muni/status >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MUNI_DOMAIN: ${MUNI_DOMAIN:?set in deploy/.env from SSM}
+      MUNI_BASIC_AUTH_USER: ${MUNI_BASIC_AUTH_USER:?set in deploy/.env from SSM}
+      MUNI_BASIC_AUTH_HASH: ${MUNI_BASIC_AUTH_HASH:?set in deploy/.env from SSM}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - muni
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  muni-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,116 @@
+name: Muni Deploy
+
+# muni-world's OWN deploy pipeline (muni ADR-0021) — fully separate from Deploy (the trading
+# platform): its own ECR repo, its own EC2 node, its own OIDC role (muni-world-deploy: can push
+# only the muni image and command only the muni instance), its own concurrency group. Manual,
+# deliberate deploys, same posture as the trading workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: Which component(s) to deploy
+        type: choice
+        default: all
+        options: [all, muni, postgres, caddy]
+      ref:
+        description: Git ref to deploy (branch, tag or SHA)
+        type: string
+        default: master
+
+concurrency:
+  group: muni-deploy-prod       # never two overlapping deploys to the muni node
+  cancel-in-progress: false
+
+permissions:
+  id-token: write               # OIDC federation to AWS
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  MUNI_ECR_REPOSITORY: ${{ vars.MUNI_ECR_REPOSITORY }}      # e.g. muni-world
+  MUNI_EC2_INSTANCE_ID: ${{ vars.MUNI_EC2_INSTANCE_ID }}    # i-0abc... (MuniWorld stack output)
+  MUNI_SSM_PREFIX: ${{ vars.MUNI_SSM_PREFIX }}              # e.g. /muni/prod
+
+jobs:
+  deploy:
+    name: Build + deploy muni-world (${{ inputs.component }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve image tag
+        id: img
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.MUNI_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Build the jar NATIVELY on the runner, then wrap it in a thin arm64 JRE image — the
+      # Dockerfile only COPIES the jar, so nothing compiles under QEMU emulation.
+      - name: Set up JDK 21
+        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build muni-world jar
+        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        run: ./gradlew :muni-world:bootJar -Pci --no-daemon
+
+      - name: Set up Docker Buildx (arm64)
+        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU for arm64
+        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build and push muni-world image (linux/arm64)
+        if: ${{ inputs.component == 'all' || inputs.component == 'muni' }}
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          IMAGE="$REGISTRY/${MUNI_ECR_REPOSITORY}:${{ steps.img.outputs.sha }}"
+          docker buildx build --platform linux/arm64 --push \
+            -t "$IMAGE" -f muni-world/deploy/Dockerfile muni-world/
+          echo "MUNI_IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Resolve image for infra-only deploy
+        if: ${{ inputs.component != 'all' && inputs.component != 'muni' }}
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: echo "MUNI_IMAGE=$REGISTRY/${MUNI_ECR_REPOSITORY}:${{ steps.img.outputs.sha }}" >> "$GITHUB_ENV"
+
+      - name: Roll out on the muni node via SSM
+        run: |
+          CMD="cd /opt/muni-world \
+            && git fetch origin '${{ inputs.ref }}' \
+            && git checkout -f FETCH_HEAD \
+            && AWS_REGION='${AWS_REGION}' MUNI_SSM_PREFIX='${MUNI_SSM_PREFIX}' \
+               bash muni-world/deploy/remote-deploy.sh '${MUNI_IMAGE}' '${{ inputs.component }}'"
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$MUNI_EC2_INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "muni deploy ${{ inputs.component }} @ ${{ steps.img.outputs.sha }}" \
+            --parameters "commands=[\"$CMD\"]" \
+            --cloud-watch-output-config CloudWatchOutputEnabled=true \
+            --query 'Command.CommandId' --output text)
+          echo "SSM command: $CMD_ID"
+          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" || true
+          STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query Status --output text)
+          echo "----- remote stdout -----"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query StandardOutputContent --output text
+          echo "----- remote stderr -----"
+          aws ssm get-command-invocation --command-id "$CMD_ID" --instance-id "$MUNI_EC2_INSTANCE_ID" --query StandardErrorContent --output text
+          echo "SSM status: $STATUS"
+          [ "$STATUS" = "Success" ]
