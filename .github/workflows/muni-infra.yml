@@ -1,0 +1,81 @@
+name: Muni Infra
+
+# ONE-TIME stack bring-up from anywhere — built for the "working from my phone" case (muni
+# ADR-0021): `cdk deploy MuniWorld` needs real AWS credentials, and the OIDC deploy role
+# deliberately CANNOT create infrastructure. This workflow runs the deploy on a runner using
+# TEMPORARY static keys pasted as GitHub secrets from the browser:
+#
+#   1. AWS console (phone browser) -> IAM -> your admin user -> create access key
+#   2. GitHub -> Settings -> Secrets and variables -> Actions -> New repository secret:
+#        AWS_BOOTSTRAP_ACCESS_KEY_ID / AWS_BOOTSTRAP_SECRET_ACCESS_KEY
+#   3. Actions -> "Muni Infra" -> Run workflow
+#   4. AFTER SUCCESS: delete the two GitHub secrets AND deactivate the IAM access key.
+#      Static keys are exactly what OIDC exists to avoid — this pair lives only for the minutes
+#      the stack takes to create. Day-to-day deploys never use them.
+#
+# Safe to re-run: CloudFormation makes it a no-op/update. Touches ONLY the MuniWorld stack.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type MUNI to confirm creating/updating the MuniWorld stack
+        type: string
+        required: true
+
+concurrency:
+  group: muni-infra
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  cdk-deploy:
+    name: cdk deploy MuniWorld
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Guard
+        run: |
+          [ "${{ inputs.confirm }}" = "MUNI" ] || { echo "type MUNI to confirm"; exit 1; }
+          [ -n "${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}" ] || {
+            echo "Missing secret AWS_BOOTSTRAP_ACCESS_KEY_ID (see this workflow's header comment)"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Configure AWS credentials (temporary bootstrap keys)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_BOOTSTRAP_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_BOOTSTRAP_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: cdk deploy MuniWorld
+        working-directory: infra
+        run: |
+          npm install -g aws-cdk
+          export CDK_DEFAULT_ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
+          export CDK_DEFAULT_REGION="$AWS_REGION"
+          cdk deploy MuniWorld --require-approval never --outputs-file /tmp/outs.json
+          echo "===================== STACK OUTPUTS ====================="
+          cat /tmp/outs.json
+          echo
+          echo "NEXT (all doable from the phone):"
+          echo "  1. AWS console -> Systems Manager -> Parameter Store: create SecureStrings"
+          echo "     /muni/prod/POSTGRES_PASSWORD, /muni/prod/MUNI_BASIC_AUTH_HASH,"
+          echo "     /muni/prod/MUNI_CONTACT_EMAIL   (+ /muni/prod/GITHUB_TOKEN for a private repo)"
+          echo "     and set /muni/prod/MUNI_DOMAIN (or use <elastic-ip-with-dashes>.nip.io)"
+          echo "  2. Actions -> 'Muni Deploy' -> Run workflow"
+          echo "  3. DELETE the AWS_BOOTSTRAP_* GitHub secrets and deactivate the IAM access key."
