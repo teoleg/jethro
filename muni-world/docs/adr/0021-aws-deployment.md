@@ -67,7 +67,7 @@ keeps is not required here):
 - **Auto:** every push to the designated muni branch that touches `muni-world/**` runs the FULL muni
   test suite (lattice identities, QuantLib cross-validation, curve-validation gates) and, **only on
   green**, deploys that exact commit. The deploy job skips cleanly while the AWS infra doesn't exist
-  yet (no `MUNI_EC2_INSTANCE_ID` variable), so the pipeline is safe to merge before `cdk deploy`.
+  yet (the tag lookup finds no node), so the pipeline is safe on the branch before `cdk deploy`.
 - **Manual:** `workflow_dispatch` stays for redeploying any ref or a single component.
 
 Mechanics in both modes: build `:muni-world:bootJar` natively on the runner, wrap it in a thin

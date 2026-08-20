@@ -8,9 +8,9 @@ trading platform's stack, workflows, or node — and vice versa.
 One CloudFormation stack (`infra/…/MuniWorldStack.java`, tagged `project=muni-world` = its own cost
 line): a `t4g.small` ARM node (Ubuntu 24.04, 20GiB encrypted gp3, Elastic IP, **always on** — muni's
 value is its daily ingest cadence), an ECR repo `muni-world`, a **versioned S3 backup bucket**
-(RETAINed — survives teardown), the node IAM role (SSM, ECR pull, `/muni/prod/*` params, the bucket),
-and the GitHub OIDC role `muni-world-deploy` (can push only the muni image and command only the muni
-node). Security group: 80/443 only; SSM needs no inbound.
+(RETAINed — survives teardown), and the node IAM role (SSM, ECR pull, `/muni/prod/*` params, the bucket). Deploy permissions are
+attached ADDITIVELY to jethro's existing `jethro-deploy` role — no new role, no new GitHub
+variables. Security group: 80/443 only; SSM needs no inbound.
 
 On the node (via user-data → `bootstrap.sh`): Docker + compose, the repo at `/opt/muni-world`, a
 systemd unit restoring the stack on reboot, and a nightly backup timer (`backup-to-s3.sh`: pg_dump +
@@ -67,8 +67,8 @@ The restore is deliberately destructive (drops + replaces the `muni` schema, ove
 
 - **Deploy a change — AUTOMATIC:** push to `claude/muni-world-aws-deploy` touching `muni-world/**` →
   the full test suite runs → **only on green**, that exact commit deploys (backup first, health-gated).
-  Until the stack exists (no `MUNI_EC2_INSTANCE_ID` variable), the deploy step skips cleanly and only
-  tests run. Manual redeploys of any ref/component: Actions → *Muni Deploy*.
+  The node is found at deploy time by its `project=muni-world` tag; until the stack exists the
+  lookup is empty and the deploy job skips cleanly — only tests run. Manual redeploys of any ref/component: Actions → *Muni Deploy*.
 - **Backups:** nightly timer + pre-deploy, to `s3://<bucket>/db/` and `/os-inbox/`; bucket versioned.
 - **Restore/DR:** *Muni Restore* workflow with any backup key.
 - **Logs:** `aws ssm start-session --target <instance>` then `docker compose ... logs muni`.
