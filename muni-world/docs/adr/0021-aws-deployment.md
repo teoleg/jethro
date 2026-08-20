@@ -73,10 +73,16 @@ keeps is not required here):
 Mechanics in both modes: build `:muni-world:bootJar` natively on the runner, wrap it in a thin
 `linux/arm64` JRE image (the Dockerfile only COPIES the jar — nothing compiles under emulation), push
 to the muni ECR repo, then SSM Run Command on the muni node runs `muni-world/deploy/remote-deploy.sh`
-(backup first, then pull + up, health-gated). It assumes a **muni-only OIDC role**
-(`muni-world-deploy`: push to the muni repo, SendCommand to the muni instance — no access to
-jethro's). Own concurrency group; own GitHub variables (`MUNI_EC2_INSTANCE_ID`,
-`MUNI_ECR_REPOSITORY`, `MUNI_DEPLOY_ROLE_ARN`, `MUNI_SSM_PREFIX`).
+(backup first, then pull + up, health-gated). **Zero muni-only GitHub configuration** (owner
+directive — the jethro variables were configured once and are THE config): the workflows assume
+jethro's existing `AWS_DEPLOY_ROLE_ARN`, to which this stack ADDITIVELY attaches the muni
+permissions (push the muni image; SendCommand to the muni node; read-only `ec2:DescribeInstances`)
+— JethroDev's template is untouched. The muni node is discovered **at deploy time by its
+`project=muni-world` tag**, so not even an instance-id variable exists; while the stack is not yet
+deployed, the lookup comes back empty and the deploy job skips cleanly (tests still gate every
+commit). The ONLY manual act in steady state is loading the collected data (Muni Restore) — the
+Postgres container, its `muni` database and the whole Flyway schema come up automatically on the
+first deploy.
 
 ## Consequences
 

@@ -25,10 +25,8 @@ import software.amazon.awscdk.services.ec2.UserData;
 import software.amazon.awscdk.services.ec2.Vpc;
 import software.amazon.awscdk.services.ecr.LifecycleRule;
 import software.amazon.awscdk.services.ecr.Repository;
-import software.amazon.awscdk.services.iam.IOpenIdConnectProvider;
+import software.amazon.awscdk.services.iam.IRole;
 import software.amazon.awscdk.services.iam.ManagedPolicy;
-import software.amazon.awscdk.services.iam.OpenIdConnectPrincipal;
-import software.amazon.awscdk.services.iam.OpenIdConnectProvider;
 import software.amazon.awscdk.services.iam.PolicyStatement;
 import software.amazon.awscdk.services.iam.Role;
 import software.amazon.awscdk.services.iam.ServicePrincipal;
@@ -149,30 +147,23 @@ public class MuniWorldStack extends Stack {
                 .instanceId(node.getInstanceId())
                 .build();
 
-        // ---- GitHub OIDC deploy role — muni-only: push THIS repo's image, command THIS node ----
-        // The OIDC provider itself is account-global and owned by JethroDev (or pre-existing);
-        // this stack only references it.
-        IOpenIdConnectProvider oidc = OpenIdConnectProvider.fromOpenIdConnectProviderArn(this,
-                "GithubOidc",
-                "arn:aws:iam::" + getAccount() + ":oidc-provider/token.actions.githubusercontent.com");
-        Map<String, Object> githubTrust = Map.of(
-                "StringEquals", Map.of("token.actions.githubusercontent.com:aud", "sts.amazonaws.com"),
-                "StringLike", Map.of("token.actions.githubusercontent.com:sub", "repo:" + githubRepo + ":*"));
-        Role deployRole = Role.Builder.create(this, "GithubDeployRole")
-                .roleName("muni-world-deploy")
-                .assumedBy(new OpenIdConnectPrincipal(oidc, githubTrust))
-                .description("GitHub Actions (OIDC): push the muni-world image + trigger its SSM rollout")
-                .build();
+        // ---- Deploy permissions: attached ADDITIVELY to jethro's EXISTING deploy role (owner
+        // directive: "use the same vars from the jethro setup" — AWS_DEPLOY_ROLE_ARN and AWS_REGION
+        // were configured once and stay the only GitHub config). JethroDev's template is untouched;
+        // this stack attaches one extra inline policy to the role by name. The muni workflows find
+        // the muni node AT DEPLOY TIME by its project=muni-world tag, so no instance-id variable
+        // exists either — ec2:DescribeInstances (read-only) enables that lookup. ----
+        IRole deployRole = Role.fromRoleName(this, "JethroDeployRole", "jethro-deploy");
         repo.grantPullPush(deployRole);
-        deployRole.addToPolicy(PolicyStatement.Builder.create()
+        deployRole.addToPrincipalPolicy(PolicyStatement.Builder.create()
                 .actions(List.of("ssm:SendCommand"))
                 .resources(List.of(
                         "arn:aws:ec2:" + getRegion() + ":" + getAccount() + ":instance/" + node.getInstanceId(),
                         "arn:aws:ssm:" + getRegion() + "::document/AWS-RunShellScript"))
                 .build());
-        deployRole.addToPolicy(PolicyStatement.Builder.create()
-                .actions(List.of("ssm:GetCommandInvocation", "ssm:ListCommands", "ssm:ListCommandInvocations"))
-                .resources(List.of("*"))
+        deployRole.addToPrincipalPolicy(PolicyStatement.Builder.create()
+                .actions(List.of("ec2:DescribeInstances"))
+                .resources(List.of("*"))       // DescribeInstances does not support resource scoping
                 .build());
 
         // ---- Non-secret SSM parameters. SecureStrings (POSTGRES_PASSWORD, MUNI_BASIC_AUTH_HASH,
@@ -184,7 +175,6 @@ public class MuniWorldStack extends Stack {
 
         // ---- Outputs: what the runbook + GitHub variables need ----
         out("MuniEcrRepositoryUri", repo.getRepositoryUri());
-        out("MuniDeployRoleArn", deployRole.getRoleArn());
         out("MuniInstanceId", node.getInstanceId());
         out("MuniElasticIp", eip.getRef());
         out("MuniBackupBucket", backups.getBucketName());

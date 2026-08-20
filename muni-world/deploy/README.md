@@ -37,12 +37,13 @@ aws ssm put-parameter --type SecureString --name /muni/prod/MUNI_CONTACT_EMAIL  
 # 3. Point DNS (or use <eip-with-dashes>.nip.io) and set the domain param:
 aws ssm put-parameter --overwrite --name /muni/prod/MUNI_DOMAIN --value 'muni.yourdomain.com'
 
-# 4. GitHub repo variables (Settings -> Variables) — ONLY TWO, both from the stack outputs
-#    (everything else defaults / reuses the jethro AWS config that already works: same account,
-#     same AWS_REGION variable, same OIDC provider):
-#    MUNI_EC2_INSTANCE_ID   MUNI_DEPLOY_ROLE_ARN
+# 4. GitHub variables: NOTHING TO CREATE. The workflows reuse jethro's existing AWS_REGION and
+#    AWS_DEPLOY_ROLE_ARN (the stack additively grants that role the muni permissions), and the
+#    muni node is found at deploy time by its project=muni-world tag.
 
-# 5. Actions -> "Muni Deploy" -> Run workflow (ref: master, component: all)
+# 5. Push to the muni branch (or Actions -> "Muni Deploy" manually) — tests gate, then the whole
+#    stack (Postgres + app + Caddy) comes up by itself; Flyway creates the muni schema on first
+#    boot. The ONLY manual act left afterwards is loading your collected data (next section).
 ```
 
 ## Moving the data you collected locally (Pi → AWS)

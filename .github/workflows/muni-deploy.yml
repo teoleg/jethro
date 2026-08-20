@@ -36,13 +36,13 @@ permissions:
   contents: read
 
 env:
+  # ZERO muni-only GitHub configuration (owner directive: the jethro setup was configured once and
+  # is THE config). AWS_REGION and AWS_DEPLOY_ROLE_ARN are jethro's existing variables — the
+  # MuniWorld stack additively grants that same role the muni permissions. The muni node is found
+  # AT DEPLOY TIME by its project=muni-world tag, so no instance-id variable exists at all.
   AWS_REGION: ${{ vars.AWS_REGION }}
-  # Defaults match what MuniWorldStack creates, so ONLY the two values that cannot be known in
-  # advance (instance id + role ARN, both stack outputs) need GitHub variables — everything else
-  # rides the SAME AWS config the jethro deploy already proved out (account, region, OIDC provider).
-  MUNI_ECR_REPOSITORY: ${{ vars.MUNI_ECR_REPOSITORY || 'muni-world' }}
-  MUNI_EC2_INSTANCE_ID: ${{ vars.MUNI_EC2_INSTANCE_ID }}    # i-0abc... (MuniWorld stack output)
-  MUNI_SSM_PREFIX: ${{ vars.MUNI_SSM_PREFIX || '/muni/prod' }}
+  MUNI_ECR_REPOSITORY: muni-world
+  MUNI_SSM_PREFIX: /muni/prod
   # push event → the pushed commit; manual dispatch → the chosen ref/component.
   DEPLOY_REF: ${{ inputs.ref || github.sha }}
   DEPLOY_COMPONENT: ${{ inputs.component || 'all' }}
@@ -66,12 +66,42 @@ jobs:
       - name: Run the muni-world test suite
         run: ./gradlew :muni-world:test -Pci --no-daemon
 
+  # Find the muni node by tag — no stored instance id. Empty result = infra not stood up yet:
+  # the deploy job then SKIPS cleanly (tests still gate every commit).
+  resolve:
+    name: Find the muni node
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      instance_id: ${{ steps.find.outputs.id }}
+    steps:
+      - name: Configure AWS credentials (OIDC, jethro's existing role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Locate instance tagged project=muni-world
+        id: find
+        run: |
+          ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:project,Values=muni-world" \
+                      "Name=instance-state-name,Values=running,stopped,pending" \
+            --query 'Reservations[].Instances[].InstanceId | [0]' --output text)
+          if [ "$ID" = "None" ] || [ -z "$ID" ]; then
+            echo "No muni-world instance found — stack not deployed yet; deploy will skip."
+            echo "id=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found muni node: $ID"
+            echo "id=$ID" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy:
     name: Build + deploy muni-world (${{ inputs.component || 'all' }})
-    needs: test
-    # Skip cleanly (not fail) while the AWS infra hasn't been stood up yet.
-    if: ${{ vars.MUNI_EC2_INSTANCE_ID != '' }}
+    needs: resolve
+    if: ${{ needs.resolve.outputs.instance_id != '' }}
     runs-on: ubuntu-latest
+    env:
+      MUNI_EC2_INSTANCE_ID: ${{ needs.resolve.outputs.instance_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,10 +111,10 @@ jobs:
         id: img
         run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials (OIDC, jethro's existing role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.MUNI_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Log in to Amazon ECR

@@ -29,18 +29,26 @@ permissions:
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION }}
-  MUNI_EC2_INSTANCE_ID: ${{ vars.MUNI_EC2_INSTANCE_ID }}
 
 jobs:
   restore:
     name: Restore ${{ inputs.s3_key }} on the muni node
     runs-on: ubuntu-latest
     steps:
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials (OIDC, jethro's existing role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.MUNI_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Locate instance tagged project=muni-world
+        run: |
+          ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:project,Values=muni-world" \
+                      "Name=instance-state-name,Values=running,stopped,pending" \
+            --query 'Reservations[].Instances[].InstanceId | [0]' --output text)
+          [ "$ID" != "None" ] && [ -n "$ID" ] || { echo "ERROR: no muni-world instance"; exit 1; }
+          echo "MUNI_EC2_INSTANCE_ID=$ID" >> "$GITHUB_ENV"
 
       - name: Run restore on the node via SSM
         run: |
